@@ -1,6 +1,6 @@
 // SSH tunnels from the app to blimpd (see "Connection" in docs/DESIGN.md).
 //
-// Each server gets one `ssh -N -L 127.0.0.1:<port>:<home>/.blimp/blimpd.sock` child. The UI
+// Each server gets one `ssh -T -L 127.0.0.1:<port>:<home>/.blimp/blimpd.sock` child. The UI
 // talks HTTP and WebSocket to that local port with the token; this file only starts, reuses
 // and stops the tunnels, and tells the UI when one dies so it can reconnect.
 
@@ -24,6 +24,27 @@ const SSH: &str = "ssh";
 
 // Prints the home folder (for the socket path), then the token.
 const INFO_CMD: &str = r#"printf "%s\n" "$HOME"; cat "$HOME/.blimp/token""#;
+
+// The tunnel's command on the server, in place of -N: it runs until the app's end of ssh's stdin
+// closes. The app holds that pipe, so however the app ends (quit, kill, crash) the kernel closes
+// it, cat sees EOF and exits, and ssh ends with its session. With -N, ssh outlived the app.
+const TUNNEL_CMD: &str = "cat >/dev/null";
+
+/// Debug builds only: BLIMP_REMOTE_DIR (an absolute path on the server, plain characters
+/// only) replaces ~/.blimp there, so app/e2e-native can reach a test blimpd on its own socket
+/// without touching the real one. Release builds never read the variable.
+fn remote_dir() -> Option<String> {
+    #[cfg(debug_assertions)]
+    if let Ok(d) = std::env::var("BLIMP_REMOTE_DIR") {
+        if d.starts_with('/')
+            && d.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c))
+        {
+            return Some(d);
+        }
+    }
+    None
+}
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const STDERR_WAIT: Duration = Duration::from_secs(1);
@@ -87,13 +108,16 @@ impl Target {
     fn info_args(&self) -> Vec<String> {
         let mut args = strings(&["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
         args.extend(self.dest_args());
-        args.push(INFO_CMD.into());
+        args.push(match remote_dir() {
+            Some(d) => format!(r#"printf "%s\n" "$HOME"; cat "{d}/token""#),
+            None => INFO_CMD.into(),
+        });
         args
     }
 
     fn tunnel_args(&self, port: u16, home: &str) -> Vec<String> {
         let mut args = strings(&[
-            "-N",
+            "-T",
             "-o",
             "BatchMode=yes",
             "-o",
@@ -112,8 +136,10 @@ impl Target {
             "ControlPath=none",
             "-L",
         ]);
-        args.push(format!("127.0.0.1:{port}:{home}/.blimp/blimpd.sock"));
+        let dir = remote_dir().unwrap_or_else(|| format!("{home}/.blimp"));
+        args.push(format!("127.0.0.1:{port}:{dir}/blimpd.sock"));
         args.extend(self.dest_args());
+        args.push(TUNNEL_CMD.into());
         args
     }
 }
@@ -325,9 +351,10 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
     })?;
 
     let port = free_port().map_err(|e| format!("Couldn't find a free local port: {e}"))?;
+    // ssh's stdin stays in `child` (never written) until the tunnel is stopped: see TUNNEL_CMD.
     let mut child = ssh()
         .args(t.tunnel_args(port, &home))
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
@@ -563,7 +590,7 @@ mod tests {
     #[test]
     fn tunnel_args() {
         let opts = [
-            "-N",
+            "-T",
             "-o",
             "BatchMode=yes",
             "-o",
@@ -582,21 +609,21 @@ mod tests {
             "127.0.0.1:50123:/home/max/.blimp/blimpd.sock",
         ];
         let mut want = opts.to_vec();
-        want.extend(["--", "claude1"]);
+        want.extend(["--", "claude1", "cat >/dev/null"]);
         assert_eq!(
             target("claude1", None, None).tunnel_args(50123, "/home/max"),
             want
         );
 
         let mut want = opts.to_vec();
-        want.extend(["--", "max@claude1"]);
+        want.extend(["--", "max@claude1", "cat >/dev/null"]);
         assert_eq!(
             target("claude1", Some("max"), None).tunnel_args(50123, "/home/max"),
             want
         );
 
         let mut want = opts.to_vec();
-        want.extend(["-p", "2222", "--", "claude1"]);
+        want.extend(["-p", "2222", "--", "claude1", "cat >/dev/null"]);
         assert_eq!(
             target("claude1", None, Some(2222)).tunnel_args(50123, "/home/max"),
             want

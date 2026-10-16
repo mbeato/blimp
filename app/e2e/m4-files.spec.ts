@@ -10,11 +10,13 @@ import { fixtureDir, killSession, openApp, openSessionTab, startSession } from "
 const name = `blimpe2e-m4-${process.pid}`;
 const del = `blimpe2e-m4del-${process.pid}`;
 const closeW = `blimpe2e-m4w-${process.pid}`;
+const tabs = `blimpe2e-m4tabs-${process.pid}`;
 
 test.afterAll(() => {
   killSession(name);
   killSession(del);
   killSession(closeW);
+  killSession(tabs);
 });
 
 const git = (dir: string, ...args: string[]) =>
@@ -159,4 +161,37 @@ test("⌘W in the files pane closes the open file (asking first if it has unsave
   await term.locator(".xterm").click();
   await page.keyboard.press("Meta+w");
   await expect(sessionTabs).toHaveCount(0);
+});
+
+test("the active file tab scrolls into view, and the Markdown Edit toggle stays visible", async ({ page }) => {
+  const dir = fixtureDir("m4tabs");
+  const names = ["first-file-name.txt", "second-file-name.txt", "third-file-name.txt", "fourth-file-name.txt", "fifth-file-name.md"];
+  for (const n of names) writeFileSync(join(dir, n), n.endsWith(".md") ? "# Fifth\n" : `${n}\n`);
+  startSession(tabs, dir);
+
+  await openApp(page);
+  await openSessionTab(page, dir);
+  const ws = page.locator(".workspace:not([hidden])");
+  const strip = ws.locator(".ftabs");
+  // Fully inside the strip's visible box (the strip scrolls sideways with no scrollbar).
+  const shown = (el: string) =>
+    ws.locator(el).evaluate((t) => {
+      const box = (t.closest(".ftabs") ?? t.closest(".files-top"))!.getBoundingClientRect();
+      const r = t.getBoundingClientRect();
+      return r.width > 0 && r.left >= box.left - 1 && r.right <= box.right + 1;
+    });
+
+  for (const n of names) {
+    await ws.locator(".tree").getByText(n).click();
+    await expect(ws.locator(".ftabs .tab.active")).toHaveText(new RegExp(n));
+    await expect.poll(() => shown(".ftabs .tab.active")).toBe(true);
+  }
+  // More tabs than fit, so the strip really scrolled.
+  expect(await strip.evaluate((s) => s.scrollWidth > s.clientWidth && s.scrollLeft > 0)).toBe(true);
+  await expect.poll(() => shown(".ftabs-toggle")).toBe(true);
+
+  // Back to the first file, which is off the left edge now.
+  await ws.locator(".tree").getByText(names[0]).click();
+  await expect(ws.locator(".ftabs .tab.active")).toHaveText(new RegExp(names[0]));
+  await expect.poll(() => shown(".ftabs .tab.active")).toBe(true);
 });

@@ -22,8 +22,8 @@ Each item says what to do, and what should happen. If the result is different, w
   Expect: the sidebar shows the sessions. It shows no "SSH to … failed" error.
 
 - [ ] **Quitting leaves no ssh behind.**
-  Do: with a server connected, run `ps aux | grep '[s]sh -N'` in Terminal. Quit blimp with ⌘Q and run it again. Then open blimp, close its window with the red button, and run it again.
-  Expect: blimp's `ssh -N … -L 127.0.0.1:…` lines show while blimp runs. After ⌘Q, none are left. After you close the window, none are left, or the app is still running (write down which).
+  Do: with a server connected, run `ps aux | grep '[s]sh -T'` in Terminal. Quit blimp with ⌘Q and run it again. Then open blimp, close its window with the red button, and run it again. Then open blimp, Force Quit it (⌥⌘Esc), wait 5 seconds, and run it again.
+  Expect: blimp's `ssh -T … -L 127.0.0.1:… cat >/dev/null` lines show while blimp runs. After ⌘Q, none are left. After you close the window, none are left, or the app is still running (write down which). After Force Quit, none are left.
 
 ## Keyboard
 

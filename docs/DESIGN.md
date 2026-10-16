@@ -22,7 +22,7 @@ Package manager everywhere: bun (`bun install`, `bun run`). No npm lockfiles.
 
 ```
 app UI ──fetch/WebSocket──▶ http://127.0.0.1:<local port>
-                               │  ssh -N -L 127.0.0.1:<local port>:<home>/.blimp/blimpd.sock host   (started by the Rust shell)
+                               │  ssh -T -L 127.0.0.1:<local port>:<home>/.blimp/blimpd.sock host 'cat >/dev/null'   (started by the Rust shell)
                                ▼
                         blimpd, listening on the unix socket ~/.blimp/blimpd.sock (mode 600, dir 700)
 ```
@@ -31,7 +31,8 @@ app UI ──fetch/WebSocket──▶ http://127.0.0.1:<local port>
 - First it runs one command over SSH to learn the home folder and the token:
   `ssh -o BatchMode=yes [-p PORT] [USER@]HOST 'printf "%s\n" "$HOME"; cat "$HOME/.blimp/token"'`
 - Both ssh calls also get `-o ConnectTimeout=10`, and `--` before the destination. A host or user that is empty, starts with `-`, or contains whitespace or control characters is refused before ssh runs.
-- Then it starts the tunnel: `ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ControlMaster=no -o ControlPath=none -L 127.0.0.1:<free port>:<home>/.blimp/blimpd.sock [-p PORT] [USER@]HOST`, and waits (up to 10 s) until `GET /health` answers through it. No connection sharing: with `ControlMaster`/`ControlPersist` in `~/.ssh/config`, ssh would hand the forward to a shared master and exit, and the app could no longer close it.
+- Then it starts the tunnel: `ssh -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ControlMaster=no -o ControlPath=none -L 127.0.0.1:<free port>:<home>/.blimp/blimpd.sock [-p PORT] [USER@]HOST 'cat >/dev/null'`, and waits (up to 10 s) until `GET /health` answers through it. No connection sharing: with `ControlMaster`/`ControlPersist` in `~/.ssh/config`, ssh would hand the forward to a shared master and exit, and the app could no longer close it.
+- The tunnel's stdin is a pipe the app holds and never writes, and the remote command `cat >/dev/null` (instead of `-N`) runs until that pipe closes. However the app ends (quit, `kill`, force quit, crash), the OS closes the pipe, `cat` exits, and ssh ends once the webview's connections through it are gone. With `-N`, ssh outlived any exit that skipped the app's own cleanup.
 - Both ssh commands get the app's PATH with `/opt/homebrew/bin` and `/usr/local/bin` added, so `ProxyCommand` and `Match exec` helpers from Homebrew are found when the app is opened from Finder.
 
 ### Token
@@ -148,7 +149,7 @@ Commands for the UI (`invoke`):
 - `disconnect({ id: string })`.
 - Event `tunnel-closed` with `{ id }` when an ssh child exits. The UI reconnects with backoff (1, 2, 5, 10 s, then every 10 s).
 
-All ssh children are killed when the app exits. Plugins: `notification`, `store` (server list in `servers.json`), `opener` (links, http and https only). macOS: a custom menu (see macOS menu). Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
+All ssh children are killed when the app exits normally; on any other exit they end by themselves (see Connection). Plugins: `notification`, `store` (server list in `servers.json`), `opener` (links, http and https only). macOS: a custom menu (see macOS menu). Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
 
 ### UI (`app/src`)
 
@@ -199,7 +200,7 @@ A custom menu, so the web page gets ⌘W, ⌘N, ⌘P and ⌘K: app menu (About, 
 ## Tests and checks per milestone
 
 - Unit: `bun test` in the repo root (blimpd) and `bun test` in `app/` (UI logic: fuzzy match, grouping/sorting, key mapping, state transitions → notifications).
-- E2E (`app/e2e`, Playwright, Chromium): starts a test blimpd on a temp socket, an `ssh -N -L` tunnel to localhost (the same thing the Rust shell does), the Vite dev server, and drives the UI. zmx sessions made by tests are named `blimpe2e-*` and killed after.
+- E2E (`app/e2e`, Playwright, Chromium): starts a test blimpd on a temp socket, an `ssh -N -L` tunnel to localhost (the same forward the Rust shell sets up), the Vite dev server, and drives the UI. zmx sessions made by tests are named `blimpe2e-*` and killed after.
   - M2: open a session in blimp and attach a second zmx client from a PTY; text typed in either shows in both.
   - M3: a session goes to waiting (hook file or a real Claude asking a question) → the row shows waiting within 5 s and the notification function is called.
   - M4: edit and save a file in blimp → `git diff` shows it. Change an open, edited file on the server → the reload bar appears.

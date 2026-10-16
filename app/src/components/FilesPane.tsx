@@ -169,6 +169,7 @@ function Workspace(props: {
   const [quick, setQuick] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const editorBox = useRef<HTMLDivElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const editorDoc = useRef<Doc | null>(null);
   const activeDoc = active ? docs.get(active) : undefined;
@@ -464,6 +465,18 @@ function Workspace(props: {
 
   // ---- view ----
 
+  // The tab strip scrolls sideways with no scrollbar, so keep the active file's tab in sight. Only
+  // the strip scrolls (scrollIntoView would also scroll the panes around it).
+  useEffect(() => {
+    const tab = strip.current?.querySelector(".tab.active");
+    if (!strip.current || !tab) return;
+    const s = strip.current.getBoundingClientRect();
+    const t = tab.getBoundingClientRect();
+    // Whole pixels, rounded away from the tab: scrollLeft drops fractions.
+    if (t.left < s.left) strip.current.scrollLeft -= Math.ceil(s.left - t.left);
+    else if (t.right > s.right) strip.current.scrollLeft += Math.ceil(t.right - s.right);
+  }, [active, docs.size, props.shown]);
+
   const renderDir = (dir: string, depth: number): ReactNode =>
     listings.get(dir)?.map((e) => {
       const path = joinPath(dir, e.name);
@@ -496,7 +509,7 @@ function Workspace(props: {
         <div className="files-head files-root" title={root}>
           {tildify(root, link.home)}
         </div>
-        <div className="ftabs" role="tablist">
+        <div className="ftabs" role="tablist" ref={strip}>
           {[...docs.values()].map((d) => (
             <div
               key={d.path}
@@ -518,20 +531,20 @@ function Workspace(props: {
               </button>
             </div>
           ))}
-          <div className="tabbar-fill" />
-          {doc?.viewer === "markdown" && doc.model && (
-            <button
-              className="ftabs-toggle"
-              aria-pressed={doc.editing}
-              onClick={() => {
-                doc.editing = !doc.editing;
-                rerender();
-              }}
-            >
-              {doc.editing ? "Preview" : "Edit"}
-            </button>
-          )}
         </div>
+        {/* Outside the scrolling strip, so many open files never push it out of sight. */}
+        {doc?.viewer === "markdown" && doc.model && (
+          <button
+            className="ftabs-toggle"
+            aria-pressed={doc.editing}
+            onClick={() => {
+              doc.editing = !doc.editing;
+              rerender();
+            }}
+          >
+            {doc.editing ? "Preview" : "Edit"}
+          </button>
+        )}
       </div>
       <div className="files-body">
         <div className="tree" role="tree">

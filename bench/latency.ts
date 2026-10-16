@@ -37,8 +37,9 @@ async function sshLink(): Promise<Link> {
 async function blimpLink(): Promise<Link> {
   const port = 20000 + Math.floor(Math.random() * 20000);
   const tunnel = Bun.spawn(
-    ["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-L", `127.0.0.1:${port}:${remoteSock}`, target],
-    { stdin: "ignore", stdout: "ignore", stderr: "inherit" },
+    // The same shape as the app's tunnel (app/src-tauri/src/tunnel.rs): a remote `cat` on a stdin pipe we hold.
+    ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-L", `127.0.0.1:${port}:${remoteSock}`, "--", target, "cat >/dev/null"],
+    { stdin: "pipe", stdout: "ignore", stderr: "inherit" },
   );
   let ws: WebSocket | undefined;
   for (let i = 0; i < 50 && !ws; i++) {
