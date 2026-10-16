@@ -2,42 +2,14 @@
 // blimpd: the server half of blimp.
 //   blimpd sessions [--json]   list live sessions (same columns as `claude1 ls`)
 //   blimpd serve               serve the API on a unix socket only you can open
+//   blimpd install-hooks       add blimp's status hooks to Claude Code's settings.json
+//   blimpd hook                what those hooks run (reads Claude's hook JSON on stdin)
 //   blimpd --version
 
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
 import pkg from "../package.json";
-import { formatList, listSessions, startSession } from "./sessions";
-
-export const socketPath = () => process.env.BLIMPD_SOCKET || join(homedir(), ".blimp", "blimpd.sock");
-
-// The app reaches this through SSH (`ssh -L <port>:<socket>`), so it never listens on the network.
-function serve() {
-  const sock = socketPath();
-  mkdirSync(dirname(sock), { recursive: true });
-  chmodSync(dirname(sock), 0o700);
-  rmSync(sock, { force: true });
-  Bun.serve({
-    unix: sock,
-    async fetch(req) {
-      const { pathname } = new URL(req.url);
-      try {
-        if (pathname === "/sessions" && req.method === "GET") return Response.json(listSessions());
-        if (pathname === "/sessions" && req.method === "POST") {
-          const { dir, name } = (await req.json()) as { dir?: string; name?: string };
-          if (!dir) return Response.json({ error: "dir is required" }, { status: 400 });
-          return Response.json({ name: startSession(dir, name) }, { status: 201 });
-        }
-        return Response.json({ error: "not found" }, { status: 404 });
-      } catch (e) {
-        return Response.json({ error: (e as Error).message }, { status: 400 });
-      }
-    },
-  });
-  chmodSync(sock, 0o600);
-  console.log(`blimpd ${pkg.version} listening on ${sock}`);
-}
+import { installHooks, runHook } from "./hooks";
+import { serve } from "./server";
+import { formatList, listSessions } from "./sessions";
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "sessions") {
@@ -46,9 +18,19 @@ if (cmd === "sessions") {
   else console.log(rows.length ? formatList(rows) : "no running sessions");
 } else if (cmd === "serve") {
   serve();
+} else if (cmd === "install-hooks") {
+  // The hooks run this exact binary, so it has to be the installed one, not `bun src/main.ts`.
+  if (!Bun.main.startsWith("/$bunfs/")) {
+    console.error("blimpd: install-hooks has to run from the built blimpd binary");
+    process.exit(1);
+  }
+  const added = installHooks(process.execPath);
+  console.log(added.length ? `hooks: added ${added.join(", ")}` : "hooks: already installed");
+} else if (cmd === "hook") {
+  await runHook();
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | hook | --version");
   process.exit(cmd ? 1 : 0);
 }

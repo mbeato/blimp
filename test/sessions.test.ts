@@ -1,8 +1,15 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { describe, expect, spyOn, test } from "bun:test";
+import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatList, newSessionName, parseZmxList, titleFromTranscript } from "../src/sessions";
+import {
+  deriveState,
+  formatList,
+  newSessionName,
+  parseZmxList,
+  titleFromTranscript,
+  transcriptTitle,
+} from "../src/sessions";
 
 describe("parseZmxList", () => {
   test("reads zmx 0.5 and 0.8 lines, skips the current-session arrow", () => {
@@ -69,6 +76,10 @@ describe("newSessionName", () => {
     expect(newSessionName("/home/u/web", at, [], "review")).toBe("web-review");
   });
 
+  test("a custom name can't carry path characters", () => {
+    expect(newSessionName("/home/u/web", at, [], "../../x")).toBe("web-______x");
+  });
+
   test("never reuses a running name", () => {
     expect(newSessionName("/home/u/web", at, ["web-090507", "web-090507-2"])).toBe("web-090507-3");
   });
@@ -88,19 +99,112 @@ describe("formatList", () => {
   });
 });
 
-test("listSessions joins zmx with Claude's session file and transcript", async () => {
+test("listSessions joins zmx with Claude's session file, transcript and blimp's hook file", async () => {
   const home = mkdtempSync(join(tmpdir(), "blimp-"));
   mkdirSync(join(home, "sessions"));
+  mkdirSync(join(home, "status"));
   mkdirSync(join(home, "projects", "-home-u-web"), { recursive: true });
   writeFileSync(
     join(home, "sessions", "42.json"),
     JSON.stringify({ sessionId: "s1", cwd: "/home/u/web/src", status: "busy", updatedAt: 123 }),
   );
   writeFileSync(join(home, "projects", "-home-u-web", "s1.jsonl"), JSON.stringify({ type: "ai-title", aiTitle: "Web work" }));
+  // sh-2 has no Claude status, only a hook file written after it started.
+  writeFileSync(join(home, "status", "sh-2.json"), JSON.stringify({ state: "waiting", at: 7000, event: "Notification" }));
   const { listSessions } = await import("../src/sessions");
   const zmxOut = "  name=web-1\tpid=42\tclients=1\tcreated=5\tcwd=/home/u/web\tcmd=claude\n  name=sh-2\tpid=43\tclients=0\tcreated=6\tcwd=/tmp\tcmd=";
-  expect(listSessions(home, zmxOut)).toEqual([
-    { name: "web-1", pid: 42, clients: 1, created: 5, dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123 },
-    { name: "sh-2", pid: 43, clients: 0, created: 6, dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined },
+  expect(listSessions(home, zmxOut, join(home, "status"))).toEqual([
+    { name: "web-1", pid: 42, clients: 1, created: 5, dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123 },
+    { name: "sh-2", pid: 43, clients: 0, created: 6, dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000 },
   ]);
+});
+
+describe("deriveState", () => {
+  test("from Claude's status file", () => {
+    expect(deriveState({ status: "busy", updatedAt: 5 }, {})).toEqual({ state: "working", stateSince: 5 });
+    expect(deriveState({ status: "shell", updatedAt: 5, statusUpdatedAt: 4 }, {})).toEqual({ state: "working", stateSince: 4 });
+    expect(deriveState({ status: "idle", updatedAt: 5 }, {})).toEqual({ state: "done", stateSince: 5 });
+    expect(deriveState({ status: "waiting", updatedAt: 5 }, {})).toEqual({ state: "waiting", stateSince: 5 });
+    expect(deriveState({ status: "busy", waitingFor: "permission", updatedAt: 5 }, {})).toEqual({ state: "waiting", stateSince: 5 });
+  });
+
+  test("the newer of Claude's file and the hook file wins", () => {
+    const claude = { status: "idle", statusUpdatedAt: 2000 };
+    expect(deriveState(claude, { state: "waiting", at: 3000 })).toEqual({ state: "waiting", stateSince: 3000 });
+    expect(deriveState(claude, { state: "working", at: 1000 })).toEqual({ state: "done", stateSince: 2000 });
+  });
+
+  test("a hook file from before the session started is ignored", () => {
+    expect(deriveState({}, { state: "waiting", at: 1000 }, 5)).toEqual({ state: "unknown" });
+    expect(deriveState({}, { state: "waiting", at: 6000 }, 5)).toEqual({ state: "waiting", stateSince: 6000 });
+  });
+
+  test("nothing known", () => {
+    expect(deriveState({}, {})).toEqual({ state: "unknown" });
+    expect(deriveState({ status: "something-new" }, { state: "bogus", at: 1 })).toEqual({ state: "unknown" });
+  });
+});
+
+describe("transcriptTitle (incremental)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "blimp-title-"));
+  const line = (o: object) => JSON.stringify(o) + "\n";
+
+  test("reads only what was appended, and an unterminated last line counts", () => {
+    const f = join(dir, "a.jsonl");
+    writeFileSync(f, line({ type: "user", message: { content: "first prompt" } }));
+    expect(transcriptTitle(f)).toBe("first prompt");
+
+    appendFileSync(f, JSON.stringify({ type: "ai-title", aiTitle: "half" })); // no newline yet
+    expect(transcriptTitle(f)).toBe("half");
+    appendFileSync(f, "\n" + line({ type: "custom-title", customTitle: "mine" }));
+    expect(transcriptTitle(f)).toBe("mine");
+
+    // The cache remembers state: earlier lines aren't re-read, so changing them in place goes unseen,
+    // while a later ai-title still loses to the custom title.
+    appendFileSync(f, line({ type: "ai-title", aiTitle: "later ai" }));
+    expect(transcriptTitle(f)).toBe("mine");
+  });
+
+  test("a file rewritten shorter is read again from the start", () => {
+    const f = join(dir, "b.jsonl");
+    writeFileSync(f, line({ type: "ai-title", aiTitle: "a long title for the first version" }));
+    expect(transcriptTitle(f)).toBe("a long title for the first version");
+    writeFileSync(f, line({ type: "ai-title", aiTitle: "short" }));
+    expect(transcriptTitle(f)).toBe("short");
+  });
+
+  test("same answer as reading the whole file, for a real-looking transcript", () => {
+    const f = join(dir, "c.jsonl");
+    const big = "x".repeat(100_000);
+    const text =
+      line({ type: "user", message: { content: "<command-name>/clear</command-name>" } }) +
+      line({ type: "user", message: { content: "fix   it" } }) +
+      line({ type: "assistant", message: { content: big } }) +
+      line({ type: "ai-title", aiTitle: "Fixing it" });
+    writeFileSync(f, text.slice(0, 50_000));
+    transcriptTitle(f);
+    appendFileSync(f, text.slice(50_000));
+    expect(transcriptTitle(f)).toBe(titleFromTranscript(text));
+  });
+
+  test("missing file", () => {
+    expect(transcriptTitle(join(dir, "nope.jsonl"))).toBe("(new session)");
+  });
+
+  test("a line longer than a chunk is skipped without holding the rest of the file in memory", () => {
+    const f = join(dir, "d.jsonl");
+    const huge = line({ type: "assistant", message: { content: "y".repeat(40 << 20) } });
+    writeFileSync(f, line({ type: "user", message: { content: "start" } }) + huge.slice(0, 20 << 20)); // still being written
+    const alloc = spyOn(Buffer, "alloc");
+    try {
+      expect(transcriptTitle(f)).toBe("start");
+      appendFileSync(f, huge.slice(20 << 20) + line({ type: "ai-title", aiTitle: "after the big one" }));
+      expect(transcriptTitle(f)).toBe("after the big one");
+      appendFileSync(f, huge + line({ type: "custom-title", customTitle: "renamed" }));
+      expect(transcriptTitle(f)).toBe("renamed");
+      expect(Math.max(...alloc.mock.calls.map((c) => c[0] as number))).toBeLessThanOrEqual(16 << 20);
+    } finally {
+      alloc.mockRestore();
+    }
+  });
 });

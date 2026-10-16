@@ -1,0 +1,3 @@
+[test]
+# blimpd tests only. The app has its own (cd app && bun test).
+root = "test"

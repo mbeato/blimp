@@ -36,10 +36,12 @@ as_tester '
   set -e
   systemctl --user is-active blimpd
   ~/.local/bin/blimpd sessions
-  curl -fsS --unix-socket ~/.blimp/blimpd.sock -X POST -d "{\"dir\":\"$HOME\"}" http://blimpd/sessions; echo
+  auth="Authorization: Bearer $(cat ~/.blimp/token)"
+  grep -c "blimpd'"'"' hook" ~/.claude/settings.json
+  curl -fsS --unix-socket ~/.blimp/blimpd.sock -H "$auth" -X POST -d "{\"dir\":\"$HOME\"}" http://blimpd/sessions; echo
   sleep 2
   ~/.local/bin/blimpd sessions
   systemctl --user restart blimpd; sleep 1
   echo "after blimpd restart:"
-  curl -fsS --unix-socket ~/.blimp/blimpd.sock http://blimpd/sessions; echo
+  curl -fsS --unix-socket ~/.blimp/blimpd.sock -H "$auth" http://blimpd/sessions; echo
   stat -c "%a %n" ~/.blimp ~/.blimp/blimpd.sock'

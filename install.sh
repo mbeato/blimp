@@ -41,6 +41,8 @@ fi
 say "blimpd: installing"
 curl -fsSL -o "$tmp/blimpd" "${BLIMPD_URL:-$RELEASES/blimpd-linux-$arch}"
 install -m 755 "$tmp/blimpd" "$BIN/blimpd"
+# Claude Code hooks that record each session's status for blimp (merged into settings.json, backed up first).
+"$BIN/blimpd" install-hooks
 
 if command -v claude >/dev/null 2>&1 || [ -x "$BIN/claude" ]; then
   say "claude: found"
