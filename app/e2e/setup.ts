@@ -1,7 +1,7 @@
 // Starts a test blimpd on a temp socket and an SSH tunnel to it, the same tunnel the Rust shell
 // builds. The specs read where to find them from the environment (workers inherit it).
-// Max's own blimpd (~/.blimp) and Claude settings are never touched: the socket, token, hook
-// status files and CLAUDE_CONFIG_DIR all live in the temp folder.
+// Max's own blimpd (~/.blimp), Claude settings and home folder are never touched: the socket,
+// token, hook status files, CLAUDE_CONFIG_DIR and the test blimpd's home all live in the temp folder.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -33,18 +33,20 @@ export default async function setup() {
   // Inside a zmx session, `zmx attach` would switch sessions instead of creating one.
   delete process.env.ZMX_SESSION;
 
-  const tmp = mkdtempSync(join(tmpdir(), "blimpe2e-"));
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "blimpe2e-")));
   chmodSync(tmp, 0o700);
   const sock = join(tmp, "blimpd.sock");
   mkdirSync(join(tmp, "claude"));
-  // Fixture folders must be inside home: blimpd serves nothing outside it.
-  const fixtures = realpathSync(mkdtempSync(join(homedir(), "blimpe2e-")));
+  // The test blimpd's home, where the fixture folders go: blimpd serves nothing outside home.
+  // The app shows them as ~/<name>, as a real user's folders would look in the screenshots.
+  const fixtures = join(tmp, "home");
+  mkdirSync(fixtures);
 
   const log = openSync(join(tmp, "blimpd.log"), "a");
   const children: ChildProcess[] = [];
   // No pipes to children: a zmx daemon started under them would inherit and hold them open.
   const blimpd = spawn("bun", [join(repo, "src/main.ts"), "serve"], {
-    env: { ...process.env, BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude") },
+    env: { ...process.env, HOME: fixtures, BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude") },
     stdio: ["ignore", log, log],
   });
   children.push(blimpd);
@@ -52,7 +54,6 @@ export default async function setup() {
   const teardown = async () => {
     await killTestSessions().catch(() => {});
     for (const c of children) c.kill();
-    rmSync(fixtures, { recursive: true, force: true });
     rmSync(tmp, { recursive: true, force: true });
   };
 

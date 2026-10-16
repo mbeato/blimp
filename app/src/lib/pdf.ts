@@ -9,6 +9,8 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 // Returns a function that stops the work and frees the document.
 export function renderPdf(bytes: Uint8Array, into: HTMLElement, width: number, onError: (e: unknown) => void) {
   // pdf.js moves the buffer to its worker, so hand it a copy and keep ours intact.
+  // The CSP forbids eval. pdf.js 6 no longer has an isEvalSupported option because it never
+  // evals, and it runs a PDF's own scripts only in its viewer's sandbox, which isn't used here.
   const task = getDocument({ data: bytes.slice() });
   let stopped = false;
   (async () => {

@@ -3,14 +3,27 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { expect, test } from "@playwright/test";
-import { fixtureDir, killSession, openApp, openSessionTab, screenText, startSession, zmxEnv } from "./helpers";
+import { fixtureDir, killSession, openApp, openSessionTab, screenText, startSession, startSessionPty, zmxEnv } from "./helpers";
 
 const name = `blimpe2e-m2-${process.pid}`;
+const early = `blimpe2e-m2early-${process.pid}`;
 let other: ChildProcess | undefined;
 
 test.afterAll(() => {
   other?.kill();
   killSession(name);
+  killSession(early);
+});
+
+test("the first open shows what the session printed before anyone attached", async ({ page }) => {
+  const dir = fixtureDir("m2early");
+  await startSessionPty(early, dir, ["sh", "-c", "printf 'printed-before-attach\\n'; exec cat"]);
+  await openApp(page);
+  const term = await openSessionTab(page, dir);
+  await expect.poll(() => screenText(term)).toContain("printed-before-attach");
+  // Still there once the tab has settled (fit, focus): nothing clears it after data arrived.
+  await page.waitForTimeout(500);
+  expect(await screenText(term)).toContain("printed-before-attach");
 });
 
 // Escape sequences out, so the text can be searched.

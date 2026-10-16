@@ -20,12 +20,13 @@ export function waitingQueue<L>(servers: { link: L; sessions: Session[] }[]): { 
     .sort((a, b) => since(a.s) - since(b.s));
 }
 
-// Folder groups hold every session in that folder, waiting ones too, so a folder whose sessions
-// all wait keeps its header and its "+". Sessions newest first; the groups are ordered by their
-// newest session, which only changes when a session starts.
+// Folder groups hold the sessions that aren't waiting: a waiting one is shown only in the queue
+// at the top. Sessions newest first; the groups are ordered by their newest session, which only
+// changes when a session starts.
 export function folderGroups(sessions: Session[], home: string): FolderGroup[] {
   const byDir = new Map<string, Session[]>();
   for (const s of sessions) {
+    if (s.state === "waiting") continue;
     const list = byDir.get(s.dir) ?? [];
     list.push(s);
     byDir.set(s.dir, list);

@@ -11,6 +11,7 @@ import {
   joinPath,
   mergeWatch,
   nextSync,
+  parentDir,
   viewerFor,
   watchPaths,
   type Sync,
@@ -19,7 +20,7 @@ import {
   type Viewer,
 } from "../lib/files";
 import { tildify } from "../lib/sidebar";
-import { ImageView, MarkdownView, PdfView } from "./FileViews";
+import { ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
 import { QuickOpen } from "./QuickOpen";
 
 // Monaco is big, so it loads the first time a text file opens.
@@ -85,6 +86,10 @@ export function FilesPane(props: { link: ServerLink | null; dir: string | null; 
           onReveal={props.onReveal}
           onCount={(n) => void openCounts.set(s.key, n)}
           onWatch={(paths) => onWatch(s.key, s.link, paths)}
+          onRewatch={() => {
+            sent.delete(s.link);
+            syncWatches();
+          }}
         />
       ))}
       {!activeKey && (
@@ -106,11 +111,13 @@ type Doc = {
   viewer: Viewer;
   size: number;
   bytes: Uint8Array<ArrayBuffer>;
+  text: string; // the server's text, which the Markdown preview shows until Monaco has loaded
   model: Monaco.editor.ITextModel | null;
   saved: number; // the model's alternative version id when it matched the server
   sync: Sync;
   viewState: Monaco.editor.ICodeEditorViewState | null;
   editing: boolean; // Markdown shown in Monaco instead of rendered
+  deleted: boolean; // gone on the server; still open, and only an explicit Save writes it back
   notice: string; // why the last save failed
   unsub: () => void;
 };
@@ -123,11 +130,13 @@ const newDoc = (path: string): Doc => ({
   viewer: "text",
   size: 0,
   bytes: new Uint8Array(0),
+  text: "",
   model: null,
   saved: 0,
   sync: initialSync(0),
   viewState: null,
   editing: false,
+  deleted: false,
   notice: "",
   unsub: () => {},
 });
@@ -145,6 +154,7 @@ function Workspace(props: {
   onReveal: () => void;
   onCount: (n: number) => void;
   onWatch: (paths: string[] | null) => void;
+  onRewatch: () => void; // send the watch set again (blimpd drops the watch on a deleted file)
 }) {
   const { link, root } = props;
   const [, rerender] = useReducer((n: number) => n + 1, 0);
@@ -200,6 +210,26 @@ function Workspace(props: {
     return r.effect;
   };
 
+  // Puts text into the doc's Monaco model, creating it the first time.
+  const setModelText = (doc: Doc, m: typeof Monaco, text: string) => {
+    if (!doc.model) {
+      // Monaco picks the language from the path's extension. The query keeps models unique when
+      // two workspaces open the same file.
+      doc.model = m.editor.createModel(text, undefined, m.Uri.from({ scheme: "blimp", path: doc.path, query: String(Math.random()) }));
+      const sub = doc.model.onDidChangeContent(() =>
+        dispatch(doc, { type: "edit", dirty: doc.model!.getAlternativeVersionId() !== doc.saved }),
+      );
+      doc.unsub = () => sub.dispose();
+    } else if (doc.model.getValue(undefined, true) !== text) {
+      // Keep the cursor and scroll position when Claude edits the file you're looking at.
+      const ed = editor.current?.getModel() === doc.model ? editor.current : null;
+      const view = ed?.saveViewState();
+      doc.model.setValue(text);
+      if (view) ed!.restoreViewState(view);
+    }
+    doc.saved = doc.model.getAlternativeVersionId();
+  };
+
   // Puts the server's copy in the doc: into its Monaco model for text, as bytes otherwise.
   const applyBody = async (doc: Doc, body: FileBody) => {
     let viewer = viewerFor(doc.name, body.bytes);
@@ -207,24 +237,23 @@ function Workspace(props: {
     const text = isText ? decodeText(body.bytes) : null;
     if (isText && text === null) viewer = "binary"; // not UTF-8: see decodeText
     if (text !== null) {
-      const m = await loadMonaco();
-      if (docs.get(doc.path) !== doc) return;
-      if (!doc.model) {
-        // Monaco picks the language from the path's extension. The query keeps models unique when
-        // two workspaces open the same file.
-        doc.model = m.editor.createModel(text, undefined, m.Uri.from({ scheme: "blimp", path: doc.path, query: String(Math.random()) }));
-        const sub = doc.model.onDidChangeContent(() =>
-          dispatch(doc, { type: "edit", dirty: doc.model!.getAlternativeVersionId() !== doc.saved }),
+      doc.text = text;
+      if (viewer === "markdown" && !monaco) {
+        // The preview doesn't need Monaco, so it shows now instead of waiting for Monaco's first
+        // load (seconds on a cold start). The model, for Edit and saving, follows with the latest text.
+        void loadMonaco().then(
+          (m) => {
+            if (docs.get(doc.path) !== doc || doc.model) return;
+            setModelText(doc, m, doc.text);
+            rerender();
+          },
+          () => {},
         );
-        doc.unsub = () => sub.dispose();
-      } else if (doc.model.getValue(undefined, true) !== text) {
-        // Keep the cursor and scroll position when Claude edits the file you're looking at.
-        const ed = editor.current?.getModel() === doc.model ? editor.current : null;
-        const view = ed?.saveViewState();
-        doc.model.setValue(text);
-        if (view) ed!.restoreViewState(view);
+      } else {
+        const m = await loadMonaco();
+        if (docs.get(doc.path) !== doc) return;
+        setModelText(doc, m, text);
       }
-      doc.saved = doc.model.getAlternativeVersionId();
     } else {
       doc.bytes = body.bytes;
     }
@@ -263,10 +292,20 @@ function Workspace(props: {
     let body: FileBody;
     try {
       body = await link.api.fsRead(doc.path);
-    } catch {
-      return; // deleted or unreadable: keep what's open; saving writes it back
+    } catch (e) {
+      // Deleted: keep what's open and say so. Unreadable for another reason: keep it quietly.
+      if (e instanceof ApiError && e.status === 404 && docs.get(doc.path) === doc && !doc.deleted) {
+        doc.deleted = true;
+        rerender();
+      }
+      return;
     }
     if (docs.get(doc.path) !== doc) return;
+    if (doc.deleted) {
+      doc.deleted = false; // it came back
+      props.onRewatch();
+      rerender();
+    }
     if (dispatch(doc, { type: "remote", mtime: body.mtime }) === "reload") await applyBody(doc, body);
   };
 
@@ -283,7 +322,8 @@ function Workspace(props: {
   // Keep mine sends none and overwrites.
   const save = async (doc: Doc, keepMine = false) => {
     const model = doc.model;
-    if (!model || doc.sync.saving || (!doc.sync.dirty && !keepMine)) return;
+    // A deleted file saves even without edits: that's how it comes back.
+    if (!model || doc.sync.saving || (!doc.sync.dirty && !keepMine && !doc.deleted)) return;
     const version = model.getAlternativeVersionId();
     dispatch(doc, { type: "save" });
     try {
@@ -293,6 +333,10 @@ function Workspace(props: {
       if (docs.get(doc.path) !== doc) return;
       doc.saved = version;
       doc.notice = "";
+      if (doc.deleted) {
+        doc.deleted = false;
+        props.onRewatch();
+      }
       dispatch(doc, { type: "saved", mtime });
       // Typing while the save was in flight leaves the file dirty.
       dispatch(doc, { type: "edit", dirty: model.getAlternativeVersionId() !== version });
@@ -328,7 +372,11 @@ function Workspace(props: {
   const onFs = useRef((_: string[]) => {});
   onFs.current = (paths) => {
     for (const p of paths) {
-      if (expanded.current.has(p)) void refreshDir(p);
+      if (expanded.current.has(p)) {
+        void refreshDir(p);
+        // A deleted file's own watch ended with it, so its folder says when it comes back.
+        for (const d of docs.values()) if (d.deleted && parentDir(d.path) === p) void checkRemote(d);
+      }
       const doc = docs.get(p);
       if (doc) void checkRemote(doc);
     }
@@ -488,7 +536,14 @@ function Workspace(props: {
               <button onClick={() => setClosing(null)}>Cancel</button>
             </div>
           )}
-          {doc?.sync.conflict && (
+          {doc?.deleted && (
+            <div className="fbar" role="alert">
+              <span>Deleted on the server</span>
+              {doc.model && <button onClick={() => void save(doc)}>Save</button>}
+              <button onClick={() => closeDoc(doc.path)}>Close</button>
+            </div>
+          )}
+          {doc?.sync.conflict && !doc.deleted && (
             <div className="fbar" role="alert">
               <span>Changed on the server</span>
               <button onClick={() => void reloadDoc(doc)}>Reload</button>
@@ -514,9 +569,16 @@ function Workspace(props: {
             {doc?.phase === "loading" && <div className="empty">Loading…</div>}
             {doc?.phase === "error" && <div className="empty error">{doc.error}</div>}
             {doc?.phase === "ready" && !inEditor(doc) && (
-              <>
-                {doc.viewer === "markdown" && doc.model && (
-                  <MarkdownView path={doc.path} text={doc.model.getValue()} onOpen={openFile} />
+              // Keyed by file, so a failed viewer resets on the next file and a Markdown view
+              // never shows one file's HTML under another's path.
+              <ViewerBoundary key={doc.path}>
+                {doc.viewer === "markdown" && (
+                  <MarkdownView
+                    path={doc.path}
+                    text={doc.model ? doc.model.getValue() : doc.text}
+                    onOpen={openFile}
+                    load={(p) => (link.api ? link.api.fsRead(p) : Promise.reject(new Error("Not connected.")))}
+                  />
                 )}
                 {doc.viewer === "image" && <ImageView name={doc.name} bytes={doc.bytes} />}
                 {doc.viewer === "pdf" && <PdfView bytes={doc.bytes} />}
@@ -526,7 +588,7 @@ function Workspace(props: {
                     <div className="empty-sub">{formatSize(doc.size)}</div>
                   </div>
                 )}
-              </>
+              </ViewerBoundary>
             )}
           </div>
         </div>

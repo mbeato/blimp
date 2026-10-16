@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Session } from "../lib/api";
 import type { ServerLink } from "../lib/connection";
-import { fuzzyFilter } from "../lib/fuzzy";
+import { rank, sessionScore } from "../lib/fuzzy";
 import { tildify } from "../lib/sidebar";
 import { Dialog } from "./Dialog";
 
@@ -14,7 +14,7 @@ export function Palette(props: { links: ServerLink[]; onPick: (link: ServerLink,
   const all = props.links.flatMap((link) =>
     (link.sessions ?? []).map((s): Item => ({ link, s, folder: tildify(s.dir, link.home) })),
   );
-  const items = fuzzyFilter(all, query, (i) => `${i.s.title} ${i.folder} ${i.s.name}`);
+  const items = rank(all, (i) => sessionScore(query, i.s.title, i.folder, i.s.name));
   const pick = (i: Item | undefined) => i && props.onPick(i.link, i.s.name);
 
   return (

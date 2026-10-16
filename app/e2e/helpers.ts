@@ -1,6 +1,6 @@
 // Shared by the specs: zmx sessions named blimpe2e-*, and the app opened against the test blimpd.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page } from "@playwright/test";
@@ -12,7 +12,7 @@ export const e2e = () => ({
   base: process.env.BLIMP_E2E_BASE!,
   token: process.env.BLIMP_E2E_TOKEN!,
   statusDir: process.env.BLIMP_E2E_STATUS!,
-  fixtures: process.env.BLIMP_E2E_FIXTURES!,
+  fixtures: process.env.BLIMP_E2E_FIXTURES!, // the test blimpd's home
 });
 
 export function fixtureDir(name: string) {
@@ -35,6 +35,27 @@ export function startSession(name: string, dir: string, cmd: string[] = ["cat"])
   execFileSync("zmx", ["attach", name, ...cmd], { cwd: dir, env: zmxEnv(), stdio: "ignore", timeout: 10_000 });
 }
 
+const sh = (a: string) => `'${a.replace(/'/g, `'\\''`)}'`;
+
+// Like startSession, but from a PTY of 120x36 (as blimpd's POST /sessions does), so the session
+// has a real size from the start and what it prints before anyone attaches is on its screen.
+// The PTY's client is killed once the session is listed and has had a moment to print.
+export async function startSessionPty(name: string, dir: string, cmd: string[] = ["cat"]) {
+  if (!name.startsWith(PREFIX)) throw new Error(`test sessions must be named ${PREFIX}*`);
+  const line = `stty cols 120 rows 36; exec zmx attach ${[name, ...cmd].map(sh).join(" ")}`;
+  const client = spawn("script", ["-qfec", line, "/dev/null"], { cwd: dir, env: zmxEnv(), stdio: ["pipe", "ignore", "ignore"] });
+  try {
+    for (const end = Date.now() + 10_000; ; await new Promise((r) => setTimeout(r, 100))) {
+      const list = execFileSync("zmx", ["list", "--short"], { env: zmxEnv(), encoding: "utf8", timeout: 10_000 });
+      if (list.split("\n").includes(name)) break;
+      if (Date.now() > end) throw new Error(`zmx session ${name} didn't start`);
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  } finally {
+    client.kill();
+  }
+}
+
 export function killSession(name: string) {
   if (!name.startsWith(PREFIX)) return;
   try {
@@ -48,9 +69,13 @@ export async function killTestSessions() {
   for (const m of out.matchAll(/name=(blimpe2e-[A-Za-z0-9_.-]+)/g)) killSession(m[1]);
 }
 
-// Records what the app hands the web Notification API (the browser build's notify()).
+// Records what the app hands the web Notification API (the browser build's notify()), and every
+// content security policy violation (window.__csp).
 export async function openApp(page: Page) {
   await page.addInitScript(() => {
+    const csp: string[] = [];
+    (window as any).__csp = csp;
+    document.addEventListener("securitypolicyviolation", (e) => csp.push(`${e.effectiveDirective} ${e.blockedURI} ${e.sourceFile}:${e.lineNumber}:${e.columnNumber}`));
     const calls: { title: string; body?: string }[] = [];
     (window as any).__notifications = calls;
     (window as any).Notification = class {
@@ -64,6 +89,8 @@ export async function openApp(page: Page) {
   const { base, token } = e2e();
   await page.goto(`/?blimpd=${encodeURIComponent(base)}&token=${token}`);
 }
+
+export const cspViolations = (page: Page) => page.evaluate(() => (window as any).__csp as string[]);
 
 export const notifications = (page: Page) => page.evaluate(() => (window as any).__notifications as { title: string; body?: string }[]);
 

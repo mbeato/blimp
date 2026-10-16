@@ -33,15 +33,16 @@ test("waiting sessions from every server form one queue, oldest wait first", () 
   ]);
 });
 
-test("waiting sessions stay in their folder group, so it keeps its header", () => {
+test("waiting sessions are only in the queue, not again in their folder group", () => {
   const folders = folderGroups(
-    [s("a", "/home/u/x", 1, { state: "waiting", stateSince: 500 }), s("b", "/home/u/y", 2)],
+    [
+      s("a", "/home/u/x", 1, { state: "waiting", stateSince: 500 }),
+      s("b", "/home/u/y", 2),
+      s("c", "/home/u/y", 3, { state: "waiting" }),
+    ],
     "/home/u",
   );
-  expect(folders.map((f) => [f.label, f.sessions.map((x) => x.name)])).toEqual([
-    ["~/y", ["b"]],
-    ["~/x", ["a"]],
-  ]);
+  expect(folders.map((f) => [f.label, f.sessions.map((x) => x.name)])).toEqual([["~/y", ["b"]]]);
 });
 
 test("folder groups: sessions newest first, groups by their newest session", () => {

@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { backoff, type ServerLink } from "../lib/connection";
+import { backoff, inTauri, type ServerLink } from "../lib/connection";
 import { mapKey } from "../lib/keys";
 
 const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
@@ -28,7 +28,21 @@ function themeFromCss(): ITheme {
   return theme;
 }
 
-type Phase = "connecting" | "live" | "reconnecting" | "ended";
+type Phase = "connecting" | "live" | "reconnecting" | "ended" | "detached";
+
+// Terminal links open in the system browser, and only web links: a link Claude prints could be
+// anything (file:, a custom app scheme).
+function openLink(_: MouseEvent, uri: string) {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return;
+  if (inTauri()) void import("@tauri-apps/plugin-opener").then((o) => o.openUrl(url.href)).catch(() => {});
+  else window.open(url.href, "_blank", "noopener");
+}
 
 // One session's terminal: xterm.js on /sessions/<name>/attach. Stays mounted while its tab is
 // open (hidden when another tab is active) so the scrollback survives tab switches.
@@ -53,7 +67,7 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
     });
     const f = new FitAddon();
     t.loadAddon(f);
-    t.loadAddon(new WebLinksAddon());
+    t.loadAddon(new WebLinksAddon(openLink));
     t.open(box.current!);
     // WebGL is much faster for Claude's redraws; without it (or when the GPU context is lost)
     // xterm falls back to its DOM renderer.
@@ -97,13 +111,14 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
       const api = linkRef.current.api;
       if (!api || linkRef.current.status !== "connected") return retry();
       if (box.current?.offsetWidth) f.fit();
+      // zmx sends the current screen first, so start from a clean terminal: before connecting,
+      // never after data has arrived (that would wipe the screen zmx just drew).
+      t.reset();
       const sock = new WebSocket(api.attachUrl(props.name, t.cols, t.rows));
       sock.binaryType = "arraybuffer";
       ws = sock;
       sock.onopen = () => {
         attempt = 0;
-        // zmx redraws the screen for every new client, so start from a clean terminal.
-        if (everOpened) t.reset();
         everOpened = true;
         setPhase("live");
       };
@@ -113,9 +128,12 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
       sock.onclose = (e) => {
         if (disposed || ws !== sock) return;
         ws = null;
+        // 4000: the session ended. 4001: someone detached this client (ctrl+\). Anything else is
+        // a dropped connection, unless the server no longer lists the session.
         const l = linkRef.current;
         const gone = l.status === "connected" && l.sessions && !l.sessions.some((s) => s.name === props.name);
-        if (e.code === 4000 || gone) setPhase("ended");
+        if (e.code === 4001) setPhase("detached");
+        else if (e.code === 4000 || gone) setPhase("ended");
         else retry();
       };
     };
@@ -168,19 +186,13 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
     term.current?.focus();
   }, [props.active]);
 
-  // Code 4000 means this zmx client exited: the session ended, or someone detached it (ctrl+\).
-  // A session the server still lists was only detached, so it can be attached again. (Right after
-  // a real end the list can lag by a second; the banner then switches to "Session ended".)
-  const l = props.link;
-  const detached = phase === "ended" && l.status === "connected" && !!l.sessions?.some((s) => s.name === props.name);
-
   return (
     <div className="term" hidden={!props.active}>
       <div className="term-box" ref={box} />
-      {phase === "ended" && (
+      {(phase === "ended" || phase === "detached") && (
         <div className="term-banner">
-          <span>{detached ? "Detached from this session" : "Session ended"}</span>
-          {detached && <button onClick={() => reattach.current()}>Reattach</button>}
+          <span>{phase === "detached" ? "Detached" : "Session ended"}</span>
+          {phase === "detached" && <button onClick={() => reattach.current()}>Reattach</button>}
           <button onClick={props.onClose}>Close tab</button>
         </div>
       )}

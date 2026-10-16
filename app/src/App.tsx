@@ -126,6 +126,8 @@ export function App() {
   onKey.current = (e) => {
     if (!e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    // Inside Monaco, ⌘K starts its chords (⌘K ⌘C and so on), as in VS Code.
+    if (k === "k" && (e.target as Element | null)?.closest?.(".monaco-editor")) return;
     if (k === "k") setDialog((d) => (d === "palette" ? null : "palette"));
     else if (k === "n" && e.shiftKey) openNewDialog();
     else if (k === "n") {

@@ -12,6 +12,8 @@ export type Server = { host: string; user?: string; port?: number };
 
 export const inTauri = () => isTauri();
 
+// user@host:port, leaving out what the user left blank. The same as the id the Rust shell gives
+// the tunnel (Target::id in src-tauri/src/tunnel.rs), so it also names the tunnel to disconnect.
 export const serverKey = (s: Server) => `${s.user ? s.user + "@" : ""}${s.host}${s.port ? ":" + s.port : ""}`;
 
 const LS_KEY = "blimp.servers";
@@ -50,19 +52,23 @@ export async function saveServers(list: Server[]) {
 }
 
 async function connectServer(s: Server): Promise<Conn> {
+  let conn: Conn;
   if (inTauri()) {
     const r = await invoke<{ id: string; port: number; token: string; home: string }>("connect", {
       host: s.host,
       user: s.user,
       port: s.port,
     });
-    return { id: r.id, base: `http://127.0.0.1:${r.port}`, token: r.token, home: r.home };
+    conn = { id: r.id, base: `http://127.0.0.1:${r.port}`, token: r.token, home: "" };
+  } else {
+    const t = browserTarget();
+    if (!t) throw new Error("A browser can't open SSH. Open blimp with ?blimpd=http://127.0.0.1:PORT&token=TOKEN.");
+    conn = { id: serverKey(s), base: t.base, token: t.token, home: "" };
   }
-  const t = browserTarget();
-  if (!t) throw new Error("A browser can't open SSH. Open blimp with ?blimpd=http://127.0.0.1:PORT&token=TOKEN.");
-  const partial: Conn = { id: serverKey(s), base: t.base, token: t.token, home: "" };
-  const { home } = await new Api(partial).health();
-  return { ...partial, home };
+  // blimpd's home has symlinks resolved, like the session folders it reports, so "~" matches
+  // them. The shell's $HOME (what connect returns) may not.
+  const { home } = await new Api(conn).health();
+  return { ...conn, home };
 }
 
 // Retry after 1, 2, 5, 10 s, then every 10 s.
@@ -123,7 +129,8 @@ export class ServerLink {
     this.set("connecting");
     try {
       const conn = await connectServer(this.server);
-      if (this.stopped) return;
+      // stop() may have run before the Rust side knew about this connect; close what it opened.
+      if (this.stopped) return this.disconnect();
       this.conn = conn;
       this.api = new Api(conn);
       this.events = new EventsSocket(this.api, {
@@ -160,12 +167,17 @@ export class ServerLink {
     void this.open();
   }
 
+  // Also during a connect: disconnect cancels a tunnel that is still starting.
   stop() {
     this.stopped = true;
     clearTimeout(this.timer);
     this.events?.close();
     links.delete(this);
-    if (inTauri() && this.conn) invoke("disconnect", { id: this.conn.id }).catch(() => {});
+    this.disconnect();
+  }
+
+  private disconnect() {
+    if (inTauri()) invoke("disconnect", { id: this.key }).catch(() => {});
   }
 
   // The files pane's watch set (expanded folders + open files). Kept here so it survives reconnects.
