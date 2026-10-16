@@ -30,6 +30,7 @@ app UI ──fetch/WebSocket──▶ http://127.0.0.1:<local port>
 - The Rust shell runs the system `ssh` (`/usr/bin/ssh` on macOS, `ssh` on PATH elsewhere) with `-o BatchMode=yes`, so it uses the user's keys, agent and `~/.ssh/config` and never prompts.
 - First it runs one command over SSH to learn the home folder and the token:
   `ssh -o BatchMode=yes [-p PORT] [USER@]HOST 'printf "%s\n" "$HOME"; cat "$HOME/.blimp/token"'`
+- Both ssh calls also get `-o ConnectTimeout=10`, and `--` before the destination. A host or user that is empty, starts with `-`, or contains whitespace or control characters is refused before ssh runs.
 - Then it starts the tunnel: `ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ControlMaster=no -o ControlPath=none -L 127.0.0.1:<free port>:<home>/.blimp/blimpd.sock [-p PORT] [USER@]HOST`, and waits (up to 10 s) until `GET /health` answers through it. No connection sharing: with `ControlMaster`/`ControlPersist` in `~/.ssh/config`, ssh would hand the forward to a shared master and exit, and the app could no longer close it.
 - Both ssh commands get the app's PATH with `/opt/homebrew/bin` and `/usr/local/bin` added, so `ProxyCommand` and `Match exec` helpers from Homebrew are found when the app is opened from Finder.
 
@@ -91,7 +92,8 @@ type Session = {
 - Server → client: binary frames, raw PTY output.
 - Client → server: binary frames = keyboard input bytes; text frames = JSON control messages. Only one for now: `{ "type": "resize", "cols": n, "rows": n }`.
 - When the socket closes, blimpd kills that zmx client (SIGTERM). The session keeps running.
-- When the zmx client exits (session ended, or the user detached with ctrl+\), blimpd closes the socket with code 4000, reason `"ended"`.
+- When the zmx client exits, blimpd checks whether the session still exists: if not, it closes with code 4000, reason `"ended"`; if it does (the user detached with ctrl+\), code 4001, reason `"detached"`.
+- Backpressure: if the socket's buffered amount passes 8 MB (a stalled client), blimpd closes it with 1013 and kills that zmx client. The app reconnects and zmx redraws the current screen, so nothing is lost but scrollback the client never read.
 - Several sockets on one session are fine: each gets its own zmx client. zmx keeps them in sync.
 
 ### Events
@@ -128,6 +130,10 @@ Claude's status files are internal and may change. So blimpd also installs Claud
 
 `GET /sessions` and the 1 s event check run often. Cache transcript titles per file and parse only bytes appended since the last read (keep the byte offset and the custom/ai/prompt state). Don't re-read whole transcripts every second.
 
+### Starting sessions
+
+`POST /sessions` creates the zmx session from inside a PTY of 120×36 (not with stdin at /dev/null), waits until the session is listed, then kills that zmx client. The session then has a real size from the start: Claude renders its first screen properly, and output written before anyone attaches is shown to the first viewer.
+
 ## The app
 
 ### Rust shell (`app/src-tauri`)
@@ -150,11 +156,12 @@ React + TypeScript + Vite. Libraries: `@xterm/xterm` + `@xterm/addon-fit` + `@xt
 
 1. **Sidebar (left, 280 px, resizable).**
    - One section per server (header hidden when there's only one). "Add server" (host, optional user and port) at the bottom.
-   - "Waiting for you" group at the top: every session with state `waiting`, each with an accent dot.
+   - "Waiting for you" group at the top of the whole sidebar (across servers): every session with state `waiting`, each with an accent dot, its folder, and its server name when there is more than one. A waiting session is shown only there, not again in its folder group.
+   - `~` in folder names means the `home` from `GET /health` (the real path), since session folders are real paths.
    - Then one group per folder (`~/x` display), sessions newest first. The group header has a "+" that starts a session in that folder.
    - Row: title (one line, ellipsis), state (working / waiting / done), last activity ("2m ago", refreshed every 30 s), folder shown in the group header only.
    - Click a row: opens its terminal tab, or focuses it if open.
-2. **Terminal (center).** Tabs of open sessions. ⌘1–9 picks a tab, ⌘W closes the tab (the session keeps running). Each tab is an xterm.js terminal on `/sessions/<name>/attach`, fitted to its container, resize sent on fit. Font: 13 px, `"SF Mono", Menlo, monospace`. Keys like the VS Code terminal on macOS: ⌘C copies the selection (if any), ⌘V pastes, ⌘K is not sent to the terminal (it's the jump palette), ⌘Backspace sends `\x15`, ⌥Backspace sends `\x17`, ⌘← sends `\x01`, ⌘→ sends `\x05`, ⌥← / ⌥→ send `\x1bb` / `\x1bf`. On close code 4000 the tab shows "Session ended". On other drops it reconnects.
+2. **Terminal (center).** Tabs of open sessions. ⌘1–9 picks a tab, ⌘W closes the tab (the session keeps running). Each tab is an xterm.js terminal on `/sessions/<name>/attach`, fitted to its container, resize sent on fit. Font: 13 px, `"SF Mono", Menlo, monospace`. Keys like the VS Code terminal on macOS: ⌘C copies the selection (if any), ⌘V pastes, ⌘K is not sent to the terminal (it's the jump palette), ⌘Backspace sends `\x15`, ⌥Backspace sends `\x17`, ⌘← sends `\x01`, ⌘→ sends `\x05`, ⌥← / ⌥→ send `\x1bb` / `\x1bf`. On close code 4000 the tab shows "Session ended"; on 4001 "Detached" with a Reattach button. On other drops it reconnects. Before connecting (and reconnecting), the tab clears the terminal; it never clears after data has arrived, since zmx sends the current screen first. Links in the terminal open in the system browser (Tauri opener plugin; `window.open` outside Tauri), http and https only.
 3. **Files (right, collapsible with ⌘B, default open, 45 % of width, resizable).** Opens at the active tab's session folder.
    - A tree column (folders expandable, `.git` hidden) beside a viewer/editor area with its own tabs of open files.
    - ⌘P: fuzzy open by name over `/fs/files` of the session folder.
@@ -165,11 +172,25 @@ React + TypeScript + Vite. Libraries: `@xterm/xterm` + `@xterm/addon-fit` + `@xt
    - Anything else binary (NUL byte in the first 8 KB): "Can't show this file", plus its size.
    - The tree and open files update from `fs` events.
 
-**Shortcuts**: ⌘N new session in the active tab's folder. ⌘⇧N "New session in…" dialog: recent folders (`/folders/recent`), a browse view (`/fs/list`), or a typed path; after choosing a folder, "New conversation" or one of `/conversations?dir=` to resume. ⌘K jump palette: fuzzy over every session's title, folder and name across servers; Enter opens it. ⌘P quick open. ⌘B toggle files. ⌘1–9, ⌘W as above. Esc closes dialogs.
+**Shortcuts**: ⌘N new session in the active tab's folder. ⌘⇧N "New session in…" dialog: recent folders (`/folders/recent`), a browse view (`/fs/list`), or a typed path; after choosing a folder, "New conversation" or one of `/conversations?dir=` to resume. ⌘K jump palette: fuzzy over every session's title, folder and name across servers; Enter opens it. Ranking: a contiguous match beats a scattered one, a match at a word start beats one mid-word, and a title match beats a folder or name match. When focus is inside Monaco, ⌘K goes to Monaco (its ⌘K chords, as in VS Code) and does not open the palette. ⌘P quick open. ⌘B toggle files. ⌘1–9, ⌘W as above. Esc closes dialogs.
 
 **Waiting**: when a session's state becomes `waiting` (not on first load), send a notification "<title> is waiting for you" (body: the folder), unless the window is focused and that session's tab is active. Dock badge = number of waiting sessions (`getCurrentWindow().setBadgeCount(n || undefined)`), only in Tauri.
 
 **Look**: native-feeling Mac app, not a web page. Dark by default (follows system light/dark), compact type (13 px UI, system font), subtle 1 px dividers, no heavy shadows or gradients. Accent for "waiting" only. Colors as CSS variables in one file.
+
+### Content security policy
+
+The UI renders files from servers (Markdown, SVG, PDF), so script injection must be impossible and, if it ever happened, contained. The same policy is set in `app/src-tauri/tauri.conf.json` (`app.security.csp`) and as a `<meta http-equiv="Content-Security-Policy">` in `app/index.html`, so the e2e tests run under it too:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'
+```
+
+(Vite's dev server needs `ws://localhost:*` for hot reload; add it only in dev.) pdf.js runs with `isEvalSupported: false` and scripting off. Tauri capabilities grant only what the UI uses: the two commands, event listen, set-badge-count, notification, store, and opener limited to `http:`/`https:` URLs. No shell, fs or http plugin.
+
+### macOS menu
+
+A custom menu, so the web page gets ⌘W, ⌘N, ⌘P and ⌘K: app menu (About, Hide, Hide Others, Show All, Quit ⌘Q), Edit (Undo, Redo, Cut, Copy, Paste, Select All with their usual keys), Window (Minimize ⌘M, Zoom). No Close Window ⌘W, no Print ⌘P.
 
 ## Tests and checks per milestone
 

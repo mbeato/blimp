@@ -78,6 +78,7 @@ export default async function setup() {
     process.env.BLIMP_E2E_TOKEN = token;
     process.env.BLIMP_E2E_STATUS = join(tmp, "status");
     process.env.BLIMP_E2E_FIXTURES = fixtures;
+    process.env.BLIMP_E2E_CLAUDE = join(tmp, "claude");
   } catch (e) {
     const logText = readFileSync(join(tmp, "blimpd.log"), "utf8").slice(-2000);
     await teardown();
