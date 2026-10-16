@@ -86,8 +86,21 @@ EOF
   systemctl --user enable --quiet blimpd.service
   systemctl --user restart blimpd.service
   say "blimpd: running as a user service"
+  # Without linger, systemd stops blimpd, and every session it started, when your last login ends.
+  # --no-ask-password: many systems let you turn it on for yourself; never stop to prompt for it.
+  me=$(id -un)
+  if [ "$(loginctl show-user "$me" -p Linger --value 2>/dev/null)" != yes ]; then
+    if loginctl --no-ask-password enable-linger "$me" >/dev/null 2>&1; then
+      say "linger: turned on, so sessions keep running after you log out"
+    else
+      say "warning: linger is off. When your last login to this server ends, systemd stops blimpd"
+      say "  and every session it started. Ask an admin to run: sudo loginctl enable-linger $me"
+    fi
+  fi
 else
-  say "blimpd: no user systemd here, so start it yourself: $BIN/blimpd serve &"
+  # nohup, so blimpd keeps running when this terminal or SSH login closes.
+  say "blimpd: no user systemd here, so start it yourself (again after each reboot):"
+  say "  nohup \"\$HOME/.local/bin/blimpd\" serve >\"\$HOME/blimpd.log\" 2>&1 &"
   # Then zmx falls back to /tmp/zmx-<uid>, a name another user could make first. blimpd refuses a
   # folder others own or can write, but a private ZMX_DIR avoids the question.
   [ -n "${XDG_RUNTIME_DIR:-}" ] || {
@@ -100,5 +113,5 @@ command -v blimpd >/dev/null 2>&1 || say "note: $BIN isn't on your PATH, so run 
 
 say ""
 say "Done. In the blimp app, add this server:"
-say "  host: $(uname -n)"
+say "  host: the name you use with ssh to reach it (this server calls itself $(uname -n))"
 say "  user: $(id -un)"

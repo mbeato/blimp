@@ -35,13 +35,13 @@ afterAll(() => {
 });
 
 // A fresh HOME with zmx already there (so the script doesn't download it), then install.sh.
-async function install(url: string) {
+async function install(url: string, extraPath?: string) {
   const home = mkdtempSync(join(tmp, "home-"));
   mkdirSync(join(home, ".local", "bin"), { recursive: true });
   writeFileSync(join(home, ".local", "bin", "zmx"), "#!/bin/sh\n");
   chmodSync(join(home, ".local", "bin", "zmx"), 0o755);
   const p = Bun.spawn(["sh", join(import.meta.dir, "..", "install.sh")], {
-    env: { HOME: home, PATH: `${stubs}:/usr/local/bin:/usr/bin:/bin`, BLIMPD_URL: url, XDG_CONFIG_HOME: join(home, ".config") },
+    env: { HOME: home, PATH: `${extraPath ? extraPath + ":" : ""}${stubs}:/usr/local/bin:/usr/bin:/bin`, BLIMPD_URL: url, XDG_CONFIG_HOME: join(home, ".config") },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -95,5 +95,68 @@ describe("install.sh checks the release's SHA256SUMS", () => {
     const r = await install(`file://${file}`);
     expect(r.code).toBe(0);
     expect(r.installed).toBe(blimpd);
+  });
+});
+
+describe("install.sh's closing advice", () => {
+  test("without user systemd it prints a start command that outlives the terminal", async () => {
+    const file = join(tmp, "blimpd-local");
+    writeFileSync(file, blimpd);
+    const r = await install(`file://${file}`);
+    expect(r.code).toBe(0);
+    // The same command as the README's "No user systemd" entry. A plain `blimpd serve &` dies on hangup.
+    expect(r.out).toContain(`nohup "$HOME/.local/bin/blimpd" serve >"$HOME/blimpd.log" 2>&1 &`);
+  });
+
+  test("it says the app wants the name you use with ssh, not only this server's own name", async () => {
+    const file = join(tmp, "blimpd-local");
+    writeFileSync(file, blimpd);
+    const r = await install(`file://${file}`);
+    expect(r.out).toContain("the name you use with ssh");
+  });
+});
+
+// User systemd present (systemctl succeeds), and loginctl says linger is off or on.
+describe("install.sh and linger", () => {
+  function stubSystemd(name: string, linger: string, enableExit: number) {
+    const dir = join(tmp, name);
+    mkdirSync(dir);
+    const log = join(dir, "calls");
+    writeFileSync(join(dir, "systemctl"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(
+      join(dir, "loginctl"),
+      `#!/bin/sh\necho "$*" >>${log}\ncase "$*" in show-user*) echo ${linger};; *enable-linger*) exit ${enableExit};; esac\n`,
+    );
+    chmodSync(join(dir, "systemctl"), 0o755);
+    chmodSync(join(dir, "loginctl"), 0o755);
+    return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8") : "") };
+  }
+  const local = () => {
+    const file = join(tmp, "blimpd-local");
+    writeFileSync(file, blimpd);
+    return `file://${file}`;
+  };
+
+  test("off: turns it on without ever asking for a password", async () => {
+    const s = stubSystemd("linger-ok", "no", 0);
+    const r = await install(local(), s.dir);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toContain("--no-ask-password enable-linger");
+    expect(r.out).toContain("linger: turned on");
+  });
+
+  test("off and can't turn it on: says what stops, and what to ask an admin", async () => {
+    const s = stubSystemd("linger-denied", "no", 1);
+    const r = await install(local(), s.dir);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("linger is off");
+    expect(r.out).toContain("sudo loginctl enable-linger");
+  });
+
+  test("already on: leaves it alone", async () => {
+    const s = stubSystemd("linger-on", "yes", 1);
+    const r = await install(local(), s.dir);
+    expect(s.calls()).not.toContain("enable-linger");
+    expect(r.out).not.toContain("linger");
   });
 });

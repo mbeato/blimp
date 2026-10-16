@@ -1,7 +1,7 @@
 name: Release
 
 # A tag like v0.3.0 publishes blimpd for Linux, its checksums, install.sh and the Mac app.
-# A tag with a "-" (v0.3.0-rc1) is a prerelease, so install.sh's "latest" skips it.
+# A tag with a "-" (v0.3.0-rc.1) is a prerelease, so install.sh's "latest" skips it.
 on:
   push:
     tags: ["v*"]
@@ -25,6 +25,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Stop before building anything if the tag and the version in the code disagree.
+      # v0.3.0 and v0.3.0-rc.1 both need version 0.3.0 in all four manifests.
+      - name: Check the tag matches the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' ||
+            { echo "::error::Tag $TAG is not vX.Y.Z or vX.Y.Z-rc.N."; exit 1; }
+          version=$(sh scripts/version.sh) ||
+            { echo "::error::The four manifests have different versions (listed above). Run scripts/version.sh X.Y.Z, commit, and tag again."; exit 1; }
+          [ "${TAG%%-*}" = "v$version" ] ||
+            { echo "::error::Tag $TAG does not match version $version in the manifests. Tag v$version or v$version-rc.N, or run scripts/version.sh to change the version."; exit 1; }
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
@@ -103,7 +115,11 @@ jobs:
           {
             echo "Server setup: \`curl -fsSL https://raw.githubusercontent.com/mbeato/blimp/main/install.sh | sh\`"
             echo
-            echo "SHA256SUMS lists the SHA-256 of both blimpd binaries."
+            echo "SHA256SUMS lists the SHA-256 of both blimpd binaries:"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
             echo
             if [ "$SIGNED" = true ]; then
               echo "The Mac app is signed and notarized."

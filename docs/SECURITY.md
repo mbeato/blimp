@@ -22,7 +22,7 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 
 ## Accepted
 
-- **Keystroke timing.** Plain `ssh` (OpenSSH 9.5+) hides typing rhythm by sending keystrokes in fixed 20 ms ticks. blimp's tunnel is a port forward, which doesn't do that, so a network observer could see when you type. This is the same as VS Code Remote or Tailscale. It also makes blimp about 9 ms faster per keystroke than `ssh` at the median.
+- **Keystroke timing.** Plain `ssh` (OpenSSH 9.5+) hides typing rhythm by sending keystrokes in fixed 20 ms ticks. blimp's tunnel is a port forward, which doesn't do that, so a network observer could see when you type. This is the same as VS Code Remote or Tailscale. It's also part of why blimp is about 8–12 ms faster per keystroke than `ssh` at the median.
 - **Whole home folder.** The files pane can open anything in your home folder, including dotfiles. That's no more than your SSH access already allows.
 - **Token lifetime.** The token stays the same until you delete `~/.blimp/token` and restart blimpd. Anyone who has it can already reach you over SSH.
 
@@ -36,4 +36,4 @@ Typing has to feel like `ssh`. Measured on a simulated 40 ms link (`bench/`):
 | `ssh -N -L` forward alone | 40 ms | 55–74 ms (rises with typing speed) |
 | full blimp path (tunnel → WebSocket → blimpd → zmx) | 40–41 ms | 44–58 ms |
 
-Target: the full blimp path stays within 5 ms of today's path at both the median and the 95th percentile. Measured: it's about 10 ms faster at the median and no worse at the 95th. blimpd adds about 0.1 ms (median) over a direct `zmx attach`.
+Target: the full blimp path stays within 5 ms of today's path at both the median and the 95th percentile. Measured: it's about 8–12 ms faster at the median (across runs) and no worse at the 95th. blimpd adds about 0.1 ms (median) over a direct `zmx attach`.

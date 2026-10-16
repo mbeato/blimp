@@ -148,7 +148,7 @@ Commands for the UI (`invoke`):
 - `disconnect({ id: string })`.
 - Event `tunnel-closed` with `{ id }` when an ssh child exits. The UI reconnects with backoff (1, 2, 5, 10 s, then every 10 s).
 
-All ssh children are killed when the app exits. Plugins: `notification`, `store` (server list in `servers.json`). macOS: a custom menu (see macOS menu). Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
+All ssh children are killed when the app exits. Plugins: `notification`, `store` (server list in `servers.json`), `opener` (links, http and https only). macOS: a custom menu (see macOS menu). Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
 
 ### UI (`app/src`)
 
