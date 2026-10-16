@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
@@ -51,6 +52,8 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
       theme: themeFromCss(),
       scrollback: 10000,
       macOptionClickForcesSelection: true,
+      // For the Unicode 11 width tables below (a proposed API in xterm).
+      allowProposedApi: true,
       // OSC 8 links (any text can carry a hidden URL) follow the same rule as WebLinksAddon's:
       // ⌘-click only, http and https only, through the opener. xterm's default asks with
       // confirm() on a plain click and then opens the URL in a new webview window.
@@ -62,6 +65,10 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
     });
     const f = new FitAddon();
     t.loadAddon(f);
+    // Claude sizes symbols like ⏺ ✻ and emoji by Unicode 11 widths, as VS Code's terminal does. With
+    // xterm's default (Unicode 6) the two disagree on column counts and Claude's redraws land offset.
+    t.loadAddon(new Unicode11Addon());
+    t.unicode.activeVersion = "11";
     t.loadAddon(
       new WebLinksAddon((e, uri) => {
         if (followsLink(e)) openWebLink(uri);
