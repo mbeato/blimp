@@ -134,6 +134,8 @@ export function App() {
       if (activeLink?.status === "connected" && activeTab?.dir) void startHere(activeLink, activeTab.dir);
       else openNewDialog();
     } else if (k === "w" && !e.shiftKey) {
+      // Inside the files pane, ⌘W closes the open file instead (see Workspace).
+      if ((e.target as Element | null)?.closest?.(".files")) return;
       if (active) closeTab(active);
     } else if (k === "b" && !e.shiftKey) setFilesOpen((o) => !o);
     else if (/^[1-9]$/.test(e.key) && !e.shiftKey) {

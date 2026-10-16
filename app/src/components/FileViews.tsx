@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import type { FileBody } from "../lib/api";
 import { errorText } from "../lib/connection";
 import { imageType, parentDir, resolvePath } from "../lib/files";
+import { openWebLink } from "../lib/links";
 import { parseMarkdown } from "../lib/markdown";
 
 // Whatever a viewer throws while rendering a file stays in the viewer. Without a boundary React
@@ -92,7 +93,8 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-// Rendered Markdown. A relative link opens that file here; nothing navigates the app's window.
+// Rendered Markdown. A relative link opens that file here, an http or https link opens in the
+// system browser, and nothing navigates the app's window.
 // Relative images come through load (/fs/file with the token in a header) as blob URLs, so the
 // token never lands in the page. marked runs in a worker (see parseMarkdown); while a new version
 // of the file renders, the last one stays on screen.
@@ -155,8 +157,10 @@ export function MarkdownView(props: {
           const a = (e.target as HTMLElement).closest("a");
           if (!a) return;
           e.preventDefault();
-          const path = relativeTarget(props.path, a.getAttribute("href") ?? "");
+          const href = a.getAttribute("href") ?? "";
+          const path = relativeTarget(props.path, href);
           if (path) props.onOpen(path);
+          else openWebLink(href);
         }}
       />
     </>

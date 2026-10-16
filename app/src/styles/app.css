@@ -541,6 +541,10 @@ h2 {
   flex-direction: column;
 }
 
+.workspace:focus {
+  outline: none;
+}
+
 /* The root folder sits above the tree and the file tabs beside it, in one 32 px strip that lines
    up with the terminal tabs. */
 .files-top {
@@ -796,7 +800,7 @@ h2 {
 
 .md-view code,
 .md-view pre {
-  font-family: "SF Mono", Menlo, monospace;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px;
 }
 

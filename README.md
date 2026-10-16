@@ -117,7 +117,7 @@ To add more servers, click **+ Add server** at the bottom of the sidebar. The ap
 - The pane on the right opens at the folder of the current session. **⌘B** shows or hides it.
 - Click a file in the tree to open it. **⌘P** opens a file by name.
 - **Text and code** open in Monaco, the editor inside VS Code. It has the same keys, search and replace, and multi-cursor. **⌘S** saves.
-- **Markdown** shows rendered. Click **Edit** to change it and **Preview** to go back. A relative link opens that file in the pane. Web links in Markdown do not open.
+- **Markdown** shows rendered. Click **Edit** to change it and **Preview** to go back. A relative link opens that file in the pane. An `http` or `https` link opens in your default browser. Other links do not open.
 - **Images** (png, jpg, jpeg, gif, webp, svg, ico, bmp) show fitted to the pane.
 - **PDF** files show all pages, with pdf.js.
 - Other binary files show "Can't show this file" and the file size.
@@ -143,7 +143,7 @@ To add more servers, click **+ Add server** at the bottom of the sidebar. The ap
 | ⌘N | New session in the current tab's folder. With no tab open, opens "New session in…". |
 | ⌘⇧N | New session in…: pick a folder, then start a new conversation or resume one. |
 | ⌘1 to ⌘9 | Go to session tab 1 to 9. |
-| ⌘W | Close the current session tab. The session keeps running. |
+| ⌘W | Close the current session tab. The session keeps running. With focus in the files pane, close the open file instead (it asks first if the file has unsaved changes). |
 | ⌘B | Show or hide the files pane. |
 | ⌘P | Open a file by name in the session's folder. Shows the files pane if it is hidden. |
 | ⌘S | Save the open file (when the files pane shows). |
@@ -163,7 +163,7 @@ In the terminal, keys work like the VS Code terminal on macOS:
 | ⌥← / ⌥→ | Go one word left or right (Esc b / Esc f). |
 | `ctrl+\` | Detach (zmx). The session keeps running. |
 
-A click on a web link in the terminal opens it in your default browser. Only `http` and `https` links open.
+A ⌘-click on a web link in the terminal opens it in your default browser, as in the VS Code terminal. A plain click does not, so you can select text near a link. Only `http` and `https` links open.
 
 ## Security in brief
 
@@ -295,7 +295,7 @@ install.sh      server setup
 
 - `bun install`
 - `bun run test` runs the interface's unit tests.
-- The interface is built for the Safari 16 engine (`build.target` in `app/vite.config.ts`). That is why the app needs macOS 11 with Safari 16, or macOS 13. The app bundle itself declares macOS 10.13, which is Tauri's default. On a system without the Safari 16 engine, the interface may not work.
+- The interface is built for the Safari 16 engine (`build.target` in `app/vite.config.ts`). That is why the app needs macOS 11 with Safari 16, or macOS 13. The app bundle declares macOS 11.0 as its minimum (`bundle.macOS.minimumSystemVersion` in `app/src-tauri/tauri.conf.json`). On a system without the Safari 16 engine, the interface may not work.
 - `bun run dev` serves the interface in a browser, on `http://localhost:5173`. A browser cannot open SSH, so give it a blimpd in the URL:
   1. Forward a local port to a blimpd socket: `ssh -N -L 127.0.0.1:7777:/home/you/.blimp/blimpd.sock yourserver`
   2. Get the token: `ssh yourserver cat .blimp/token`

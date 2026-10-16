@@ -167,6 +167,7 @@ function Workspace(props: {
   const [active, setActive] = useState<string | null>(null);
   const [closing, setClosing] = useState<string | null>(null);
   const [quick, setQuick] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
   const editorBox = useRef<HTMLDivElement>(null);
   const editor = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const editorDoc = useRef<Doc | null>(null);
@@ -353,12 +354,17 @@ function Workspace(props: {
     if (!doc) return;
     if (doc.sync.dirty && !discard) return setClosing(path);
     const order = [...docs.keys()];
+    // Read before setModel(null), which takes focus out of Monaco.
+    const hadFocus = box.current?.contains(document.activeElement);
     if (editor.current && editor.current.getModel() === doc.model) editor.current.setModel(null);
     if (editorDoc.current === doc) editorDoc.current = null;
     doc.unsub();
     doc.model?.dispose();
     docs.delete(path);
     setClosing(null);
+    // Focus was in the editor or on a button that's going away: keep it in the pane, so the next
+    // ⌘W closes the next file instead of the session tab.
+    if (hadFocus) box.current!.focus();
     if (active === path) {
       const i = order.indexOf(path);
       const rest = order.filter((p) => p !== path);
@@ -407,7 +413,7 @@ function Workspace(props: {
         model: null,
         automaticLayout: true,
         fontSize: 13,
-        fontFamily: '"SF Mono", Menlo, monospace',
+        fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         renderLineHighlight: "line",
@@ -431,7 +437,9 @@ function Workspace(props: {
     [],
   );
 
-  // ⌘P works while the pane is hidden (it shows it); ⌘S only while it's on screen.
+  // ⌘P works while the pane is hidden (it shows it); ⌘S only while it's on screen; ⌘W closes the
+  // open file when focus is in the pane (elsewhere it closes the session tab: see App), or the
+  // quick-open sheet when that's up.
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
     if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -441,6 +449,9 @@ function Workspace(props: {
       setQuick(true);
     } else if (k === "s" && props.shown) {
       if (activeDoc) void save(activeDoc);
+    } else if (k === "w" && box.current?.contains(e.target as Node)) {
+      if (quick) setQuick(false);
+      else if (active) closeDoc(active);
     } else return;
     e.preventDefault();
   };
@@ -479,7 +490,8 @@ function Workspace(props: {
   const closingDoc = closing ? docs.get(closing) : undefined;
 
   return (
-    <div className="workspace" hidden={!props.current}>
+    // Focusable, so a click anywhere in the pane (a preview, an image) puts focus in it for ⌘W.
+    <div className="workspace" ref={box} tabIndex={-1} hidden={!props.current}>
       <div className="files-top">
         <div className="files-head files-root" title={root}>
           {tildify(root, link.home)}

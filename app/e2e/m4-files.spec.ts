@@ -9,10 +9,12 @@ import { fixtureDir, killSession, openApp, openSessionTab, startSession } from "
 
 const name = `blimpe2e-m4-${process.pid}`;
 const del = `blimpe2e-m4del-${process.pid}`;
+const closeW = `blimpe2e-m4w-${process.pid}`;
 
 test.afterAll(() => {
   killSession(name);
   killSession(del);
+  killSession(closeW);
 });
 
 const git = (dir: string, ...args: string[]) =>
@@ -85,4 +87,76 @@ test("a file deleted on the server shows a bar, and only Save brings it back; �
   // Watched again: a later change on the server still reaches the editor.
   writeFileSync(file, "changed again\n");
   await expect(editor).toContainText("changed again", { timeout: 5000 });
+});
+
+test("⌘W in the files pane closes the open file (asking first if it has unsaved edits); elsewhere the session tab", async ({ page }) => {
+  const dir = fixtureDir("m4w");
+  writeFileSync(join(dir, "readme.md"), "# Read me\n");
+  writeFileSync(join(dir, "code.txt"), "some code\n");
+  startSession(closeW, dir);
+
+  await openApp(page);
+  const term = await openSessionTab(page, dir);
+  const sessionTabs = page.locator(".tabbar .tab");
+  await expect(sessionTabs).toHaveCount(1);
+  const ws = page.locator(".workspace:not([hidden])");
+  const fileTabs = ws.locator(".ftabs .tab");
+  await ws.locator(".tree").getByText("readme.md").click();
+  await expect(ws.locator(".md-view h1")).toHaveText("Read me");
+  await ws.locator(".tree").getByText("code.txt").click();
+  const editor = ws.locator(".monaco-editor .view-lines");
+  await expect(editor).toContainText("some code");
+  await expect(fileTabs).toHaveCount(2);
+
+  // Unsaved edits: ⌘W asks first, and Don't save closes the file.
+  await editor.click();
+  await page.keyboard.type("edited ");
+  await page.keyboard.press("Meta+w");
+  const bar = ws.locator(".fbar", { hasText: "code.txt has unsaved changes" });
+  await expect(bar).toBeVisible();
+  await expect(fileTabs).toHaveCount(2);
+  await bar.getByRole("button", { name: "Don't save" }).click();
+  await expect(fileTabs).toHaveCount(1);
+  expect(readFileSync(join(dir, "code.txt"), "utf8")).toBe("some code\n");
+
+  // Focus stays in the pane after a close, so ⌘W again closes the next file, and with none left
+  // does nothing: the session tab stays.
+  await page.keyboard.press("Meta+w");
+  await expect(fileTabs).toHaveCount(0);
+  await page.keyboard.press("Meta+w");
+  await page.waitForTimeout(300);
+  await expect(sessionTabs).toHaveCount(1);
+
+  // The same from inside the editor, pressing ⌘W twice with no click in between.
+  await ws.locator(".tree").getByText("readme.md").click();
+  await ws.locator(".tree").getByText("code.txt").click();
+  await expect(fileTabs).toHaveCount(2);
+  await editor.click();
+  await page.keyboard.press("Meta+w");
+  await expect(fileTabs).toHaveCount(1);
+  await page.keyboard.press("Meta+w");
+  await expect(fileTabs).toHaveCount(0);
+  await expect(sessionTabs).toHaveCount(1);
+
+  // ⌘W with the quick-open sheet up closes the sheet, not the file behind it.
+  await ws.locator(".tree").getByText("readme.md").click();
+  await expect(fileTabs).toHaveCount(1);
+  await page.keyboard.press("Meta+p");
+  const quick = page.getByPlaceholder("Open a file by name");
+  await expect(quick).toBeFocused();
+  await page.keyboard.press("Meta+w");
+  await expect(quick).toHaveCount(0);
+  await expect(fileTabs).toHaveCount(1);
+  await expect(sessionTabs).toHaveCount(1);
+
+  // Focus in the Markdown preview: ⌘W closes that file, and the session tab stays.
+  await ws.locator(".md-view").click();
+  await page.keyboard.press("Meta+w");
+  await expect(fileTabs).toHaveCount(0);
+  await expect(sessionTabs).toHaveCount(1);
+
+  // Focus in the terminal: ⌘W closes the session tab.
+  await term.locator(".xterm").click();
+  await page.keyboard.press("Meta+w");
+  await expect(sessionTabs).toHaveCount(0);
 });

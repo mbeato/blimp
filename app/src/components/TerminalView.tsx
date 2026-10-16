@@ -4,8 +4,9 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { backoff, inTauri, type ServerLink } from "../lib/connection";
+import { backoff, type ServerLink } from "../lib/connection";
 import { mapKey } from "../lib/keys";
+import { followsLink, openWebLink } from "../lib/links";
 
 const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
 const camel = (s: string) => s.replace(/-(\w)/g, (_, c) => c.toUpperCase());
@@ -30,20 +31,6 @@ function themeFromCss(): ITheme {
 
 type Phase = "connecting" | "live" | "reconnecting" | "ended" | "detached";
 
-// Terminal links open in the system browser, and only web links: a link Claude prints could be
-// anything (file:, a custom app scheme).
-function openLink(_: MouseEvent, uri: string) {
-  let url: URL;
-  try {
-    url = new URL(uri);
-  } catch {
-    return;
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return;
-  if (inTauri()) void import("@tauri-apps/plugin-opener").then((o) => o.openUrl(url.href)).catch(() => {});
-  else window.open(url.href, "_blank", "noopener");
-}
-
 // One session's terminal: xterm.js on /sessions/<name>/attach. Stays mounted while its tab is
 // open (hidden when another tab is active) so the scrollback survives tab switches.
 export function TerminalView(props: { link: ServerLink; name: string; active: boolean; onClose: () => void }) {
@@ -60,14 +47,26 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
   useEffect(() => {
     const t = new Terminal({
       fontSize: 13,
-      fontFamily: '"SF Mono", Menlo, monospace',
+      fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
       theme: themeFromCss(),
       scrollback: 10000,
       macOptionClickForcesSelection: true,
+      // OSC 8 links (any text can carry a hidden URL) follow the same rule as WebLinksAddon's:
+      // ⌘-click only, http and https only, through the opener. xterm's default asks with
+      // confirm() on a plain click and then opens the URL in a new webview window.
+      linkHandler: {
+        activate: (e, uri) => {
+          if (followsLink(e)) openWebLink(uri);
+        },
+      },
     });
     const f = new FitAddon();
     t.loadAddon(f);
-    t.loadAddon(new WebLinksAddon(openLink));
+    t.loadAddon(
+      new WebLinksAddon((e, uri) => {
+        if (followsLink(e)) openWebLink(uri);
+      }),
+    );
     t.open(box.current!);
     // WebGL is much faster for Claude's redraws; without it (or when the GPU context is lost)
     // xterm falls back to its DOM renderer.

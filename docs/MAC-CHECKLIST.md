@@ -43,7 +43,7 @@ Each item says what to do, and what should happen. If the result is different, w
 
 - [ ] **Fonts look right.**
   Do: look at the terminal, the editor and the sidebar. In the terminal, compare the letters with Terminal.app set to SF Mono.
-  Expect: the terminal and the editor use SF Mono. The sidebar and dialogs use the system font (SF Pro). If the terminal looks like Menlo instead, write it down: WebKit may not find "SF Mono" by name, and `ui-monospace` would be the fix.
+  Expect: the terminal and the editor use SF Mono. The sidebar and dialogs use the system font (SF Pro). If the terminal looks like Menlo instead, write it down: the font stacks start with `ui-monospace`, which WebKit should map to SF Mono.
 
 - [ ] **Light and dark mode.**
   Do: switch macOS between Light and Dark in System Settings > Appearance.
@@ -66,8 +66,8 @@ Each item says what to do, and what should happen. If the result is different, w
 ## Links
 
 - [ ] **Terminal links open in the default browser.**
-  Do: in a session, run or print an `https://` URL. Click it.
-  Expect: it opens in your default browser (not in blimp). blimp stays as it was.
+  Do: in a session, run or print an `https://` URL. Click it, then ⌘-click it.
+  Expect: the plain click opens nothing. The ⌘-click opens it in your default browser (not in blimp). blimp stays as it was.
 
 ## Notifications and Dock
 
