@@ -21,11 +21,11 @@ describe("installHooks", () => {
     mkdirSync(dir);
     writeFileSync(settings, JSON.stringify(original), { mode: 0o600 });
 
-    expect(installHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse"]);
+    expect(installHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"]);
     const s = JSON.parse(readFileSync(settings, "utf8"));
     const ours = { hooks: [{ type: "command", command: `'/opt/it'\\''s/blimpd' hook`, timeout: 5 }] };
     expect(s.model).toBe("opus");
-    expect(s.hooks.PreToolUse).toEqual(original.hooks.PreToolUse);
+    expect(s.hooks.PreToolUse).toEqual([original.hooks.PreToolUse[0], { matcher: "AskUserQuestion", ...ours }]);
     expect(s.hooks.Stop).toEqual([original.hooks.Stop[0], ours]);
     expect(s.hooks.Notification).toEqual([ours]);
     expect(statSync(settings).mode & 0o777).toBe(0o600);
@@ -48,18 +48,18 @@ describe("installHooks", () => {
     const settings = join(tmp, "plain.json");
     const hook = { hooks: [{ type: "command", command: "/home/u/.local/bin/blimpd hook" }] };
     writeFileSync(settings, JSON.stringify({ hooks: { Notification: [hook] } }));
-    expect(installHooks("/x/blimpd", settings)).toEqual(["Stop", "UserPromptSubmit", "PostToolUse"]);
+    expect(installHooks("/x/blimpd", settings)).toEqual(["Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"]);
   });
 
   test("idempotent even when the binary isn't called blimpd", () => {
     const settings = join(tmp, "renamed.json");
-    expect(installHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(4);
+    expect(installHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(7);
     expect(installHooks("/x/dist/blimpd-linux-x64", settings)).toEqual([]);
   });
 
   test("no settings.json yet: creates it, nothing to back up", () => {
     const settings = join(tmp, "fresh", "settings.json");
-    expect(installHooks("/x/blimpd", settings)).toHaveLength(4);
+    expect(installHooks("/x/blimpd", settings)).toHaveLength(7);
     expect(existsSync(settings + ".blimp-backup")).toBe(false);
   });
 
@@ -70,11 +70,11 @@ describe("installHooks", () => {
     writeFileSync(join(tmp, "dotfiles", "s.json"), JSON.stringify({ a: 1 }));
     const settings = join(tmp, "linked", "settings.json");
     symlinkSync("../dotfiles/s.json", settings);
-    expect(installHooks("/x/blimpd", settings)).toHaveLength(4);
+    expect(installHooks("/x/blimpd", settings)).toHaveLength(7);
     expect(lstatSync(settings).isSymbolicLink()).toBe(true);
     const s = JSON.parse(readFileSync(join(tmp, "dotfiles", "s.json"), "utf8"));
     expect(s.a).toBe(1);
-    expect(Object.keys(s.hooks)).toHaveLength(4);
+    expect(Object.keys(s.hooks)).toHaveLength(7);
     expect(readdirSync(join(tmp, "dotfiles"))).toEqual(["s.json"]); // no temp files left
   });
 
@@ -99,7 +99,7 @@ describe("uninstallHooks", () => {
     const settings = join(tmp, "un.json");
     writeFileSync(settings, JSON.stringify(original), { mode: 0o640 });
     installHooks("/opt/it's/blimpd", settings);
-    expect(uninstallHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse"]);
+    expect(uninstallHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"]);
     expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual(original);
     expect(statSync(settings).mode & 0o777).toBe(0o640);
 
@@ -113,7 +113,7 @@ describe("uninstallHooks", () => {
     const settings = join(tmp, "un-bare.json");
     writeFileSync(settings, JSON.stringify({ model: "opus" }));
     installHooks("/x/dist/blimpd-linux-x64", settings);
-    expect(uninstallHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(4);
+    expect(uninstallHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(7);
     expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ model: "opus" });
   });
 
@@ -147,7 +147,7 @@ describe("uninstallHooks", () => {
     const settings = join(tmp, "linked2", "settings.json");
     symlinkSync("../dotfiles2/s.json", settings);
     installHooks("/x/blimpd", settings);
-    expect(uninstallHooks("/x/blimpd", settings)).toHaveLength(4);
+    expect(uninstallHooks("/x/blimpd", settings)).toHaveLength(7);
     expect(lstatSync(settings).isSymbolicLink()).toBe(true);
     expect(JSON.parse(readFileSync(join(tmp, "dotfiles2", "s.json"), "utf8"))).toEqual({ a: 1 });
     expect(readdirSync(join(tmp, "dotfiles2"))).toEqual(["s.json"]); // no temp files left
@@ -176,6 +176,8 @@ describe("writeHookStatus", () => {
   test("maps hook events to states", () => {
     for (const [event, state] of [
       ["Notification", "waiting"],
+      ["PermissionRequest", "waiting"],
+      ["Elicitation", "waiting"],
       ["UserPromptSubmit", "working"],
       ["PostToolUse", "working"],
       ["Stop", "done"],
@@ -186,6 +188,14 @@ describe("writeHookStatus", () => {
       expect(s).toMatchObject({ state, sessionId: "abc", event });
       expect(s.at).toBeGreaterThanOrEqual(before);
     }
+  });
+
+  test("PreToolUse means waiting only for the question tool", () => {
+    writeHookStatus(ev("Stop"), "web-4", dir);
+    writeHookStatus(JSON.stringify({ hook_event_name: "PreToolUse", session_id: "abc", tool_name: "Bash" }), "web-4", dir);
+    expect(read("web-4").state).toBe("done");
+    writeHookStatus(JSON.stringify({ hook_event_name: "PreToolUse", session_id: "abc", tool_name: "AskUserQuestion" }), "web-4", dir);
+    expect(read("web-4").state).toBe("waiting");
   });
 
   test("only notifications that need an answer mean waiting", () => {
@@ -212,7 +222,7 @@ describe("writeHookStatus", () => {
     for (const bad of ["../../x", "../escape", "a/b", "..", ".", ""]) writeHookStatus(ev("Stop"), bad, dir);
     expect(existsSync(join(tmp, "x.json"))).toBe(false);
     expect(existsSync(join(tmp, "escape.json"))).toBe(false);
-    expect(readdirSync(dir).sort()).toEqual(["web-1.json", "web-3.json"]);
+    expect(readdirSync(dir).sort()).toEqual(["web-1.json", "web-3.json", "web-4.json"]);
   });
 });
 

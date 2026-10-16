@@ -5,10 +5,19 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathS
 import { dirname, join } from "node:path";
 import { blimpDir, claudeDir, isSafeName } from "./sessions";
 
-const EVENTS = ["Notification", "Stop", "UserPromptSubmit", "PostToolUse"];
+const EVENTS = ["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"];
 
+// PreToolUse only for the question tool: it fires the moment Claude asks, and a hook on every tool call would
+// add a process start to each one.
+const MATCHERS: Record<string, string> = { PreToolUse: "AskUserQuestion" };
+
+// PermissionRequest, PreToolUse(AskUserQuestion) and Elicitation fire as the prompt appears. Notification can
+// come seconds later, so it's only a second signal for the same thing.
 const STATES: Record<string, string> = {
   Notification: "waiting",
+  PermissionRequest: "waiting",
+  PreToolUse: "waiting",
+  Elicitation: "waiting",
   UserPromptSubmit: "working",
   PostToolUse: "working",
   Stop: "done",
@@ -36,7 +45,8 @@ export function installHooks(blimpdPath: string, settingsPath = join(claudeDir()
   for (const event of EVENTS) {
     const groups = (settings.hooks[event] ??= []);
     if (groups.some((g: any) => Array.isArray(g?.hooks) && g.hooks.some((h: any) => isOurs(h, command)))) continue;
-    groups.push({ hooks: [{ type: "command", command, timeout: 5 }] });
+    const matcher = MATCHERS[event];
+    groups.push({ ...(matcher && { matcher }), hooks: [{ type: "command", command, timeout: 5 }] });
     added.push(event);
   }
   if (!added.length) return added;
@@ -101,6 +111,7 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   const state = STATES[ev?.hook_event_name];
   if (!state) return;
   if (ev.hook_event_name === "Notification" && !WAITING_NOTIFICATIONS.includes(ev.notification_type)) return;
+  if (ev.hook_event_name === "PreToolUse" && ev.tool_name !== MATCHERS.PreToolUse) return;
   mkdirSync(statusDir, { recursive: true, mode: 0o700 });
   const file = join(statusDir, `${session}.json`);
   const tmp = `${file}.${process.pid}.tmp`;
