@@ -2,7 +2,7 @@
 // so several devices can watch one session and zmx keeps them in sync.
 
 import type { ServerWebSocket, Subprocess } from "bun";
-import { zmxEnv, zmxPath } from "./sessions";
+import { sessionExists, zmxEnv, zmxPath } from "./sessions";
 
 export type AttachData = { kind: "attach"; name: string; cols: number; rows: number; proc?: Subprocess; closed?: boolean };
 
@@ -15,6 +15,11 @@ export function termSize(cols: unknown, rows: unknown): { cols: number; rows: nu
   return { cols: clamp(cols, 80), rows: clamp(rows, 24) };
 }
 
+// A client that stops reading (a sleeping laptop, a dead network) would make blimpd hold everything the
+// session prints. Past this, drop it: the app reconnects and zmx redraws the screen.
+export const MAX_BUFFERED = 8 << 20;
+
+// Output goes out as soon as the PTY gives it to us: no batching or timers, they'd add typing lag.
 export function openAttach(ws: ServerWebSocket<AttachData>) {
   const d = ws.data;
   let proc: Subprocess;
@@ -25,7 +30,13 @@ export function openAttach(ws: ServerWebSocket<AttachData>) {
         cols: d.cols,
         rows: d.rows,
         data(_term, bytes) {
-          if (!d.closed) ws.sendBinary(bytes);
+          if (d.closed) return;
+          ws.sendBinary(bytes);
+          if (ws.getBufferedAmount() > MAX_BUFFERED) {
+            d.closed = true;
+            ws.close(1013, "client too slow");
+            d.proc?.kill("SIGTERM");
+          }
         },
       },
     });
@@ -35,12 +46,15 @@ export function openAttach(ws: ServerWebSocket<AttachData>) {
     return;
   }
   d.proc = proc;
-  // The zmx client exits when the session ends or the user detaches (ctrl+\).
-  proc.exited.then(() => {
+  // The zmx client exits when the session ends or the user detaches (ctrl+\). The app needs to know
+  // which: an ended session is gone, a detached one can be attached again.
+  proc.exited.then(async () => {
     proc.terminal?.close();
     if (d.closed) return;
+    const alive = await sessionExists(d.name).catch(() => false);
+    if (d.closed) return;
     d.closed = true;
-    ws.close(4000, "ended");
+    ws.close(alive ? 4001 : 4000, alive ? "detached" : "ended");
   });
 }
 

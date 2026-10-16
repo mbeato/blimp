@@ -5,6 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/mbeato/blimp/main/install.sh | sh
 #
 # BLIMPD_URL overrides where the blimpd binary comes from (any URL curl reads, file:// too).
+# Except for file://, SHA256SUMS next to it must list the binary's sum.
 set -eu
 
 BIN="$HOME/.local/bin"
@@ -39,7 +40,21 @@ else
 fi
 
 say "blimpd: installing"
-curl -fsSL -o "$tmp/blimpd" "${BLIMPD_URL:-$RELEASES/blimpd-linux-$arch}"
+url=${BLIMPD_URL:-$RELEASES/blimpd-linux-$arch}
+curl -fsSL -o "$tmp/blimpd" "$url"
+# A download is checked against SHA256SUMS from the same release folder; no sums, no install.
+# A file:// URL is a local build (the install test), which has none.
+case "$url" in
+  file://*) ;;
+  *)
+    f=${url##*/}
+    curl -fsSL -o "$tmp/SHA256SUMS" "${url%/*}/SHA256SUMS" ||
+      die "couldn't download SHA256SUMS from ${url%/*}, so blimpd can't be checked"
+    want=$(awk -v f="$f" '$2 == f || $2 == "*" f { print $1; exit }' "$tmp/SHA256SUMS")
+    [ -n "$want" ] || die "SHA256SUMS has no line for $f"
+    echo "$want  $tmp/blimpd" | sha256sum -c - >/dev/null 2>&1 || die "blimpd download doesn't match SHA256SUMS"
+    ;;
+esac
 install -m 755 "$tmp/blimpd" "$BIN/blimpd"
 # Claude Code hooks that record each session's status for blimp (merged into settings.json, backed up first).
 "$BIN/blimpd" install-hooks
@@ -73,6 +88,12 @@ EOF
   say "blimpd: running as a user service"
 else
   say "blimpd: no user systemd here, so start it yourself: $BIN/blimpd serve &"
+  # Then zmx falls back to /tmp/zmx-<uid>, a name another user could make first. blimpd refuses a
+  # folder others own or can write, but a private ZMX_DIR avoids the question.
+  [ -n "${XDG_RUNTIME_DIR:-}" ] || {
+    say "  zmx will keep its sockets in /tmp. On a shared server, first add this to your shell profile:"
+    say "  export ZMX_DIR=\"\$HOME/.zmx\""
+  }
 fi
 
 command -v blimpd >/dev/null 2>&1 || say "note: $BIN isn't on your PATH, so run blimpd as $BIN/blimpd"

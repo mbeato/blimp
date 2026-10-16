@@ -5,7 +5,18 @@
 //   ~/.blimp/status/<zmx name>.json         see hooks.ts
 // and a session's state comes from whichever of the two is newer.
 
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -230,10 +241,40 @@ export async function zmxListAsync(): Promise<string> {
   return await new Response(p.stdout).text();
 }
 
-export const sessionExists = async (name: string) => parseZmxList(await zmxListAsync()).some((s) => s.name === name);
+// zmx lists a session it can't reach as `err=… status=unreachable`, with no pid. That's either one that
+// just ended (that same list cleans up its socket) or one too busy to answer in time. Asking again tells which.
+export async function sessionExists(name: string): Promise<boolean> {
+  for (let i = 0; i < 3; i++) {
+    const s = parseZmxList(await zmxListAsync()).find((s) => s.name === name);
+    if (!s) return false;
+    if (s.pid > 0) return true;
+  }
+  return true; // still there, just busy
+}
+
+// The folder zmx keeps every session's socket in, found the way zmx finds it.
+export function zmxDir(env: Record<string, string | undefined> = process.env): string {
+  if (env.ZMX_DIR) return env.ZMX_DIR;
+  if (env.XDG_RUNTIME_DIR) return join(env.XDG_RUNTIME_DIR, "zmx");
+  return join(env.TMPDIR || "/tmp", `zmx-${process.getuid!()}`);
+}
+
+// Whoever can write that folder can swap a session's socket for their own, and `zmx attach` then sends
+// them what you type. Without XDG_RUNTIME_DIR it's /tmp/zmx-<uid>, a name another user can make first,
+// and zmx doesn't check who owns it. Making it here (700) leaves no gap for them to make it in between.
+export function checkZmxDir(dir = zmxDir()) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = lstatSync(dir);
+  if (!st.isDirectory() || st.uid !== process.getuid!())
+    throw new Error(`zmx's socket folder ${dir} isn't a folder you own. Set ZMX_DIR to a private folder.`);
+  if (st.mode & 0o022)
+    throw new Error(`zmx's socket folder ${dir} is writable by others. Run: chmod 700 ${dir}`);
+}
 
 // Inside a zmx session, ZMX_SESSION makes `zmx attach` switch sessions instead of creating one.
+// Every zmx call gets its env here, so the socket folder is checked before each one.
 export function zmxEnv() {
+  checkZmxDir();
   const env = { ...process.env };
   delete env.ZMX_SESSION;
   return env;
@@ -254,21 +295,40 @@ export function newSessionName(dir: string, at: Date, taken: string[], custom?: 
 // through the user's login shell so it gets the same environment as typing `claude` there,
 // and the shell execs it so the session's pid is Claude's (that's how the status file is found).
 // Claude's arguments go to the shell as "$@", never pasted into the command string.
-export function startSession(dir: string, custom?: string, resume?: string): string {
+//
+// The creating zmx client runs in a 120x36 PTY, not with stdin at /dev/null: the session then has a real
+// size from the start, so Claude draws its first screen properly and the first viewer sees it.
+// Once the session is listed, that client is killed; the session keeps running.
+//
+// One start at a time: two in the same second would pick the same name, and the second would just attach.
+let starting: Promise<unknown> = Promise.resolve();
+export function startSession(dir: string, custom?: string, resume?: string): Promise<string> {
+  const p = starting.then(() => start(dir, custom, resume));
+  starting = p.catch(() => {});
+  return p;
+}
+
+async function start(dir: string, custom?: string, resume?: string): Promise<string> {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`not a folder: ${dir}`);
-  const name = newSessionName(dir, new Date(), parseZmxList(runZmxList()).map((s) => s.name), custom);
+  const name = newSessionName(dir, new Date(), parseZmxList(await zmxListAsync()).map((s) => s.name), custom);
   const shell = process.env.SHELL || userInfo().shell || "/bin/sh";
   const args = resume ? ["--resume", resume] : [];
-  // With stdin at /dev/null the zmx client creates the session, then detaches right away.
-  // No pipes: the session daemon inherits them and would keep them open forever.
-  Bun.spawnSync([zmxPath(), "attach", name, shell, "-l", "-i", "-c", 'exec claude "$@"', "claude", ...args], {
+  const proc = Bun.spawn([zmxPath(), "attach", name, shell, "-l", "-i", "-c", 'exec claude "$@"', "claude", ...args], {
     cwd: dir,
-    env: zmxEnv(),
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
+    env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor" },
+    terminal: { cols: 120, rows: 36, data() {} }, // nobody watches this client; zmx keeps the screen
   });
-  if (!parseZmxList(runZmxList()).some((s) => s.name === name)) throw new Error(`zmx didn't start ${name}`);
+  try {
+    // Listed with this client attached. Killed any sooner, zmx 0.5 shows the first viewer an empty screen.
+    const end = Date.now() + 5000;
+    while (!parseZmxList(await zmxListAsync()).some((s) => s.name === name && s.clients > 0)) {
+      if (proc.exitCode !== null || Date.now() > end) throw new Error(`zmx didn't start ${name}`);
+      await Bun.sleep(25);
+    }
+  } finally {
+    proc.kill("SIGTERM");
+    proc.exited.then(() => proc.terminal?.close());
+  }
   return name;
 }
 

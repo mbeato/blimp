@@ -105,23 +105,33 @@ describe("writeFile", () => {
     writeFile(join(home, "proj", "brand-new.txt"), new TextEncoder().encode("x"));
     expect(readFileSync(join(home, "proj", "brand-new.txt"), "utf8")).toBe("x");
   });
+
+  test("a new file gets the umask's mode, like any editor would make it", () => {
+    const old = process.umask(0o077);
+    try {
+      writeFile(join(home, "proj", "private.env"), new TextEncoder().encode("x"));
+    } finally {
+      process.umask(old);
+    }
+    expect(statSync(join(home, "proj", "private.env")).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe("listFiles", () => {
-  test("walks outside git, skipping .git, node_modules and dot-folders", () => {
+  test("walks outside git, skipping .git, node_modules and dot-folders", async () => {
     const r = join(home, "walk");
     for (const d of ["src", "node_modules/x", ".cache", ".git"]) mkdirSync(join(r, d), { recursive: true });
     for (const f of ["src/a.ts", "node_modules/x/i.js", ".cache/c", ".git/HEAD", ".env", "README.md"]) writeFileSync(join(r, f), "");
-    expect(listFiles(r)).toEqual({ files: [".env", "README.md", "src/a.ts"], truncated: false });
+    expect(await listFiles(r)).toEqual({ files: [".env", "README.md", "src/a.ts"], truncated: false });
   });
 
-  test("inside a git repo, uses git's list (tracked + untracked, not ignored)", () => {
+  test("inside a git repo, uses git's list (tracked + untracked, not ignored)", async () => {
     const r = join(home, "repo");
     mkdirSync(join(r, "dist"), { recursive: true });
     writeFileSync(join(r, ".gitignore"), "dist/\n");
     writeFileSync(join(r, "dist", "out.js"), "");
     writeFileSync(join(r, "main.ts"), "");
     Bun.spawnSync(["git", "init", "-q"], { cwd: r });
-    expect(listFiles(r).files.sort()).toEqual([".gitignore", "main.ts"]);
+    expect((await listFiles(r)).files.sort()).toEqual([".gitignore", "main.ts"]);
   });
 });

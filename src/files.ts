@@ -1,6 +1,7 @@
 // Files under the home folder: list, read, write, and the file list for quick open.
 // Every path is checked after following symlinks, so a link can't lead outside home.
 
+import { readdir } from "node:fs/promises";
 import {
   chmodSync,
   type Dirent,
@@ -116,7 +117,8 @@ export function readFile(path: string): Response {
 // Writes through a temp file and a rename, so Claude or a watcher never sees half a file.
 // With baseMtime, refuses if the file changed since the app read it.
 export function writeFile(path: string, body: Uint8Array, baseMtime?: number): { mtime: number } {
-  let mode = 0o644;
+  // A new file gets whatever the umask allows, as any editor would make it.
+  let mode: number | undefined;
   if (existsSync(path)) {
     const st = statSync(path);
     if (st.isDirectory()) throw new HttpError(400, "that's a folder");
@@ -126,8 +128,8 @@ export function writeFile(path: string, body: Uint8Array, baseMtime?: number): {
   }
   const tmp = join(dirname(path), `.${basename(path)}.blimp-${process.pid}-${Date.now()}.tmp`);
   try {
-    writeFileSync(tmp, body, { mode, flag: "wx" });
-    chmodSync(tmp, mode); // the umask may have taken bits off
+    writeFileSync(tmp, body, { mode: mode ?? 0o666, flag: "wx" });
+    if (mode !== undefined) chmodSync(tmp, mode); // keep the original's mode: the umask may have taken bits off
     renameSync(tmp, path);
   } catch (e) {
     rmSync(tmp, { force: true });
@@ -139,33 +141,35 @@ export function writeFile(path: string, body: Uint8Array, baseMtime?: number): {
 const MAX_FILES = 20_000;
 
 // For ⌘P. In a git repo, git's own list (respects .gitignore). Otherwise a walk that skips the usual noise.
-export function listFiles(root: string): { files: string[]; truncated: boolean } {
-  const files = gitFiles(root) ?? walk(root);
+// Async, so a big repo doesn't stall every open terminal while git or the walk runs.
+export async function listFiles(root: string): Promise<{ files: string[]; truncated: boolean }> {
+  const files = (await gitFiles(root)) ?? (await walk(root));
   return files.length > MAX_FILES ? { files: files.slice(0, MAX_FILES), truncated: true } : { files, truncated: false };
 }
 
-function gitFiles(root: string): string[] | undefined {
+async function gitFiles(root: string): Promise<string[] | undefined> {
   try {
     // core.fsmonitor=false: a repo's config can't make this run a program.
-    const r = Bun.spawnSync(
+    const p = Bun.spawn(
       ["git", "-c", "core.fsmonitor=false", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
       { cwd: root, stdin: "ignore", stdout: "pipe", stderr: "ignore" },
     );
-    if (r.exitCode !== 0) return;
-    return [...new Set(r.stdout.toString().split("\0").filter(Boolean))];
+    const out = await new Response(p.stdout).text();
+    if ((await p.exited) !== 0) return;
+    return [...new Set(out.split("\0").filter(Boolean))];
   } catch {
     return; // no git installed
   }
 }
 
-function walk(root: string): string[] {
+async function walk(root: string): Promise<string[]> {
   const out: string[] = [];
   const stack = [root];
   while (stack.length && out.length <= MAX_FILES) {
     const dir = stack.pop()!;
     let ents: Dirent[];
     try {
-      ents = readdirSync(dir, { withFileTypes: true });
+      ents = await readdir(dir, { withFileTypes: true });
     } catch {
       continue;
     }

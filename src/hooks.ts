@@ -43,6 +43,40 @@ export function installHooks(blimpdPath: string, settingsPath = join(claudeDir()
 
   const backup = settingsPath + ".blimp-backup";
   if (exists && !existsSync(backup)) copyFileSync(settingsPath, backup);
+  writeSettings(settingsPath, settings);
+  return added;
+}
+
+// Takes out the hooks installHooks added (any blimpd's, or this exact command) and keeps everything else.
+// A group or event left empty goes too, so install then uninstall gives back the same settings.
+// Returns the events it removed them from.
+export function uninstallHooks(blimpdPath: string, settingsPath = join(claudeDir(), "settings.json")): string[] {
+  if (!existsSync(settingsPath)) return [];
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  const hooks = settings.hooks;
+  const command = `${shellQuote(blimpdPath)} hook`;
+  const removed = [];
+  for (const event of EVENTS) {
+    const groups = hooks?.[event];
+    if (!Array.isArray(groups)) continue;
+    const ours = (g: any) => Array.isArray(g?.hooks) && g.hooks.some((h: any) => isOurs(h, command));
+    if (!groups.some(ours)) continue;
+    const kept = groups
+      .map((g: any) => (ours(g) ? { ...g, hooks: g.hooks.filter((h: any) => !isOurs(h, command)) } : g))
+      .filter((g: any) => !Array.isArray(g?.hooks) || g.hooks.length);
+    if (kept.length) hooks[event] = kept;
+    else delete hooks[event];
+    removed.push(event);
+  }
+  if (!removed.length) return removed;
+  if (!Object.keys(hooks).length) delete settings.hooks;
+  writeSettings(settingsPath, settings);
+  return removed;
+}
+
+// Atomic (temp file, then rename), keeping the file's mode.
+function writeSettings(settingsPath: string, settings: unknown) {
+  const exists = existsSync(settingsPath);
   mkdirSync(dirname(settingsPath), { recursive: true });
   // settings.json is often a symlink into a dotfiles repo: write its target, or the rename replaces the link.
   const target = exists ? realpathSync(settingsPath) : settingsPath;
@@ -51,7 +85,6 @@ export function installHooks(blimpdPath: string, settingsPath = join(claudeDir()
   writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { mode });
   chmodSync(tmp, mode);
   renameSync(tmp, target);
-  return added;
 }
 
 // Runs inside Claude (which zmx started, so ZMX_SESSION names the session). Never fails Claude's turn:

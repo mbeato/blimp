@@ -1,15 +1,48 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { appendFileSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  checkZmxDir,
   deriveState,
   formatList,
   newSessionName,
   parseZmxList,
   titleFromTranscript,
   transcriptTitle,
+  zmxDir,
 } from "../src/sessions";
+
+describe("zmx's socket folder", () => {
+  test("found the way zmx finds it", () => {
+    const uid = process.getuid!();
+    expect(zmxDir({ ZMX_DIR: "/z", XDG_RUNTIME_DIR: "/run/user/1" })).toBe("/z");
+    expect(zmxDir({ XDG_RUNTIME_DIR: "/run/user/1" })).toBe("/run/user/1/zmx");
+    expect(zmxDir({ TMPDIR: "/var/t" })).toBe(`/var/t/zmx-${uid}`);
+    expect(zmxDir({})).toBe(`/tmp/zmx-${uid}`);
+  });
+
+  test("made private when missing; refused when others can write it or it's a link", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "bz"));
+    try {
+      const dir = join(tmp, "zmx");
+      checkZmxDir(dir);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      chmodSync(dir, 0o750); // zmx's own default
+      checkZmxDir(dir);
+
+      for (const mode of [0o777, 0o770, 0o702]) {
+        chmodSync(dir, mode);
+        expect(() => checkZmxDir(dir)).toThrow(`zmx's socket folder ${dir} is writable by others`);
+      }
+      chmodSync(dir, 0o700);
+      symlinkSync(dir, join(tmp, "link"));
+      expect(() => checkZmxDir(join(tmp, "link"))).toThrow("isn't a folder you own");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("parseZmxList", () => {
   test("reads zmx 0.5 and 0.8 lines, skips the current-session arrow", () => {

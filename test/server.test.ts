@@ -2,7 +2,7 @@
 // Every zmx session made here is named blimptest-* and killed at the end; nothing else is touched.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseZmxList, zmxPath } from "../src/sessions";
@@ -31,11 +31,11 @@ async function until<T>(f: () => T | Promise<T>, what: string, ms = 5000): Promi
   }
 }
 
-// A zmx session running sh. No pipes: the session daemon would inherit them.
-async function shSession(suffix: string): Promise<string> {
+// A zmx session running sh (or cmd). No pipes: the session daemon would inherit them.
+async function shSession(suffix: string, cmd = ["sh"]): Promise<string> {
   const name = `${tag}-${suffix}`;
   made.push(name);
-  Bun.spawnSync([zmxPath(), "attach", name, "sh"], { env, cwd: tmp, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  Bun.spawnSync([zmxPath(), "attach", name, ...cmd], { env, cwd: tmp, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
   await until(() => zmxNames().includes(name), `zmx session ${name}`);
   return name;
 }
@@ -64,9 +64,21 @@ function socket(path: string) {
   return opened;
 }
 const type = (ws: WebSocket, keys: string) => ws.send(new TextEncoder().encode(keys));
+// A busy session can be listed as unreachable, with no pid or client count: that's not 0 clients.
+const clients = (name: string) => parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name && s.pid > 0)?.clients;
+
+// POST /sessions runs `$SHELL -l -i -c 'exec claude "$@"'`. This stand-in for the shell prints the
+// terminal size it was started with, then echoes input, so no real Claude starts.
+const fakeShell = join(tmp, "fake-shell");
+writeFileSync(fakeShell, '#!/bin/sh\necho "fake-claude size=$(stty size)"\nexec cat\n');
+chmodSync(fakeShell, 0o755);
 
 beforeAll(async () => {
-  server = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "serve"], { env, stdout: "pipe", stderr: "inherit" });
+  server = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "serve"], {
+    env: { ...env, SHELL: fakeShell },
+    stdout: "pipe",
+    stderr: "inherit",
+  });
   await until(() => {
     try {
       return statSync(sock).isSocket() && (token = readFileSync(join(tmp, "token"), "utf8").trim());
@@ -91,10 +103,11 @@ describe("token", () => {
     expect(statSync(tmp).mode & 0o777).toBe(0o700);
   });
 
-  test("401 without or with a wrong token, CORS on every response", async () => {
+  test("401 without or with a wrong token, CORS only once authorized", async () => {
     const none = await api("/health", {}, false);
     expect(none.status).toBe(401);
-    expect(none.headers.get("access-control-allow-origin")).toBe("*");
+    // A readable 401 would tell any web page that this port is blimp.
+    expect(none.headers.get("access-control-allow-origin")).toBeNull();
     expect((await api("/health", { headers: { Authorization: "Bearer " + "0".repeat(64) } }, false)).status).toBe(401);
     expect((await api("/sessions?token=nope", {}, false)).status).toBe(401);
 
@@ -110,6 +123,24 @@ describe("token", () => {
     expect(r.headers.get("access-control-allow-headers")).toBe("Authorization, Content-Type");
     expect(r.headers.get("access-control-allow-methods")).toBe("GET, POST, PUT, OPTIONS");
   });
+});
+
+test("refuses to start when zmx's socket folder is writable by others", async () => {
+  // Whoever can write that folder can swap a session's socket for their own and get what you type.
+  const dir = mkdtempSync(join(tmpdir(), "bz"));
+  mkdirSync(join(dir, "zmx"));
+  chmodSync(join(dir, "zmx"), 0o777);
+  const p = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "serve"], {
+    env: { ...env, BLIMPD_SOCKET: join(dir, "s.sock"), ZMX_DIR: join(dir, "zmx") },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const killer = setTimeout(() => p.kill(), 3000); // before the test timeout, which would kill the main blimpd too
+  const [err, code] = [await new Response(p.stderr).text(), await p.exited];
+  clearTimeout(killer);
+  rmSync(dir, { recursive: true, force: true });
+  expect(code).toBe(1);
+  expect(err).toContain(`blimpd: zmx's socket folder ${join(dir, "zmx")} is writable by others`);
 });
 
 describe("terminal", () => {
@@ -139,8 +170,7 @@ describe("terminal", () => {
     b.ws.close();
     await until(() => a.closed && b.closed, "sockets to close");
     // Each socket's zmx client is gone, the session itself isn't.
-    const clients = () => parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)?.clients;
-    await until(() => clients() === 0, "zmx clients to detach");
+    await until(() => clients(name) === 0, "zmx clients to detach");
     expect(zmxNames()).toContain(name);
     // And it can be attached again.
     const c = await socket(`/sessions/${name}/attach`);
@@ -156,6 +186,80 @@ describe("terminal", () => {
     await until(() => s.closed, "socket to close");
     expect(s.closed).toEqual({ code: 4000, reason: "ended" });
   });
+
+  test("closes with 4001 'detached' on ctrl+\\, and the session keeps running", async () => {
+    const name = await shSession("d");
+    const s = await socket(`/sessions/${name}/attach`);
+    type(s.ws, "\x1c");
+    await until(() => s.closed, "socket to close");
+    expect(s.closed).toEqual({ code: 4001, reason: "detached" });
+    expect(zmxNames()).toContain(name);
+  });
+
+  test("a client that stops reading is closed with 1013 past 8 MB, and its zmx client is killed", async () => {
+    const name = await shSession("flood", ["yes"]);
+    // A separate process that upgrades, then blocks its thread (so it reads nothing) until `go` exists.
+    // Then it reads on until the close frame and prints its code.
+    const go = join(tmp, "go");
+    const script = join(tmp, "stalled-client.js");
+    writeFileSync(
+      script,
+      `import { existsSync } from "node:fs";
+      const [sock, path, go] = process.argv.slice(2);
+      let tail = Buffer.alloc(0), stalled = false;
+      await Bun.connect({ unix: sock, socket: {
+        open(s) { s.write("GET " + path + " HTTP/1.1\\r\\nHost: blimpd\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n" +
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\nSec-WebSocket-Version: 13\\r\\n\\r\\n"); },
+        data(s, d) {
+          if (!stalled) { stalled = true; while (!existsSync(go)) Bun.sleepSync(50); }
+          tail = Buffer.concat([tail, d]).subarray(-256);
+          // An unmasked close frame at the very end: 0x88, length, 2-byte code, reason.
+          for (let i = tail.length - 4; i >= 0; i--)
+            if (tail[i] === 0x88 && tail[i + 1] === tail.length - i - 2) { console.log(tail.readUInt16BE(i + 2)); process.exit(0); }
+        },
+      }});`,
+    );
+    const child = Bun.spawn(["bun", script, sock, `/sessions/${name}/attach?token=${token}`, go], { stdout: "pipe", stderr: "inherit" });
+    try {
+      await until(() => clients(name) === 1, "the stalled client to attach");
+      await until(() => clients(name) === 0, "blimpd to drop the stalled client", 15000);
+      writeFileSync(go, "");
+      expect((await new Response(child.stdout).text()).trim()).toBe("1013");
+      expect(zmxNames()).toContain(name);
+    } finally {
+      child.kill();
+      zmx("kill", name);
+    }
+  }, 30000);
+});
+
+describe("starting sessions", () => {
+  test("starts from a 120x36 PTY: the first viewer sees what the session printed before anyone attached", async () => {
+    const dir = join(homeDir, tag);
+    mkdirSync(dir);
+    const r = await api("/sessions", { method: "POST", body: JSON.stringify({ dir, name: "start" }) });
+    expect(r.status).toBe(201);
+    const { name } = await r.json();
+    made.push(name);
+    expect(name).toBe(`${tag}-start`);
+    // The client that created it is gone; the session isn't.
+    await until(() => clients(name) === 0, "the creating zmx client to go");
+
+    const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    await until(() => s.text.includes("fake-claude size=36 120"), "output printed before the first attach");
+    type(s.ws, "ping\r");
+    await until(() => /ping\r?\n[^]*ping/.test(s.text), "input echoed back by the session");
+    s.ws.close();
+  }, 15000);
+
+  test("two starts at once get two sessions", async () => {
+    const dir = join(homeDir, tag);
+    const post = () => api("/sessions", { method: "POST", body: JSON.stringify({ dir, name: "twin" }) }).then((r) => r.json());
+    const [a, b] = await Promise.all([post(), post()]);
+    made.push(a.name, b.name);
+    expect([a.name, b.name].sort()).toEqual([`${tag}-twin`, `${tag}-twin-2`]);
+    expect(zmxNames()).toEqual(expect.arrayContaining([a.name, b.name]));
+  }, 15000);
 });
 
 describe("events", () => {

@@ -10,7 +10,7 @@ import pkg from "../package.json";
 import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { guard, HttpError, listDir, listFiles, readFile, realHome, writeFile } from "./files";
 import { conversations, recentFolders } from "./folders";
-import { claudeDir, listSessions, sessionExists, socketPath, startSession, zmxListAsync } from "./sessions";
+import { checkZmxDir, claudeDir, listSessions, sessionExists, socketPath, startSession, zmxListAsync } from "./sessions";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
 type WsData = AttachData | EventsData;
@@ -63,7 +63,7 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
       throw new HttpError(400, "resume must be a conversation id");
     const real = guard(dir);
     if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
-    return Response.json({ name: startSession(real, name || undefined, resume) }, { status: 201 });
+    return Response.json({ name: await startSession(real, name || undefined, resume) }, { status: 201 });
   }
 
   const attach = path.match(/^\/sessions\/([^/]+)\/attach$/);
@@ -103,13 +103,14 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
   if (path === "/fs/files" && get) {
     const root = guard(q.get("root"));
     if (!isDir(root)) throw new HttpError(400, "root must be a folder");
-    return Response.json(listFiles(root));
+    return Response.json(await listFiles(root));
   }
 
   return error(404, "not found");
 }
 
 export function serve(): Server {
+  checkZmxDir(); // refuse to start, rather than fail every zmx call later
   const sock = socketPath();
   mkdirSync(dirname(sock), { recursive: true });
   chmodSync(dirname(sock), 0o700);
@@ -129,14 +130,13 @@ export function serve(): Server {
           },
         });
       const url = new URL(req.url);
+      // No CORS header on a 401: any web page could read it and learn that this port is blimp.
+      if (!authorized(req, url, token)) return error(401, "wrong or missing token");
       let res: Response | undefined;
-      if (!authorized(req, url, token)) res = error(401, "wrong or missing token");
-      else {
-        try {
-          res = await route(req, url, server);
-        } catch (e) {
-          res = errorResponse(e);
-        }
+      try {
+        res = await route(req, url, server);
+      } catch (e) {
+        res = errorResponse(e);
       }
       res?.headers.set("Access-Control-Allow-Origin", "*");
       return res;

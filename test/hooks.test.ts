@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installHooks, writeHookStatus } from "../src/hooks";
+import { installHooks, uninstallHooks, writeHookStatus } from "../src/hooks";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-hooks-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -86,6 +86,87 @@ describe("installHooks", () => {
   });
 });
 
+describe("uninstallHooks", () => {
+  const original = {
+    model: "opus",
+    hooks: {
+      Stop: [{ hooks: [{ type: "command", command: "say done" }] }],
+      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "check" }] }],
+    },
+  };
+
+  test("removes exactly what installHooks added and nothing else", () => {
+    const settings = join(tmp, "un.json");
+    writeFileSync(settings, JSON.stringify(original), { mode: 0o640 });
+    installHooks("/opt/it's/blimpd", settings);
+    expect(uninstallHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse"]);
+    expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual(original);
+    expect(statSync(settings).mode & 0o777).toBe(0o640);
+
+    // Nothing left to remove: the file isn't touched.
+    const after = readFileSync(settings, "utf8");
+    expect(uninstallHooks("/opt/it's/blimpd", settings)).toEqual([]);
+    expect(readFileSync(settings, "utf8")).toBe(after);
+  });
+
+  test("settings that had no hooks at all come back without a hooks key", () => {
+    const settings = join(tmp, "un-bare.json");
+    writeFileSync(settings, JSON.stringify({ model: "opus" }));
+    installHooks("/x/dist/blimpd-linux-x64", settings);
+    expect(uninstallHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(4);
+    expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ model: "opus" });
+  });
+
+  test("an older or differently placed blimpd's hook goes too; a group's other hooks stay", () => {
+    const settings = join(tmp, "un-mixed.json");
+    const mine = { type: "command", command: "say hi" };
+    writeFileSync(
+      settings,
+      JSON.stringify({
+        hooks: {
+          Notification: [{ matcher: "", hooks: [{ type: "command", command: "/home/u/.local/bin/blimpd hook" }, mine] }],
+          Stop: [{ hooks: [{ type: "command", command: "'/other/blimpd' hook", timeout: 5 }] }],
+          // install-hooks never adds to other events, so it never removes from them either.
+          SessionStart: [{ hooks: [{ type: "command", command: "/home/u/.local/bin/blimpd hook" }] }],
+        },
+      }),
+    );
+    expect(uninstallHooks("/x/blimpd", settings)).toEqual(["Notification", "Stop"]);
+    expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({
+      hooks: {
+        Notification: [{ matcher: "", hooks: [mine] }],
+        SessionStart: [{ hooks: [{ type: "command", command: "/home/u/.local/bin/blimpd hook" }] }],
+      },
+    });
+  });
+
+  test("a symlinked settings.json stays a link and its target loses the hooks", () => {
+    mkdirSync(join(tmp, "dotfiles2"));
+    mkdirSync(join(tmp, "linked2"));
+    writeFileSync(join(tmp, "dotfiles2", "s.json"), JSON.stringify({ a: 1 }));
+    const settings = join(tmp, "linked2", "settings.json");
+    symlinkSync("../dotfiles2/s.json", settings);
+    installHooks("/x/blimpd", settings);
+    expect(uninstallHooks("/x/blimpd", settings)).toHaveLength(4);
+    expect(lstatSync(settings).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(readFileSync(join(tmp, "dotfiles2", "s.json"), "utf8"))).toEqual({ a: 1 });
+    expect(readdirSync(join(tmp, "dotfiles2"))).toEqual(["s.json"]); // no temp files left
+  });
+
+  test("no settings.json: nothing to do, nothing created", () => {
+    const settings = join(tmp, "none", "settings.json");
+    expect(uninstallHooks("/x/blimpd", settings)).toEqual([]);
+    expect(existsSync(settings)).toBe(false);
+  });
+
+  test("refuses to overwrite settings it can't read", () => {
+    const settings = join(tmp, "un-broken.json");
+    writeFileSync(settings, "{ not json");
+    expect(() => uninstallHooks("/x/blimpd", settings)).toThrow();
+    expect(readFileSync(settings, "utf8")).toBe("{ not json");
+  });
+});
+
 describe("writeHookStatus", () => {
   const dir = join(tmp, "status");
   const ev = (name: string, notification_type = "permission_prompt") =>
@@ -154,4 +235,16 @@ describe("`blimpd hook`", () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout.toString() + r.stderr.toString()).toBe("");
   });
+});
+
+test("`blimpd uninstall-hooks` takes them out of $CLAUDE_CONFIG_DIR/settings.json", () => {
+  const dir = join(tmp, "cli");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "'/u/blimpd' hook" }] }] } }));
+  const r = Bun.spawnSync(["bun", join(import.meta.dir, "..", "src", "main.ts"), "uninstall-hooks"], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
+  });
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout.toString()).toBe("hooks: removed Stop\n");
+  expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"))).toEqual({});
 });
