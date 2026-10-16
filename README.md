@@ -317,7 +317,7 @@ install.sh      server setup
 2. Push a tag for that version: `git tag v0.3.0 && git push origin v0.3.0`.
 3. The release workflow stops if the tag is not `vX.Y.Z` or `vX.Y.Z-rc.N`, or if it does not match the version in the four files. Then it builds both blimpd binaries, `SHA256SUMS` and the Mac `.dmg`, and publishes them with `install.sh` as a GitHub release.
 4. A tag like `v0.3.0-rc.1` makes a prerelease. The installer skips prereleases.
-5. The workflow signs and notarizes the Mac app only when all six Apple secrets are set for the repository: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`. If any secret is missing, the app has only an ad-hoc signature, which needs no Apple account. The release notes say which kind of build it is.
+5. The workflow signs and notarizes the Mac app only when all six Apple secrets are set for the repository: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`. If any secret is missing, the app has only an ad-hoc signature, which needs no Apple account. The release notes say which kind of build it is. How to get the certificate and add the secrets: [docs/SIGNING.md](docs/SIGNING.md).
 
 ## License
 
