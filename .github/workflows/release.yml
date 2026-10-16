@@ -1,0 +1,120 @@
+name: Release
+
+# A tag like v0.3.0 publishes blimpd for Linux, its checksums, install.sh and the Mac app.
+# A tag with a "-" (v0.3.0-rc1) is a prerelease, so install.sh's "latest" skips it.
+on:
+  push:
+    tags: ["v*"]
+
+# Read-only by default. Only the publish job, which runs no build tools or third-party
+# actions, gets write access, so code that runs during the build can't change the repo or
+# the release. Every action is pinned to a commit (tags and branches can be moved), and bun
+# and Rust are pinned because bun is embedded in the released blimpd binaries.
+permissions:
+  contents: read
+
+env:
+  # Sign and notarize only when every Apple secret is set; otherwise build unsigned.
+  SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+
+jobs:
+  build:
+    # One macOS job: bun cross-compiles blimpd for Linux, and the Mac app needs a Mac.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          # The cache is shared with CI runs; a release must not pick up a bun put there.
+          no-cache: true
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (master, 2026-10-16)
+        with:
+          toolchain: 1.99.1
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # bun build --compile for bun-linux-x64 and bun-linux-arm64 (the root "build" script).
+      - name: Build blimpd
+        run: |
+          bun install
+          bun run build
+          cd dist
+          shasum -a 256 blimpd-linux-x64 blimpd-linux-arm64 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Install the app's packages
+        working-directory: app
+        run: bun install --frozen-lockfile
+
+      # Tauri imports the certificate into a temporary keychain, signs, then notarizes with
+      # the Apple ID, all from these environment variables.
+      - name: Build the Mac app (signed and notarized)
+        if: env.SIGNED == 'true'
+        working-directory: app
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bun run tauri build --target universal-apple-darwin --bundles dmg -- --locked
+
+      - name: Build the Mac app (unsigned)
+        if: env.SIGNED != 'true'
+        working-directory: app
+        env:
+          # Ad-hoc signature: needs no Apple account, and macOS then offers "Open Anyway"
+          # instead of calling the app damaged.
+          APPLE_SIGNING_IDENTITY: "-"
+        run: bun run tauri build --target universal-apple-darwin --bundles dmg -- --locked
+
+      # Paths are kept relative to the repo root, so publish sees the same layout.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/blimpd-linux-x64
+            dist/blimpd-linux-arm64
+            dist/SHA256SUMS
+            install.sh
+            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo "Server setup: \`curl -fsSL https://raw.githubusercontent.com/mbeato/blimp/main/install.sh | sh\`"
+            echo
+            echo "SHA256SUMS lists the SHA-256 of both blimpd binaries."
+            echo
+            if [ "$SIGNED" = true ]; then
+              echo "The Mac app is signed and notarized."
+            else
+              echo "The Mac app is **not signed or notarized** (no Apple Developer certificate was set up for this build)."
+              echo "After the first launch is blocked, open System Settings > Privacy & Security and click Open Anyway,"
+              echo "or run \`xattr -dr com.apple.quarantine /Applications/blimp.app\`."
+            fi
+          } > "$notes"
+          prerelease=""
+          case "$tag" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$tag" $prerelease --title "blimp $tag" --notes-file "$notes" \
+            dist/blimpd-linux-x64 dist/blimpd-linux-arm64 dist/SHA256SUMS install.sh \
+            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg

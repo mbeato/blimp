@@ -5,6 +5,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Actions pinned to commits and tool versions as in release.yml, so CI tests what ships.
 permissions:
   contents: read
 
@@ -12,8 +13,12 @@ jobs:
   blimpd:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
       - run: bun install
       # The server tests run real zmx sessions. Same pinned release and checksum as install.sh.
       - name: Install zmx
@@ -31,16 +36,22 @@ jobs:
   app-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (master, 2026-10-16)
+        with:
+          toolchain: 1.99.1
       - name: Test and build the app
         working-directory: app
         run: |
           bun install --frozen-lockfile
           bun run test
-          bun run tauri build --bundles app,dmg
-      - uses: actions/upload-artifact@v7
+          bun run tauri build --bundles app,dmg -- --locked
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: blimp-macos-dmg
           path: app/src-tauri/target/release/bundle/dmg/*.dmg
@@ -49,9 +60,12 @@ jobs:
   app-linux-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (master, 2026-10-16)
+        with:
+          toolchain: 1.99.1
           components: clippy
       - name: Install Tauri's Linux libraries
         run: |
@@ -62,7 +76,7 @@ jobs:
         run: mkdir -p app/dist && echo '<!doctype html><title>blimp</title>' > app/dist/index.html
       - name: Clippy
         working-directory: app/src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Unit tests
         working-directory: app/src-tauri
-        run: cargo test
+        run: cargo test --locked

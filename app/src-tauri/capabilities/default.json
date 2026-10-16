@@ -1,12 +1,24 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the blimp UI may call in the main window.",
+  "description": "What the blimp UI may call in the main window: only what it uses (docs/DESIGN.md, Content security policy).",
   "windows": ["main"],
   "permissions": [
-    "core:default",
+    "allow-connect",
+    "allow-disconnect",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-set-badge-count",
-    "notification:default",
-    "store:default"
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    "store:allow-load",
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-save",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "http://*" }, { "url": "https://*" }]
+    }
   ]
 }

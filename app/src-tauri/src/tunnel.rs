@@ -26,6 +26,7 @@ const SSH: &str = "ssh";
 const INFO_CMD: &str = r#"printf "%s\n" "$HOME"; cat "$HOME/.blimp/token""#;
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+const STDERR_WAIT: Duration = Duration::from_secs(1);
 
 /// A server as the user entered it in "Add server".
 #[derive(Debug)]
@@ -43,9 +44,11 @@ impl Target {
         if host.is_empty() {
             return Err("Enter a host to connect to.".into());
         }
-        // ssh would read a leading "-" as an option (say -oProxyCommand=...), so refuse it.
+        // ssh would read a leading "-" as an option (say -oProxyCommand=...), so refuse it,
+        // even though `--` comes before the destination too. Whitespace and control
+        // characters are never part of a real name and could split or hide text in a command.
         for s in std::iter::once(&host).chain(user.as_ref()) {
-            if s.starts_with('-') || s.chars().any(char::is_whitespace) {
+            if s.starts_with('-') || s.chars().any(|c| c.is_whitespace() || c.is_control()) {
                 return Err(format!("\"{s}\" isn't a valid host or user name."));
             }
         }
@@ -69,18 +72,20 @@ impl Target {
         }
     }
 
-    /// `[-p PORT] [USER@]HOST`, the end of both ssh command lines.
+    /// `[-p PORT] -- [USER@]HOST`, the end of both ssh command lines. `--` makes ssh read
+    /// the destination as a name, never as an option.
     fn dest_args(&self) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(p) = self.port {
             args.extend(["-p".into(), p.to_string()]);
         }
+        args.push("--".into());
         args.push(self.destination());
         args
     }
 
     fn info_args(&self) -> Vec<String> {
-        let mut args = strings(&["-o", "BatchMode=yes"]);
+        let mut args = strings(&["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
         args.extend(self.dest_args());
         args.push(INFO_CMD.into());
         args
@@ -91,6 +96,8 @@ impl Target {
             "-N",
             "-o",
             "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
             "-o",
             "ExitOnForwardFailure=yes",
             "-o",
@@ -332,7 +339,15 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
         return Err("blimp is quitting.".into());
     }
     let ended = Arc::new(AtomicBool::new(false));
-    let watcher = watch(app.clone(), id.clone(), serial, stderr, ended.clone());
+    let last = Arc::new(Mutex::new(String::new()));
+    let watcher = watch(
+        app.clone(),
+        id.clone(),
+        serial,
+        stderr,
+        ended.clone(),
+        last.clone(),
+    );
 
     let healthy = wait_healthy(|| tunnels.starting_alive(serial), port, &token, &t.host);
 
@@ -344,18 +359,16 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
     if let Err(msg) = healthy {
         drop(inner);
         stop(child);
-        let detail = watcher.join().unwrap_or_default();
-        return Err(with_detail(msg, &detail));
+        return Err(with_detail(msg, &stderr_after_stop(&watcher, &last)));
     }
     // The watcher sets `ended` under this lock, so it either saw nothing to report yet
     // (and we notice here) or will find this tunnel in the map and report it.
     if ended.load(Ordering::SeqCst) {
         drop(inner);
         stop(child);
-        let detail = watcher.join().unwrap_or_default();
         return Err(with_detail(
             format!("SSH tunnel to {} closed right away", t.host),
-            &detail,
+            &stderr_after_stop(&watcher, &last),
         ));
     }
     // Two connects for the same server can race; keep the one that finished first.
@@ -382,23 +395,18 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
 }
 
 /// Drains ssh's stderr (so a full pipe never stalls it) and, when ssh exits, tells the UI
-/// with `tunnel-closed`, unless the tunnel was already removed on purpose. Returns the
-/// last stderr line, for error messages.
+/// with `tunnel-closed`, unless the tunnel was already removed on purpose. Keeps the last
+/// stderr line in `last`, for error messages.
 fn watch(
     app: AppHandle,
     id: String,
     serial: u64,
     stderr: ChildStderr,
     ended: Arc<AtomicBool>,
-) -> JoinHandle<String> {
+    last: Arc<Mutex<String>>,
+) -> JoinHandle<()> {
     thread::spawn(move || {
-        let mut last = String::new();
-        for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
-            let line = String::from_utf8_lossy(&line).trim().to_string();
-            if !line.is_empty() {
-                last = line;
-            }
-        }
+        drain(stderr, &last);
         let tunnels = app.state::<Tunnels>();
         let mut inner = tunnels.inner.lock().unwrap();
         ended.store(true, Ordering::SeqCst);
@@ -408,8 +416,28 @@ fn watch(
             stop(t.child);
             let _ = app.emit("tunnel-closed", Closed { id });
         }
-        last
     })
+}
+
+/// Reads stderr to its end, keeping the last non-empty line.
+fn drain(stderr: impl Read, last: &Mutex<String>) {
+    for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+        let line = String::from_utf8_lossy(&line).trim().to_string();
+        if !line.is_empty() {
+            *last.lock().unwrap() = line;
+        }
+    }
+}
+
+/// ssh's last stderr line, once ssh has been stopped. Its stderr normally closes right
+/// then, but a ProxyCommand helper that inherited it and outlives ssh keeps it open, so
+/// wait at most a second for the reader and then take what it has.
+fn stderr_after_stop<T>(reader: &JoinHandle<T>, last: &Mutex<String>) -> String {
+    let deadline = Instant::now() + STDERR_WAIT;
+    while !reader.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    last.lock().unwrap().clone()
 }
 
 /// Asks the OS for a free port. If something takes it before ssh binds it,
@@ -486,18 +514,45 @@ mod tests {
         assert!(Target::new("-oProxyCommand=touch /tmp/x".into(), None, None).is_err());
         assert!(Target::new("claude1".into(), Some("-lroot".into()), None).is_err());
         assert!(Target::new("clau de1".into(), None, None).is_err());
+        assert!(Target::new("claude1".into(), Some("m ax".into()), None).is_err());
+        assert!(Target::new("claude1\tx".into(), None, None).is_err());
+        assert!(Target::new("claude1".into(), Some("max\u{7}".into()), None).is_err());
+        assert!(Target::new("claude1\u{1b}[2J".into(), None, None).is_err());
+        assert!(Target::new("".into(), None, None).is_err());
         assert!(Target::new("  ".into(), None, None).is_err());
+        // Ordinary names, addresses and ~/.ssh/config aliases still work.
+        assert!(Target::new("claude1.example.com".into(), Some("max-b".into()), None).is_ok());
+        assert!(Target::new("::1".into(), None, Some(22)).is_ok());
+        assert!(Target::new("100.64.0.1".into(), None, None).is_ok());
     }
 
     #[test]
     fn info_args() {
         assert_eq!(
             target("claude1", None, None).info_args(),
-            ["-o", "BatchMode=yes", "claude1", INFO_CMD]
+            [
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "--",
+                "claude1",
+                INFO_CMD
+            ]
         );
         assert_eq!(
             target("claude1", Some("max"), Some(2222)).info_args(),
-            ["-o", "BatchMode=yes", "-p", "2222", "max@claude1", INFO_CMD]
+            [
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-p",
+                "2222",
+                "--",
+                "max@claude1",
+                INFO_CMD
+            ]
         );
         assert_eq!(
             INFO_CMD,
@@ -512,6 +567,8 @@ mod tests {
             "-o",
             "BatchMode=yes",
             "-o",
+            "ConnectTimeout=10",
+            "-o",
             "ExitOnForwardFailure=yes",
             "-o",
             "ServerAliveInterval=15",
@@ -525,21 +582,21 @@ mod tests {
             "127.0.0.1:50123:/home/max/.blimp/blimpd.sock",
         ];
         let mut want = opts.to_vec();
-        want.push("claude1");
+        want.extend(["--", "claude1"]);
         assert_eq!(
             target("claude1", None, None).tunnel_args(50123, "/home/max"),
             want
         );
 
         let mut want = opts.to_vec();
-        want.push("max@claude1");
+        want.extend(["--", "max@claude1"]);
         assert_eq!(
             target("claude1", Some("max"), None).tunnel_args(50123, "/home/max"),
             want
         );
 
         let mut want = opts.to_vec();
-        want.extend(["-p", "2222", "claude1"]);
+        want.extend(["-p", "2222", "--", "claude1"]);
         assert_eq!(
             target("claude1", None, Some(2222)).tunnel_args(50123, "/home/max"),
             want
@@ -610,6 +667,74 @@ mod tests {
 
         tunnels.close_all();
         assert!(!running(other_pid));
+    }
+
+    #[test]
+    fn error_detail_does_not_wait_for_a_helper_holding_stderr() {
+        // Stands in for ssh whose ProxyCommand helper inherited its stderr: the helper
+        // (a background sleep) keeps the pipe open after the shell, our "ssh", is stopped.
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "sleep 30 & echo $!; echo 'ssh: connect to host x: Connection refused' >&2; wait",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut helper = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut helper)
+            .unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let last = Arc::new(Mutex::new(String::new()));
+        let reader = {
+            let last = last.clone();
+            thread::spawn(move || drain(stderr, &last))
+        };
+        // Let the reader see the line before ssh goes away, as it would in the app.
+        let seen = Instant::now() + Duration::from_secs(5);
+        while last.lock().unwrap().is_empty() && Instant::now() < seen {
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        stop(child);
+        let started = Instant::now();
+        let detail = stderr_after_stop(&reader, &last);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(detail, "ssh: connect to host x: Connection refused");
+        assert!(!reader.is_finished()); // the helper still holds stderr
+
+        let helper: u32 = helper.trim().parse().unwrap();
+        assert!(running(helper));
+        Command::new("kill")
+            .arg(helper.to_string())
+            .status()
+            .unwrap();
+        reader.join().unwrap();
+    }
+
+    #[test]
+    fn error_detail_after_ssh_closes_stderr() {
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "echo 'Banner' >&2; echo 'Permission denied (publickey).' >&2",
+            ])
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let last = Arc::new(Mutex::new(String::new()));
+        let reader = {
+            let last = last.clone();
+            thread::spawn(move || drain(stderr, &last))
+        };
+        child.wait().unwrap();
+        assert_eq!(
+            stderr_after_stop(&reader, &last),
+            "Permission denied (publickey)."
+        );
     }
 
     #[test]
