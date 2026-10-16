@@ -30,7 +30,8 @@ app UI ──fetch/WebSocket──▶ http://127.0.0.1:<local port>
 - The Rust shell runs the system `ssh` (`/usr/bin/ssh` on macOS, `ssh` on PATH elsewhere) with `-o BatchMode=yes`, so it uses the user's keys, agent and `~/.ssh/config` and never prompts.
 - First it runs one command over SSH to learn the home folder and the token:
   `ssh -o BatchMode=yes [-p PORT] [USER@]HOST 'printf "%s\n" "$HOME"; cat "$HOME/.blimp/token"'`
-- Then it starts the tunnel: `ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -L 127.0.0.1:<free port>:<home>/.blimp/blimpd.sock [-p PORT] [USER@]HOST`, and waits (up to 10 s) until `GET /health` answers through it.
+- Then it starts the tunnel: `ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ControlMaster=no -o ControlPath=none -L 127.0.0.1:<free port>:<home>/.blimp/blimpd.sock [-p PORT] [USER@]HOST`, and waits (up to 10 s) until `GET /health` answers through it. No connection sharing: with `ControlMaster`/`ControlPersist` in `~/.ssh/config`, ssh would hand the forward to a shared master and exit, and the app could no longer close it.
+- Both ssh commands get the app's PATH with `/opt/homebrew/bin` and `/usr/local/bin` added, so `ProxyCommand` and `Match exec` helpers from Homebrew are found when the app is opened from Finder.
 
 ### Token
 
@@ -71,7 +72,7 @@ type Session = {
 
 `state` comes from whichever source is newer:
 - Claude's status file (`statusUpdatedAt ?? updatedAt`): `waiting` or a non-empty `waitingFor` → waiting; `busy` or `shell` → working; `idle` → done.
-- blimp's hook file `~/.blimp/status/<zmx name>.json` (`at`): see Hooks.
+- blimp's hook file `<socket dir>/status/<zmx name>.json` (`at`), so `~/.blimp/status/` by default and next to the temp socket for a test blimpd: see Hooks.
 - Neither → `unknown`.
 
 `POST /sessions` body `{ "dir": string, "name"?: string, "resume"?: string }` → 201 `{ "name": string }`.
@@ -121,7 +122,7 @@ Every path must resolve, after following symlinks, to the home folder or somethi
 Claude's status files are internal and may change. So blimpd also installs Claude Code hooks that record status itself.
 
 - `blimpd install-hooks` merges into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, for each of `Notification`, `Stop`, `UserPromptSubmit`, `PostToolUse`: `{ "hooks": [{ "type": "command", "command": "'<absolute path of this blimpd>' hook", "timeout": 5 }] }`. It skips an event that already has a command containing `blimpd' hook` or `blimpd hook`. It keeps every other key and hook as they were, writes a one-time backup `settings.json.blimp-backup` before the first change, and writes atomically. Running it twice changes nothing. `install.sh` runs it.
-- `blimpd hook` reads the hook JSON on stdin. If `ZMX_SESSION` is set (Claude runs inside zmx, which sets it), it writes `~/.blimp/status/<ZMX_SESSION>.json`: `{ "state": "waiting" | "working" | "done", "at": <ms>, "sessionId": <session_id>, "event": <hook_event_name> }`. Notification → waiting; UserPromptSubmit, PostToolUse → working; Stop → done. It always exits 0 quickly and prints nothing.
+- `blimpd hook` reads the hook JSON on stdin. If `ZMX_SESSION` is set (Claude runs inside zmx, which sets it), it writes `<socket dir>/status/<ZMX_SESSION>.json` (the socket dir comes from `BLIMPD_SOCKET`, which Claude inherits from the session): `{ "state": "waiting" | "working" | "done", "at": <ms>, "sessionId": <session_id>, "event": <hook_event_name> }`. Notification with `notification_type` `permission_prompt`, `elicitation_dialog` or `elicitation_url_dialog` → waiting (other notifications, like `idle_prompt` about 60 s after a finished turn, are ignored); UserPromptSubmit, PostToolUse → working; Stop → done. It always exits 0 quickly and prints nothing.
 
 ### Performance
 
