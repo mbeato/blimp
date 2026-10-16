@@ -41,7 +41,7 @@ The local port is reachable by anything on the Mac, including web pages, and Web
 - `blimpd serve` creates `<socket dir>/token` (32 random bytes, hex; mode 600) if it doesn't exist. The socket dir is `dirname(BLIMPD_SOCKET)`, default `~/.blimp`.
 - HTTP: `Authorization: Bearer <token>`. WebSocket: `?token=<token>` (browsers can't set headers on a WebSocket).
 - Wrong or missing token → 401. Compare in constant time.
-- CORS: every response has `Access-Control-Allow-Origin: *`. `OPTIONS` returns 204 with `Access-Control-Allow-Headers: Authorization, Content-Type` and `Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS`. (`*` is safe because the token is not a cookie.)
+- CORS: every authorized response and the `OPTIONS` preflight have `Access-Control-Allow-Origin: *`. A 401 has none, so a web page can't read it to learn the port is blimp. `OPTIONS` returns 204 with `Access-Control-Allow-Headers: Authorization, Content-Type` and `Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS`. (`*` is safe because the token is not a cookie.)
 
 ## blimpd API
 
@@ -126,13 +126,17 @@ Claude's status files are internal and may change. So blimpd also installs Claud
 - `blimpd install-hooks` merges into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, for each of `Notification`, `Stop`, `UserPromptSubmit`, `PostToolUse`: `{ "hooks": [{ "type": "command", "command": "'<absolute path of this blimpd>' hook", "timeout": 5 }] }`. It skips an event that already has a command containing `blimpd' hook` or `blimpd hook`. It keeps every other key and hook as they were, writes a one-time backup `settings.json.blimp-backup` before the first change, and writes atomically. Running it twice changes nothing. `install.sh` runs it.
 - `blimpd hook` reads the hook JSON on stdin. If `ZMX_SESSION` is set (Claude runs inside zmx, which sets it), it writes `<socket dir>/status/<ZMX_SESSION>.json` (the socket dir comes from `BLIMPD_SOCKET`, which Claude inherits from the session): `{ "state": "waiting" | "working" | "done", "at": <ms>, "sessionId": <session_id>, "event": <hook_event_name> }`. Notification with `notification_type` `permission_prompt`, `elicitation_dialog` or `elicitation_url_dialog` → waiting (other notifications, like `idle_prompt` about 60 s after a finished turn, are ignored); UserPromptSubmit, PostToolUse → working; Stop → done. It always exits 0 quickly and prints nothing.
 
+### zmx's socket folder
+
+zmx keeps session sockets in `ZMX_DIR`, else `$XDG_RUNTIME_DIR/zmx`, else `${TMPDIR:-/tmp}/zmx-<uid>`. The last one is a predictable name in a shared folder, so blimpd creates it itself (mode 700) if it's missing, and refuses to start or run zmx if it isn't owned by the user or others can write it.
+
 ### Performance
 
 `GET /sessions` and the 1 s event check run often. Cache transcript titles per file and parse only bytes appended since the last read (keep the byte offset and the custom/ai/prompt state). Don't re-read whole transcripts every second.
 
 ### Starting sessions
 
-`POST /sessions` creates the zmx session from inside a PTY of 120×36 (not with stdin at /dev/null), waits until the session is listed, then kills that zmx client. The session then has a real size from the start: Claude renders its first screen properly, and output written before anyone attaches is shown to the first viewer.
+`POST /sessions` creates the zmx session from inside a PTY of 120×36 (not with stdin at /dev/null), waits until the session is listed with that client attached (`clients>0`; on zmx 0.5 killing it earlier loses the size), then kills that zmx client. Starts run one at a time, so two starts in the same second get different names. The session gets `TERM=xterm-256color` and `COLORTERM=truecolor`. The session then has a real size from the start: Claude renders its first screen properly, and output written before anyone attaches is shown to the first viewer.
 
 ## The app
 
@@ -144,7 +148,7 @@ Commands for the UI (`invoke`):
 - `disconnect({ id: string })`.
 - Event `tunnel-closed` with `{ id }` when an ssh child exits. The UI reconnects with backoff (1, 2, 5, 10 s, then every 10 s).
 
-All ssh children are killed when the app exits. Plugins: `notification`, `store` (server list in `servers.json`). macOS: default app menu, which gives ⌘C/⌘V/⌘A/⌘Q. Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
+All ssh children are killed when the app exits. Plugins: `notification`, `store` (server list in `servers.json`). macOS: a custom menu (see macOS menu). Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
 
 ### UI (`app/src`)
 
@@ -166,7 +170,7 @@ React + TypeScript + Vite. Libraries: `@xterm/xterm` + `@xterm/addon-fit` + `@xt
    - A tree column (folders expandable, `.git` hidden) beside a viewer/editor area with its own tabs of open files.
    - ⌘P: fuzzy open by name over `/fs/files` of the session folder.
    - Text/code: Monaco, language from the extension, theme follows the app. ⌘S saves with `baseMtime`. On 409, or when an `fs` event says an open file changed and it has unsaved edits: a bar "Changed on the server: Reload / Keep mine". Keep mine saves without `baseMtime`. With no unsaved edits it reloads silently.
-   - Markdown: rendered (marked + DOMPurify) with an Edit toggle that switches to Monaco.
+   - Markdown: rendered (marked in a Web Worker, 5 s and 1,000,000-character limits, then DOMPurify) with an Edit toggle that switches to Monaco. A file that breaks marked shows "Can't show this Markdown" instead of freezing the app.
    - Images (png, jpg, jpeg, gif, webp, svg, ico, bmp): shown fitted. SVG goes through an `<img>` from a blob URL, never inline.
    - PDF: pdf.js, all pages, scrollable.
    - Anything else binary (NUL byte in the first 8 KB): "Can't show this file", plus its size.
@@ -186,7 +190,7 @@ The UI renders files from servers (Markdown, SVG, PDF), so script injection must
 default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'
 ```
 
-(Vite's dev server needs `ws://localhost:*` for hot reload; add it only in dev.) pdf.js runs with `isEvalSupported: false` and scripting off. Tauri capabilities grant only what the UI uses: the two commands, event listen, set-badge-count, notification, store, and opener limited to `http:`/`https:` URLs. No shell, fs or http plugin.
+(Vite's dev server needs `ws://localhost:*` for hot reload; add it only in dev.) pdf.js (pdfjs-dist 6, which never uses eval) runs with scripting off. Tauri capabilities grant only what the UI uses: the two commands, event listen, set-badge-count, notification, store, and opener limited to `http:`/`https:` URLs. No shell, fs or http plugin.
 
 ### macOS menu
 
