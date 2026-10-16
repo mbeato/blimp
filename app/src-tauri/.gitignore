@@ -1,0 +1,3 @@
+# Rust build output, and schemas tauri-build regenerates on every build.
+/target/
+/gen/schemas

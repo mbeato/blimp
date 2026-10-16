@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Placeholder app icon: a blimp on a night-sky tile. The tile leaves the macOS icon margin. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1d2a44"/>
+  <g transform="translate(-14 32)">
+    <!-- fins and gondola go under the envelope so it hides their joins -->
+    <path d="M330 450 L232 318 Q222 304 240 304 L300 304 Q318 304 330 318 L420 420 Z" fill="#f2a541"/>
+    <path d="M330 510 L232 642 Q222 656 240 656 L300 656 Q318 656 330 642 L420 540 Z" fill="#f2a541"/>
+    <path d="M500 590 L640 590 L628 650 Q624 664 610 664 L530 664 Q516 664 512 650 Z" fill="#f2a541"/>
+    <ellipse cx="545" cy="480" rx="285" ry="132" fill="#f4f1ea"/>
+    <path d="M290 480 Q545 520 830 480" fill="none" stroke="#d9d3c5" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>
