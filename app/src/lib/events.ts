@@ -1,0 +1,51 @@
+// The /events WebSocket: the session list as it changes, and changes to watched paths.
+
+import type { Api, Session } from "./api";
+
+export type EventHandlers = {
+  onSessions: (sessions: Session[]) => void;
+  onFs: (paths: string[]) => void;
+  onClose: () => void; // the socket dropped or never opened; the caller decides when to retry
+};
+
+export class EventsSocket {
+  private ws: WebSocket;
+  private watching: string[] = [];
+  private closed = false;
+
+  constructor(api: Api, private h: EventHandlers) {
+    this.ws = new WebSocket(api.eventsUrl());
+    // The watch set belongs to the socket on the server, so send it again on every new socket.
+    this.ws.onopen = () => this.sendWatch();
+    this.ws.onmessage = (e) => {
+      if (typeof e.data !== "string") return;
+      let msg: any;
+      try {
+        msg = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (msg.type === "sessions" && Array.isArray(msg.sessions)) this.h.onSessions(msg.sessions);
+      else if (msg.type === "fs" && Array.isArray(msg.paths)) this.h.onFs(msg.paths);
+    };
+    this.ws.onclose = () => {
+      if (!this.closed) h.onClose();
+      this.closed = true;
+    };
+  }
+
+  // Replaces the watch set (expanded folders plus open files).
+  watch(paths: string[]) {
+    this.watching = paths;
+    this.sendWatch();
+  }
+
+  private sendWatch() {
+    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: "watch", paths: this.watching }));
+  }
+
+  close() {
+    this.closed = true;
+    this.ws.close();
+  }
+}
