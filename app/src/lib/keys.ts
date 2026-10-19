@@ -18,7 +18,10 @@ export type KeyAction =
 
 const plain = (e: KeyLike) => !e.ctrlKey && !e.shiftKey;
 
-export function mapKey(e: KeyLike, hasSelection: boolean): KeyAction {
+// claude: the session runs Claude Code, where Shift+Enter starts a new line. It reads ESC CR
+// (Option+Enter) as one, which is what VS Code's `/terminal-setup` makes Shift+Enter send. A
+// shell gets the usual Enter.
+export function mapKey(e: KeyLike, hasSelection: boolean, claude = false): KeyAction {
   const cmd = e.metaKey && !e.altKey && plain(e);
   const opt = e.altKey && !e.metaKey && plain(e);
   let data: string | undefined;
@@ -28,6 +31,7 @@ export function mapKey(e: KeyLike, hasSelection: boolean): KeyAction {
   else if (cmd && e.key === "ArrowRight") data = "\x05"; // line end
   else if (opt && e.key === "ArrowLeft") data = "\x1bb"; // word left
   else if (opt && e.key === "ArrowRight") data = "\x1bf"; // word right
+  else if (claude && e.key === "Enter" && e.shiftKey && !e.metaKey && !e.altKey && !e.ctrlKey) data = "\x1b\r"; // new line
   if (data !== undefined) return e.type === "keydown" ? { kind: "send", data } : { kind: "skip" };
 
   // ⌘C copies when there is a selection. ⌘V is left to the browser's paste event, which xterm

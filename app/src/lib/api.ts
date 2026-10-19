@@ -2,6 +2,9 @@
 
 export type SessionState = "working" | "waiting" | "done" | "unknown";
 
+// A port a program in a session listens on (blimpd's ports.ts). host: where it is on the server.
+export type Port = { port: number; host: "127.0.0.1" | "::1"; session: string; pid: number; command: string };
+
 export type Session = {
   name: string;
   kind: "claude" | "shell";
@@ -127,7 +130,18 @@ export class Api {
     return (await res.json()) as { mtime: number };
   }
 
-  fsMkdir(path: string) {
+  // The browser build's download (the Mac app's goes through Rust: src-tauri/src/transfer.rs).
+  fsDownload(path: string, signal?: AbortSignal) {
+    return this.req("/fs/download", { query: { path }, signal });
+  }
+
+  // mode "new": 409 if the name is taken; "replace": over a file of that name.
+  async fsUpload(path: string, body: Blob, mode: "new" | "replace", signal?: AbortSignal) {
+    const res = await this.req("/fs/upload", { method: "PUT", body, query: { path, mode }, signal });
+    return (await res.json()) as { size: number; mtime: number };
+  }
+
+    fsMkdir(path: string) {
     return this.post<{ path: string }>("/fs/mkdir", { path });
   }
 

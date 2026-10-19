@@ -1,6 +1,7 @@
 // The native half of the blimp app: it opens SSH tunnels to blimpd and hosts the UI.
 // Sessions, terminals and files all live in the UI, which talks to blimpd through the tunnel.
 
+mod transfer;
 mod tunnel;
 mod windows;
 
@@ -14,21 +15,35 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(tunnel::Tunnels::default())
+        .manage(transfer::Transfers::default())
         .manage(windows::Windows::default())
         .invoke_handler(tauri::generate_handler![
             tunnel::connect,
             tunnel::disconnect,
+            tunnel::forward_port,
+            tunnel::unforward_port,
             windows::open_window,
             windows::focus_project,
             windows::drop_session,
+            windows::set_shown,
+            windows::focus_session,
+            windows::take_session,
+            transfer::download,
+            transfer::upload,
+            transfer::pick_upload,
+            transfer::cancel_transfer,
             windows::set_window_projects,
             windows::set_viewing,
             windows::claim_notice
         ])
         .on_window_event(|window, event| match event {
-            WindowEvent::Destroyed => window.state::<windows::Windows>().forget(window.label()),
+            WindowEvent::Destroyed => window.state::<windows::Windows>().forget(window.app_handle(), window.label()),
             WindowEvent::Focused(true) => window.state::<windows::Windows>().focused(window.label()),
+            // Files let go on a window from Finder may be uploaded (the page gets the same event).
+            // Only on the drop: a file merely dragged across the window isn't one.
+            WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => window.state::<transfer::Transfers>().allow(paths),
             _ => {}
         })
         .build(tauri::generate_context!())

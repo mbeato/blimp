@@ -1,9 +1,11 @@
-// The /events WebSocket: the session list as it changes, and changes to watched paths.
+// The /events WebSocket: the session list as it changes, the ports sessions listen on, and
+// changes to watched paths.
 
-import type { Api, Session } from "./api";
+import type { Api, Port, Session } from "./api";
 
 export type EventHandlers = {
   onSessions: (sessions: Session[]) => void;
+  onPorts: (ports: Port[]) => void;
   onFs: (paths: string[]) => void;
   onClose: () => void; // the socket dropped or never opened; the caller decides when to retry
 };
@@ -26,6 +28,7 @@ export class EventsSocket {
         return;
       }
       if (msg.type === "sessions" && Array.isArray(msg.sessions)) this.h.onSessions(msg.sessions);
+      else if (msg.type === "ports" && Array.isArray(msg.ports)) this.h.onPorts(msg.ports);
       else if (msg.type === "fs" && Array.isArray(msg.paths)) this.h.onFs(msg.paths);
     };
     this.ws.onclose = () => {

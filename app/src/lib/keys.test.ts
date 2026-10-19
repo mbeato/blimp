@@ -45,3 +45,10 @@ test("everything else goes to xterm", () => {
   expect(mapKey(key("c", { ctrlKey: true }), true)).toEqual({ kind: "xterm" });
   expect(mapKey(key("ArrowLeft", { altKey: true, shiftKey: true }), false)).toEqual({ kind: "xterm" });
 });
+
+test("Shift+Enter is a new line in Claude (ESC CR, as VS Code's /terminal-setup sends); a plain Enter in a shell", () => {
+  expect(mapKey(key("Enter", { shiftKey: true }), false, true)).toEqual({ kind: "send", data: "\x1b\r" });
+  expect(mapKey(key("Enter", { shiftKey: true }, "keypress"), false, true)).toEqual({ kind: "skip" });
+  expect(mapKey(key("Enter", { shiftKey: true }), false, false)).toEqual({ kind: "xterm" });
+  expect(mapKey(key("Enter"), false, true)).toEqual({ kind: "xterm" });
+});

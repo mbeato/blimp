@@ -3,21 +3,31 @@ import { AddServerDialog } from "./components/AddServerDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
 import { noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
+import { TransferList } from "./components/TransferList";
 import { Welcome } from "./components/Welcome";
-import { Workbench, type Opener } from "./components/Workbench";
-import { errorText, loadServers, saveServers, serverKey, ServerLink, type Server } from "./lib/connection";
-import { baseName } from "./lib/files";
+import { Workbench, type FileDrop, type Opener, type PageOpener } from "./components/Workbench";
+import { errorText, inTauri, loadServers, saveServers, serverKey, ServerLink, type Server } from "./lib/connection";
+import { baseName, parentDir } from "./lib/files";
+import type { Item } from "./lib/transfers";
 import type { Panes } from "./lib/panes";
 import {
   dropSession,
   focusProject,
+  focusSession,
   onDropSession,
+  onReleaseSession,
+  onRememberLayout,
   onSelectSession,
+  onShown,
   openWindow,
   projectKey,
   readLayout,
+  setShown,
   setViewing,
   setWindowProjects,
+  takeSession,
+  windowLabel,
+  type Shown,
   setWindowTitle,
   writeLayout,
   type Place,
@@ -42,6 +52,8 @@ export function App() {
   // Per tab (by workbench key): ⌘-click's file opener and the terminal pane's actions (⌘N).
   const openers = useRef(new Map<string, { current: Opener }>()).current;
   const actions = useRef(new Map<string, { current: PaneActions }>()).current;
+  const fileDrops = useRef(new Map<string, { current: FileDrop }>()).current;
+  const pageOpeners = useRef(new Map<string, { current: PageOpener }>()).current;
   const refFor = <T,>(m: Map<string, { current: T }>, k: string, init: T) => {
     if (!m.has(k)) m.set(k, { current: init });
     return m.get(k)!;
@@ -122,6 +134,16 @@ export function App() {
     if (sig !== lastSig.current) (lastSig.current = sig), (owner.current = true);
     if (owner.current) void rememberLayout(layout);
   }, [layout]);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  useEffect(() => {
+    let off = () => {};
+    void onRememberLayout(() => {
+      owner.current = true;
+      if (layoutRef.current) void rememberLayout(layoutRef.current);
+    }).then((f) => (off = f));
+    return () => off();
+  }, []);
   const projects = (layout?.tabs ?? []).map((t) => (rootOf(t) ? projectKey(t.server, rootOf(t)!) : "")).filter(Boolean);
   const projectsKey = projects.join("\t");
   useEffect(() => setWindowProjects(projects), [projectsKey]);
@@ -142,6 +164,39 @@ export function App() {
       window.removeEventListener("blur", sync);
     };
   }, [viewingKey]);
+
+  // Sessions other windows show ("<server key>/<name>"): their rows say so, and a click there
+  // brings that window forward instead of showing the session twice.
+  const [elsewhere, setElsewhere] = useState<Set<string>>(new Set());
+  const me = useRef<string | null>(null);
+  const others = (s: Shown) => new Set(Object.entries(s).flatMap(([label, keys]) => (label === me.current ? [] : keys)));
+  const shownKey = (layout?.tabs ?? []).flatMap((t) => t.panes.map((n) => `${t.server}/${n}`)).join("\n");
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      me.current ??= await windowLabel();
+      const s = await setShown(shownKey ? shownKey.split("\n") : []);
+      if (live) setElsewhere(others(s));
+    })();
+    return () => void (live = false);
+  }, [shownKey]);
+  useEffect(() => {
+    let off = () => {};
+    let offRelease = () => {};
+    void onShown((s, label) => ((me.current = label), setElsewhere(others(s)))).then((f) => (off = f));
+    // Another window took one of this window's sessions into a split.
+    void onReleaseSession((key) => releaseRef.current(key)).then((f) => (offRelease = f));
+    return () => (off(), offRelease());
+  }, []);
+  const releaseRef = useRef((_: string) => {});
+  releaseRef.current = (key) => {
+    for (const t of layout?.tabs ?? []) {
+      const l = links.get(t.server);
+      const r = rootOf(t);
+      const name = key.startsWith(t.server + "/") ? key.slice(t.server.length + 1) : null;
+      if (l && r && name && t.panes.includes(name)) actions.get(wbKey(l, r))?.current.release(name);
+    }
+  };
 
   // A folder as a tab's dir: null for the server's home folder (Home).
   const tabDir = (server: string, dir: string | null | undefined) => (!dir || dir === links.get(server)?.home ? null : dir);
@@ -217,6 +272,7 @@ export function App() {
     const s = l.sessions?.find((x) => x.name === name);
     if (!s || !layout) return;
     const dir = tabDir(l.key, s.dir);
+    if (elsewhere.has(`${l.key}/${name}`) && (await focusSession({ server: l.key, dir: s.dir, session: name }))) return;
     const here = layout.tabs.some((t) => t.server === l.key && t.dir === dir);
     if (!here && (await focusProject({ server: l.key, dir: s.dir, session: name }))) return;
     open(l.key, dir, name);
@@ -281,6 +337,77 @@ export function App() {
   }, []);
 
   const wbKey = (l: ServerLink, r: string) => `${l.id}\n${r}`;
+
+  // ---- files dragged in from Finder ----
+  // Over the tree: into the folder under the pointer (a file's own folder). Over a terminal: up
+  // to ~/.blimp/uploads, and the paths typed into that session. Anywhere else in the tab: into
+  // the folder new files go in. What it would land in is lit while dragging.
+  const frontKey = link && root ? wbKey(link, root) : null;
+  const dropAt = useRef((_x: number, _y: number, _items: Item[] | null) => {});
+  dropAt.current = (x, y, items) => {
+    const el = document.elementFromPoint(x, y);
+    const wb = el?.closest(".wb:not([hidden])");
+    let lit: Element | null = null;
+    let go = () => {};
+    if (el && wb && frontKey && items !== undefined) {
+      const split = el.closest<HTMLElement>(".tsplit[data-split]");
+      const row = el.closest<HTMLElement>(".wb-tree [data-path]");
+      if (split) {
+        lit = split;
+        go = () => items && actions.get(frontKey)?.current.dropFiles(split.dataset.split!, items);
+      } else {
+        const tree = wb.querySelector(".tree");
+        const dir = row ? (row.dataset.kind === "dir" ? row.dataset.path! : parentDir(row.dataset.path!)) : null;
+        lit = (dir && wb.querySelector(`.wb-tree [data-kind="dir"][data-path="${CSS.escape(dir)}"]`)) || tree;
+        go = () => items && fileDrops.get(frontKey)?.current(dir, items);
+      }
+    }
+    for (const e of document.querySelectorAll(".drop-over")) if (e !== lit) e.classList.remove("drop-over");
+    if (items) {
+      lit?.classList.remove("drop-over");
+      go();
+    } else lit?.classList.add("drop-over");
+  };
+  useEffect(() => {
+    const clear = () => document.querySelectorAll(".drop-over").forEach((e) => e.classList.remove("drop-over"));
+    if (inTauri()) {
+      // The Mac app: Tauri's own drag-drop event, with the files' paths (Rust may then read them).
+      let off = () => {};
+      void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
+        getCurrentWebview()
+          .onDragDropEvent((e) => {
+            const p = e.payload;
+            if (p.type === "leave") return clear();
+            const x = p.position.x / devicePixelRatio;
+            const y = p.position.y / devicePixelRatio;
+            dropAt.current(x, y, p.type === "drop" ? p.paths.map((path) => ({ name: baseName(path), local: path })) : null);
+          })
+          .then((f) => (off = f)),
+      );
+      return () => off();
+    }
+    // A browser: HTML drag and drop, with File objects.
+    const files = (e: DragEvent) => !!e.dataTransfer?.types.includes("Files");
+    const over = (e: DragEvent) => {
+      if (!files(e)) return;
+      e.preventDefault();
+      dropAt.current(e.clientX, e.clientY, null);
+    };
+    const leave = (e: DragEvent) => !e.relatedTarget && clear();
+    const drop = (e: DragEvent) => {
+      if (!files(e)) return;
+      e.preventDefault();
+      dropAt.current(e.clientX, e.clientY, [...e.dataTransfer!.files].map((file) => ({ name: file.name, file })));
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("drop", drop);
+    };
+  }, []);
   const frontActions = link && root ? refFor(actions, wbKey(link, root), noActions) : null;
 
   if (!servers) return <div className="app" />;
@@ -340,6 +467,11 @@ export function App() {
                 )}
                 {linkList.length > 1 && <span className="ptab-server">{t.server}</span>}
                 {i > 0 && <span className="ptab-title">{name}</span>}
+                {t.panes.length > 1 && (
+                  <span className="ptab-count" title={`${t.panes.length} sessions side by side`}>
+                    {t.panes.length}
+                  </span>
+                )}
                 {waiting && <span className="dot" aria-label="A session is waiting for you" />}
                 {i > 0 && (
                   <button className="tab-close" aria-label={`Close ${name}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => close(i)}>
@@ -383,6 +515,8 @@ export function App() {
             showTerm={show.term}
             welcome={i === 0 ? welcome : undefined}
             opener={opener}
+            onDrop={refFor(fileDrops, key, () => {})}
+            pages={refFor(pageOpeners, key, () => {})}
             terminal={
               <TerminalPane
                 link={l}
@@ -394,6 +528,10 @@ export function App() {
                 onOpenPath={(p, line, col) => opener.current(p, line, col)}
                 onNotice={setNotice}
                 onMoveOut={(names, at) => moveOut(t, names, at)}
+                elsewhere={(n) => elsewhere.has(`${t.server}/${n}`)}
+                onFocusElsewhere={(n) => focusSession({ server: t.server, dir: r, session: n })}
+                onTake={(n) => elsewhere.has(`${t.server}/${n}`) && takeSession(`${t.server}/${n}`)}
+                onOpenPort={(p) => pageOpeners.get(key)?.current(p)}
                 actions={refFor(actions, key, noActions)}
               />
             }
@@ -411,6 +549,7 @@ export function App() {
         />
       )}
       {dialog === "add" && <AddServerDialog onAdd={addServer} onClose={() => setDialog(null)} />}
+      <TransferList />
       {notice && (
         <div className="toast" role="status" onClick={() => setNotice("")}>
           {notice}

@@ -50,7 +50,7 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const STDERR_WAIT: Duration = Duration::from_secs(1);
 
 /// A server as the user entered it in "Add server".
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Target {
     host: String,
     user: Option<String>,
@@ -144,6 +144,36 @@ impl Target {
     }
 }
 
+impl Target {
+    /// A browser tab's forward: local `port` to `host:remote` on the server (host is
+    /// 127.0.0.1 or ::1). Tied to the app's lifetime the same way as the tunnel (TUNNEL_CMD).
+    fn forward_args(&self, port: u16, host: &str, remote: u16) -> Vec<String> {
+        let mut args = strings(&[
+            "-T",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "ControlMaster=no",
+            "-o",
+            "ControlPath=none",
+            "-L",
+        ]);
+        let host = if host == "::1" { "[::1]" } else { "127.0.0.1" };
+        args.push(format!("127.0.0.1:{port}:{host}:{remote}"));
+        args.extend(self.dest_args());
+        args.push(TUNNEL_CMD.into());
+        args
+    }
+}
+
 fn strings(s: &[&str]) -> Vec<String> {
     s.iter().map(|s| s.to_string()).collect()
 }
@@ -210,10 +240,18 @@ struct Closed {
     id: String,
 }
 
+struct Forward {
+    local: u16,
+    child: Child,
+    users: u32,
+}
+
 struct Tunnel {
     serial: u64,
     child: Child,
     conn: Conn,
+    /// For more ssh children to the same server (browser tabs' port forwards).
+    target: Target,
 }
 
 #[derive(Default)]
@@ -232,9 +270,18 @@ struct Inner {
     starting: HashMap<u64, (String, Child)>,
     /// Set once the app is exiting; no tunnel may start after that.
     closing: bool,
+    /// Browser tabs' port forwards: (server id, host, port on the server) -> the forward. Two
+    /// tabs on one port share it; it closes when the last one does.
+    forwards: HashMap<(String, String, u16), Forward>,
 }
 
 impl Tunnels {
+    /// The local port and token of a live tunnel, for transfers done here (transfer.rs).
+    pub fn endpoint(&self, id: &str) -> Option<(u16, String)> {
+        let inner = self.inner.lock().unwrap();
+        inner.map.get(id).map(|t| (t.conn.port, t.conn.token.clone()))
+    }
+
     /// Stops every ssh, starting ones included. Their watchers then find nothing to report.
     pub fn close_all(&self) {
         let mut inner = self.inner.lock().unwrap();
@@ -244,6 +291,9 @@ impl Tunnels {
         }
         for (_, (_, child)) in inner.starting.drain() {
             stop(child);
+        }
+        for (_, f) in inner.forwards.drain() {
+            stop(f.child);
         }
     }
 
@@ -280,6 +330,10 @@ impl Tunnels {
         for s in serials {
             children.extend(inner.starting.remove(&s).map(|(_, c)| c));
         }
+        let fwd: Vec<_> = inner.forwards.keys().filter(|(i, _, _)| i == id).cloned().collect();
+        for k in fwd {
+            children.extend(inner.forwards.remove(&k).map(|f| f.child));
+        }
         drop(inner);
         children.into_iter().for_each(stop);
     }
@@ -312,6 +366,93 @@ pub async fn connect(
 #[tauri::command]
 pub fn disconnect(tunnels: State<'_, Tunnels>, id: String) {
     tunnels.remove(&id);
+}
+
+/// A browser tab on a server's port: forwards a free local port to `host:port` on the server
+/// (host is 127.0.0.1 or ::1, nothing else) with one more ssh, or reuses the forward already
+/// open. Resolves to the local port once it accepts connections.
+#[tauri::command]
+pub async fn forward_port(app: AppHandle, server: String, host: String, port: u16) -> Result<u16, String> {
+    if host != "127.0.0.1" && host != "::1" {
+        return Err("Only the server's own ports (127.0.0.1 or ::1) can be opened.".into());
+    }
+    if port == 0 {
+        return Err("No port.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let tunnels = app.state::<Tunnels>();
+        let key = (server.clone(), host.clone(), port);
+        let target = {
+            let mut inner = tunnels.inner.lock().unwrap();
+            if let Some(f) = inner.forwards.get_mut(&key) {
+                if matches!(f.child.try_wait(), Ok(None)) {
+                    f.users += 1;
+                    return Ok(f.local);
+                }
+            }
+            if let Some(f) = inner.forwards.remove(&key) {
+                stop(f.child);
+            }
+            inner.map.get(&server).map(|t| t.target.clone()).ok_or("Not connected.")?
+        };
+        let local = free_port().map_err(|e| format!("Couldn't find a free local port: {e}"))?;
+        let mut child = ssh()
+            .args(target.forward_args(local, &host, port))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Couldn't run ssh: {e}"))?;
+        let deadline = Instant::now() + HEALTH_TIMEOUT;
+        let addr = SocketAddr::from(([127, 0, 0, 1], local));
+        loop {
+            if !matches!(child.try_wait(), Ok(None)) {
+                return Err(format!("Couldn't open port {port} on {}.", target.host));
+            }
+            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+                break;
+            }
+            if Instant::now() > deadline {
+                stop(child);
+                return Err(format!("Opening port {port} on {} took too long.", target.host));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        let mut inner = tunnels.inner.lock().unwrap();
+        if inner.closing {
+            drop(inner);
+            stop(child);
+            return Err("blimp is quitting.".into());
+        }
+        // Another tab opened the same port meanwhile: use that forward, drop this one.
+        if let Some(f) = inner.forwards.get_mut(&key) {
+            f.users += 1;
+            let theirs = f.local;
+            drop(inner);
+            stop(child);
+            return Ok(theirs);
+        }
+        inner.forwards.insert(key, Forward { local, child, users: 1 });
+        Ok(local)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A browser tab on that port closed: the forward goes with the last one.
+#[tauri::command]
+pub fn unforward_port(tunnels: State<'_, Tunnels>, server: String, host: String, port: u16) {
+    let mut inner = tunnels.inner.lock().unwrap();
+    let key = (server, host, port);
+    let last = inner.forwards.get_mut(&key).is_some_and(|f| {
+        f.users = f.users.saturating_sub(1);
+        f.users == 0
+    });
+    if last {
+        let f = inner.forwards.remove(&key).unwrap();
+        drop(inner);
+        stop(f.child);
+    }
 }
 
 fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
@@ -416,6 +557,7 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
             serial,
             child,
             conn: conn.clone(),
+            target: t.clone(),
         },
     );
     Ok(conn)
@@ -551,6 +693,16 @@ mod tests {
         assert!(Target::new("claude1.example.com".into(), Some("max-b".into()), None).is_ok());
         assert!(Target::new("::1".into(), None, Some(22)).is_ok());
         assert!(Target::new("100.64.0.1".into(), None, None).is_ok());
+    }
+
+    #[test]
+    fn forward_args() {
+        let a = target("claude1", Some("max"), Some(2222)).forward_args(5000, "::1", 3000);
+        assert!(a.windows(2).any(|w| w == ["-L", "127.0.0.1:5000:[::1]:3000"]));
+        assert_eq!(a[a.len() - 5..], ["-p", "2222", "--", "max@claude1", TUNNEL_CMD]);
+        // Anything but ::1 is 127.0.0.1: never another host on the server's network.
+        let b = target("claude1", None, None).forward_args(5000, "10.0.0.5", 3000);
+        assert!(b.contains(&"127.0.0.1:5000:127.0.0.1:3000".to_string()));
     }
 
     #[test]

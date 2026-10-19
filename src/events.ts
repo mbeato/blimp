@@ -1,9 +1,11 @@
-// The events socket: the session list whenever it changes, and changes to the paths the app watches.
+// The events socket: the session list whenever it changes, the ports programs in sessions listen
+// on (ports.ts), and changes to the paths the app watches.
 
 import { type FSWatcher, statSync, watch } from "node:fs";
 import type { Server, ServerWebSocket } from "bun";
 import { guard } from "./files";
-import { claudeDir, listSessions, zmxListAsync } from "./sessions";
+import { sessionPorts } from "./ports";
+import { claudeDir, listSessions, parseZmxList, zmxListAsync } from "./sessions";
 
 export type EventsData = {
   kind: "events";
@@ -19,17 +21,25 @@ export const eventsData = (): EventsData => ({ kind: "events", watches: new Map(
 let ticker: ReturnType<typeof setInterval> | undefined;
 let listeners = 0;
 let last = "";
+let lastPorts = "";
+let ticks = 0;
 let checking = false;
 
-const sessionsMessage = async () =>
-  JSON.stringify({ type: "sessions", sessions: listSessions(claudeDir(), await zmxListAsync()) });
+const sessionsMessage = (zmx: string) => JSON.stringify({ type: "sessions", sessions: listSessions(claudeDir(), zmx) });
+const portsMessage = async (zmx: string) => JSON.stringify({ type: "ports", ports: await sessionPorts(parseZmxList(zmx)) });
 
 async function tick(server: Server) {
   if (checking) return; // a slow zmx shouldn't pile up checks
   checking = true;
   try {
-    const m = await sessionsMessage();
+    const zmx = await zmxListAsync();
+    const m = sessionsMessage(zmx);
     if (m !== last) server.publish("sessions", (last = m));
+    // Ports every other second.
+    if (ticks++ % 2 === 0) {
+      const p = await portsMessage(zmx);
+      if (p !== lastPorts) server.publish("sessions", (lastPorts = p));
+    }
   } catch {
   } finally {
     checking = false;
@@ -41,7 +51,9 @@ export async function openEvents(ws: ServerWebSocket<EventsData>, server: Server
   listeners++;
   ticker ??= setInterval(() => tick(server), 1000);
   try {
-    ws.send(await sessionsMessage());
+    const zmx = await zmxListAsync();
+    ws.send(sessionsMessage(zmx));
+    ws.send(await portsMessage(zmx));
   } catch {}
 }
 
@@ -115,5 +127,6 @@ export function closeEvents(ws: ServerWebSocket<EventsData>) {
     clearInterval(ticker);
     ticker = undefined;
     last = "";
+    lastPorts = "";
   }
 }

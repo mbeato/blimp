@@ -46,6 +46,8 @@ export function TerminalView(props: {
   focused: boolean;
   onOpenPath: (path: string, line?: number, col?: number) => void;
   onClose: () => void;
+  // Where this terminal puts its paste function (text typed in as a paste), by session.
+  pastes: Map<string, (text: string) => void>;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
@@ -60,6 +62,9 @@ export function TerminalView(props: {
   dirRef.current = props.dir;
   const openPath = useRef(props.onOpenPath);
   openPath.current = props.onOpenPath;
+  // Shell or Claude, from the server's list (a session's kind can show up after it starts).
+  const claudeRef = useRef(false);
+  claudeRef.current = props.link.sessions?.find((s) => s.name === props.name)?.kind === "claude";
 
   useEffect(() => {
     const t = new Terminal({
@@ -135,6 +140,10 @@ export function TerminalView(props: {
     } catch {}
     term.current = t;
     fit.current = f;
+    props.pastes.set(props.name, (text) => {
+      t.paste(text);
+      t.focus();
+    });
 
     let ws: WebSocket | null = null;
     let disposed = false;
@@ -148,7 +157,7 @@ export function TerminalView(props: {
     };
 
     t.attachCustomKeyEventHandler((e) => {
-      const a = mapKey(e, t.hasSelection());
+      const a = mapKey(e, t.hasSelection(), claudeRef.current);
       if (a.kind === "xterm") return true;
       if (a.kind === "send") {
         e.preventDefault();
@@ -224,6 +233,7 @@ export function TerminalView(props: {
     scheme.addEventListener("change", onScheme);
 
     return () => {
+      props.pastes.delete(props.name);
       disposed = true;
       clearTimeout(retryTimer);
       ws?.close();

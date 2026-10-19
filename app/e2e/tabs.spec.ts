@@ -257,3 +257,33 @@ test("a session dragged out of the window opens in a new window", async ({ page,
   await expect.poll(() => layoutOf(page).tabs[1].panes).toEqual([left]);
   await win.close();
 });
+
+test("the splits on screen show as a group: first in the list, joined, numbered like their headers; the tab says how many", async ({ page }) => {
+  const dir = fixtureDir("tabs-split");
+  startSession(left, dir);
+  startSession(right, dir);
+  await openApp(page, { dir, session: left });
+  await expect(frontTab(page).locator(".sgroup")).toHaveCount(0);
+  await splitTwo(page, dir);
+  const group = frontTab(page).locator(".sgroup");
+  await expect(group.locator(".srow")).toHaveCount(2);
+  await expect(group.locator(".srow").nth(0)).toHaveAttribute("data-session", left);
+  await expect(group.locator(".srow").nth(1)).toHaveAttribute("data-session", right);
+  await expect(group.locator(".split-num")).toHaveText(["1", "2"]);
+  await expect(frontTab(page).locator(".tsplit-head .split-num")).toHaveText(["1", "2"]);
+  await expect(frontTab(page).locator(`.tsplit[data-split="${right}"] .split-num`)).toHaveText("2");
+  await expect(projectTab(page, "tabs-split").locator(".ptab-count")).toHaveText("2");
+  // Swapped: the list follows the splits' order.
+  const row = (await sessionRow(page, right).boundingBox())!;
+  const box = (await frontTab(page).locator(".tpane-terms").boundingBox())!;
+  await page.mouse.move(row.x + 40, row.y + row.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.1, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect(group.locator(".srow").nth(0)).toHaveAttribute("data-session", right);
+  // One split alone: no group, no count. (A split's × shows on hover, or while it's focused.)
+  await frontTab(page).locator(`.tsplit[data-split="${left}"] .tsplit-head`).hover();
+  await frontTab(page).getByRole("button", { name: `Close split: ${left}` }).click();
+  await expect(group).toHaveCount(0);
+  await expect(projectTab(page, "tabs-split").locator(".ptab-count")).toHaveCount(0);
+});

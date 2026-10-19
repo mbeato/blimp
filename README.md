@@ -121,6 +121,9 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Drag a session out of the window** to move it: let go over another blimp window and it goes into that window's tab for its folder, where you let go; let go anywhere else and it opens in a new window there. Drag it back the same way.
 - **Right-click a session** (its row, or the name on top of its split) for **Open in New Window**, and, on a split, **Open All Splits in New Window**. The session moves; this window stops showing it.
 - The files, the session list and each split are as wide as you drag the line beside them.
+- **Splits are a group you can see.** The sessions on screen come first in the list, in their left-to-right order, joined by a blue line and numbered like their splits' headers. A project tab says how many sessions it shows side by side.
+- A session another blimp window shows has a small window mark in the list. Click it to go to that window.
+- **Shift+Enter** starts a new line in a Claude session, as in VS Code (it sends what Claude reads as Option+Enter). In a plain shell it's Enter.
 - **+** (or **⌘N**) starts a new Claude session in this folder. The **+** menu also has **New shell**: a plain terminal in this folder, with your login shell and no Claude.
 - **Earlier** lists this folder's past conversations that are not running. Click one to resume it in a new session.
 - Hover a session and click the trash icon to end it. An idle Claude session ends at once; its conversation is saved, so you can resume it from **Earlier**. A session that is working or waiting, or a shell, asks first.
@@ -140,6 +143,19 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **PDF** files show all pages, with pdf.js.
 - Other binary files show "Can't show this file" and the file size.
 - The tree and the open files update when a session changes them.
+
+**Moving files between your Mac and the server**
+
+- **Download:** right-click a file (in the tree, or its tab) and pick **Download**. It goes to your Downloads folder, next to anything already there (`name 2.txt`, not over it). A folder downloads as a `.tar.gz`; double-click it on the Mac to open it.
+- **Upload:** drag files or folders from Finder onto the window. Over the tree, the folder under the pointer lights up and they go there; let go on a file, they go in its folder. Anywhere else in the window, they go in the folder you last clicked. Or right-click a folder and pick **Upload…**.
+- A name that's already there asks first: **Replace**, **Keep both** (as `name 2.txt`) or **Skip**.
+- **Drop a file on a Claude session** (a screenshot, say): it goes to `~/.blimp/uploads` on the server, and its path is typed into the prompt, so Claude can read it.
+- Transfers show at the bottom left, with their progress and **Cancel**. A finished download has **Show in Finder**.
+
+**Web pages from the server**
+
+- When a program in one of the folder's sessions starts listening on a port (a dev server on `localhost:3000`, say), blimp says "Port 3000 is open" with **Open**. The session list shows every such port under **Ports**.
+- **Open** shows the page in a tab next to your files, as if it ran on your Mac (blimp forwards the port over your SSH connection while the tab is open). The bar above it takes a path, and has **Reload** and **Open in Browser**.
 
 **When a file changes on the server**
 

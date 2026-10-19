@@ -139,6 +139,21 @@ h2 {
   font-weight: 600;
 }
 
+/* How many sessions the tab has side by side, in the split group's color. */
+.ptab-count {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: var(--group);
+  background: var(--group-bg);
+}
+
 .ptab-server {
   flex: none;
   font-size: 12px;
@@ -510,6 +525,30 @@ h2 {
   color: var(--fg);
 }
 
+/* The splits on screen are one group: the same accent on their headers and on their rows in the
+   session list, with the same numbers. */
+.tsplit.grouped .tsplit-head {
+  box-shadow: inset 0 2px 0 var(--group-dim);
+}
+
+.tsplit.grouped.focused .tsplit-head {
+  box-shadow: inset 0 2px 0 var(--group);
+}
+
+.split-num {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: var(--group);
+  background: var(--group-bg);
+}
+
 .tsplit-head:hover .tab-close,
 .tsplit.focused .tsplit-head .tab-close {
   visibility: visible;
@@ -641,6 +680,34 @@ body.dragging-session * {
 
 .srow.selected {
   background: var(--selected);
+}
+
+/* The splits on screen, first in the list: a bar joins them, as in VS Code's terminal list. */
+.sgroup {
+  position: relative;
+  margin: 2px 0 6px;
+}
+
+.sgroup::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--group);
+  opacity: 0.7;
+}
+
+/* Shown by another window: dimmer, with a window mark. A click goes there. */
+.srow.elsewhere .srow-title {
+  color: var(--fg-dim);
+}
+
+.srow-away {
+  flex: none;
+  color: var(--fg-faint);
 }
 
 /* In a split, but not the focused one. */
@@ -1576,4 +1643,208 @@ body.dragging-session * {
   box-shadow: var(--shadow);
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* ---- files from Finder, and transfers ---- */
+
+/* What a file dragged in from Finder would land in: a tree folder, the tree, or a terminal. */
+.drop-over {
+  outline: 2px solid var(--group);
+  outline-offset: -2px;
+  border-radius: 4px;
+  background: var(--group-bg);
+}
+
+.transfers {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 15;
+  width: 224px;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.transfer {
+  padding: 7px 6px 7px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+}
+
+.transfer-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.transfer-line .tab-close {
+  visibility: visible;
+}
+
+.transfer-what {
+  flex: none;
+  color: var(--fg-dim);
+}
+
+.transfer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-bar {
+  height: 3px;
+  margin: 6px 4px 0 0;
+  border-radius: 2px;
+  background: var(--hover);
+  overflow: hidden;
+}
+
+.transfer-bar > div {
+  height: 100%;
+  background: var(--group);
+  transition: width 0.1s linear;
+}
+
+.transfer-bar > div.unknown {
+  animation: slide 1.2s ease-in-out infinite;
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transfer-bar > div.unknown {
+    animation: none;
+  }
+}
+
+.transfer-note {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.transfer-note.error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.dialog.ask {
+  width: 420px;
+  padding: 18px 18px 14px;
+}
+
+.ask-text {
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+}
+
+/* ---- browser tabs on server ports ---- */
+
+.page-icon {
+  flex: none;
+  color: var(--fg-dim);
+}
+
+.page-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px 0 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-side);
+}
+
+.page-origin {
+  flex: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.page-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-input);
+  font: 12px ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Pages draw as on a white page, whatever blimp's theme. */
+.page-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.port-row .srow-time {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.port-mark {
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+/* "Port 3000 is open": bottom right of the terminal. */
+.port-notice {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px 7px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.port-notice .port-by {
+  color: var(--fg-faint);
+}
+
+.port-notice button:not(.tab-close) {
+  padding: 3px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--hover);
+}
+
+.port-notice .tab-close {
+  visibility: visible;
 }

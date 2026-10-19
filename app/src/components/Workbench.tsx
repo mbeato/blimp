@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/editor/editor.api";
-import { ApiError, type DirEntry, type FileBody } from "../lib/api";
+import { ApiError, type DirEntry, type FileBody, type Port } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import {
   baseName,
@@ -18,8 +18,12 @@ import {
   type SyncEvent,
   type Viewer,
 } from "../lib/files";
+import { closePort, openPort } from "../lib/ports";
 import { tildify } from "../lib/sessions";
+import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
+import { Dialog } from "./Dialog";
 import { ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
+import { PageView, type Page } from "./PageView";
 import { QuickOpen } from "./QuickOpen";
 import { Splitter } from "./Splitter";
 
@@ -36,6 +40,18 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 // Opens a file in a tab, at a line (and column) if given. Set by the workbench for the
 // terminal's ⌘-click.
 export type Opener = (path: string, line?: number, col?: number) => void;
+
+// Opens a server port in a browser tab (or brings its tab forward).
+export type PageOpener = (p: Pick<Port, "port" | "host">) => void;
+
+// Files dropped on the window (from Finder): into this folder, or null for the folder new files
+// go in (the one last clicked in the tree).
+export type FileDrop = (dir: string | null, items: Item[]) => void;
+
+// Right-click on a tree row or a file tab.
+type Menu = { x: number; y: number; path: string; kind: "file" | "dir" };
+// Names an upload would take that are already there: what to do with them.
+type Ask = { dir: string; names: string[]; resolve: (choice: "replace" | "keep" | "skip" | null) => void };
 
 // An open file. Text and Markdown live in a Monaco model; images and PDFs keep their bytes.
 type Doc = {
@@ -105,6 +121,8 @@ export function Workbench(props: {
   welcome?: ReactNode;
   terminal: ReactNode;
   opener: { current: Opener };
+  onDrop: { current: FileDrop };
+  pages: { current: PageOpener };
 }) {
   const { link, root } = props;
   const id = useRef(++workbenches).current;
@@ -114,6 +132,9 @@ export function Workbench(props: {
   const expanded = useRef(new Set([root]));
   const listings = useRef(new Map<string, DirEntry[]>()).current;
   const docs = useRef(new Map<string, Doc>()).current;
+  // Browser tabs on server ports, after the file tabs. Their keys ("port:<n>") share `active`
+  // with file paths, which are absolute and so never look like one.
+  const pages = useRef(new Map<string, Page>()).current;
   // Saves not finished yet (sent, or waiting for the one before). Models are disposed only after
   // these finish, so leaving a project mid-save still sends what was typed meanwhile.
   const pending = useRef(new Set<Promise<void>>()).current;
@@ -126,6 +147,8 @@ export function Workbench(props: {
   // The folder new files and folders go in: the last folder clicked, or the clicked file's folder.
   const [target, setTarget] = useState(root);
   const [creating, setCreating] = useState<Creating | null>(null);
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
   const editorBox = useRef<HTMLDivElement>(null);
@@ -192,6 +215,40 @@ export function Workbench(props: {
       setTarget(path);
     } else openFile(path);
   };
+
+  // ---- uploads ----
+
+  // Into dir (else the folder new files go in). Names already there: one question for all of
+  // them (Replace, Keep both, Skip); the rest go up as new.
+  const uploadInto: FileDrop = async (dir, items) => {
+    const api = link.api;
+    if (!api || !items.length) return;
+    const into = dir ?? (listings.has(target) || target === root ? target : root);
+    let taken: Set<string>;
+    try {
+      taken = new Set((await api.fsList(into)).entries.map((e) => e.name));
+    } catch {
+      return;
+    }
+    const clash = items.filter((i) => taken.has(i.name)).map((i) => i.name);
+    const choice = clash.length ? await new Promise<"replace" | "keep" | "skip" | null>((resolve) => setAsk({ dir: into, names: clash, resolve })) : null;
+    setAsk(null);
+    if (clash.length && !choice) return;
+    for (const item of items) {
+      let as = item.name;
+      let mode: "new" | "replace" = "new";
+      if (taken.has(item.name)) {
+        if (choice === "skip") continue;
+        if (choice === "replace") mode = "replace";
+        else as = freeName(item.name, taken);
+      }
+      taken.add(as);
+      await upload(link, into, item, mode, as);
+    }
+    expand(into);
+    await refreshDir(into);
+  };
+  props.onDrop.current = uploadInto;
 
   // ---- open files ----
 
@@ -412,6 +469,38 @@ export function Workbench(props: {
     rerender();
   };
 
+  // ---- browser tabs ----
+
+  const openPage: PageOpener = (p) => {
+    const key = `port:${p.port}`;
+    if (!pages.has(key)) {
+      const page: Page = { key, port: p.port, host: p.host, base: null, path: "/", error: "", nonce: 0 };
+      pages.set(key, page);
+      openPort(link, p).then(
+        (base) => ((page.base = base), rerender()),
+        (e) => ((page.error = errorText(e)), rerender()),
+      );
+    }
+    setActive(key);
+    rerender();
+  };
+  props.pages.current = openPage;
+
+  const closePage = (key: string) => {
+    const page = pages.get(key);
+    if (!page) return;
+    closePort(link, page);
+    const order = [...docs.keys(), ...pages.keys()];
+    pages.delete(key);
+    const rest = order.filter((k) => k !== key);
+    const i = order.indexOf(key);
+    setActiveState((a) => (a === key ? (rest[Math.min(i, rest.length - 1)] ?? null) : a));
+    rerender();
+  };
+  // A file tab or a browser tab.
+  const closeTab = (key: string) => (pages.has(key) ? closePage(key) : void closeDoc(key));
+  useEffect(() => () => pages.forEach((p) => closePort(link, p)), []);
+
   // ---- live updates ----
 
   const onFs = useRef((_: string[]) => {});
@@ -515,7 +604,7 @@ export function Workbench(props: {
       if (activeDoc) void save(activeDoc, { explicit: true });
     } else if (k === "w") {
       if (quick) setQuick(false);
-      else if (active) void closeDoc(active);
+      else if (active) closeTab(active);
     } else return;
     e.preventDefault();
   };
@@ -574,6 +663,12 @@ export function Workbench(props: {
               role="treeitem"
               aria-expanded={e.kind === "dir" ? open : undefined}
               title={e.name}
+              data-path={path}
+              data-kind={e.kind === "dir" ? "dir" : "file"}
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                setMenu({ x: ev.clientX, y: ev.clientY, path, kind: e.kind === "dir" ? "dir" : "file" });
+              }}
               onClick={() => {
                 if (e.kind === "dir") toggleDir(path);
                 else {
@@ -596,7 +691,7 @@ export function Workbench(props: {
   const closingDoc = closing ? docs.get(closing) : undefined;
   const showTerm = props.showTerm;
   // With the terminal hidden and no file open, the editor area shows how to open one.
-  const showEditor = docs.size > 0 || !!props.welcome || !showTerm;
+  const showEditor = docs.size + pages.size > 0 || !!props.welcome || !showTerm;
   const treeOpen = props.showFiles;
 
   return (
@@ -633,14 +728,25 @@ export function Workbench(props: {
             </svg>
           </button>
         </div>
-        <div className="tree" role="tree" onClick={(e) => e.target === e.currentTarget && setTarget(root)}>
+        <div
+          className="tree"
+          role="tree"
+          data-path={root}
+          data-kind="dir"
+          onClick={(e) => e.target === e.currentTarget && setTarget(root)}
+          onContextMenu={(e) => {
+            if (e.target !== e.currentTarget) return;
+            e.preventDefault();
+            setMenu({ x: e.clientX, y: e.clientY, path: root, kind: "dir" });
+          }}
+        >
           {rootError ? <p className="view-note error">{rootError}</p> : renderDir(root, 0)}
         </div>
       </aside>
       {treeOpen && <Splitter label="Resize files" onDrag={(x) => setTreeWidth(clamp(x - box.current!.getBoundingClientRect().left, 160, 520))} />}
       <div className="wb-right" ref={right}>
         <div className="wb-editor" hidden={!showEditor} style={showTerm ? { height: `${editorShare * 100}%` } : { flex: 1 }}>
-          {docs.size > 0 && (
+          {docs.size + pages.size > 0 && (
             <div className="ftabs-bar">
               <div className="ftabs" role="tablist" ref={strip}>
                 {[...docs.values()].map((d) => (
@@ -652,6 +758,10 @@ export function Workbench(props: {
                     title={tildify(d.path, link.home)}
                     onMouseDown={(e) => e.button === 0 && setActive(d.path)}
                     onAuxClick={(e) => e.button === 1 && void closeDoc(d.path)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setMenu({ x: e.clientX, y: e.clientY, path: d.path, kind: "file" });
+                    }}
                   >
                     <span className="tab-title">{d.name}</span>
                     <button
@@ -661,6 +771,26 @@ export function Workbench(props: {
                       onClick={() => void closeDoc(d.path)}
                     >
                       {d.sync.dirty ? "●" : "×"}
+                    </button>
+                  </div>
+                ))}
+                {[...pages.values()].map((pg) => (
+                  <div
+                    key={pg.key}
+                    role="tab"
+                    aria-selected={pg.key === active}
+                    className={"tab page-tab" + (pg.key === active ? " active" : "")}
+                    title={`localhost:${pg.port} on the server`}
+                    onMouseDown={(e) => e.button === 0 && setActive(pg.key)}
+                    onAuxClick={(e) => e.button === 1 && closePage(pg.key)}
+                  >
+                    <svg className="page-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+                      <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" />
+                      <path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" fill="none" stroke="currentColor" />
+                    </svg>
+                    <span className="tab-title">localhost:{pg.port}</span>
+                    <button className="tab-close" aria-label={`Close localhost:${pg.port}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => closePage(pg.key)}>
+                      ×
                     </button>
                   </div>
                 ))}
@@ -680,14 +810,23 @@ export function Workbench(props: {
               )}
             </div>
           )}
-          {docs.size === 0 && props.welcome}
-          {docs.size === 0 && !props.welcome && (
+          {docs.size + pages.size === 0 && props.welcome}
+          {docs.size + pages.size === 0 && !props.welcome && (
             <div className="empty">
               No file open
               <div className="empty-sub">⌘P to open one, or pick it in the files on the left</div>
             </div>
           )}
-          <div className="viewer" hidden={docs.size === 0}>
+          {[...pages.values()].map((pg) => (
+            <div key={pg.key} className="viewer" hidden={pg.key !== active}>
+              <PageView
+                page={pg}
+                onGo={(path) => ((pg.path = path), pg.nonce++, rerender())}
+                onReload={() => (pg.nonce++, rerender())}
+              />
+            </div>
+          ))}
+          <div className="viewer" hidden={docs.size === 0 || !!(active && pages.has(active))}>
             {closingDoc && (
               <div className="fbar" role="alert">
                 <span>{closingDoc.name} isn't saved.</span>
@@ -768,6 +907,65 @@ export function Workbench(props: {
           {props.terminal}
         </div>
       </div>
+      {menu && (
+        <>
+          <div
+            className="menu-scrim"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div className="menu context-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 240), top: Math.min(menu.y, innerHeight - 90) }} onKeyDown={(e) => e.key === "Escape" && setMenu(null)}>
+            <button
+              role="menuitem"
+              autoFocus
+              onClick={() => {
+                setMenu(null);
+                void download(link, menu.path, menu.kind === "dir");
+              }}
+            >
+              {menu.kind === "dir" ? "Download as .tar.gz" : "Download"}
+            </button>
+            {menu.kind === "dir" && (
+              <button
+                role="menuitem"
+                onClick={async () => {
+                  setMenu(null);
+                  setTarget(menu.path);
+                  void uploadInto(menu.path, await pickFiles());
+                }}
+              >
+                Upload…
+              </button>
+            )}
+          </div>
+        </>
+      )}
+      {ask && (
+        <Dialog className="ask" onClose={() => ask.resolve(null)}>
+          <p className="ask-text">
+            {ask.names.length === 1 ? (
+              <>
+                <b>{ask.names[0]}</b> is already in {baseName(ask.dir) || ask.dir}.
+              </>
+            ) : (
+              <>
+                {ask.names.length} of these are already in {baseName(ask.dir) || ask.dir}: {ask.names.join(", ")}.
+              </>
+            )}
+          </p>
+          <div className="dialog-actions">
+            <button onClick={() => ask.resolve(null)}>Cancel</button>
+            <button onClick={() => ask.resolve("skip")}>Skip</button>
+            <button onClick={() => ask.resolve("keep")}>Keep both</button>
+            <button className="primary" autoFocus onClick={() => ask.resolve("replace")}>
+              Replace
+            </button>
+          </div>
+        </Dialog>
+      )}
       {quick && (
         <QuickOpen
           api={link.api}

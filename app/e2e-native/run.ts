@@ -20,6 +20,7 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, copyFileSync, openSync } from "node:fs";
 import { rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -152,11 +153,13 @@ try {
   await startSession("blimptest-a", ["bash", "--norc", "--noprofile"]);
   await sleep(1100);
   await startSession("blimptest-b", ["bash", "--norc", "--noprofile"]);
+  // `zmx run` can hang if bash hasn't drawn its prompt yet, so wait for the prompt first.
+  await until(10_000, () => zmx("history", "blimptest-a").includes("$"));
   zmx("run", "blimptest-a", "echo", "pre-existing-screen");
 
   const dlog = openSync(join(tmp, "driver.log"), "a");
   driver = spawn("tauri-driver", ["--port", String(PORT)], {
-    env: { ...zenv, HOME: appHome, BLIMP_REMOTE_DIR: tmp, BLIMPD_SOCKET: "" },
+    env: { ...zenv, HOME: appHome, BLIMP_REMOTE_DIR: tmp, BLIMPD_SOCKET: "", BLIMP_TEST_UPLOADS: join(tmp, "to-upload") },
     stdio: ["ignore", dlog, dlog],
   });
   await until(10_000, () => fetch(`http://127.0.0.1:${PORT}/status`).then((r) => r.ok));
@@ -242,6 +245,66 @@ try {
     workers: p3.workers,
   });
   await shot("06-pdf");
+
+  // 4a. Transfers through Rust (transfer.rs): download a file and a folder to ~/Downloads,
+  // upload a folder; a file that wasn't dropped or picked isn't read.
+  mkdirSync(join(proj, "sub"), { recursive: true });
+  writeFileSync(join(proj, "sub", "in-sub.txt"), "sub file\n");
+  mkdirSync(join(tmp, "to-upload", "pack", "deep"), { recursive: true });
+  writeFileSync(join(tmp, "to-upload", "pack", "deep", "up.txt"), "uploaded\n");
+  const tauri = (cmd: string, args: object) =>
+    jsAsync(`return await window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)}).then(v => JSON.stringify(v), e => 'ERR ' + e)`);
+  const server = "localhost";
+  const dlFile = JSON.parse(await tauri("download", { server, path: join(proj, "README.md"), id: 9001 }));
+  const dlDir = JSON.parse(await tauri("download", { server, path: join(proj, "sub"), id: 9002 }));
+  const dlAgain = JSON.parse(await tauri("download", { server, path: join(proj, "README.md"), id: 9003 }));
+  const tarList = existsSync(dlDir) ? execFileSync("tar", ["-tzf", dlDir], { encoding: "utf8" }) : "";
+  record("download: a file and a folder (.tar.gz) to ~/Downloads, never over an earlier one", readFileSync(dlFile, "utf8").startsWith("# Native heading") && tarList.includes("sub/in-sub.txt") && dlAgain !== dlFile && dlAgain.endsWith("README 2.md"), {
+    dlFile,
+    dlDir,
+    dlAgain,
+    tarList,
+  });
+  const upOk = await tauri("upload", { server, local: join(tmp, "to-upload", "pack"), remoteDir: proj, name: "pack", mode: "new", id: 9004 });
+  const upNo = await tauri("upload", { server, local: join(tmp, "blimpd.log"), remoteDir: proj, name: "log", mode: "new", id: 9005 });
+  record("upload: a dropped folder goes up whole; a file nobody dropped or picked is refused", upOk === "1" && readFileSync(join(proj, "pack", "deep", "up.txt"), "utf8") === "uploaded\n" && upNo.startsWith("ERR") && !existsSync(join(proj, "log")), {
+    upOk,
+    upNo,
+  });
+
+  // 4c'. A session's web server in a browser tab, through a port forward (forward_port), shown
+  // in the app's WebKit under its CSP.
+  const webPort = await new Promise<number>((resolve) => {
+    const srv = createServer().listen(0, "127.0.0.1", () => {
+      const p = (srv.address() as { port: number }).port;
+      srv.close(() => resolve(p));
+    });
+  });
+  await startSession("blimptest-web", ["bun", "-e", `'Bun.serve({ hostname: "127.0.0.1", port: ${webPort}, fetch: () => new Response("<h1>native page</h1>", { headers: { "content-type": "text/html" } }) }); setInterval(() => {}, 1e9)'`]);
+  const portRow = await until(15_000, () => js(`return !!document.querySelector('.wb:not([hidden]) .port-row')`));
+  if (portRow) await click(".wb:not([hidden]) .port-row");
+  const frameEl = await until(15_000, async () => {
+    try {
+      return await find(".wb:not([hidden]) .viewer:not([hidden]) iframe.page-frame");
+    } catch {
+      return undefined;
+    }
+  });
+  let pageText = "";
+  if (frameEl) {
+    await sleep(1500);
+    await wd("POST", "/frame", { id: { "element-6066-11e4-a52e-4f735466cecf": frameEl } });
+    pageText = await until(10_000, () => js("return document.querySelector('h1')?.textContent")) ?? "";
+    await wd("POST", "/frame/parent", {});
+  }
+  const forwards = execFileSync("ps", ["-eo", "args"], { encoding: "utf8" }).split("\n").filter((l) => l.includes(`:127.0.0.1:${webPort}`));
+  record("a session's port opens in a browser tab, through an ssh forward", !!portRow && pageText === "native page" && forwards.length === 1, { portRow, pageText, forwards });
+  await shot("05b-browser-tab");
+  // Closing the tab closes the forward.
+  await click(".wb:not([hidden]) .ftabs .page-tab .tab-close").catch(() => {});
+  const fwdGone = await until(5000, () => !execFileSync("ps", ["-eo", "args"], { encoding: "utf8" }).includes(`:127.0.0.1:${webPort}`));
+  record("closing the browser tab closes its forward", !!fwdGone, { fwdGone });
+  zmx("kill", "blimptest-web");
 
   // 4b. The show/hide buttons at the top right.
   const hiddenNow = () => js("const w = document.querySelector('.wb:not([hidden])'); return ['.wb-tree', '.wb-term', '.slist'].map(c => w.querySelector(c).offsetWidth === 0)");
@@ -360,6 +423,22 @@ try {
     await wd("POST", "/window", { handle: first });
     await click('.wb:not([hidden]) .tsplit[data-split="blimptest-b"] .tab-close').catch(() => {});
     await wd("POST", "/window", { handle: second });
+
+    // "In another window": this window says it shows b (set_shown); the first window marks b's
+    // row, and a click there brings this window forward with b shown (focus_session).
+    await jsAsync(`return await window.__TAURI_INTERNALS__.invoke('set_shown', { sessions: ['localhost/blimptest-b'] }).then(() => 'ok', e => 'ERR ' + e)`);
+    await wd("POST", "/window", { handle: first });
+    const marked = await until(5000, () => js(`return !!document.querySelector('.wb:not([hidden]) .srow.elsewhere[data-session="blimptest-b"]')`));
+    await click('.wb:not([hidden]) .srow[data-session="blimptest-b"] .srow-main');
+    await wd("POST", "/window", { handle: second });
+    const there = await until(5000, async () => {
+      const l = JSON.parse((await js("return new URLSearchParams(location.search).get('layout')")) ?? "null");
+      return l && l.tabs[l.active]?.panes?.includes("blimptest-b") ? l.tabs.map((t: any) => t.dir) : undefined;
+    });
+    record("a session another window shows is marked; a click on it goes to that window", !!marked && !!there, { marked: !!marked, secondWindowTabs: there });
+    // Close that tab again before this window goes: step 6 needs b on no window's screen.
+    await click(".ptab.active .tab-close").catch(() => {});
+    await until(3000, () => js("return document.querySelectorAll('.ptab').length === 1"));
     await wd("DELETE", "/window");
     await wd("POST", "/window", { handle: first });
   } else record("⌘⇧N opens a second window on Home, sharing the tunnel", false, await wd("GET", "/window/handles"));
@@ -378,8 +457,10 @@ try {
   const p5 = await probe();
   record("no CSP violations during the run", p5.csp.length === 0, p5.csp);
   record("no uncaught errors / rejections", p5.errors.length === 0, p5.errors);
-  record("no failed IPC calls", !p5.invokes.some((i: any) => i.ok === false), {
-    failed: p5.invokes.filter((i: any) => i.ok === false),
+  // Besides 4a's upload of a file nobody dropped, which must fail.
+  const failed = p5.invokes.filter((i: any) => i.ok === false && !(i.cmd === "upload" && /Drop it on the window/.test(i.err ?? "")));
+  record("no failed IPC calls", failed.length === 0, {
+    failed,
     called: [...new Set(p5.invokes.map((i: any) => i.cmd))],
   });
   // xterm logs this when a render task runs long (software GL under Xvfb); it is not an error.

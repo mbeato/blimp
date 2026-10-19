@@ -5,7 +5,7 @@
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Api, type Conn, type Session } from "./api";
+import { Api, type Conn, type Port, type Session } from "./api";
 import { EventsSocket } from "./events";
 
 export type Server = { host: string; user?: string; port?: number };
@@ -98,6 +98,8 @@ export class ServerLink {
   status: LinkStatus = "connecting";
   error = "";
   sessions: Session[] | null = null; // null until the first list arrives
+  ports: Port[] = [];
+  portsKnown = false; // the first port list has arrived
   conn: Conn | null = null;
   api: Api | null = null;
   private events: EventsSocket | null = null;
@@ -142,6 +144,11 @@ export class ServerLink {
           this.attempt = 0;
           this.error = "";
           this.set("connected");
+        },
+        onPorts: (p) => {
+          this.ports = p;
+          this.portsKnown = true;
+          this.onChange(this);
         },
         onFs: (paths) => this.fsListeners.forEach((f) => f(paths)),
         onClose: () => this.retry("Lost the connection to blimpd."),

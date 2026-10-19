@@ -23,18 +23,32 @@ struct Inner {
     viewing: HashMap<String, Vec<String>>,
     /// Waits already announced: "<server key>/<session>/<wait start>".
     noticed: HashSet<String>,
+    /// Window label -> the "<server key>/<session>" of every split in every one of its tabs, kept
+    /// while the window is in the background too, so other windows can say "in another window".
+    shown: HashMap<String, Vec<String>>,
     /// Window labels, the one focused most recently last: where windows overlap, a drop goes
     /// to the one most likely on top.
     focus_order: Vec<String>,
 }
 
 impl Windows {
-    /// A window closed: forget what it showed.
-    pub fn forget(&self, label: &str) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.projects.remove(label);
-        inner.viewing.remove(label);
-        inner.focus_order.retain(|l| l != label);
+    /// A window closed: forget what it showed, and tell the others. The window used most
+    /// recently of the ones left saves its tabs ("remember-layout"), so the next launch reopens
+    /// those, not the closed window's.
+    pub fn forget(&self, app: &AppHandle, label: &str) {
+        let (shown, next) = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.projects.remove(label);
+            inner.viewing.remove(label);
+            inner.shown.remove(label);
+            inner.focus_order.retain(|l| l != label);
+            (inner.shown.clone(), inner.focus_order.last().cloned())
+        };
+        let _ = app.emit("shown", shown);
+        let next = next.or_else(|| app.webview_windows().into_keys().find(|l| l != label));
+        if let Some(l) = next {
+            let _ = app.emit_to(l.as_str(), "remember-layout", ());
+        }
     }
 
     /// A window got focus.
@@ -140,6 +154,60 @@ pub fn focus_project(
     let _ = w.set_focus();
     w.emit_to(w.label(), "select-session", init).map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Every session this window has in a split, in any tab. Every window gets the new map ("shown"),
+/// and so does the caller, as the return value.
+#[tauri::command]
+pub fn set_shown(
+    app: AppHandle,
+    window: WebviewWindow,
+    windows: State<'_, Windows>,
+    sessions: Vec<String>,
+) -> HashMap<String, Vec<String>> {
+    let shown = {
+        let mut inner = windows.inner.lock().unwrap();
+        inner.shown.insert(window.label().to_string(), sessions);
+        inner.shown.clone()
+    };
+    let _ = app.emit("shown", shown.clone());
+    shown
+}
+
+/// A click on a session another window shows: that window comes forward and shows it
+/// ("select-session" with `init`). false: no other window shows it.
+#[tauri::command]
+pub fn focus_session(
+    app: AppHandle,
+    window: WebviewWindow,
+    windows: State<'_, Windows>,
+    session: String,
+    init: String,
+) -> Result<bool, String> {
+    let label = {
+        let inner = windows.inner.lock().unwrap();
+        inner.shown.iter().find(|(k, v)| *k != window.label() && v.contains(&session)).map(|(k, _)| k.clone())
+    };
+    let Some(w) = label.and_then(|l| app.get_webview_window(&l)) else {
+        return Ok(false);
+    };
+    let _ = w.unminimize();
+    let _ = w.set_focus();
+    w.emit_to(w.label(), "select-session", init).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// This window took a session another window showed (dragged it into a split here): those
+/// windows stop showing it ("release-session"), so it's never on screen twice.
+#[tauri::command]
+pub fn take_session(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, session: String) {
+    let labels: Vec<String> = {
+        let inner = windows.inner.lock().unwrap();
+        inner.shown.iter().filter(|(k, v)| *k != window.label() && v.contains(&session)).map(|(k, _)| k.clone()).collect()
+    };
+    for l in labels {
+        let _ = app.emit_to(l.as_str(), "release-session", session.clone());
+    }
 }
 
 /// What this window shows while it has focus (empty when it loses focus).

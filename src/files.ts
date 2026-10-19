@@ -1,17 +1,19 @@
-// Files under the home folder: list, read, write, and the file list for quick open.
+// Files under the home folder: list, read, write, download, upload, and the file list for quick open.
 // Every path is checked after following symlinks, so a link can't lead outside home.
 
-import { readdir } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import {
   chmodSync,
   type Dirent,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readdirSync,
   realpathSync,
   renameSync,
   rmSync,
+  statfsSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -204,4 +206,91 @@ async function walk(root: string): Promise<string[]> {
     }
   }
   return out.sort();
+}
+
+const attachment = (name: string) => `attachment; filename*=UTF-8''${encodeURIComponent(name)}`;
+
+// A file as it is, of any size (streamed), or a folder as <name>.tar.gz made on the fly. tar
+// stores symlinks as links and never follows them, so nothing outside home is read.
+// signal: the request's, so a cancelled download stops tar.
+export function download(path: string, signal: AbortSignal): Response {
+  const st = statSync(path);
+  const name = basename(path);
+  if (st.isDirectory()) {
+    const tar = Bun.spawn(["tar", "-czf", "-", "-C", dirname(path), "--", name], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+    signal.addEventListener("abort", () => tar.kill());
+    // The status went out with the first bytes, so a tar that fails part way (2: a file it
+    // couldn't read) breaks the stream instead, and the app shows the download as failed rather
+    // than saving an archive with files missing. (1 is "a file changed while read": kept.)
+    const out = tar.stdout.getReader();
+    const body = new ReadableStream<Uint8Array>({
+      async pull(c) {
+        const { done, value } = await out.read();
+        if (!done) return c.enqueue(value);
+        const code = await tar.exited;
+        if (code > 1) c.error(new Error(`tar exited with ${code}`));
+        else c.close();
+      },
+      cancel: () => void tar.kill(),
+    });
+    return new Response(body, { headers: { "Content-Type": "application/gzip", "Content-Disposition": attachment(`${name}.tar.gz`) } });
+  }
+  if (!st.isFile()) throw new HttpError(400, "not a file or a folder");
+  return new Response(Bun.file(path), {
+    headers: { "Content-Type": "application/octet-stream", "Content-Length": String(st.size), "Content-Disposition": attachment(name) },
+  });
+}
+
+export const MAX_UPLOAD = 2 * 1024 ** 3;
+
+// Streams an upload to a temp file beside the target, then puts it in place: mode "new" only if
+// the name is free (409 otherwise, also if it was taken meanwhile), "replace" over a file of
+// that name. Never over a folder. At most MAX_UPLOAD bytes (413).
+export async function upload(path: string, body: ReadableStream<Uint8Array> | null, mode: string, length: number): Promise<{ size: number; mtime: number }> {
+  if (mode !== "new" && mode !== "replace") throw new HttpError(400, "mode must be new or replace");
+  // A replaced file keeps its permissions (a 600 key, a runnable script).
+  let keepMode: number | undefined;
+  if (lstatExists(path)) {
+    const st = statSync(path);
+    if (st.isDirectory()) throw new HttpError(409, "a folder has that name");
+    if (mode === "new") throw new HttpError(409, "already exists");
+    keepMode = st.mode & 0o7777;
+  }
+  if (length > MAX_UPLOAD) throw new HttpError(413, "over 2 GB");
+  try {
+    const fs = statfsSync(dirname(path));
+    if (length > fs.bavail * fs.bsize) throw new HttpError(507, "not enough free disk space on the server");
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+  }
+  const tmp = join(dirname(path), `.${basename(path)}.blimp-upload-${process.pid}-${Date.now()}`);
+  let size = 0;
+  try {
+    const fh = await open(tmp, "wx", 0o666);
+    try {
+      if (body)
+        for await (const chunk of body) {
+          size += chunk.length;
+          if (size > MAX_UPLOAD) throw new HttpError(413, "over 2 GB");
+          await fh.write(chunk);
+        }
+      if (keepMode !== undefined) await fh.chmod(keepMode);
+    } finally {
+      await fh.close();
+    }
+    if (mode === "new") {
+      // A hard link fails if the name was taken meanwhile; rename would replace it.
+      try {
+        linkSync(tmp, path);
+      } catch (e: any) {
+        if (e?.code === "EEXIST") throw new HttpError(409, "already exists");
+        throw e;
+      }
+      rmSync(tmp, { force: true });
+    } else renameSync(tmp, path);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+  return { size, mtime: ms(statSync(path).mtimeMs) };
 }

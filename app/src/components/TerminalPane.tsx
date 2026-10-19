@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import type { Conversation, Session } from "../lib/api";
+import type { Conversation, Port, Session } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
+import { freeName, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, lastActivity, pickSession } from "../lib/sessions";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
@@ -9,8 +10,18 @@ import { TerminalView } from "./TerminalView";
 
 // Things the window reaches into the pane for: ⌘N, and a session dropped here from another
 // window at (x, y) in the page.
-export type PaneActions = { newClaude: () => void; dropIn: (name: string, x: number, y: number) => void };
-export const noActions: PaneActions = { newClaude: () => {}, dropIn: () => {} };
+// release: another window took the session into one of its splits, so stop showing it here.
+// dropFiles: files from Finder let go on a session's terminal.
+export type PaneActions = {
+  newClaude: () => void;
+  dropIn: (name: string, x: number, y: number) => void;
+  release: (name: string) => void;
+  dropFiles: (name: string, items: Item[]) => void;
+};
+export const noActions: PaneActions = { newClaude: () => {}, dropIn: () => {}, release: () => {}, dropFiles: () => {} };
+
+// Where files dropped on a terminal go on the server.
+const UPLOADS = ".blimp/uploads";
 
 const STATE_LABEL: Record<Session["state"], string> = {
   working: "Working",
@@ -44,6 +55,8 @@ function useNow(ms: number) {
 // front: this tab is the one in front. showList: the list's show/hide button.
 // onMoveOut: sessions leaving for another window (right-click > Open in New Window, or a drag let
 // go outside the window at a point on screen); the pane then stops showing them.
+// elsewhere: another window shows the session; a click on its row goes there (onFocusElsewhere,
+// false if that window has gone), and dragging it into a split here takes it (onTake).
 export function TerminalPane(props: {
   link: ServerLink;
   dir: string;
@@ -54,6 +67,11 @@ export function TerminalPane(props: {
   onOpenPath: (path: string, line?: number, col?: number) => void;
   onNotice: (msg: string) => void;
   onMoveOut: (names: string[], at?: { x: number; y: number }) => void;
+  elsewhere: (name: string) => boolean;
+  onFocusElsewhere: (name: string) => Promise<boolean>;
+  onTake: (name: string) => void;
+  // A port a session here listens on: open it in a browser tab.
+  onOpenPort: (p: Port) => void;
   actions: { current: PaneActions };
 }) {
   const { link, dir, panes: p, onPanes } = props;
@@ -77,6 +95,7 @@ export function TerminalPane(props: {
   // Moved to another window: not picked to fill an empty terminal here (the user can still
   // click or drag them back).
   const away = useRef(new Set<string>()).current;
+  const pastes = useRef(new Map<string, (text: string) => void>()).current;
   // Divider positions, for the splits they were dragged for (another set of splits: equal again).
   const [sizes, setSizes] = useState<{ names: string; shares: number[] }>({ names: "", shares: [] });
   const terms = useRef<HTMLDivElement>(null);
@@ -159,6 +178,28 @@ export function TerminalPane(props: {
       const t = targetAt(x, y);
       onPanes((q) => (t ? dropAt(q, name, t.at, t.side) : q.panes.length ? dropAt(q, name, q.panes.length - 1, "right") : show(q, name)));
     },
+    release: (name) => {
+      away.add(name);
+      closeSplit(name);
+    },
+    // Uploads them to ~/.blimp/uploads under plain names, then types their paths in, as a paste:
+    // Claude reads a file (a screenshot, say) from a path in the prompt.
+    dropFiles: async (name, items) => {
+      const api = link.api;
+      if (!api || !link.home || !items.length) return;
+      const dir = `${link.home}/${UPLOADS}`;
+      // Each folder of the path (409 once it's there).
+      for (let i = 1; i <= UPLOADS.split("/").length; i++) await api.fsMkdir(`${link.home}/${UPLOADS.split("/").slice(0, i).join("/")}`).catch(() => {});
+      const taken = new Set((await api.fsList(dir).catch(() => ({ entries: [] }))).entries.map((e) => e.name));
+      const paths: string[] = [];
+      for (const item of items) {
+        const as = freeName(plainName(item.name), taken);
+        taken.add(as);
+        const path = await upload(link, dir, item, "new", as);
+        if (path) paths.push(path);
+      }
+      if (paths.length) pastes.get(name)?.(paths.join(" ") + " ");
+    },
   };
 
   const showHere = (name: string) => {
@@ -191,6 +232,26 @@ export function TerminalPane(props: {
   const trash = (s: Session) => (s.kind === "claude" && s.state === "done" ? void end(s) : setConfirm(s.name));
 
   const past = convs ? earlier(convs, running) : [];
+
+  // Ports the folder's sessions listen on. One that opens while the pane is up is announced
+  // (not the ones already open when it first loads), until opened, closed or 20 s pass.
+  const ports = link.ports.filter((x) => running.some((s) => s.name === x.session));
+  const seenPorts = useRef<Set<number> | null>(null);
+  const [fresh, setFresh] = useState<Port | null>(null);
+  const portsKey = ports.map((x) => x.port).join(",");
+  useEffect(() => {
+    if (!loaded || !link.portsKnown) return;
+    if (!seenPorts.current) return void (seenPorts.current = new Set(ports.map((x) => x.port)));
+    const added = ports.find((x) => !seenPorts.current!.has(x.port));
+    for (const x of ports) seenPorts.current.add(x.port);
+    if (added) setFresh(added);
+    else if (fresh && !ports.some((x) => x.port === fresh.port)) setFresh(null);
+  }, [portsKey, loaded, link.portsKnown]);
+  useEffect(() => {
+    if (!fresh) return;
+    const t = setTimeout(() => setFresh(null), 20_000);
+    return () => clearTimeout(t);
+  }, [fresh]);
 
   const focusOn = (name: string) =>
     onPanes((q) => {
@@ -248,6 +309,7 @@ export function TerminalPane(props: {
       if (t) {
         away.delete(s.name);
         onPanes((q) => dropAt(q, s.name, t.at, t.side));
+        props.onTake(s.name);
       }
     };
     const key = (ev: KeyboardEvent) => {
@@ -280,6 +342,66 @@ export function TerminalPane(props: {
   const half = t && p.panes.length ? shares[t.at] / 2 : 1;
   const overlay = t && { left: (p.panes.length ? lefts[t.at] + (t.side === "right" ? half : 0) : 0) * 100, width: half * 100 };
 
+  // The splits on screen come first in the list, in their left-to-right order, joined as a group
+  // and numbered as their headers are. (One split alone stays where it is.)
+  const group = split ? p.panes.map(sessionOf).filter((x): x is Session => !!x) : [];
+  const rest = running.filter((s) => !group.includes(s));
+  const row = (s: Session, num?: number) => {
+    const far = !p.panes.includes(s.name) && props.elsewhere(s.name);
+    return (
+      <div
+        key={s.name}
+        data-session={s.name}
+        className={
+          "srow" +
+          (s.name === p.panes[p.focus] ? " selected" : p.panes.includes(s.name) ? " shown" : "") +
+          (link.status !== "connected" ? " stale" : "") +
+          (drag?.name === s.name ? " dragging" : "") +
+          (far ? " elsewhere" : "")
+        }
+        title={`${s.kind === "shell" ? "Shell" : s.title}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}${far ? "\nIn another window: click to go there" : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
+        onContextMenu={(e) => openMenu(e, s.name)}
+      >
+        {confirm === s.name ? (
+          <div className="srow-confirm">
+            <span>End {s.kind === "shell" ? "this shell" : "this session"}?</span>
+            <button className="danger" onClick={() => void end(s)}>
+              End
+            </button>
+            <button onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        ) : (
+          <>
+            <button
+              className="srow-main"
+              onPointerDown={(e) => startDrag(e, s)}
+              onClick={async () => {
+                if (dragged.current) return void (dragged.current = false);
+                if (far && (await props.onFocusElsewhere(s.name))) return;
+                showHere(s.name);
+              }}
+            >
+              <Mark s={s} />
+              {num && <span className="split-num">{num}</span>}
+              <span className="srow-title">{s.kind === "shell" ? s.name : s.title}</span>
+              {far && (
+                <svg className="srow-away" width="14" height="14" viewBox="0 0 16 16" aria-label="In another window">
+                  <path d="M5.5 2.5h8v7h-8zM2.5 6.5v7h8" fill="none" stroke="currentColor" />
+                </svg>
+              )}
+              <span className="srow-time">{relTime(lastActivity(s), now)}</span>
+            </button>
+            <button className="srow-trash" title="End session" aria-label={`End ${s.kind === "shell" ? s.name : s.title}`} onClick={() => trash(s)}>
+              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+                <path d="M2.5 4.5h11M6 4.5V2.5h4v2M4 4.5l.7 9h6.6l.7-9M6.8 7v4.5M9.2 7v4.5" fill="none" stroke="currentColor" />
+              </svg>
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="tpane" ref={box}>
       <div className="tpane-terms" ref={terms}>
@@ -290,7 +412,7 @@ export function TerminalPane(props: {
           return (
             <div
               key={name}
-              className={"tsplit" + (split && i === p.focus ? " focused" : "")}
+              className={"tsplit" + (split ? " grouped" : "") + (split && i === p.focus ? " focused" : "")}
               data-split={name}
               hidden={i < 0}
               style={i >= 0 ? { left: `${lefts[i] * 100}%`, width: `${shares[i] * 100}%` } : undefined}
@@ -307,6 +429,7 @@ export function TerminalPane(props: {
                   }}
                   onContextMenu={(e) => openMenu(e, name)}
                 >
+                  <span className="split-num">{i + 1}</span>
                   <span className="tsplit-title">{titleOf(name)}</span>
                   <button className="tab-close" title="Close split (the session keeps running)" aria-label={`Close split: ${titleOf(name)}`} onClick={() => closeSplit(name)}>
                     ×
@@ -321,6 +444,7 @@ export function TerminalPane(props: {
                   visible={i >= 0}
                   focused={props.front && i === p.focus}
                   onOpenPath={props.onOpenPath}
+                  pastes={pastes}
                   onClose={() => {
                     setMounted((m) => m.filter((n) => n !== name));
                     closeSplit(name);
@@ -342,6 +466,24 @@ export function TerminalPane(props: {
           </div>
         ))}
         {overlay && <div className="drop-zone" style={{ left: `${overlay.left}%`, width: `${overlay.width}%` }} />}
+        {fresh && props.front && (
+          <div className="port-notice" role="status">
+            <span>
+              Port {fresh.port} is open <span className="port-by">({fresh.command} in {titleOf(fresh.session)})</span>
+            </span>
+            <button
+              onClick={() => {
+                props.onOpenPort(fresh);
+                setFresh(null);
+              }}
+            >
+              Open
+            </button>
+            <button className="tab-close" aria-label="Dismiss" onClick={() => setFresh(null)}>
+              ×
+            </button>
+          </div>
+        )}
         {loaded && !p.panes.length && (
           <div className="empty-center">
             <p>{live.length ? "Pick a session on the right, or start one." : "No session in this folder."}</p>
@@ -390,51 +532,31 @@ export function TerminalPane(props: {
           </div>
         </div>
         <div className="slist-scroll">
-          {running.map((s) => (
-            <div
-              key={s.name}
-              data-session={s.name}
-              className={
-                "srow" +
-                (s.name === p.panes[p.focus] ? " selected" : p.panes.includes(s.name) ? " shown" : "") +
-                (link.status !== "connected" ? " stale" : "") +
-                (drag?.name === s.name ? " dragging" : "")
-              }
-              title={`${s.kind === "shell" ? "Shell" : s.title}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
-              onContextMenu={(e) => openMenu(e, s.name)}
-            >
-              {confirm === s.name ? (
-                <div className="srow-confirm">
-                  <span>End {s.kind === "shell" ? "this shell" : "this session"}?</span>
-                  <button className="danger" onClick={() => void end(s)}>
-                    End
-                  </button>
-                  <button onClick={() => setConfirm(null)}>Cancel</button>
-                </div>
-              ) : (
-                <>
-                  <button
-                    className="srow-main"
-                    onPointerDown={(e) => startDrag(e, s)}
-                    onClick={() => {
-                      if (dragged.current) return void (dragged.current = false);
-                      showHere(s.name);
-                    }}
-                  >
-                    <Mark s={s} />
-                    <span className="srow-title">{s.kind === "shell" ? s.name : s.title}</span>
-                    <span className="srow-time">{relTime(lastActivity(s), now)}</span>
-                  </button>
-                  <button className="srow-trash" title="End session" aria-label={`End ${s.kind === "shell" ? s.name : s.title}`} onClick={() => trash(s)}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-                      <path d="M2.5 4.5h11M6 4.5V2.5h4v2M4 4.5l.7 9h6.6l.7-9M6.8 7v4.5M9.2 7v4.5" fill="none" stroke="currentColor" />
-                    </svg>
-                  </button>
-                </>
-              )}
+          {group.length > 1 && (
+            <div className="sgroup" role="group" aria-label="Side by side">
+              {group.map((s, i) => row(s, i + 1))}
             </div>
-          ))}
+          )}
+          {rest.map((s) => row(s))}
           {loaded && running.length === 0 && <p className="slist-note">Nothing running here.</p>}
+          {ports.length > 0 && <div className="slist-label">Ports</div>}
+          {ports.map((x) => (
+            <button
+              key={x.port}
+              className="srow-main port-row"
+              title={`Open localhost:${x.port} in a tab\n${x.command} in ${titleOf(x.session)}`}
+              onClick={() => {
+                props.onOpenPort(x);
+                if (fresh?.port === x.port) setFresh(null);
+              }}
+            >
+              <span className="srow-mark port-mark" aria-hidden>
+                ⇄
+              </span>
+              <span className="srow-title">localhost:{x.port}</span>
+              <span className="srow-time">{x.command}</span>
+            </button>
+          ))}
           {past.length > 0 && <div className="slist-label">Earlier</div>}
           {past.map((c) => (
             <button key={c.sessionId} className="srow-main earlier" disabled={busy || !api} title={`Resume: ${c.title}`} onClick={() => void start({ resume: c.sessionId })}>

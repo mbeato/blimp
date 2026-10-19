@@ -8,14 +8,16 @@ import { dirname, join, resolve } from "node:path";
 import type { Server } from "bun";
 import pkg from "../package.json";
 import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
-import { createFile, guard, HttpError, listDir, listFiles, makeDir, readFile, realHome, writeFile } from "./files";
+import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders } from "./folders";
+import { sessionPorts } from "./ports";
 import {
   checkZmxDir,
   claudeDir,
   isSafeName,
   killSession,
   listSessions,
+  parseZmxList,
   sessionExists,
   socketPath,
   startSession,
@@ -107,6 +109,7 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
     throw new HttpError(400, "expected a WebSocket");
   }
 
+  if (path === "/ports" && get) return Response.json(await sessionPorts(parseZmxList(await zmxListAsync())));
   if (path === "/folders/recent" && get) return Response.json(recentFolders());
   if (path === "/conversations" && get) {
     const dir = q.get("dir");
@@ -125,6 +128,11 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
     if (base !== null && !Number.isFinite(Number(base))) throw new HttpError(400, "baseMtime must be a number");
     const body = new Uint8Array(await req.arrayBuffer());
     return Response.json(writeFile(real, body, base === null ? undefined : Number(base)));
+  }
+  if (path === "/fs/download" && get) return download(guard(q.get("path")), req.signal);
+  if (path === "/fs/upload" && req.method === "PUT") {
+    const r = await upload(guard(q.get("path")), req.body, q.get("mode") ?? "new", Number(req.headers.get("content-length") ?? 0));
+    return Response.json(r, { status: 201 });
   }
   if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guard(await bodyPath(req))), { status: 201 });
   if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guard(await bodyPath(req))), { status: 201 });
@@ -146,6 +154,8 @@ export function serve(): Server {
   const token = loadToken(dirname(sock));
   const server = Bun.serve<WsData>({
     unix: sock,
+    // Uploads stream to disk; the cap itself is checked as they go (files.ts).
+    maxRequestBodySize: MAX_UPLOAD + 1024 * 1024,
     async fetch(req, server) {
       // Preflights carry no token. `*` is safe because the token isn't a cookie.
       if (req.method === "OPTIONS")

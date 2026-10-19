@@ -59,6 +59,26 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: click each of the three buttons twice.
   Expect: they hide and show the files, the terminal and the session list. A hidden pane's button looks dimmer.
 
+- [ ] **Shift+Enter in Claude.**
+  Do: in a Claude session, type a word, press Shift+Enter, type another word. Don't press Enter.
+  Expect: the second word is on a new line in Claude's input box, and nothing was sent.
+
+- [ ] **Split groups and other windows.**
+  Do: split two sessions side by side. Then open a second window and show one of this folder's sessions there.
+  Expect: in the list, the two splits are at the top, joined by a blue line, numbered 1 and 2 like their headers, and the project tab shows "2". In the first window, the session the second window shows has a small window mark; clicking it brings the second window forward.
+
+- [ ] **Upload by drag from Finder.**
+  Do: drag a file from Finder over the tree, and move it over a folder. Let go. Drag the same file onto the same folder again. Then drag a folder in. Then drag a screenshot onto a Claude session.
+  Expect: the folder under the pointer lights up, and the file appears in it on the server. The second time, blimp asks Replace, Keep both or Skip. The folder arrives with what's in it. The screenshot appears in `~/.blimp/uploads`, and its path is typed into Claude's prompt. If the folder that lights up isn't the one under the pointer, write down how far off it is (and whether the screen is Retina).
+
+- [ ] **Download and Upload….**
+  Do: right-click a file and pick Download. Right-click a folder and pick Download as .tar.gz. Right-click a folder and pick Upload… and choose a file.
+  Expect: both downloads are in Downloads, and the progress box at the bottom left has Show in Finder. The macOS file picker opens for Upload…, and the file arrives on the server.
+
+- [ ] **A web page from the server.**
+  Do: in a session, start a dev server (for example `python3 -m http.server 8000`). Click Open on "Port 8000 is open". Type a path in the bar and press Enter. Click Open in Browser. Close the tab.
+  Expect: the page shows in a tab next to the files, and the path loads. Open in Browser shows it in Safari while blimp runs. If the tab shows an error or a blank page instead, write down what the page is (some sites refuse to be shown inside another page).
+
 - [ ] **Shortcuts with the editor in focus.**
   Do: open a code file and click in it. Press ⌘K and then ⌘C.
   Expect: the session search does not open. The editor comments the line, as in VS Code.

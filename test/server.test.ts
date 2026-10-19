@@ -2,7 +2,7 @@
 // Every zmx session made here is named blimptest-* and killed at the end; nothing else is touched.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseZmxList, zmxPath } from "../src/sessions";
@@ -310,6 +310,39 @@ describe("events", () => {
     e.ws.close();
   });
 
+  test("ports that programs in a session listen on: listed with the session, over /ports and the events socket", async () => {
+    // A free port, then a web server on it inside a session (on IPv4), and one on IPv6 only.
+    const free = () => {
+      const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+      const p = s.port;
+      s.stop(true);
+      return p;
+    };
+    const [p4, p6] = [free(), free()];
+    const serve = (host: string, port: number) => [
+      "bun",
+      "-e",
+      `Bun.serve({ hostname: "${host}", port: ${port}, fetch: () => new Response("hi") }); setInterval(() => {}, 1e9)`,
+    ];
+    const v4 = await shSession("port4", serve("127.0.0.1", p4));
+    const v6 = await shSession("port6", serve("::1", p6));
+    const ports = await until(async () => {
+      const list: any[] = await (await api("/ports")).json();
+      return list.some((x) => x.port === p4) && list.some((x) => x.port === p6) && list;
+    }, "the two ports", 10_000);
+    expect(ports.find((x: any) => x.port === p4)).toMatchObject({ port: p4, host: "127.0.0.1", session: v4, command: "bun" });
+    expect(ports.find((x: any) => x.port === p6)).toMatchObject({ port: p6, host: "::1", session: v6 });
+    // blimpd's own socket, and anything outside blimp's sessions, isn't listed.
+    expect(ports.every((x: any) => x.session.startsWith(tag))).toBe(true);
+
+    const e = await socket("/events");
+    const msg = await until(() => e.messages.find((m) => m.type === "ports"), "ports message", 5000);
+    expect(msg.ports.map((x: any) => x.port)).toContain(p4);
+    zmx("kill", v4);
+    await until(() => e.messages.some((m) => m.type === "ports" && !m.ports.some((x: any) => x.port === p4)), "port gone", 8000);
+    e.ws.close();
+  });
+
   test("watched folders and files report changes, debounced; paths outside home are ignored", async () => {
     const file = join(homeDir, "notes.md");
     writeFileSync(file, "one");
@@ -381,6 +414,75 @@ describe("files over HTTP", () => {
     expect((await post("/fs/mkdir", join(tmp, "outside"))).status).toBe(403);
     expect((await post("/fs/create", "relative.txt")).status).toBe(400);
     expect((await api("/fs/mkdir", { method: "POST", body: "{}" })).status).toBe(400);
+  });
+
+  test("download: a file as it is, a folder as .tar.gz; inside home only", async () => {
+    const q = (p: string) => encodeURIComponent(p);
+    const dir = join(homeDir, "dl");
+    mkdirSync(join(dir, "sub"), { recursive: true });
+    writeFileSync(join(dir, "a.bin"), new Uint8Array([0, 1, 2, 255]));
+    writeFileSync(join(dir, "sub", "b.txt"), "bee");
+    symlinkSync("/etc/passwd", join(dir, "sub", "out"));
+
+    const f = await api(`/fs/download?path=${q(join(dir, "a.bin"))}`);
+    expect(f.status).toBe(200);
+    expect([...new Uint8Array(await f.arrayBuffer())]).toEqual([0, 1, 2, 255]);
+    expect(f.headers.get("content-disposition")).toBe(`attachment; filename*=UTF-8''a.bin`);
+
+    const t = await api(`/fs/download?path=${q(dir)}`);
+    expect(t.status).toBe(200);
+    expect(t.headers.get("content-disposition")).toBe(`attachment; filename*=UTF-8''dl.tar.gz`);
+    const tgz = join(tmp, "dl.tar.gz");
+    writeFileSync(tgz, new Uint8Array(await t.arrayBuffer()));
+    const listing = Bun.spawnSync(["tar", "-tvzf", tgz]).stdout.toString();
+    expect(listing).toContain("dl/a.bin");
+    expect(listing).toContain("dl/sub/b.txt");
+    // A symlink goes in as a link; what it points at outside home is never read.
+    expect(listing).toMatch(/dl\/sub\/out -> \/etc\/passwd/);
+    expect(listing).not.toContain("root:");
+
+    // tar failing part way (an unreadable file) fails the download instead of ending it short.
+    writeFileSync(join(dir, "sub", "locked"), "x");
+    chmodSync(join(dir, "sub", "locked"), 0);
+    const bad = await api(`/fs/download?path=${q(dir)}`);
+    expect(bad.status).toBe(200);
+    expect(await bad.arrayBuffer().then(() => "complete", () => "failed")).toBe("failed");
+    chmodSync(join(dir, "sub", "locked"), 0o600);
+
+    expect((await api(`/fs/download?path=${q("/etc/passwd")}`)).status).toBe(403);
+    expect((await api(`/fs/download?path=${q(join(dir, "missing"))}`)).status).toBe(404);
+  });
+
+  test("upload: new names only unless replace, never into a folder's name, streamed into place", async () => {
+    const q = (p: string) => encodeURIComponent(p);
+    const dir = join(homeDir, "ul");
+    mkdirSync(join(dir, "taken-dir"), { recursive: true });
+    const put = (path: string, body: BodyInit, mode = "new") => api(`/fs/upload?path=${q(path)}&mode=${mode}`, { method: "PUT", body });
+
+    const big = new Uint8Array(3 * 1024 * 1024).map((_, i) => i % 251);
+    const r = await put(join(dir, "big.bin"), big);
+    expect(r.status).toBe(201);
+    expect((await r.json()).size).toBe(big.length);
+    expect(readFileSync(join(dir, "big.bin")).equals(Buffer.from(big))).toBe(true);
+
+    expect((await put(join(dir, "big.bin"), "other")).status).toBe(409);
+    expect(readFileSync(join(dir, "big.bin")).length).toBe(big.length);
+    expect((await put(join(dir, "big.bin"), "other", "replace")).status).toBe(201);
+    expect(readFileSync(join(dir, "big.bin"), "utf8")).toBe("other");
+
+    // Replace keeps the file's permissions (a 600 key stays 600, a script stays runnable).
+    writeFileSync(join(dir, "key"), "old");
+    chmodSync(join(dir, "key"), 0o600);
+    expect((await put(join(dir, "key"), "new", "replace")).status).toBe(201);
+    expect(statSync(join(dir, "key")).mode & 0o777).toBe(0o600);
+    rmSync(join(dir, "key"));
+
+    expect((await put(join(dir, "taken-dir"), "x", "replace")).status).toBe(409);
+    expect((await put(join(dir, "f.txt"), "x", "sideways")).status).toBe(400);
+    expect((await put(join(tmp, "outside.txt"), "x")).status).toBe(403);
+    expect((await put(join(dir, "no/such/f.txt"), "x")).status).toBe(403);
+    // No temp files left behind.
+    expect(readdirSync(dir).sort()).toEqual(["big.bin", "taken-dir"]);
   });
 
   test("POST /sessions checks resume ids and the home folder", async () => {

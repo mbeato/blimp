@@ -123,3 +123,49 @@ export async function setWindowTitle(title: string) {
     .setTitle(title)
     .catch(() => {});
 }
+
+// Every session this window has in a split, in any tab ("<server key>/<name>"). Resolves to what
+// every window shows, by window label, as does each "shown" event after it.
+export type Shown = Record<string, string[]>;
+export async function setShown(sessions: string[]): Promise<Shown> {
+  if (!inTauri()) return {};
+  return invoke<Shown>("set_shown", { sessions }).catch(() => ({}));
+}
+
+export async function onShown(fn: (s: Shown, me: string) => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const w = getCurrentWebviewWindow();
+  return w.listen<Shown>("shown", (e) => fn(e.payload, w.label));
+}
+
+export async function windowLabel(): Promise<string> {
+  if (!inTauri()) return "";
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  return getCurrentWebviewWindow().label;
+}
+
+// Another window closed and this one was used most recently of the ones left: save this
+// window's tabs for the next launch.
+export async function onRememberLayout(fn: () => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  return getCurrentWebviewWindow().listen("remember-layout", () => fn());
+}
+
+// A click on a session another window shows: that window comes forward and shows it.
+export async function focusSession(p: Place & { server: string; session: string }): Promise<boolean> {
+  if (!inTauri()) return false;
+  return invoke<boolean>("focus_session", { session: `${p.server}/${p.session}`, init: placeQuery(p) }).catch(() => false);
+}
+
+// This window took a session into a split: other windows showing it let it go.
+export function takeSession(key: string) {
+  if (inTauri()) invoke("take_session", { session: key }).catch(() => {});
+}
+
+export async function onReleaseSession(fn: (key: string) => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  return getCurrentWebviewWindow().listen<string>("release-session", (e) => fn(e.payload));
+}
