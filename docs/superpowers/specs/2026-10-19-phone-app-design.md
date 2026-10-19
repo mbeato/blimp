@@ -54,7 +54,7 @@ As built (part 1), see DESIGN.md's Chat section:
 `GET /sessions/<name>/chat?token=…` upgrades to a WebSocket. Server → client text frames:
 
 - `{ "type": "history", "messages": ChatMessage[] }` on connect: the last 200 messages of the session's current transcript.
-- `{ "type": "append", "messages": ChatMessage[] }` when the transcript grows. blimpd reads only bytes added since the last read, as titles do. It checks on the existing 1 s tick and when the session's hook file changes.
+- `{ "type": "append", "messages": ChatMessage[] }` when the transcript grows. blimpd reads only bytes added since the last read, as titles do. The chat socket checks every 250 ms.
 - `{ "type": "reset" }` then a new `history`, when the session's `sessionId` changes (`/clear`, compaction into a new file, resume).
 - `{ "type": "unreadable" }` if blimpd doesn't know the session's Claude `sessionId`, or the transcript exists but can't be read. (A new session with no transcript file yet gets an empty `history`, then `append` once the file appears.) The app shows "Can't show this conversation, open it on the Mac".
 - Close code 4000 when the session ends, as with attach.
