@@ -224,6 +224,17 @@ describe("writeHookStatus", () => {
     expect(existsSync(join(tmp, "escape.json"))).toBe(false);
     expect(readdirSync(dir).sort()).toEqual(["web-1.json", "web-3.json", "web-4.json"]);
   });
+
+  test("records what Claude asked, and a later Notification keeps it", () => {
+    writeHookStatus(JSON.stringify({ hook_event_name: "PermissionRequest", session_id: "s1", tool_name: "Bash", tool_input: { command: "ls" } }), "p1", dir);
+    const first = read("p1");
+    expect(first.prompt).toMatchObject({ kind: "permission", summary: "Ran `ls`" });
+    writeHookStatus(JSON.stringify({ hook_event_name: "Notification", session_id: "s1", notification_type: "permission_prompt" }), "p1", dir);
+    expect(read("p1").prompt).toEqual(first.prompt);
+    expect(read("p1").at).toBe(first.at);
+    writeHookStatus(JSON.stringify({ hook_event_name: "PostToolUse", session_id: "s1" }), "p1", dir);
+    expect(read("p1").prompt).toBeUndefined();
+  });
 });
 
 describe("`blimpd hook`", () => {

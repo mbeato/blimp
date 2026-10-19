@@ -22,6 +22,7 @@ import {
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { kindLabel, readKindsFile, type Launch } from "./kinds";
+import { type Prompt, withScreenOptions } from "./prompt";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
 
@@ -37,6 +38,7 @@ export type Session = ZmxSession & {
   updatedAt?: number; // ms
   state: State;
   stateSince?: number; // ms
+  prompt?: Prompt & { at: number }; // what a waiting Claude asks (prompt.ts), and when the wait started
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -201,7 +203,7 @@ function readJson(path: string): any {
 // sessionId -> transcript, so finding it doesn't list every project folder every second.
 const transcripts = new Map<string, string>();
 
-function transcriptPath(dir: string, sessionId: string): string | undefined {
+export function transcriptPath(dir: string, sessionId: string): string | undefined {
   const known = transcripts.get(dir + "\0" + sessionId);
   if (known && existsSync(known)) return known;
   const found = findTranscript(dir, sessionId);
@@ -230,6 +232,22 @@ export function rememberKind(name: string, kind: string, live: string[], file = 
   renameSync(file + ".tmp", file);
 }
 
+// A permission prompt's options come from the screen, read once per wait (keyed by the hook's `at`).
+const screenPrompts = new Map<string, Prompt>();
+function promptFor(name: string, hook: any): Prompt | undefined {
+  const p = hook.prompt as Prompt | undefined;
+  if (!p || p.kind !== "permission") return p;
+  const key = `${name}\0${hook.at}`;
+  let done = screenPrompts.get(key);
+  if (!done) {
+    const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore" });
+    done = withScreenOptions(p, r.stdout.toString().split("\n").slice(-40).join("\n"));
+    if (screenPrompts.size > 200) screenPrompts.clear();
+    screenPrompts.set(key, done);
+  }
+  return done;
+}
+
 export function listSessions(
   dir = claudeDir(),
   zmxOut = runZmxList(),
@@ -245,6 +263,11 @@ export function listSessions(
     // A shell someone then typed `claude` in is Claude Code now.
     let kind = typeof memo[z.name] === "string" ? memo[z.name] : info.sessionId || /\bclaude\b/.test(z.cmd) ? "claude" : "shell";
     if (kind === "shell" && info.sessionId) kind = "claude";
+    const st = deriveState(info, hook, z.created);
+    // Only the hook knows what's asked. Claude's own status file may be the newer of the two, so
+    // don't require the hook to be what set the state, only that both say waiting.
+    const asked = st.state === "waiting" && hook.state === "waiting" && hook.at >= z.created * 1000 ? promptFor(z.name, hook) : undefined;
+    const prompt = asked && { ...asked, at: hook.at as number };
     return {
       ...z,
       kind,
@@ -255,7 +278,8 @@ export function listSessions(
       status: info.status ?? "",
       waitingFor: info.waitingFor,
       updatedAt: info.updatedAt,
-      ...deriveState(info, hook, z.created),
+      ...st,
+      ...(prompt && { prompt }),
     };
   });
 }

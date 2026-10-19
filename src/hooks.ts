@@ -6,6 +6,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { promptFromHook } from "./prompt";
 import { blimpDir, claudeDir, isSafeName } from "./sessions";
 
 const EVENTS = ["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"];
@@ -136,8 +137,19 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   if (!codex && ev.hook_event_name === "PreToolUse" && ev.tool_name !== MATCHERS.PreToolUse) return;
   mkdirSync(statusDir, { recursive: true, mode: 0o700 });
   const file = join(statusDir, `${session}.json`);
+  // What Claude asks, for the phone. The Notification that follows a permission prompt seconds
+  // later carries no details, so it keeps the prompt, and the time the wait started, already
+  // recorded for this wait (the phone's answer names the wait by that time).
+  let prompt = codex ? undefined : promptFromHook(ev);
+  let at = Date.now();
+  if (!prompt && state === "waiting") {
+    try {
+      const prev = JSON.parse(readFileSync(file, "utf8"));
+      if (prev.state === "waiting" && prev.sessionId === ev.session_id && prev.prompt) ({ prompt, at } = prev);
+    } catch {}
+  }
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at: Date.now(), sessionId: ev.session_id, event: ev.hook_event_name }));
+  writeFileSync(tmp, JSON.stringify({ state, at, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }) }));
   renameSync(tmp, file); // the server never reads half a file
 }
 
