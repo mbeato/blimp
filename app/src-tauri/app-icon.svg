@@ -1,12 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Placeholder app icon: a blimp on a night-sky tile. The tile leaves the macOS icon margin. -->
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1d2a44"/>
-  <g transform="translate(-14 32)">
-    <!-- fins and gondola go under the envelope so it hides their joins -->
-    <path d="M330 450 L232 318 Q222 304 240 304 L300 304 Q318 304 330 318 L420 420 Z" fill="#f2a541"/>
-    <path d="M330 510 L232 642 Q222 656 240 656 L300 656 Q318 656 330 642 L420 540 Z" fill="#f2a541"/>
-    <path d="M500 590 L640 590 L628 650 Q624 664 610 664 L530 664 Q516 664 512 650 Z" fill="#f2a541"/>
-    <ellipse cx="545" cy="480" rx="285" ry="132" fill="#f4f1ea"/>
-    <path d="M290 480 Q545 520 830 480" fill="none" stroke="#d9d3c5" stroke-width="10" stroke-linecap="round"/>
+  <!-- App icon: a solid white blimp on a black tile. The tile leaves the macOS icon margin. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#000"/>
+  <!-- One white shape: envelope (round nose right, tapered tail left), tail fins and gondola.
+       The round stroke softens every corner. -->
+  <g transform="translate(-12 -4)" fill="#fff" stroke="#fff" stroke-width="18" stroke-linejoin="round">
+    <path d="M300 512 C340 452 448 424 566 424 C676 424 748 460 748 512 C748 564 676 600 566 600 C448 600 340 572 300 512 Z"/>
+    <path d="M300 400 L338 400 L424 456 L424 568 L338 624 L300 624 Z"/>
+    <path d="M520 590 L612 590 L602 630 L530 630 Z"/>
   </g>
 </svg>
