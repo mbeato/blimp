@@ -374,6 +374,47 @@ describe("chat", () => {
     expect(c.closed?.code).toBe(4000);
   });
 
+  test("a transcript that doesn't exist yet is unreadable until it does", async () => {
+    const sid = "66666666-6666-6666-6666-666666666666";
+    const { transcript, name } = await fakeClaude("chat6", sid, [user("u1", "first")]);
+    rmSync(transcript);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "unreadable"), "unreadable");
+    writeFileSync(transcript, user("u1", "first"));
+    await until(() => c.messages.find((m) => m.type === "history"), "history", 4000);
+    expect(c.messages.find((m) => m.type === "history").messages.map((m: any) => m.text)).toEqual(["first"]);
+    c.ws.close();
+  });
+
+  test("two inputs sent back to back are typed one after the other", async () => {
+    const { name } = await fakeClaude("chat7", "77777777-7777-7777-7777-777777777777", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "a", text: "one" }));
+    c.ws.send(JSON.stringify({ type: "input", id: "b", text: "two" }));
+    await until(() => c.messages.filter((m) => m.type === "ack").length === 2, "both acks");
+    await until(() => viewer.text.includes("got:~[200~one~[201~") && viewer.text.includes("got:~[200~two~[201~"), "two separate lines");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
+  test("a repeated interrupt id types one Esc", async () => {
+    const { name } = await fakeClaude("chat8", "88888888-8888-8888-8888-888888888888", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "i1" }));
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "i1" }));
+    await until(() => c.messages.filter((m) => m.type === "ack" && m.id === "i1").length === 2, "both acks");
+    type(viewer.ws, "\r");
+    await until(() => viewer.text.includes("got:~"), "Esc reached the session");
+    await Bun.sleep(300);
+    expect(viewer.text).not.toContain("got:~~");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
   test("404 for an unknown session", async () => {
     expect((await api(`/sessions/${tag}-none/chat?token=${token}`)).status).toBe(404);
   });

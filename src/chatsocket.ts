@@ -6,7 +6,8 @@
 import type { ServerWebSocket, Subprocess } from "bun";
 import { type ChatMessage, type ChatScan, mergeById, newScan, readAppended } from "./chat";
 import { answerKeys } from "./prompt";
-import { claudeDir, listSessions, type Session, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
+import { existsSync } from "node:fs";
+import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
 import { followSize, lastSize } from "./terminal";
 
 export type ChatData = {
@@ -21,6 +22,8 @@ export type ChatData = {
   timer?: ReturnType<typeof setInterval>;
   ticks: number;
   busy?: boolean;
+  opened?: Promise<void>;
+  queue?: Promise<unknown>; // writes to the zmx client, one at a time
 };
 
 export const chatData = (name: string): ChatData => ({ kind: "chat", name, ticks: 0 });
@@ -64,6 +67,7 @@ async function tick(ws: ServerWebSocket<ChatData>) {
       if (d.closed) return;
       if (!s) {
         d.closed = true;
+        seen.delete(d.name);
         return ws.close(4000, "ended");
       }
       const changed = s.sessionId !== d.session?.sessionId;
@@ -71,6 +75,8 @@ async function tick(ws: ServerWebSocket<ChatData>) {
       if (changed) {
         send(ws, { type: "reset" });
         loadHistory(ws);
+      } else if (s.sessionId && !d.scan && existsSync(transcriptPath(claudeDir(), s.sessionId))) {
+        loadHistory(ws); // the transcript wasn't there yet when the socket opened
       }
     }
     if (d.file && d.scan) {
@@ -83,9 +89,14 @@ async function tick(ws: ServerWebSocket<ChatData>) {
   }
 }
 
-export async function openChat(ws: ServerWebSocket<ChatData>) {
+export function openChat(ws: ServerWebSocket<ChatData>) {
+  return (ws.data.opened = start(ws));
+}
+
+async function start(ws: ServerWebSocket<ChatData>) {
   const d = ws.data;
   d.session = await find(d.name);
+  if (d.closed) return;
   if (!d.session) {
     d.closed = true;
     return ws.close(4000, "ended");
@@ -115,7 +126,15 @@ function client(ws: ServerWebSocket<ChatData>) {
 
 // Typing too soon after the client attaches can land before zmx has connected it.
 async function write(ws: ServerWebSocket<ChatData>, parts: string[]) {
-  const fresh = !ws.data.proc || ws.data.proc.exitCode !== null;
+  const d = ws.data;
+  if (d.closed) throw new Error("the socket is closed");
+  const fresh = !d.proc || d.proc.exitCode !== null;
+  if (fresh) {
+    // `zmx attach` would create a session that has ended, and the text would go to a bare shell.
+    const alive = await sessionExists(d.name).catch(() => false);
+    if (d.closed) throw new Error("the socket is closed");
+    if (!alive) throw new Error("the session ended");
+  }
   const term = client(ws).terminal!;
   if (fresh) await Bun.sleep(150);
   // zmx 0.5 drops an Esc that is a new client's first input; an empty paste passes and the TUI ignores it.
@@ -127,6 +146,20 @@ async function write(ws: ServerWebSocket<ChatData>, parts: string[]) {
     if (i) await Bun.sleep(50); // Enter apart from the paste, as a person would press it
     term.write(p);
   }
+}
+
+// One typed thing at a time, so two inputs close together don't interleave. A repeated id is typed
+// once: the phone resends what it didn't see acknowledged.
+async function typed(ws: ServerWebSocket<ChatData>, id: string, parts: string[]) {
+  const d = ws.data;
+  const step = (d.queue ?? Promise.resolve()).then(async () => {
+    const ids = seen.get(d.name) ?? [];
+    if (ids.includes(id)) return;
+    await write(ws, parts);
+    seen.set(d.name, [...(seen.get(d.name) ?? []), id].slice(-100));
+  });
+  d.queue = step.catch(() => {});
+  await step;
 }
 
 export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
@@ -141,26 +174,25 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
   if (typeof id !== "string" || !id || id.length > 100) return;
   const fail = (error: string) => send(ws, { type: "error", id, error });
   const d = ws.data;
+  await d.opened;
   if (!d.session?.sessionId) return fail("open this session on the Mac");
+  if (m.type !== "input" && (seen.get(d.name) ?? []).includes(id)) return send(ws, { type: "ack", id });
   try {
     if (m.type === "input") {
       if (typeof m.text !== "string" || m.text.length > 100_000) return fail("text must be a string of at most 100 000 characters");
-      const ids = seen.get(d.name) ?? [];
-      if (ids.includes(id)) return send(ws, { type: "ack", id });
-      seen.set(d.name, [...ids, id].slice(-100));
       // No ESC from the phone: it would end the paste early and turn the rest into key presses.
-      await write(ws, ["\x1b[200~" + m.text.replaceAll("\x1b", "") + "\x1b[201~", "\r"]);
+      await typed(ws, id, ["\x1b[200~" + m.text.replaceAll("\x1b", "") + "\x1b[201~", "\r"]);
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer") {
       const s = await find(d.name);
       const keys = s?.state === "waiting" && s.prompt && s.prompt.at === m.at ? answerKeys(s.prompt, m.pick) : undefined;
       if (!keys) return fail("the question changed");
-      await write(ws, [keys]);
+      await typed(ws, id, [keys]);
       return send(ws, { type: "ack", id });
     }
     if (m.type === "interrupt") {
-      await write(ws, ["\x1b"]);
+      await typed(ws, id, ["\x1b"]);
       return send(ws, { type: "ack", id });
     }
     fail("unknown message");
