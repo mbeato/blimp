@@ -20,3 +20,26 @@ jobs:
       - name: BlimpKit tests
         working-directory: ios/BlimpKit
         run: swift test
+  app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The iOS 26 SDK comes with Xcode 26; use the newest Xcode 26 the runner has.
+      - name: Pick Xcode
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$x" ] && sudo xcode-select -s "$x"
+          xcodebuild -version
+      - run: brew install xcodegen
+      - name: BlimpKit tests on macOS
+        working-directory: ios/BlimpKit
+        run: swift test
+      - name: Build for the simulator
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodegen generate
+          xcodebuild -project Blimp.xcodeproj -scheme Blimp -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build | tail -80

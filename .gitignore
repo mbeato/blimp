@@ -1,2 +1,4 @@
 node_modules/
 dist/
+ios/Blimp.xcodeproj/
+ios/Blimp/Info.plist

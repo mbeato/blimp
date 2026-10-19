@@ -1,0 +1,42 @@
+name: Blimp
+options:
+  bundleIdPrefix: dev.blimp
+  deploymentTarget:
+    iOS: "26.0"
+packages:
+  BlimpKit:
+    path: BlimpKit
+targets:
+  Blimp:
+    type: application
+    platform: iOS
+    sources: [Blimp]
+    dependencies:
+      - package: BlimpKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.blimp.phone
+        PRODUCT_NAME: blimp
+        MARKETING_VERSION: "0.2.5"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Blimp/Info.plist
+      properties:
+        CFBundleDisplayName: blimp
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSFaceIDUsageDescription: blimp locks with Face ID because it can run anything on your server.
+        NSMicrophoneUsageDescription: blimp listens while you hold the mic button, to type what you say.
+        NSSpeechRecognitionUsageDescription: blimp turns what you say into text on this iPhone.
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            localhost: { NSExceptionAllowsInsecureHTTPLoads: true }
+            127.0.0.1: { NSExceptionAllowsInsecureHTTPLoads: true }
+schemes:
+  Blimp:
+    build:
+      targets: { Blimp: all }
