@@ -87,6 +87,14 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: in a session, start a dev server (for example `python3 -m http.server 8000`). Click Open on "Port 8000 is open". Type a path in the bar and press Enter. Click Open in Browser. Close the tab.
   Expect: the page shows in a tab next to the files, and the path loads. Open in Browser shows it in Safari while blimp runs. If the tab shows an error or a blank page instead, write down what the page is (some sites refuse to be shown inside another page).
 
+- [ ] **Split groups, as in VS Code.**
+  Do: split two sessions. Click a third session in the list. Then click either of the two.
+  Expect: the third shows on its own and the two stay grouped (dimmer in the list). Clicking either brings both back side by side.
+
+- [ ] **Settings.**
+  Do: press ⌘, (and try blimp > Settings…). Set Theme to Light while the Mac is dark, raise the terminal text size, and turn Option key as Meta on; in a shell, type Option+B.
+  Expect: the whole window, the editor and the native title bar go light at once; the terminal text gets bigger and still fills its pane; Option+B moves back a word instead of typing ∫. Another open window changes too. The settings are still there after quitting and opening blimp again.
+
 - [ ] **Shortcuts with the editor in focus.**
   Do: open a code file and click in it. Press ⌘K and then ⌘C.
   Expect: the session search does not open. The editor comments the line, as in VS Code.

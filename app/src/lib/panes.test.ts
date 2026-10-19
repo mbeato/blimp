@@ -1,34 +1,52 @@
 import { describe, expect, test } from "bun:test";
-import { dropAt, dropTarget, equalShares, moveDivider, prune, removePane, show } from "./panes";
+import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show } from "./panes";
 
-describe("show", () => {
+const P = (panes: string[], focus = 0, groups: string[][] = []) => ({ panes, focus, groups });
+
+describe("show (a click in the session list), as in VS Code's terminal groups", () => {
   test("an empty terminal shows the session", () => {
-    expect(show({ panes: [], focus: 0 }, "a")).toEqual({ panes: ["a"], focus: 0 });
+    expect(show(P([]), "a")).toEqual(P(["a"]));
   });
-  test("a session already in a split gets the focus there", () => {
-    expect(show({ panes: ["a", "b"], focus: 0 }, "b")).toEqual({ panes: ["a", "b"], focus: 1 });
+  test("a session in the splits on screen gets the focus there", () => {
+    expect(show(P(["a", "b"]), "b")).toEqual(P(["a", "b"], 1));
   });
-  test("otherwise it replaces the focused split", () => {
-    expect(show({ panes: ["a", "b"], focus: 1 }, "c")).toEqual({ panes: ["a", "c"], focus: 1 });
+  test("another session shows on its own; the split group is kept, not changed", () => {
+    expect(show(P(["a", "b"], 1), "c")).toEqual(P(["c"], 0, [["a", "b"]]));
+  });
+  test("clicking either session of a kept group brings the whole group back", () => {
+    const kept = P(["c"], 0, [["a", "b"]]);
+    expect(show(kept, "b")).toEqual(P(["a", "b"], 1));
+    expect(show(kept, "a")).toEqual(P(["a", "b"], 0));
+  });
+  test("switching between two groups keeps both", () => {
+    const two = P(["a", "b"], 0, [["c", "d"]]);
+    expect(show(two, "d")).toEqual(P(["c", "d"], 1, [["a", "b"]]));
+  });
+  test("a single session shown before isn't kept as a group", () => {
+    expect(show(P(["a"]), "b")).toEqual(P(["b"]));
   });
 });
 
 describe("dropAt", () => {
+  test("a session from a kept group leaves it (a group of one is no group)", () => {
+    expect(dropAt(P(["x"], 0, [["a", "b"]]), "b", 0, "right")).toEqual(P(["x", "b"], 1));
+    expect(dropAt(P(["x"], 0, [["a", "b", "c"]]), "b", 0, "left")).toEqual(P(["b", "x"], 0, [["a", "c"]]));
+  });
   test("onto an empty terminal", () => {
-    expect(dropAt({ panes: [], focus: 0 }, "a", 0, "left")).toEqual({ panes: ["a"], focus: 0 });
+    expect(dropAt(P([], 0), "a", 0, "left")).toEqual(P(["a"], 0));
   });
   test("right of a split", () => {
-    expect(dropAt({ panes: ["a"], focus: 0 }, "b", 0, "right")).toEqual({ panes: ["a", "b"], focus: 1 });
+    expect(dropAt(P(["a"], 0), "b", 0, "right")).toEqual(P(["a", "b"], 1));
   });
   test("left of a split", () => {
-    expect(dropAt({ panes: ["a", "b"], focus: 1 }, "c", 1, "left")).toEqual({ panes: ["a", "c", "b"], focus: 1 });
+    expect(dropAt(P(["a", "b"], 1), "c", 1, "left")).toEqual(P(["a", "c", "b"], 1));
   });
   test("a session already shown moves instead of showing twice", () => {
-    expect(dropAt({ panes: ["a", "b", "c"], focus: 0 }, "a", 2, "right")).toEqual({ panes: ["b", "c", "a"], focus: 2 });
-    expect(dropAt({ panes: ["a", "b", "c"], focus: 0 }, "c", 0, "left")).toEqual({ panes: ["c", "a", "b"], focus: 0 });
+    expect(dropAt(P(["a", "b", "c"], 0), "a", 2, "right")).toEqual(P(["b", "c", "a"], 2));
+    expect(dropAt(P(["a", "b", "c"], 0), "c", 0, "left")).toEqual(P(["c", "a", "b"], 0));
   });
   test("onto itself changes nothing", () => {
-    const p = { panes: ["a", "b"], focus: 1 };
+    const p = P(["a", "b"], 1);
     expect(dropAt(p, "a", 0, "right")).toBe(p);
     expect(dropAt(p, "a", 0, "left")).toBe(p);
     // Right of a, which is already where b sits (left of b).
@@ -38,19 +56,28 @@ describe("dropAt", () => {
 
 describe("removePane", () => {
   test("focus stays on the same session, or moves to the neighbour", () => {
-    expect(removePane({ panes: ["a", "b", "c"], focus: 2 }, 0)).toEqual({ panes: ["b", "c"], focus: 1 });
-    expect(removePane({ panes: ["a", "b", "c"], focus: 1 }, 1)).toEqual({ panes: ["a", "c"], focus: 1 });
-    expect(removePane({ panes: ["a", "b"], focus: 1 }, 1)).toEqual({ panes: ["a"], focus: 0 });
-    expect(removePane({ panes: ["a"], focus: 0 }, 0)).toEqual({ panes: [], focus: 0 });
+    expect(removePane(P(["a", "b", "c"], 2), 0)).toEqual(P(["b", "c"], 1));
+    expect(removePane(P(["a", "b", "c"], 1), 1)).toEqual(P(["a", "c"], 1));
+    expect(removePane(P(["a", "b"], 1), 1)).toEqual(P(["a"], 0));
+    expect(removePane(P(["a"], 0), 0)).toEqual(P([], 0));
+  });
+});
+
+describe("forget", () => {
+  test("a session moved to another window leaves the splits and any kept group", () => {
+    expect(forget(P(["a", "b"], 1, [["c", "d"]]), ["b", "c"])).toEqual(P(["a"], 0));
   });
 });
 
 describe("prune", () => {
+  test("ended sessions leave kept groups too", () => {
+    expect(prune(P(["x"], 0, [["a", "b", "c"], ["d", "e"]]), (n) => n !== "a" && n !== "d")).toEqual(P(["x"], 0, [["b", "c"]]));
+  });
   test("drops ended sessions and keeps the focused one focused", () => {
-    expect(prune({ panes: ["a", "b", "c"], focus: 2 }, (n) => n !== "a")).toEqual({ panes: ["b", "c"], focus: 1 });
+    expect(prune(P(["a", "b", "c"], 2), (n) => n !== "a")).toEqual(P(["b", "c"], 1));
   });
   test("returns the same object when nothing ended", () => {
-    const p = { panes: ["a", "b"], focus: 0 };
+    const p = P(["a", "b"], 0);
     expect(prune(p, () => true)).toBe(p);
   });
 });

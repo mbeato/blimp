@@ -47,8 +47,10 @@
   --term-bright-white: #ffffff;
 }
 
+/* Light follows the system setting, unless Settings > Theme says Light or Dark (data-theme on
+   <html>, set by lib/settings.ts). */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     color-scheme: light;
     --bg: #ffffff;
     --bg-side: #f1f1f3;
@@ -91,4 +93,48 @@
     --term-bright-cyan: #239a98;
     --term-bright-white: #2b2b2f;
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-side: #f1f1f3;
+  --bg-raised: #ffffff;
+  --bg-input: #ffffff;
+  --fg: #1d1d1f;
+  --fg-dim: #5d5e66;
+  --fg-faint: #8e8f96;
+  --line: rgba(0, 0, 0, 0.09);
+  --hover: rgba(0, 0, 0, 0.04);
+  --selected: rgba(0, 0, 0, 0.075);
+  --focus: rgba(0, 0, 0, 0.4);
+  --scrim: rgba(0, 0, 0, 0.18);
+  --shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+  --danger: #c63636;
+  --waiting: #c27c00;
+  --waiting-glow: rgba(194, 124, 0, 0.35);
+  --group: #2f6fc4;
+  --group-dim: rgba(47, 111, 196, 0.3);
+  --group-bg: rgba(47, 111, 196, 0.1);
+
+  --term-bg: #ffffff;
+  --term-fg: #1d1d1f;
+  --term-cursor: #1d1d1f;
+  --term-selection: rgba(60, 100, 170, 0.22);
+  --term-black: #1d1d1f;
+  --term-red: #c4322f;
+  --term-green: #3b8a2a;
+  --term-yellow: #9a6a00;
+  --term-blue: #2a63c4;
+  --term-magenta: #9a3fb8;
+  --term-cyan: #1c8584;
+  --term-white: #8e8f96;
+  --term-bright-black: #5d5e66;
+  --term-bright-red: #d9443f;
+  --term-bright-green: #4a9e36;
+  --term-bright-yellow: #b07c00;
+  --term-bright-blue: #3a75d6;
+  --term-bright-magenta: #ad52c9;
+  --term-bright-cyan: #239a98;
+  --term-bright-white: #2b2b2f;
 }

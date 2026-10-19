@@ -51,10 +51,11 @@ fn main() {
         })
         // blimp > Check for Updates…: the focused window checks and says what it found.
         .on_menu_event(|app, event| {
-            if event.id().as_ref() == "check-updates" {
+            let id = event.id().as_ref();
+            if id == "check-updates" || id == "open-settings" {
                 let w = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false));
                 if let Some(w) = w.or_else(|| app.get_webview_window("main")) {
-                    let _ = w.emit_to(w.label(), "check-updates", ());
+                    let _ = w.emit_to(w.label(), id, ());
                 }
             }
         })
@@ -80,9 +81,12 @@ fn menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::me
     use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
     let updates = MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
+    let settings = MenuItemBuilder::with_id("open-settings", "Settings…").accelerator("CmdOrCtrl+,").build(app)?;
     let app_menu = SubmenuBuilder::new(app, "blimp")
         .about(None)
         .item(&updates)
+        .separator()
+        .item(&settings)
         .separator()
         .hide()
         .hide_others()

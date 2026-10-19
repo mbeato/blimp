@@ -9,6 +9,16 @@ import { backoff, type ServerLink } from "../lib/connection";
 import { mapKey } from "../lib/keys";
 import { followsLink, openWebLink } from "../lib/links";
 import { ExistsCache, findPaths, resolveAgainst } from "../lib/pathlinks";
+import { getSettings, onSettings, type Settings } from "../lib/settings";
+
+// The settings a terminal follows (Settings > Terminal), as xterm options.
+const termOptions = (s: Settings) => ({
+  fontSize: s.terminalFontSize,
+  cursorStyle: s.cursorStyle,
+  cursorBlink: s.cursorBlink,
+  scrollback: s.scrollback,
+  macOptionIsMeta: s.optionIsMeta,
+});
 
 const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
 const camel = (s: string) => s.replace(/-(\w)/g, (_, c) => c.toUpperCase());
@@ -68,10 +78,9 @@ export function TerminalView(props: {
 
   useEffect(() => {
     const t = new Terminal({
-      fontSize: 13,
+      ...termOptions(getSettings()),
       fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
       theme: themeFromCss(),
-      scrollback: 10000,
       macOptionClickForcesSelection: true,
       // For the Unicode 11 width tables below (a proposed API in xterm).
       allowProposedApi: true,
@@ -228,9 +237,12 @@ export function TerminalView(props: {
     });
     ro.observe(box.current!);
 
-    const scheme = matchMedia("(prefers-color-scheme: light)");
-    const onScheme = () => (t.options.theme = themeFromCss());
-    scheme.addEventListener("change", onScheme);
+    // A settings change (or the system going light/dark): new options and colors, then refit,
+    // since a new font size changes how many rows and columns fit.
+    const offSettings = onSettings(() => {
+      Object.assign(t.options, termOptions(getSettings()), { theme: themeFromCss() });
+      if (box.current?.offsetWidth) f.fit();
+    });
 
     return () => {
       props.pastes.delete(props.name);
@@ -238,7 +250,7 @@ export function TerminalView(props: {
       clearTimeout(retryTimer);
       ws?.close();
       ro.disconnect();
-      scheme.removeEventListener("change", onScheme);
+      offSettings();
       t.dispose();
     };
   }, [props.name]);

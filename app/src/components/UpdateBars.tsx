@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { errorText, type ServerLink } from "../lib/connection";
 import { canUpdate, checkForUpdate, onCheckForUpdates, updateServer, type AppUpdate } from "../lib/updates";
+import { getSettings } from "../lib/settings";
 import { appVersion, compareVersions } from "../lib/version";
 
 // How often the app looks for a new version, after the first look a few seconds after it opens.
@@ -33,8 +34,10 @@ export function UpdateBars(props: { links: ServerLink[]; onNotice: (msg: string)
 
   useEffect(() => {
     if (!canUpdate()) return;
-    const first = setTimeout(() => void look(false), 4000);
-    const every = setInterval(() => void look(false), CHECK_EVERY_MS);
+    // Settings > Check for updates automatically; Check for Updates… works either way.
+    const auto = () => getSettings().autoUpdate && void look(false);
+    const first = setTimeout(auto, 4000);
+    const every = setInterval(auto, CHECK_EVERY_MS);
     let off = () => {};
     void onCheckForUpdates(() => void look(true)).then((f) => (off = f));
     return () => (clearTimeout(first), clearInterval(every), off());

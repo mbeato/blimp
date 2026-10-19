@@ -28,6 +28,8 @@
     "allow-claim-notice",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:window:allow-set-theme",
     "core:window:allow-set-badge-count",
     "core:window:allow-set-title",
     "notification:allow-is-permission-granted",

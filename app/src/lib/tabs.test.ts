@@ -19,7 +19,7 @@ describe("openTab", () => {
   });
   test("Home is always the first tab; opening another server's Home switches it", () => {
     const l = openTab(two(), "s2", null);
-    expect(l.tabs[0]).toEqual({ server: "s2", dir: null, panes: [], focus: 0 });
+    expect(l.tabs[0]).toEqual({ server: "s2", dir: null, panes: [], focus: 0, groups: [] });
     expect(l.tabs).toHaveLength(2);
     expect(l.active).toBe(0);
   });
@@ -59,12 +59,16 @@ describe("encode and decode", () => {
     );
     expect(l).toEqual({
       tabs: [
-        { server: "s", dir: null, panes: ["a"], focus: 0 },
-        { server: "s", dir: "/x", panes: [], focus: 0 },
+        { server: "s", dir: null, panes: ["a"], focus: 0, groups: [] },
+        { server: "s", dir: "/x", panes: [], focus: 0, groups: [] },
       ],
       active: 1,
       show: { files: true, term: true, sessions: true },
     });
+  });
+  test("kept split groups load, minus bad ones; layouts saved before them load with none", () => {
+    const l = decodeLayout(JSON.stringify({ tabs: [{ server: "s", dir: null, panes: ["a"], groups: [["b", "c"], ["a", "d"], ["e"], "x", ["f", 1, "g"]] }] }));
+    expect(l?.tabs[0].groups).toEqual([["b", "c"], ["f", "g"]]);
   });
   test("a folder listed twice gets one tab", () => {
     const t = { server: "s", dir: "/x", panes: [], focus: 0 };

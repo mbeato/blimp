@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { Conversation, Port, Session } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
-import { dropAt, dropTarget, equalShares, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
+import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
 import { freeName, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, lastActivity, pickSession } from "../lib/sessions";
 import { relTime } from "../lib/time";
@@ -180,7 +180,7 @@ export function TerminalPane(props: {
     },
     release: (name) => {
       away.add(name);
-      closeSplit(name);
+      onPanes((q) => forget(q, [name]));
     },
     // Uploads them to ~/.blimp/uploads under plain names, then types their paths in, as a paste:
     // Claude reads a file (a screenshot, say) from a path in the prompt.
@@ -210,7 +210,7 @@ export function TerminalPane(props: {
   const moveOut = (names: string[], at?: { x: number; y: number }) => {
     setCtx(null);
     for (const n of names) away.add(n);
-    onPanes((q) => names.reduce((acc, n) => (acc.panes.includes(n) ? removePane(acc, acc.panes.indexOf(n)) : acc), q));
+    onPanes((q) => forget(q, names));
     props.onMoveOut(names, at);
   };
 
@@ -256,7 +256,7 @@ export function TerminalPane(props: {
   const focusOn = (name: string) =>
     onPanes((q) => {
       const i = q.panes.indexOf(name);
-      return i >= 0 && i !== q.focus ? { panes: q.panes, focus: i } : q;
+      return i >= 0 && i !== q.focus ? { ...q, focus: i } : q;
     });
   const closeSplit = (name: string) =>
     onPanes((q) => {
@@ -343,9 +343,13 @@ export function TerminalPane(props: {
   const overlay = t && { left: (p.panes.length ? lefts[t.at] + (t.side === "right" ? half : 0) : 0) * 100, width: half * 100 };
 
   // The splits on screen come first in the list, in their left-to-right order, joined as a group
-  // and numbered as their headers are. (One split alone stays where it is.)
-  const group = split ? p.panes.map(sessionOf).filter((x): x is Session => !!x) : [];
-  const rest = running.filter((s) => !group.includes(s));
+  // and numbered as their headers are; then the kept split groups, the same way but dimmer (a
+  // click on one brings its group back). (One session alone stays where it is.)
+  const toSessions = (g: string[]) => g.map(sessionOf).filter((x): x is Session => !!x);
+  const group = split ? toSessions(p.panes) : [];
+  const kept = p.groups.map(toSessions).filter((g) => g.length > 1);
+  const grouped = new Set([...group, ...kept.flat()]);
+  const rest = running.filter((s) => !grouped.has(s));
   const row = (s: Session, num?: number) => {
     const far = !p.panes.includes(s.name) && props.elsewhere(s.name);
     return (
@@ -537,6 +541,11 @@ export function TerminalPane(props: {
               {group.map((s, i) => row(s, i + 1))}
             </div>
           )}
+          {kept.map((g) => (
+            <div key={g.map((s) => s.name).join("\n")} className="sgroup kept" role="group" aria-label="Side by side, not on screen">
+              {g.map((s, i) => row(s, i + 1))}
+            </div>
+          ))}
           {rest.map((s) => row(s))}
           {loaded && running.length === 0 && <p className="slist-note">Nothing running here.</p>}
           {ports.length > 0 && <div className="slist-label">Ports</div>}

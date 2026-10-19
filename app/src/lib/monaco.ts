@@ -4,6 +4,7 @@
 // TypeScript worker alone is several MB.
 
 import * as monaco from "monaco-editor/editor/editor.api";
+import { isLight, onSettings } from "./settings";
 import "monaco-editor/features/register.all";
 import "monaco-editor/languages/definitions/register.all";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
@@ -11,7 +12,6 @@ import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 // Vite bundles the worker; without this Monaco would look for it next to its own files.
 globalThis.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 
-const scheme = matchMedia("(prefers-color-scheme: light)");
 
 // Monaco needs real colors, so take the editor background from theme.css like the terminal does.
 // It only accepts #rrggbb, and the CSS minifier shortens colors, so let a canvas spell them out.
@@ -22,7 +22,7 @@ function applyTheme() {
     ctx.fillStyle = css.getPropertyValue(name).trim();
     return ctx.fillStyle;
   };
-  const light = scheme.matches;
+  const light = isLight();
   monaco.editor.defineTheme("blimp", {
     base: light ? "vs" : "vs-dark",
     inherit: true,
@@ -36,6 +36,7 @@ function applyTheme() {
   monaco.editor.setTheme("blimp");
 }
 applyTheme();
-scheme.addEventListener("change", applyTheme);
+// The Theme setting, or the system going light/dark (after theme.css has switched its colors).
+onSettings(() => requestAnimationFrame(applyTheme));
 
 export { monaco };

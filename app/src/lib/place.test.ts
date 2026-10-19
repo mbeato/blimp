@@ -12,7 +12,7 @@ test("a place round-trips through a query and keeps the browser build's own keys
 });
 
 test("a place opens as Home plus the folder's tab, with the session shown", () => {
-  expect(layoutFor({ server: "s" }).tabs).toEqual([{ server: "s", dir: null, panes: [], focus: 0 }]);
+  expect(layoutFor({ server: "s" }).tabs).toEqual([{ server: "s", dir: null, panes: [], focus: 0, groups: [] }]);
   const l = layoutFor({ server: "s", dir: "/h/a", session: "x" });
   expect(l.tabs.map((t) => t.dir)).toEqual([null, "/h/a"]);
   expect(l.tabs[1].panes).toEqual(["x"]);

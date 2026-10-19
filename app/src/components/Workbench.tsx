@@ -20,6 +20,7 @@ import {
 } from "../lib/files";
 import { closePort, openPort } from "../lib/ports";
 import { tildify } from "../lib/sessions";
+import { getSettings, onSettings } from "../lib/settings";
 import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
 import { Dialog } from "./Dialog";
 import { ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
@@ -329,10 +330,10 @@ export function Workbench(props: {
     }
   };
 
-  // Switching files saves the one you leave.
+  // Switching files saves the one you leave (with autosave on).
   const setActive = (path: string | null) => {
     const prev = active ? docs.get(active) : undefined;
-    if (prev && prev.path !== path) flush(prev);
+    if (prev && prev.path !== path && getSettings().autosave) flush(prev);
     setActiveState(path);
   };
 
@@ -437,7 +438,9 @@ export function Workbench(props: {
     if (doc.inflight === p) doc.inflight = null;
   };
 
+  // Settings > Autosave off: edits wait for ⌘S (closing a tab or the window still saves first).
   const schedule = (doc: Doc) => {
+    if (!getSettings().autosave) return;
     clearTimeout(doc.timer);
     doc.timer = setTimeout(() => void save(doc), AUTOSAVE_MS);
   };
@@ -534,11 +537,12 @@ export function Workbench(props: {
   flushRef.current = flushAll;
   useEffect(() => {
     const flush = () => flushRef.current();
+    const blur = () => getSettings().autosave && flush();
     // pagehide: the window is closing (a blur doesn't always come first).
-    window.addEventListener("blur", flush);
+    window.addEventListener("blur", blur);
     window.addEventListener("pagehide", flush);
     return () => {
-      window.removeEventListener("blur", flush);
+      window.removeEventListener("blur", blur);
       window.removeEventListener("pagehide", flush);
       flushRef.current();
     };
@@ -554,14 +558,15 @@ export function Workbench(props: {
       editor.current = monaco.editor.create(editorBox.current!, {
         model: null,
         automaticLayout: true,
-        fontSize: 13,
+        fontSize: getSettings().editorFontSize,
+        wordWrap: getSettings().wordWrap ? "on" : "off",
         fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
-        minimap: { enabled: false },
+        minimap: { enabled: getSettings().minimap },
         scrollBeyondLastLine: false,
         renderLineHighlight: "line",
         fixedOverflowWidgets: true,
       });
-      editor.current.onDidBlurEditorText(() => editorDoc.current && flush(editorDoc.current));
+      editor.current.onDidBlurEditorText(() => editorDoc.current && getSettings().autosave && flush(editorDoc.current));
     }
     const ed = editor.current;
     if (ed.getModel() !== doc.model) {
@@ -579,6 +584,15 @@ export function Workbench(props: {
       ed.focus();
     }
   });
+
+  useEffect(
+    () =>
+      onSettings(() => {
+        const s = getSettings();
+        editor.current?.updateOptions({ fontSize: s.editorFontSize, wordWrap: s.wordWrap ? "on" : "off", minimap: { enabled: s.minimap } });
+      }),
+    [],
+  );
 
   useEffect(
     () => () => {

@@ -287,3 +287,29 @@ test("the splits on screen show as a group: first in the list, joined, numbered 
   await expect(group).toHaveCount(0);
   await expect(projectTab(page, "tabs-split").locator(".ptab-count")).toHaveCount(0);
 });
+
+test("as in VS Code: clicking another session keeps the split group; clicking either of its sessions brings both back", async ({ page }) => {
+  const dir = fixtureDir("tabs-split");
+  const third = `blimpe2e-splitt-${pid}`;
+  startSession(left, dir);
+  startSession(right, dir);
+  startSession(third, dir);
+  try {
+    await splitTwo(page, dir);
+    await sessionRow(page, third).locator(".srow-main").click();
+    await expect.poll(() => layoutOf(page).tabs[1].panes).toEqual([third]);
+    expect(layoutOf(page).tabs[1].groups).toEqual([[left, right]]);
+    // The kept group still shows in the list, joined and numbered.
+    await expect(frontTab(page).locator(".sgroup.kept .srow")).toHaveCount(2);
+    await expect(splitTerm(page, left)).toBeHidden();
+
+    await sessionRow(page, right).locator(".srow-main").click();
+    await expect.poll(() => layoutOf(page).tabs[1].panes).toEqual([left, right]);
+    expect(layoutOf(page).tabs[1].focus).toBe(1);
+    await expect(splitTerm(page, left)).toBeVisible();
+    await expect(splitTerm(page, right)).toBeVisible();
+    await expect(frontTab(page).locator(".sgroup.kept")).toHaveCount(0);
+  } finally {
+    killSession(third);
+  }
+});

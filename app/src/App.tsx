@@ -3,6 +3,7 @@ import { AddServerDialog } from "./components/AddServerDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
 import { noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { TransferList } from "./components/TransferList";
 import { UpdateBars } from "./components/UpdateBars";
 import { Welcome } from "./components/Welcome";
@@ -36,9 +37,10 @@ import {
 import { forgetProject, lastLayout, lastServer, rememberLayout, rememberProject } from "./lib/recent";
 import { tildify } from "./lib/sessions";
 import { closeTab, dropHomeTabs, homeTab, keepServers, newLayout, openTab, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
+import { getSettings, startSettings, useSettings } from "./lib/settings";
 import { notify, setBadge, WaitWatcher } from "./lib/waiting";
 
-type DialogKind = "palette" | "open" | "add" | null;
+type DialogKind = "palette" | "open" | "add" | "settings" | null;
 
 // One window: project tabs along the top (Home, the server's home folder, first), each laid out
 // by its own Workbench. Every tab stays mounted while open, so its files and terminals survive
@@ -64,11 +66,29 @@ export function App() {
   const links = useRef(new Map<string, ServerLink>()).current;
   const viewingRef = useRef<string[]>([]);
   const watcher = useRef<WaitWatcher | null>(null);
-  watcher.current ??= new WaitWatcher(notify, () => ({ focused: document.hasFocus(), viewing: viewingRef.current }));
+  // Settings > Notifications: the watcher still follows states, it just doesn't announce them.
+  watcher.current ??= new WaitWatcher(
+    (title, body, id) => getSettings().notifications && notify(title, body, id),
+    () => ({ focused: document.hasFocus(), viewing: viewingRef.current }),
+  );
+  const settings = useSettings();
   const onLinkChange = useRef((l: ServerLink) => {
     if (l.status === "connected" && l.sessions) watcher.current!.update(l.key, l.home, l.sessions);
     rerender();
   }).current;
+
+  useEffect(() => {
+    void startSettings();
+    // blimp > Settings… in the menu bar.
+    let off = () => {};
+    if (inTauri())
+      void import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) =>
+        getCurrentWebviewWindow()
+          .listen("open-settings", () => setDialog("settings"))
+          .then((f) => (off = f)),
+      );
+    return () => off();
+  }, []);
 
   useEffect(() => {
     loadServers().then(
@@ -120,7 +140,7 @@ export function App() {
 
   // Only servers blimp can see right now: an offline server's last list may be long out of date.
   const waitingCount = connected.reduce((n, l) => n + (l.sessions?.filter((s) => s.state === "waiting").length ?? 0), 0);
-  useEffect(() => void setBadge(waitingCount), [waitingCount]);
+  useEffect(() => void setBadge(settings.dockBadge ? waitingCount : 0), [waitingCount, settings.dockBadge]);
 
   // The URL keeps the tabs, so a reload stays put, and the Mac keeps them for the next launch:
   // from the window whose tabs changed last. A window that opened on a place (⌘⇧N, a reload)
@@ -324,6 +344,7 @@ export function App() {
     else if (k === "n") frontActions?.current.newClaude();
     else if (k === "b" && !e.shiftKey) toggle("files");
     else if (k === "j" && !e.shiftKey) toggle("term");
+    else if (k === "," && !e.shiftKey) setDialog((d) => (d === "settings" ? null : "settings"));
     else if (k === "o" && !e.shiftKey) {
       if (connected.length) setDialog("open");
       else setNotice("No server is connected yet.");
@@ -495,6 +516,12 @@ export function App() {
           <LayoutToggle label="Files" keys="⌘B" on={show.files} onClick={() => toggle("files")} pane={<rect x="1.5" y="2.5" width="5" height="11" rx="1.5" />} />
           <LayoutToggle label="Terminal" keys="⌘J" on={show.term} onClick={() => toggle("term")} pane={<rect x="1.5" y="9.5" width="13" height="4" rx="1.5" />} />
           <LayoutToggle label="Sessions" keys="⌘⌥B" on={show.sessions} onClick={() => toggle("sessions")} pane={<rect x="9.5" y="2.5" width="5" height="11" rx="1.5" />} />
+          <button className="icon-button small" title="Settings (⌘,)" aria-label="Settings" onClick={() => setDialog("settings")}>
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor">
+              <circle cx="8" cy="8" r="2.2" />
+              <path d="M8 1.8v1.8M8 12.4v1.8M1.8 8h1.8M12.4 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3" />
+            </svg>
+          </button>
         </div>
       </header>
       <UpdateBars links={linkList} onNotice={setNotice} />
@@ -551,6 +578,7 @@ export function App() {
         />
       )}
       {dialog === "add" && <AddServerDialog onAdd={addServer} onClose={() => setDialog(null)} />}
+      {dialog === "settings" && <SettingsDialog onClose={() => setDialog(null)} />}
       <TransferList />
       {notice && (
         <div className="toast" role="status" onClick={() => setNotice("")}>

@@ -123,7 +123,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Drag a session out of the window** to move it: let go over another blimp window and it goes into that window's tab for its folder, where you let go; let go anywhere else and it opens in a new window there. Drag it back the same way.
 - **Right-click a session** (its row, or the name on top of its split) for **Open in New Window**, and, on a split, **Open All Splits in New Window**. The session moves; this window stops showing it.
 - The files, the session list and each split are as wide as you drag the line beside them.
-- **Splits are a group you can see.** The sessions on screen come first in the list, in their left-to-right order, joined by a blue line and numbered like their splits' headers. A project tab says how many sessions it shows side by side.
+- **Splits are groups, as in VS Code's terminal.** Click any session of a split group and the whole group shows, with that one focused. Click a session outside it and that session shows on its own; the group stays together, and a click on either of its sessions brings it back. In the list, the group on screen comes first, joined by a blue line and numbered like its splits' headers; other split groups follow, dimmer. A project tab says how many sessions it shows side by side.
 - A session another blimp window shows has a small window mark in the list. Click it to go to that window.
 - **Shift+Enter** starts a new line in a Claude session, as in VS Code (it sends what Claude reads as Option+Enter). In a plain shell it's Enter.
 - **+** (or **⌘N**) starts a new Claude session in this folder. The **+** menu also has **New shell**: a plain terminal in this folder, with your login shell and no Claude.
@@ -181,6 +181,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 | ⌘P | Open a file by name in this folder. |
 | ⌘S | Save the open file now (edits also save by themselves). |
 | ⌘W | Close the open file tab. The session and the window stay. |
+| ⌘, | Settings: theme, text sizes, terminal cursor and scrollback, Option as Meta, autosave, word wrap, minimap, notifications, Dock badge, automatic update checks. |
 | ⌘B | Show or hide the files on the left. |
 | ⌘J | Show or hide the terminal. |
 | ⌘⌥B | Show or hide the session list. |

@@ -15,7 +15,7 @@ export type Layout = { tabs: Tab[]; active: number; show: Show };
 
 const SHOW_ALL: Show = { files: true, term: true, sessions: true };
 
-export const homeTab = (server: string): Tab => ({ server, dir: null, panes: [], focus: 0 });
+export const homeTab = (server: string): Tab => ({ server, dir: null, panes: [], focus: 0, groups: [] });
 export const newLayout = (server: string): Layout => ({ tabs: [homeTab(server)], active: 0, show: SHOW_ALL });
 
 // Stable across reorders, so React keeps each tab's workbench (open files, terminals) mounted.
@@ -31,7 +31,7 @@ export function openTab(l: Layout, server: string, dir: string | null, session?:
     if (tabs[0].server !== server) tabs[0] = homeTab(server);
   } else {
     i = tabs.findIndex((t) => t.server === server && t.dir === dir);
-    if (i < 0) i = tabs.push({ server, dir, panes: [], focus: 0 }) - 1;
+    if (i < 0) i = tabs.push({ server, dir, panes: [], focus: 0, groups: [] }) - 1;
   }
   if (session) tabs[i] = { ...tabs[i], ...showSession(tabs[i], session) };
   return { ...l, tabs, active: i };
@@ -47,7 +47,7 @@ export function closeTab(l: Layout, i: number): Layout {
 
 export const setPanes = (l: Layout, i: number, p: Panes): Layout => ({
   ...l,
-  tabs: l.tabs.map((t, j) => (j === i ? { ...t, panes: p.panes, focus: p.focus } : t)),
+  tabs: l.tabs.map((t, j) => (j === i ? { ...t, panes: p.panes, focus: p.focus, groups: p.groups } : t)),
 });
 
 export const encodeLayout = (l: Layout) => JSON.stringify(l);
@@ -70,7 +70,18 @@ export function decodeLayout(text: string): Layout | null {
     seen.add(tabKey(t));
     const panes = Array.isArray(t.panes) ? t.panes.filter((n: unknown): n is string => typeof n === "string") : [];
     const focus = Number.isInteger(t.focus) && t.focus >= 0 && t.focus < panes.length ? t.focus : 0;
-    tabs.push({ server: t.server, dir: t.dir, panes, focus });
+    // Kept split groups (missing in layouts saved before they existed): two or more names each,
+    // and no session in two places.
+    const used = new Set<string>(panes);
+    const groups: string[][] = [];
+    for (const g of Array.isArray(t.groups) ? t.groups : []) {
+      if (!Array.isArray(g)) continue;
+      const names = g.filter((n: unknown): n is string => typeof n === "string" && !used.has(n));
+      if (names.length < 2) continue;
+      names.forEach((n: string) => used.add(n));
+      groups.push(names);
+    }
+    tabs.push({ server: t.server, dir: t.dir, panes, focus, groups });
   }
   if (!tabs.length) return null;
   const front = tabs[Number.isInteger(v.active) ? Math.max(0, Math.min(v.active, tabs.length - 1)) : 0];
