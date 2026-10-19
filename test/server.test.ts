@@ -2,7 +2,7 @@
 // Every zmx session made here is named blimptest-* and killed at the end; nothing else is touched.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../package.json";
@@ -262,6 +262,121 @@ describe("terminal", () => {
       zmx("kill", name);
     }
   }, 30000);
+});
+
+describe("chat", () => {
+  // A stand-in Claude: reads lines, answers `size` with its terminal size, echoes the rest with
+  // ESC shown as ~ (zmx draws output through a terminal emulator, which would swallow a raw ESC).
+  const LOOP = `while IFS= read -r l; do case "$l" in size) echo "sz=$(stty size)";; *) printf 'got:%s\\n' "$(printf %s "$l" | tr '\\033' '~')";; esac; done`;
+  const claudeDir = join(tmp, "claude");
+  const T = new Date().toISOString();
+  const tline = (o: object) => JSON.stringify({ timestamp: T, ...o }) + "\n";
+
+  // A session that looks like Claude to blimpd: its pid has a status file naming a transcript.
+  async function fakeClaude(suffix: string, sessionId: string, lines: string[]) {
+    const name = await shSession(suffix, ["sh", "-c", LOOP]);
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
+    mkdirSync(join(claudeDir, "sessions"), { recursive: true });
+    mkdirSync(join(claudeDir, "projects", "p"), { recursive: true });
+    const transcript = join(claudeDir, "projects", "p", `${sessionId}.jsonl`);
+    writeFileSync(transcript, lines.join(""));
+    writeFileSync(join(claudeDir, "sessions", `${pid}.json`), JSON.stringify({ sessionId, cwd: tmp, status: "idle" }));
+    return { name, pid, transcript };
+  }
+  const user = (uuid: string, text: string) => tline({ type: "user", uuid, message: { role: "user", content: text } });
+  const said = (uuid: string, text: string) => tline({ type: "assistant", uuid, message: { role: "assistant", content: [{ type: "text", text }] } });
+
+  test("history on connect, appends as the transcript grows, reset on a new conversation", async () => {
+    const sid = "11111111-1111-1111-1111-111111111111";
+    const { pid, transcript, name } = await fakeClaude("chat1", sid, [user("u1", "hello"), said("a1", "hi there")]);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    expect(c.messages[0].messages.map((m: any) => [m.role, m.text])).toEqual([["user", "hello"], ["assistant", "hi there"]]);
+
+    appendFileSync(transcript, said("a2", "more"));
+    await until(() => c.messages.find((m) => m.type === "append"), "append", 3000);
+    expect(c.messages.find((m) => m.type === "append").messages[0].text).toBe("more");
+
+    const sid2 = "22222222-2222-2222-2222-222222222222";
+    writeFileSync(join(claudeDir, "projects", "p", `${sid2}.jsonl`), user("u9", "fresh"));
+    writeFileSync(join(claudeDir, "sessions", `${pid}.json`), JSON.stringify({ sessionId: sid2, cwd: tmp, status: "idle" }));
+    await until(() => c.messages.some((m) => m.type === "reset"), "reset", 4000);
+    await until(() => c.messages.filter((m) => m.type === "history").length === 2, "second history");
+    expect(c.messages.at(-1).messages.map((m: any) => m.text)).toEqual(["fresh"]);
+    c.ws.close();
+  });
+
+  test("input is typed as a paste plus Enter, once per id, at the viewer's size", async () => {
+    const { name } = await fakeClaude("chat2", "33333333-3333-3333-3333-333333333333", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=101&rows=33`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "m1", text: "hel\x1blo\nworld" }));
+    await until(() => c.messages.find((m) => m.type === "ack" && m.id === "m1"), "ack");
+    // ESC is stripped from the text, the paste markers wrap it, and the newline stays inside the paste.
+    await until(() => viewer.text.includes("got:~[200~hello"), "pasted text reached the session");
+    c.ws.send(JSON.stringify({ type: "input", id: "m1", text: "again" }));
+    await until(() => c.messages.filter((m) => m.type === "ack" && m.id === "m1").length === 2, "second ack");
+    await Bun.sleep(300);
+    expect(viewer.text).not.toContain("again");
+    // The chat client attached at the viewer's size, so the session's size is unchanged.
+    type(viewer.ws, "size\r");
+    await until(() => viewer.text.includes("sz=33 101"), "size unchanged");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
+  test("answer presses the option's key while that prompt is up; a stale one is refused", async () => {
+    const { name } = await fakeClaude("chat3", "44444444-4444-4444-4444-444444444444", []);
+    const at = Date.now();
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    writeFileSync(
+      join(tmp, "status", `${name}.json`),
+      JSON.stringify({ state: "waiting", at, sessionId: "44444444-4444-4444-4444-444444444444", event: "PermissionRequest",
+        prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }),
+    );
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "answer", id: "q1", at: at - 1, pick: 0 }));
+    await until(() => c.messages.find((m) => m.id === "q1"), "reply");
+    expect(c.messages.find((m) => m.id === "q1")).toEqual({ type: "error", id: "q1", error: "the question changed" });
+    c.ws.send(JSON.stringify({ type: "answer", id: "q2", at, pick: 0 }));
+    await until(() => c.messages.find((m) => m.type === "ack" && m.id === "q2"), "ack");
+    type(viewer.ws, "\r");
+    await until(() => viewer.text.includes("got:1"), "the digit reached the session");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
+  test("interrupt sends Esc", async () => {
+    const { name } = await fakeClaude("chat4", "55555555-5555-5555-5555-555555555555", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "i1" }));
+    await until(() => c.messages.find((m) => m.type === "ack" && m.id === "i1"), "ack");
+    type(viewer.ws, "\r");
+    await until(() => viewer.text.includes("got:~"), "Esc reached the session");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
+  test("a session that isn't Claude is unreadable and takes no input; an ended one closes with 4000", async () => {
+    const name = await shSession("chat5");
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "unreadable"), "unreadable");
+    c.ws.send(JSON.stringify({ type: "input", id: "x", text: "ls" }));
+    await until(() => c.messages.find((m) => m.id === "x"), "reply");
+    expect(c.messages.find((m) => m.id === "x").type).toBe("error");
+    zmx("kill", name);
+    await until(() => c.closed, "socket to close", 5000);
+    expect(c.closed?.code).toBe(4000);
+  });
+
+  test("404 for an unknown session", async () => {
+    expect((await api(`/sessions/${tag}-none/chat?token=${token}`)).status).toBe(404);
+  });
 });
 
 describe("starting sessions", () => {

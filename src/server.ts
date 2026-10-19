@@ -7,6 +7,7 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } f
 import { dirname, join, resolve } from "node:path";
 import type { Server } from "bun";
 import pkg from "../package.json";
+import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders } from "./folders";
@@ -26,7 +27,7 @@ import {
 } from "./sessions";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
-type WsData = AttachData | EventsData;
+type WsData = AttachData | EventsData | ChatData;
 
 // <socket dir>/token, made once: 32 random bytes as hex, readable only by you.
 export function loadToken(dir: string): string {
@@ -122,6 +123,14 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
     throw new HttpError(400, "expected a WebSocket");
   }
 
+  const chat = path.match(/^\/sessions\/([^/]+)\/chat$/);
+  if (chat && get) {
+    const name = decodeURIComponent(chat[1]);
+    if (!isSafeName(name) || !(await sessionExists(name))) throw new HttpError(404, `no session named ${name}`);
+    if (server.upgrade(req, { data: chatData(name) })) return;
+    throw new HttpError(400, "expected a WebSocket");
+  }
+
   if (path === "/events" && get) {
     if (server.upgrade(req, { data: eventsData() })) return;
     throw new HttpError(400, "expected a WebSocket");
@@ -200,14 +209,17 @@ export function serve(): Server {
     websocket: {
       open(ws) {
         if (ws.data.kind === "attach") openAttach(ws as any);
+        else if (ws.data.kind === "chat") openChat(ws as any);
         else openEvents(ws as any, server);
       },
       message(ws, msg) {
         if (ws.data.kind === "attach") attachMessage(ws as any, msg);
+        else if (ws.data.kind === "chat") chatMessage(ws as any, msg);
         else eventsMessage(ws as any, msg);
       },
       close(ws) {
         if (ws.data.kind === "attach") closeAttach(ws as any);
+        else if (ws.data.kind === "chat") closeChat(ws as any);
         else closeEvents(ws as any);
       },
     },
