@@ -23,13 +23,17 @@ enum Keychain {
         return try? JSONDecoder().decode(ServerLink.self, from: data)
     }
 
+    /// Updates the saved item, and adds it only when there is none: never delete first, so a
+    /// failed add can't lose the server that was saved.
     static func save(_ s: ServerLink) throws {
         let data = try JSONEncoder().encode(s)
-        SecItemDelete(item as CFDictionary)
-        var query = item
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var status = SecItemUpdate(item as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var query = item
+            query[kSecValueData as String] = data
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            status = SecItemAdd(query as CFDictionary, nil)
+        }
         guard status == errSecSuccess else { throw KeychainError(status: status) }
     }
 

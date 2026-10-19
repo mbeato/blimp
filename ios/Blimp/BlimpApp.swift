@@ -5,26 +5,34 @@ import SwiftUI
 @main
 struct BlimpApp: App {
     @State private var store = Store()
+    @State private var lock = Lock()
 
     var body: some Scene {
         WindowGroup {
-            Root().environment(store)
+            Root().environment(store).environment(lock)
         }
     }
 }
 
 private struct Root: View {
     @Environment(Store.self) private var store
+    @Environment(Lock.self) private var lock
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
-            if store.server == nil || store.connection == .unauthorized {
+            if lock.locked && store.server != nil {
+                LockedView()
+            } else if store.server == nil || store.connection == .unauthorized {
                 PairView()
             } else {
                 HomeView()
             }
         }
         .onReturnFromBackground { store.reconnectNow() }
+        .onChange(of: lock.locked) { _, locked in if !locked { store.reconnectNow() } }
+        .task { await lock.unlock() }
+        .onChange(of: scenePhase) { _, phase in lock.scenePhaseChanged(phase) }
     }
 }
 

@@ -108,21 +108,3 @@ private struct StatusBar: View {
         }
     }
 }
-
-// Task 6 fills this in.
-struct SettingsView: View {
-    @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Button("Sign out", role: .destructive) {
-                    store.signOut()
-                    dismiss()
-                }
-            }
-            .navigationTitle("Settings")
-        }
-    }
-}

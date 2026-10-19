@@ -44,8 +44,9 @@ final class ChatModel {
 
     /// Live from the store; nil until /events lists it (a new session can take a second) and once it's gone.
     var session: Session? { store.sessions.first { $0.name == name } }
-    /// Gone from the list after being in it, or blimpd closed the chat because it ended.
-    var ended: Bool { socketEnded || (lastSeen != nil && session == nil) }
+    /// blimpd closed the chat (4000), refused it (404) or said "the session ended". Not "missing from
+    /// the list": blimpd publishes an empty list when zmx fails, which would end every open chat.
+    var ended: Bool { socketEnded }
     var title: String { (session ?? lastSeen)?.title ?? name }
     var folder: String { (session ?? lastSeen).map { URL(fileURLWithPath: $0.dir).lastPathComponent } ?? "" }
     var working: Bool { session?.state == .working }
@@ -97,8 +98,6 @@ final class ChatModel {
             Task { @MainActor in self?.watch(round) }
         }
         if let s, s != lastSeen { lastSeen = s }
-        // gone from the list after being in it: it ended, and its chat socket has nothing more to say
-        if s == nil, lastSeen != nil { endChat() }
     }
 
     /// The session is over: no more reconnecting, and what's still waiting for a reply gets none.
