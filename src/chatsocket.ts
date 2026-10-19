@@ -98,22 +98,30 @@ async function tick(ws: ServerWebSocket<ChatData>) {
   }
 }
 
+// Never rejects: Bun exits on an unhandled rejection from a WebSocket handler.
 export function openChat(ws: ServerWebSocket<ChatData>) {
-  return (ws.data.opened = start(ws));
+  return (ws.data.opened = start(ws).catch(() => {}));
 }
 
 async function start(ws: ServerWebSocket<ChatData>) {
   const d = ws.data;
-  d.session = await find(d.name);
-  if (d.closed) return;
-  if (!d.session) {
+  try {
+    d.session = await find(d.name);
+    if (d.closed) return;
+    if (!d.session) {
+      d.closed = true;
+      return ws.close(4000, "ended");
+    }
+    if (d.session.sessionId) await loadHistory(ws);
+    else send(ws, { type: "unreadable" });
+    if (d.closed) return; // closed while the history was read
+    d.timer = setInterval(() => tick(ws), 250);
+  } catch {
+    // zmx missing or refused, the transcript folder changing under us…
+    if (d.closed) return;
     d.closed = true;
-    return ws.close(4000, "ended");
+    ws.close(1011, "couldn't read the session");
   }
-  if (d.session.sessionId) await loadHistory(ws);
-  else send(ws, { type: "unreadable" });
-  if (d.closed) return; // closed while the history was read
-  d.timer = setInterval(() => tick(ws), 250);
 }
 
 // The zmx client is started on the first input, not on open: a phone that only reads adds no client.
@@ -184,10 +192,10 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
   if (typeof id !== "string" || !id || id.length > 100) return;
   const fail = (error: string) => send(ws, { type: "error", id, error });
   const d = ws.data;
-  await d.opened;
-  if (!d.session?.sessionId) return fail("open this session on the Mac");
-  if (m.type !== "input" && (seen.get(d.name) ?? []).includes(id)) return send(ws, { type: "ack", id });
   try {
+    await d.opened;
+    if (!d.session?.sessionId) return fail("open this session on the Mac");
+    if (m.type !== "input" && (seen.get(d.name) ?? []).includes(id)) return send(ws, { type: "ack", id });
     if (m.type === "input") {
       if (typeof m.text !== "string" || m.text.length > 100_000) return fail("text must be a string of at most 100 000 characters");
       // No ESC from the phone: it would end the paste early and turn the rest into key presses.
