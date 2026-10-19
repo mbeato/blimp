@@ -21,7 +21,6 @@
   --waiting-glow: rgba(242, 184, 75, 0.5);
   /* Sessions split side by side: their headers, rows and numbers. */
   --group: #7aa7e0;
-  --group-dim: rgba(122, 167, 224, 0.35);
   --group-bg: rgba(122, 167, 224, 0.14);
 
   /* xterm.js reads these when a terminal opens and when the system theme changes. */
@@ -69,7 +68,6 @@
     --waiting: #c27c00;
     --waiting-glow: rgba(194, 124, 0, 0.35);
     --group: #2f6fc4;
-    --group-dim: rgba(47, 111, 196, 0.3);
     --group-bg: rgba(47, 111, 196, 0.1);
 
     --term-bg: #ffffff;
@@ -114,7 +112,6 @@
   --waiting: #c27c00;
   --waiting-glow: rgba(194, 124, 0, 0.35);
   --group: #2f6fc4;
-  --group-dim: rgba(47, 111, 196, 0.3);
   --group-bg: rgba(47, 111, 196, 0.1);
 
   --term-bg: #ffffff;

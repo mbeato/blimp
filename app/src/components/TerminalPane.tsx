@@ -20,6 +20,8 @@ export type PaneActions = {
 };
 export const noActions: PaneActions = { newClaude: () => {}, dropIn: () => {}, release: () => {}, dropFiles: () => {} };
 
+const EARLIER_KEY = "blimp.earlierOpen";
+
 // Where files dropped on a terminal go on the server.
 const UPLOADS = ".blimp/uploads";
 
@@ -232,6 +234,21 @@ export function TerminalPane(props: {
   const trash = (s: Session) => (s.kind === "claude" && s.state === "done" ? void end(s) : setConfirm(s.name));
 
   const past = convs ? earlier(convs, running) : [];
+  // Earlier conversations fold away (folded at first); the choice is kept on this computer.
+  const [showEarlier, setShowEarlier] = useState(() => {
+    try {
+      return localStorage.getItem(EARLIER_KEY) === "open";
+    } catch {
+      return false;
+    }
+  });
+  const toggleEarlier = () =>
+    setShowEarlier((o) => {
+      try {
+        localStorage.setItem(EARLIER_KEY, o ? "closed" : "open");
+      } catch {}
+      return !o;
+    });
 
   // Ports the folder's sessions listen on. One that opens while the pane is up is announced
   // (not the ones already open when it first loads), until opened, closed or 20 s pass.
@@ -510,15 +527,14 @@ export function TerminalPane(props: {
         <div className="pane-head">
           <span className="pane-title">Sessions</span>
           <div className="menu-anchor">
-            <button
-              className="icon-button small"
-              title="New session"
-              aria-label="New session"
-              aria-expanded={menu}
-              disabled={!api}
-              onClick={() => setMenu((m) => !m)}
-            >
+            {/* + starts a Claude session at once; the chevron beside it has the other kinds. */}
+            <button className="icon-button small" title="New Claude session (⌘N)" aria-label="New Claude session" disabled={!api || busy} onClick={() => void start({})}>
               +
+            </button>
+            <button className="icon-button small new-more" title="More kinds of session" aria-label="More kinds of session" aria-expanded={menu} disabled={!api} onClick={() => setMenu((m) => !m)}>
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" />
+              </svg>
             </button>
             {menu && (
               <>
@@ -566,8 +582,13 @@ export function TerminalPane(props: {
               <span className="srow-time">{x.command}</span>
             </button>
           ))}
-          {past.length > 0 && <div className="slist-label">Earlier</div>}
-          {past.map((c) => (
+          {past.length > 0 && (
+            <button className="slist-label slist-fold" aria-expanded={showEarlier} onClick={() => toggleEarlier()}>
+              <span className={"tree-twisty" + (showEarlier ? " open" : "")}>›</span>
+              Earlier <span className="slist-count">{past.length}</span>
+            </button>
+          )}
+          {showEarlier && past.map((c) => (
             <button key={c.sessionId} className="srow-main earlier" disabled={busy || !api} title={`Resume: ${c.title}`} onClick={() => void start({ resume: c.sessionId })}>
               <span className="srow-mark" />
               <span className="srow-title">{c.title}</span>

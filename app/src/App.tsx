@@ -18,12 +18,13 @@ import {
   focusSession,
   onDropSession,
   onReleaseSession,
-  onRememberLayout,
   onSelectSession,
   onShown,
   openWindow,
   projectKey,
   readLayout,
+  restoreWindows,
+  saveWindowLayout,
   setShown,
   setViewing,
   setWindowProjects,
@@ -95,8 +96,9 @@ export function App() {
       async (list) => {
         const keys = list.map(serverKey);
         if (!layout && keys.length) {
-          // A new start reopens the last window's tabs, or opens Home on the server used last.
-          const saved = await lastLayout();
+          // A new start reopens the last run's windows (the Mac app; a browser has one), or opens
+          // Home on the server used last.
+          const saved = (await restoreWindows()) ?? (await lastLayout());
           const last = await lastServer();
           setLayout(keepServers(saved ?? newLayout(keys.includes(last ?? "") ? last! : keys[0]), keys));
         }
@@ -142,29 +144,14 @@ export function App() {
   const waitingCount = connected.reduce((n, l) => n + (l.sessions?.filter((s) => s.state === "waiting").length ?? 0), 0);
   useEffect(() => void setBadge(settings.dockBadge ? waitingCount : 0), [waitingCount, settings.dockBadge]);
 
-  // The URL keeps the tabs, so a reload stays put, and the Mac keeps them for the next launch:
-  // from the window whose tabs changed last. A window that opened on a place (⌘⇧N, a reload)
-  // saves nothing until its tabs change, so an untouched new window doesn't replace them.
-  const sigOf = (l: Layout | null) => (l ? JSON.stringify([l.tabs.map(tabKey), l.active, l.show]) : "");
-  const lastSig = useRef(sigOf(layout));
-  const owner = useRef(false);
+  // The URL keeps the tabs, so a reload stays put. For the next launch, the Mac app keeps every
+  // window's tabs (and where the window is); a browser keeps its one window's.
   useEffect(() => {
     if (!layout) return;
     writeLayout(layout);
-    const sig = sigOf(layout);
-    if (sig !== lastSig.current) (lastSig.current = sig), (owner.current = true);
-    if (owner.current) void rememberLayout(layout);
+    if (inTauri()) saveWindowLayout(layout);
+    else void rememberLayout(layout);
   }, [layout]);
-  const layoutRef = useRef(layout);
-  layoutRef.current = layout;
-  useEffect(() => {
-    let off = () => {};
-    void onRememberLayout(() => {
-      owner.current = true;
-      if (layoutRef.current) void rememberLayout(layoutRef.current);
-    }).then((f) => (off = f));
-    return () => off();
-  }, []);
   const projects = (layout?.tabs ?? []).map((t) => (rootOf(t) ? projectKey(t.server, rootOf(t)!) : "")).filter(Boolean);
   const projectsKey = projects.join("\t");
   useEffect(() => setWindowProjects(projects), [projectsKey]);

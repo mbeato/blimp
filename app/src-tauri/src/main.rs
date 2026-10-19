@@ -21,6 +21,11 @@ fn main() {
         .manage(tunnel::Tunnels::default())
         .manage(transfer::Transfers::default())
         .manage(windows::Windows::default())
+        .setup(|app| {
+            // The last run's windows, for the first window to reopen (restore_windows).
+            app.state::<windows::Windows>().load(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             tunnel::connect,
             tunnel::disconnect,
@@ -33,6 +38,8 @@ fn main() {
             windows::set_shown,
             windows::focus_session,
             windows::take_session,
+            windows::save_window_layout,
+            windows::restore_windows,
             transfer::download,
             transfer::upload,
             transfer::pick_upload,
@@ -44,6 +51,7 @@ fn main() {
         .on_window_event(|window, event| match event {
             WindowEvent::Destroyed => window.state::<windows::Windows>().forget(window.app_handle(), window.label()),
             WindowEvent::Focused(true) => window.state::<windows::Windows>().focused(window.label()),
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) => window.state::<windows::Windows>().moved(window),
             // Files let go on a window from Finder may be uploaded (the page gets the same event).
             // Only on the drop: a file merely dragged across the window isn't one.
             WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => window.state::<transfer::Transfers>().allow(paths),
@@ -63,7 +71,10 @@ fn main() {
         .expect("error while starting blimp")
         .run(|app, event| match event {
             // ssh children would otherwise outlive the app and keep their tunnels open.
-            RunEvent::Exit => app.state::<tunnel::Tunnels>().close_all(),
+            RunEvent::Exit => {
+                app.state::<windows::Windows>().exiting(app);
+                app.state::<tunnel::Tunnels>().close_all()
+            }
             // Clicking the Dock icon with every window closed opens a new one, as Mac apps do.
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { has_visible_windows: false, .. } => {

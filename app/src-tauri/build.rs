@@ -15,6 +15,8 @@ fn main() {
                 "set_shown",
                 "focus_session",
                 "take_session",
+                "save_window_layout",
+                "restore_windows",
                 "download",
                 "upload",
                 "pick_upload",

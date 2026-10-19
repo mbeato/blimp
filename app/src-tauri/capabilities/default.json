@@ -18,6 +18,8 @@
     "allow-set-shown",
     "allow-focus-session",
     "allow-take-session",
+    "allow-save-window-layout",
+    "allow-restore-windows",
     "allow-download",
     "allow-upload",
     "allow-pick-upload",

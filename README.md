@@ -104,7 +104,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Home** is the first tab: your home folder on the server. Its Welcome page lists your recent projects. With more than one server, it has a server picker.
 - **Open Folder…** (⌘O, or the **+** after the tabs) picks a folder: from the folders you used Claude in, by browsing the server, or by typing a path (like `~/projects/app`). While browsing, **New folder** makes a folder and goes into it. The folder opens in a new tab, or its tab comes to the front if it's already open.
 - Close a tab with its **×** or a middle-click. Its sessions keep running. An amber dot on a tab means a session in that folder is waiting for you.
-- blimp reopens your tabs the next time you open it.
+- blimp reopens every window you had open, with its tabs, where it was on screen, the next time you open it. A window you closed yourself (not by quitting) doesn't come back.
 - **⌘⇧N** opens a new window, on Home. Each window has its own tabs.
 
 **The window**
@@ -126,8 +126,8 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Splits are groups, as in VS Code's terminal.** Click any session of a split group and the whole group shows, with that one focused. Click a session outside it and that session shows on its own; the group stays together, and a click on either of its sessions brings it back. In the list, the group on screen comes first, joined by a blue line and numbered like its splits' headers; other split groups follow, dimmer. A project tab says how many sessions it shows side by side.
 - A session another blimp window shows has a small window mark in the list. Click it to go to that window.
 - **Shift+Enter** starts a new line in a Claude session, as in VS Code (it sends what Claude reads as Option+Enter). In a plain shell it's Enter.
-- **+** (or **⌘N**) starts a new Claude session in this folder. The **+** menu also has **New shell**: a plain terminal in this folder, with your login shell and no Claude.
-- **Earlier** lists this folder's past conversations that are not running. Click one to resume it in a new session.
+- **+** (or **⌘N**) starts a new Claude session in this folder. The arrow next to it has **New shell**: a plain terminal in this folder, with your login shell and no Claude.
+- **Earlier** lists this folder's past conversations that are not running, with how many there are. Click it to unfold or fold the list (blimp remembers which), and click a conversation to resume it in a new session.
 - Hover a session and click the trash icon to end it. An idle Claude session ends at once; its conversation is saved, so you can resume it from **Earlier**. A session that is working or waiting, or a shell, asks first.
 - blimp starts every session in the real folder on the server, the same as typing `claude` there. So Claude reads that project's CLAUDE.md and settings.
 - Closing the window or quitting blimp only detaches. Sessions keep running on the server. A reboot of the server ends them. With user systemd and linger, blimpd starts again by itself after the reboot.

@@ -145,12 +145,18 @@ export async function windowLabel(): Promise<string> {
   return getCurrentWebviewWindow().label;
 }
 
-// Another window closed and this one was used most recently of the ones left: save this
-// window's tabs for the next launch.
-export async function onRememberLayout(fn: () => void): Promise<() => void> {
-  if (!inTauri()) return () => {};
-  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-  return getCurrentWebviewWindow().listen("remember-layout", () => fn());
+// The Mac app keeps every window's tabs for the next launch (Rust: save_window_layout); a
+// window closed on purpose (not by quitting) drops out.
+export function saveWindowLayout(l: Layout) {
+  if (inTauri()) invoke("save_window_layout", { layout: encodeLayout(l) }).catch(() => {});
+}
+
+// At launch, once: the last run's windows. This window becomes the first of them (Rust moves it
+// to where that one was and opens the others); null if there's nothing to restore.
+export async function restoreWindows(): Promise<Layout | null> {
+  if (!inTauri()) return null;
+  const saved = await invoke<string | null>("restore_windows").catch(() => null);
+  return saved ? decodeLayout(saved) : null;
 }
 
 // A click on a session another window shows: that window comes forward and shows it.

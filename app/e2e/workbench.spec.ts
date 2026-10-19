@@ -132,11 +132,19 @@ test("the session list: only this folder's sessions; New shell; trash ends a ses
   await expect(sessionRow(page, listed)).toBeVisible();
   // Started in a subfolder: not listed here, as `claude --resume` wouldn't.
   await expect(sessionRow(page, other)).toHaveCount(0);
+  // Earlier is folded at first, and unfolds with a click (kept over a reload).
+  const fold = frontTab(page).locator(".slist-fold");
+  await expect(fold).toHaveAttribute("aria-expanded", "false");
+  await expect(fold).toContainText("1");
+  await expect(page.locator(".srow-main.earlier")).toHaveCount(0);
+  await fold.click();
   await expect(page.locator(".srow-main.earlier")).toContainText("an earlier chat about tests");
+  // + is New Claude session itself; the chevron beside it has the other kinds.
+  await expect(frontTab(page).getByRole("button", { name: "New Claude session", exact: true })).toBeVisible();
 
   // New shell from the + menu: listed with its name, shown in the terminal.
   const before = zmxNames();
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByRole("button", { name: "More kinds of session" }).click();
   await page.getByRole("menuitem", { name: "New shell" }).click();
   await expect.poll(() => zmxNames().filter((n) => !before.includes(n)).length).toBe(1);
   const shell = zmxNames().find((n) => !before.includes(n))!;

@@ -504,9 +504,15 @@ try {
   for (const l of tunnels()) execFileSync("kill", [l.trim().split(/\s+/)[0]]);
   await wd("DELETE", "").catch(() => {});
 
-  // 7c. SIGKILL (force quit, a crash) runs no code in the app at all.
+  // 7c. SIGKILL (force quit, a crash) runs no code in the app at all. Two windows are open (the
+  // second from ⌘⇧N), so step 8 can check that both come back.
   await openApp();
   await until(20_000, () => tunnels().length === 1);
+  await wd("POST", "/actions", {
+    actions: [{ type: "key", id: "kb", actions: [{ type: "keyDown", value: "\uE03D" }, { type: "keyDown", value: "\uE008" }, { type: "keyDown", value: "n" }, { type: "keyUp", value: "n" }, { type: "keyUp", value: "\uE008" }, { type: "keyUp", value: "\uE03D" }] }],
+  });
+  const twoBefore = await until(10_000, async () => ((await wd("GET", "/window/handles")) as string[]).length === 2);
+  await sleep(2500); // both windows have saved their tabs
   const pid3 = pidOf();
   execFileSync("kill", ["-KILL", pid3]);
   await gone(pid3);
@@ -521,6 +527,15 @@ try {
   );
   const store = join(appHome, ".local/share/dev.blimp.app/servers.json");
   const recentStore = join(appHome, ".local/share/dev.blimp.app/recent.json");
+  const handlesAfter: string[] | undefined = await until(15_000, async () => {
+    const h: string[] = await wd("GET", "/window/handles");
+    return h.length === 2 ? h : undefined;
+  });
+  record("every window open at a force quit comes back at the next launch", !!twoBefore && !!handlesAfter, {
+    before: !!twoBefore,
+    after: handlesAfter?.length ?? (await wd("GET", "/window/handles")).length,
+    windows_json: existsSync(join(appHome, ".local/share/dev.blimp.app/windows.json")) ? readFileSync(join(appHome, ".local/share/dev.blimp.app/windows.json"), "utf8").slice(0, 300) : "missing",
+  });
   record("servers, recent projects and the open tabs persist across restart (store plugin)", !!again && !(await js("return !!document.querySelector('.welcome form')")), {
     tabs: await js("return [...document.querySelectorAll('.ptab')].map(t => t.getAttribute('aria-label') + (t.classList.contains('active') ? '*' : ''))"),
     page: await js("return document.querySelector('.welcome-page')?.innerText.slice(0, 200)"),

@@ -6,7 +6,29 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use std::time::{Duration, Instant};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri_plugin_store::StoreExt;
+
+/// A window closed this long before the app quits counts as part of quitting (⌘Q closes every
+/// window, then the app ends), so it comes back at the next launch. One closed earlier was
+/// closed on purpose and doesn't.
+const QUIT_GRACE: Duration = Duration::from_secs(3);
+
+/// What the next launch reopens, per window: its tabs (the page's layout, as JSON) and where it
+/// was (logical x, y, width, height).
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Saved {
+    layout: String,
+    bounds: Option<[f64; 4]>,
+}
+
+struct Open {
+    label: String,
+    saved: Saved,
+    closed: Option<Instant>,
+}
 
 #[derive(Default)]
 pub struct Windows {
@@ -29,25 +51,79 @@ struct Inner {
     /// Window labels, the one focused most recently last: where windows overlap, a drop goes
     /// to the one most likely on top.
     focus_order: Vec<String>,
+    /// Every window's tabs and place, in the order the windows opened, for the next launch.
+    open: Vec<Open>,
+    /// What the last run left, until the first window takes it (restore_windows).
+    previous: Option<Vec<Saved>>,
 }
 
+/// The windows to save: open ones, and ones closed within QUIT_GRACE.
+fn kept(open: &[Open], now: Instant) -> Vec<Saved> {
+    open.iter().filter(|o| o.closed.is_none_or(|t| now.duration_since(t) < QUIT_GRACE)).map(|o| o.saved.clone()).collect()
+}
+
+const STORE: &str = "windows.json";
+
 impl Windows {
-    /// A window closed: forget what it showed, and tell the others. The window used most
-    /// recently of the ones left saves its tabs ("remember-layout"), so the next launch reopens
-    /// those, not the closed window's.
+    /// At startup: what the last run's windows were, for restore_windows.
+    pub fn load(&self, app: &AppHandle) {
+        let saved = app
+            .store(STORE)
+            .ok()
+            .and_then(|s| s.get("windows"))
+            .and_then(|v| serde_json::from_value::<Vec<Saved>>(v).ok())
+            .unwrap_or_default();
+        self.inner.lock().unwrap().previous = Some(saved);
+    }
+
+    /// Writes what the next launch reopens. Live windows' places are read fresh.
+    fn persist(&self, app: &AppHandle) {
+        let list = {
+            let mut inner = self.inner.lock().unwrap();
+            for o in inner.open.iter_mut().filter(|o| o.closed.is_none()) {
+                if let Some(w) = app.get_webview_window(&o.label) {
+                    o.saved.bounds = bounds(&w).or(o.saved.bounds);
+                }
+            }
+            kept(&inner.open, Instant::now())
+        };
+        if let Ok(store) = app.store(STORE) {
+            store.set("windows", serde_json::json!(list));
+            let _ = store.save();
+        }
+    }
+
+    /// A window closed: forget what it showed, and tell the others. Its tabs stay saved for a
+    /// moment, in case this is the app quitting (QUIT_GRACE).
     pub fn forget(&self, app: &AppHandle, label: &str) {
-        let (shown, next) = {
+        let shown = {
             let mut inner = self.inner.lock().unwrap();
             inner.projects.remove(label);
             inner.viewing.remove(label);
             inner.shown.remove(label);
             inner.focus_order.retain(|l| l != label);
-            (inner.shown.clone(), inner.focus_order.last().cloned())
+            if let Some(o) = inner.open.iter_mut().find(|o| o.label == label) {
+                o.closed = Some(Instant::now());
+            }
+            inner.shown.clone()
         };
         let _ = app.emit("shown", shown);
-        let next = next.or_else(|| app.webview_windows().into_keys().find(|l| l != label));
-        if let Some(l) = next {
-            let _ = app.emit_to(l.as_str(), "remember-layout", ());
+        self.persist(app);
+    }
+
+    /// The app is ending: save once more (windows closed on purpose earlier drop out now).
+    pub fn exiting(&self, app: &AppHandle) {
+        self.persist(app);
+    }
+
+    /// A window moved or was resized: remember where it is (written with the next save, so a
+    /// drag doesn't write the file at every step).
+    pub fn moved(&self, window: &tauri::Window) {
+        let Some(w) = window.app_handle().get_webview_window(window.label()) else { return };
+        let b = bounds(&w);
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(o) = inner.open.iter_mut().find(|o| o.label == window.label() && o.closed.is_none()) {
+            o.saved.bounds = b.or(o.saved.bounds);
         }
     }
 
@@ -63,6 +139,10 @@ impl Windows {
 /// string; it reaches the page as a JSON string, so nothing in it can run as script.
 /// `at`: its top-left corner on screen (logical pixels), else where the system puts it.
 pub fn create(app: &AppHandle, windows: &Windows, init: &str, at: Option<(f64, f64)>) -> Result<(), String> {
+    create_sized(app, windows, init, at, None)
+}
+
+fn create_sized(app: &AppHandle, windows: &Windows, init: &str, at: Option<(f64, f64)>, size: Option<(f64, f64)>) -> Result<(), String> {
     let n = windows.next.fetch_add(1, Ordering::Relaxed) + 1;
     let init = serde_json::to_string(init).map_err(|e| e.to_string())?;
     let mut b = WebviewWindowBuilder::new(app, format!("w-{n}"), WebviewUrl::App("index.html".into()))
@@ -73,7 +153,65 @@ pub fn create(app: &AppHandle, windows: &Windows, init: &str, at: Option<(f64, f
     if let Some((x, y)) = at {
         b = b.position(x, y);
     }
+    if let Some((w, h)) = size {
+        b = b.inner_size(w, h);
+    }
     b.build().map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn bounds(w: &WebviewWindow) -> Option<[f64; 4]> {
+    let scale = w.scale_factor().ok()?;
+    let p = w.outer_position().ok()?.to_logical::<f64>(scale);
+    let s = w.inner_size().ok()?.to_logical::<f64>(scale);
+    Some([p.x, p.y, s.width, s.height])
+}
+
+/// Whether a saved place is still on one of the screens (a screen may have been unplugged).
+fn on_screen(app: &AppHandle, b: &[f64; 4]) -> bool {
+    app.available_monitors().unwrap_or_default().iter().any(|m| {
+        let p = m.position().to_logical::<f64>(m.scale_factor());
+        let s = m.size().to_logical::<f64>(m.scale_factor());
+        b[0] >= p.x - 40.0 && b[1] >= p.y - 40.0 && b[0] < p.x + s.width - 100.0 && b[1] < p.y + s.height - 100.0
+    })
+}
+
+fn percent(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// The window's tabs changed (the page's layout, as JSON): saved for the next launch.
+#[tauri::command]
+pub fn save_window_layout(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, layout: String) {
+    {
+        let mut inner = windows.inner.lock().unwrap();
+        let label = window.label().to_string();
+        match inner.open.iter_mut().find(|o| o.label == label) {
+            Some(o) => o.saved.layout = layout,
+            None => inner.open.push(Open { label, saved: Saved { layout, bounds: bounds(&window) }, closed: None }),
+        }
+    }
+    windows.persist(&app);
+}
+
+/// Once per launch, for the first window: the last run's windows. The caller becomes the first
+/// of them (its tabs are returned, and it moves to where that window was); the others open where
+/// they were. None: nothing to restore (or already done), so the caller starts as usual.
+#[tauri::command]
+pub fn restore_windows(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>) -> Option<String> {
+    let mut list = windows.inner.lock().unwrap().previous.take()?;
+    if list.is_empty() {
+        return None;
+    }
+    let first = list.remove(0);
+    if let Some(b) = first.bounds.filter(|b| on_screen(&app, b)) {
+        let _ = window.set_position(LogicalPosition::new(b[0], b[1]));
+        let _ = window.set_size(LogicalSize::new(b[2], b[3]));
+    }
+    for s in list {
+        let b = s.bounds.filter(|b| on_screen(&app, b));
+        let _ = create_sized(&app, &windows, &format!("layout={}", percent(&s.layout)), b.map(|b| (b[0], b[1])), b.map(|b| (b[2], b[3])));
+    }
+    Some(first.layout)
 }
 
 /// Whether the point (logical screen pixels) is on the window, and where in its page if so.
@@ -230,4 +368,26 @@ pub fn claim_notice(windows: State<'_, Windows>, session: String, key: String) -
         return false;
     }
     inner.noticed.insert(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open(label: &str, closed: Option<Instant>) -> Open {
+        Open { label: label.into(), saved: Saved { layout: label.into(), bounds: None }, closed }
+    }
+
+    #[test]
+    fn closed_windows_drop_out_unless_the_app_is_quitting() {
+        let now = Instant::now();
+        let list = [open("main", None), open("w-1", Some(now - Duration::from_secs(1))), open("w-2", Some(now - Duration::from_secs(60)))];
+        let names: Vec<String> = kept(&list, now).into_iter().map(|s| s.layout).collect();
+        assert_eq!(names, ["main", "w-1"]);
+    }
+
+    #[test]
+    fn layouts_go_into_a_query_safely() {
+        assert_eq!(percent(r#"{"a":"b c&d"}"#), "%7B%22a%22%3A%22b%20c%26d%22%7D");
+    }
 }
