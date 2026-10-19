@@ -198,8 +198,10 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
     if (m.type !== "input" && (seen.get(d.name) ?? []).includes(id)) return send(ws, { type: "ack", id });
     if (m.type === "input") {
       if (typeof m.text !== "string" || m.text.length > 100_000) return fail("text must be a string of at most 100 000 characters");
-      // No ESC from the phone: it would end the paste early and turn the rest into key presses.
-      await typed(ws, id, ["\x1b[200~" + m.text.replaceAll("\x1b", "") + "\x1b[201~", "\r"]);
+      // No control characters from the phone: ESC would end the paste early and turn the rest into key
+      // presses, ctrl+\ detaches zmx's client, ctrl+C interrupts. Newlines and tabs stay; \r is a newline.
+      const text = m.text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+      await typed(ws, id, ["\x1b[200~" + text + "\x1b[201~", "\r"]);
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer") {

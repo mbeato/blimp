@@ -426,6 +426,24 @@ describe("chat", () => {
     viewer.ws.close();
   });
 
+  test("control characters are taken out of input: ctrl+\\ doesn't detach the chat client, ctrl+C isn't pressed", async () => {
+    const { name } = await fakeClaude("chat11", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "k1", text: "a\x1cb\x03c\x7f\x9b\x00d\te\r\nf\rg" }));
+    await until(() => c.messages.find((m) => m.type === "ack" && m.id === "k1"), "ack");
+    // \r\n and a lone \r are newlines, so they stay inside the paste; tab stays.
+    await until(() => viewer.text.includes("got:~[200~abcd\te") && viewer.text.includes("got:f") && viewer.text.includes("got:g~[201~"), "the text without them");
+    await Bun.sleep(300);
+    expect(clients(name)).toBe(2); // the viewer and the chat client
+    c.ws.send(JSON.stringify({ type: "input", id: "k2", text: "still here" }));
+    await until(() => viewer.text.includes("got:~[200~still here~[201~"), "the next input through the same client");
+    expect(clients(name)).toBe(2);
+    c.ws.close();
+    viewer.ws.close();
+  });
+
   test("a permission prompt's options come from the screen, even when the hook fires before it's drawn", async () => {
     const name = await shSession("chat9");
     const at = Date.now();
