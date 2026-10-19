@@ -23,6 +23,7 @@ import { basename, dirname, join } from "node:path";
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
 
 export type Session = ZmxSession & {
+  kind: "claude" | "shell"; // shell: anything that isn't Claude, like blimp's "New shell"
   sessionId?: string;
   title: string;
   status: string; // busy | idle | waiting | shell, or "" when Claude isn't running
@@ -219,6 +220,7 @@ export function listSessions(
     const file = info.sessionId ? transcriptPath(dir, info.sessionId) : undefined;
     return {
       ...z,
+      kind: info.sessionId || /\bclaude\b/.test(z.cmd) ? "claude" : "shell",
       dir: realDir(info.cwd || z.dir || "/"),
       sessionId: info.sessionId,
       title: file ? transcriptTitle(file) : "(new session)",
@@ -291,7 +293,8 @@ export function newSessionName(dir: string, at: Date, taken: string[], custom?: 
   return name;
 }
 
-// Starts `claude` in dir inside a new zmx session and returns its name. Claude is started
+// Starts `claude` (or, with shell, just the login shell) in dir inside a new zmx session and
+// returns its name. Claude is started
 // through the user's login shell so it gets the same environment as typing `claude` there,
 // and the shell execs it so the session's pid is Claude's (that's how the status file is found).
 // Claude's arguments go to the shell as "$@", never pasted into the command string.
@@ -302,18 +305,20 @@ export function newSessionName(dir: string, at: Date, taken: string[], custom?: 
 //
 // One start at a time: two in the same second would pick the same name, and the second would just attach.
 let starting: Promise<unknown> = Promise.resolve();
-export function startSession(dir: string, custom?: string, resume?: string): Promise<string> {
-  const p = starting.then(() => start(dir, custom, resume));
+export type StartOptions = { name?: string; resume?: string; shell?: boolean };
+export function startSession(dir: string, opts: StartOptions = {}): Promise<string> {
+  const p = starting.then(() => start(dir, opts));
   starting = p.catch(() => {});
   return p;
 }
 
-async function start(dir: string, custom?: string, resume?: string): Promise<string> {
+async function start(dir: string, { name: custom, resume, shell: plain }: StartOptions): Promise<string> {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`not a folder: ${dir}`);
   const name = newSessionName(dir, new Date(), parseZmxList(await zmxListAsync()).map((s) => s.name), custom);
   const shell = process.env.SHELL || userInfo().shell || "/bin/sh";
   const args = resume ? ["--resume", resume] : [];
-  const proc = Bun.spawn([zmxPath(), "attach", name, shell, "-l", "-i", "-c", 'exec claude "$@"', "claude", ...args], {
+  const cmd = plain ? [shell, "-l", "-i"] : [shell, "-l", "-i", "-c", 'exec claude "$@"', "claude", ...args];
+  const proc = Bun.spawn([zmxPath(), "attach", name, ...cmd], {
     cwd: dir,
     env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor" },
     terminal: { cols: 120, rows: 36, data() {} }, // nobody watches this client; zmx keeps the screen
@@ -330,6 +335,16 @@ async function start(dir: string, custom?: string, resume?: string): Promise<str
     proc.exited.then(() => proc.terminal?.close());
   }
   return name;
+}
+
+// Ends a session: zmx closes its terminal, which ends Claude or the shell in it. Claude's
+// conversation is saved as it goes, so it can still be resumed.
+export async function killSession(name: string): Promise<void> {
+  const p = Bun.spawn([zmxPath(), "kill", name], { env: zmxEnv(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  if ((await p.exited) !== 0) throw new Error(`zmx couldn't end ${name}`);
+  // zmx kill returns before the session is gone from the list; wait, so the next list agrees.
+  for (const end = Date.now() + 3000; Date.now() < end; await Bun.sleep(25))
+    if (!parseZmxList(await zmxListAsync()).some((s) => s.name === name)) return;
 }
 
 // Resolve symlinks so a session shows under the folder Claude really runs in.

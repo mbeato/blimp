@@ -7,6 +7,7 @@ import {
   type Dirent,
   existsSync,
   lstatSync,
+  mkdirSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -136,6 +137,27 @@ export function writeFile(path: string, body: Uint8Array, baseMtime?: number): {
     throw e;
   }
   return { mtime: ms(statSync(path).mtimeMs) };
+}
+
+// New, empty, for the files pane's "New folder" and "New file". Never over something that exists.
+export function makeDir(path: string): { path: string } {
+  try {
+    mkdirSync(path);
+  } catch (e: any) {
+    if (e?.code === "EEXIST") throw new HttpError(409, "that name is taken");
+    throw e;
+  }
+  return { path };
+}
+
+export function createFile(path: string): { path: string; mtime: number } {
+  try {
+    writeFileSync(path, "", { flag: "wx" });
+  } catch (e: any) {
+    if (e?.code === "EEXIST") throw new HttpError(409, "that name is taken");
+    throw e;
+  }
+  return { path, mtime: ms(statSync(path).mtimeMs) };
 }
 
 const MAX_FILES = 20_000;

@@ -147,8 +147,8 @@ test("listSessions joins zmx with Claude's session file, transcript and blimp's 
   const { listSessions } = await import("../src/sessions");
   const zmxOut = "  name=web-1\tpid=42\tclients=1\tcreated=5\tcwd=/home/u/web\tcmd=claude\n  name=sh-2\tpid=43\tclients=0\tcreated=6\tcwd=/tmp\tcmd=";
   expect(listSessions(home, zmxOut, join(home, "status"))).toEqual([
-    { name: "web-1", pid: 42, clients: 1, created: 5, dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123 },
-    { name: "sh-2", pid: 43, clients: 0, created: 6, dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000 },
+    { name: "web-1", pid: 42, clients: 1, created: 5, kind: "claude", dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123 },
+    { name: "sh-2", pid: 43, clients: 0, created: 6, kind: "shell", dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000 },
   ]);
 });
 

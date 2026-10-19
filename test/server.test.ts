@@ -121,7 +121,7 @@ describe("token", () => {
     const r = await api("/sessions", { method: "OPTIONS" }, false);
     expect(r.status).toBe(204);
     expect(r.headers.get("access-control-allow-headers")).toBe("Authorization, Content-Type");
-    expect(r.headers.get("access-control-allow-methods")).toBe("GET, POST, PUT, OPTIONS");
+    expect(r.headers.get("access-control-allow-methods")).toBe("GET, POST, PUT, DELETE, OPTIONS");
   });
 });
 
@@ -260,6 +260,35 @@ describe("starting sessions", () => {
     expect([a.name, b.name].sort()).toEqual([`${tag}-twin`, `${tag}-twin-2`]);
     expect(zmxNames()).toEqual(expect.arrayContaining([a.name, b.name]));
   }, 15000);
+
+  test("shell: true starts the login shell without Claude, listed as kind shell", async () => {
+    const dir = join(homeDir, tag);
+    const r = await api("/sessions", { method: "POST", body: JSON.stringify({ dir, name: "sh", shell: true }) });
+    expect(r.status).toBe(201);
+    const { name } = await r.json();
+    made.push(name);
+    const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    // The fake shell got the login-shell arguments and no "-c exec claude".
+    await until(() => s.text.includes("fake-claude"), "the shell's first output");
+    s.ws.close();
+    const list = await (await api("/sessions")).json();
+    expect(list.find((x: any) => x.name === name)?.kind).toBe("shell");
+    const post = (body: object) => api("/sessions", { method: "POST", body: JSON.stringify(body) });
+    expect((await post({ dir, shell: "yes" })).status).toBe(400);
+    expect((await post({ dir, shell: true, resume: "0123abcd-0123-0123-0123-0123456789ab" })).status).toBe(400);
+  }, 15000);
+
+  test("DELETE /sessions/<name> ends the session; 404 for one that isn't there", async () => {
+    const name = await shSession("doomed");
+    const s = await socket(`/sessions/${name}/attach`);
+    const r = await api(`/sessions/${name}`, { method: "DELETE" });
+    expect(r.status).toBe(204);
+    expect(zmxNames()).not.toContain(name);
+    await until(() => s.closed?.code === 4000, "the attached client to see the session end");
+    expect((await api(`/sessions/${name}`, { method: "DELETE" })).status).toBe(404);
+    expect((await api(`/sessions/..%2F..`, { method: "DELETE" })).status).toBe(404);
+    expect((await api(`/sessions/${name}`, { method: "DELETE" }, false)).status).toBe(401);
+  }, 15000);
 });
 
 describe("events", () => {
@@ -332,6 +361,26 @@ describe("files over HTTP", () => {
     expect((await api(`/fs/file?path=${q("/etc/passwd")}`)).status).toBe(403);
     expect((await api(`/fs/list?path=${q(join(homeDir, "missing"))}`)).status).toBe(404);
     expect((await api(`/fs/files?root=${q(homeDir)}`)).status).toBe(200);
+  });
+
+  test("mkdir and create: new names only, inside home, parent must exist", async () => {
+    const post = (route: string, path: string) => api(route, { method: "POST", body: JSON.stringify({ path }) });
+    const dir = join(homeDir, "made");
+    expect((await post("/fs/mkdir", dir)).status).toBe(201);
+    expect(statSync(dir).isDirectory()).toBe(true);
+    expect((await post("/fs/mkdir", dir)).status).toBe(409);
+    const file = join(dir, "new.txt");
+    const r = await post("/fs/create", file);
+    expect(r.status).toBe(201);
+    expect((await r.json()).mtime).toBeGreaterThan(0);
+    expect(readFileSync(file, "utf8")).toBe("");
+    writeFileSync(file, "keep me");
+    expect((await post("/fs/create", file)).status).toBe(409);
+    expect(readFileSync(file, "utf8")).toBe("keep me");
+    expect((await post("/fs/mkdir", join(homeDir, "no/such/parent"))).status).toBe(403);
+    expect((await post("/fs/mkdir", join(tmp, "outside"))).status).toBe(403);
+    expect((await post("/fs/create", "relative.txt")).status).toBe(400);
+    expect((await api("/fs/mkdir", { method: "POST", body: "{}" })).status).toBe(400);
   });
 
   test("POST /sessions checks resume ids and the home folder", async () => {

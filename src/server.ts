@@ -8,9 +8,19 @@ import { dirname, join, resolve } from "node:path";
 import type { Server } from "bun";
 import pkg from "../package.json";
 import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
-import { guard, HttpError, listDir, listFiles, readFile, realHome, writeFile } from "./files";
+import { createFile, guard, HttpError, listDir, listFiles, makeDir, readFile, realHome, writeFile } from "./files";
 import { conversations, recentFolders } from "./folders";
-import { checkZmxDir, claudeDir, listSessions, sessionExists, socketPath, startSession, zmxListAsync } from "./sessions";
+import {
+  checkZmxDir,
+  claudeDir,
+  isSafeName,
+  killSession,
+  listSessions,
+  sessionExists,
+  socketPath,
+  startSession,
+  zmxListAsync,
+} from "./sessions";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
 type WsData = AttachData | EventsData;
@@ -48,6 +58,12 @@ function errorResponse(e: any): Response {
 
 const isDir = (p: string) => statSync(p).isDirectory();
 
+async function bodyPath(req: Request): Promise<string> {
+  const { path } = (await req.json()) as Record<string, unknown>;
+  if (typeof path !== "string") throw new HttpError(400, "path is required");
+  return path;
+}
+
 async function route(req: Request, url: URL, server: Server): Promise<Response | undefined> {
   const { pathname: path, searchParams: q } = url;
   const get = req.method === "GET";
@@ -56,14 +72,24 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
 
   if (path === "/sessions" && get) return Response.json(listSessions(claudeDir(), await zmxListAsync()));
   if (path === "/sessions" && req.method === "POST") {
-    const { dir, name, resume } = (await req.json()) as Record<string, unknown>;
+    const { dir, name, resume, shell } = (await req.json()) as Record<string, unknown>;
     if (typeof dir !== "string") throw new HttpError(400, "dir is required");
     if (name !== undefined && typeof name !== "string") throw new HttpError(400, "name must be a string");
     if (resume !== undefined && (typeof resume !== "string" || !/^[0-9a-f-]{36}$/.test(resume)))
       throw new HttpError(400, "resume must be a conversation id");
+    if (shell !== undefined && typeof shell !== "boolean") throw new HttpError(400, "shell must be true or false");
+    if (shell && resume) throw new HttpError(400, "a shell can't resume a conversation");
     const real = guard(dir);
     if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
-    return Response.json({ name: await startSession(real, name || undefined, resume) }, { status: 201 });
+    return Response.json({ name: await startSession(real, { name: name || undefined, resume, shell }) }, { status: 201 });
+  }
+
+  const one = path.match(/^\/sessions\/([^/]+)$/);
+  if (one && req.method === "DELETE") {
+    const name = decodeURIComponent(one[1]);
+    if (!isSafeName(name) || !(await sessionExists(name))) throw new HttpError(404, `no session named ${name}`);
+    await killSession(name);
+    return new Response(null, { status: 204 });
   }
 
   const attach = path.match(/^\/sessions\/([^/]+)\/attach$/);
@@ -100,6 +126,8 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
     const body = new Uint8Array(await req.arrayBuffer());
     return Response.json(writeFile(real, body, base === null ? undefined : Number(base)));
   }
+  if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guard(await bodyPath(req))), { status: 201 });
+  if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guard(await bodyPath(req))), { status: 201 });
   if (path === "/fs/files" && get) {
     const root = guard(q.get("root"));
     if (!isDir(root)) throw new HttpError(400, "root must be a folder");
@@ -126,7 +154,7 @@ export function serve(): Server {
           headers: {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Authorization, Content-Type",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
           },
         });
       const url = new URL(req.url);
