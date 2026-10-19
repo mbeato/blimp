@@ -15,8 +15,11 @@ export type ChatMessage =
 export type ChatScan = { offset: number; dir: string; tools: Map<string, ToolMessage> };
 export const newScan = (dir: string): ChatScan => ({ offset: 0, dir, tools: new Map() });
 
+// Never between the two halves of an emoji: a lone surrogate can make the phone reject the whole frame.
+const cut = (s: string, n: number) => s.slice(0, /[\ud800-\udbff]/.test(s[n - 1] ?? "") ? n - 1 : n);
+
 const CAP = 20_000;
-const cap = (s: string) => (s.length > CAP ? s.slice(0, CAP) + "\n… (cut)" : s);
+const cap = (s: string) => (s.length > CAP ? cut(s, CAP) + "\n… (cut)" : s);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
 // Command wrappers (<command-name>), command output and system reminders all start with a tag;
@@ -28,7 +31,7 @@ const rel = (p: string, dir: string) => (dir && p.startsWith(dir + "/") ? p.slic
 export function toolSummary(name: string, input: any, dir: string): string {
   switch (name) {
     case "Bash":
-      return `Ran \`${str(input?.command).split("\n")[0].slice(0, 80)}\``;
+      return `Ran \`${cut(str(input?.command).split("\n")[0], 80)}\``;
     case "Edit":
     case "MultiEdit":
       return `Edited ${rel(str(input?.file_path), dir)}`;

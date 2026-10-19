@@ -43,6 +43,17 @@ describe("messagesFromLine", () => {
     const [r] = messagesFromLine(user("u1", [{ type: "tool_result", tool_use_id: "t1", content: "z".repeat(30000) }]), s);
     expect((r as any).output.length).toBeLessThan(20100);
   });
+
+  test("a cut never splits an emoji in two", () => {
+    const s = newScan("/");
+    const [m] = messagesFromLine(assistant("a1", [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "x".repeat(19_999) + "😀" + "y".repeat(100) } }]), s);
+    const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    expect((m as any).input.startsWith("x".repeat(19_999) + "\n… (cut)")).toBe(true);
+    expect(lone.test((m as any).input)).toBe(false);
+    expect(lone.test((m as any).summary)).toBe(false);
+    expect(toolSummary("Bash", { command: "x".repeat(79) + "😀" }, "/")).toBe("Ran `" + "x".repeat(79) + "`");
+    expect(toolSummary("Bash", { command: "x".repeat(78) + "😀" }, "/")).toBe("Ran `" + "x".repeat(78) + "😀`");
+  });
 });
 
 test("toolSummary", () => {
