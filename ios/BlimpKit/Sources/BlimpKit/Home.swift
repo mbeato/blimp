@@ -8,6 +8,10 @@ public struct ProjectGroup: Equatable, Identifiable, Sendable {
     public let sessions: [Session]
     public let waiting: Bool
     public let activity: Double
+
+    public init(dir: String, name: String, sessions: [Session], waiting: Bool, activity: Double) {
+        self.dir = dir; self.name = name; self.sessions = sessions; self.waiting = waiting; self.activity = activity
+    }
 }
 
 public struct HomeList: Equatable, Sendable {
