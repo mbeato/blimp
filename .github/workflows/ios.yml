@@ -36,6 +36,7 @@ jobs:
       - name: BlimpKit tests on macOS
         working-directory: ios/BlimpKit
         run: swift test
+      # Swift warnings fail the build, for good (5a9b30a said "reverted next"; it stays).
       - name: Build for the simulator
         working-directory: ios
         run: |
