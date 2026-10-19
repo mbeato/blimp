@@ -1,6 +1,6 @@
 # Next ideas (after rc.5)
 
-Date: 2026-10-19. Status: 1, 3 and 4 are built (rc.6), with these differences: a folder downloads as `.tar.gz` rather than `.zip` (`tar` is on every server; a Mac opens it with a double-click), and a browser tab has Reload and Open in Browser but no Back and Forward (the page is another origin, so blimp can't read or steer its history). 2 and 5 are still proposals. Max asked for these after trying rc.5. Each one
+Date: 2026-10-19. Status: 1, 3 and 4 are built (rc.6), with these differences: a folder downloads as `.tar.gz` rather than `.zip` (`tar` is on every server; a Mac opens it with a double-click), and a browser tab has Reload and Open in Browser but no Back and Forward (the page is another origin, so blimp can't read or steer its history). 2 is built too (v0.2.0): updates from `latest.json` on the latest plain release, signed with the updater key; prereleases don't reach installed apps (no beta channel yet). 5 is still a proposal. Max asked for these after trying rc.5. Each one
 says what it does, how it would work, what's open, and a rough size (S: an afternoon, M: a day or
 two, L: a week or more).
 

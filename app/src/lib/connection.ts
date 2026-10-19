@@ -67,8 +67,8 @@ async function connectServer(s: Server): Promise<Conn> {
   }
   // blimpd's home has symlinks resolved, like the session folders it reports, so "~" matches
   // them. The shell's $HOME (what connect returns) may not.
-  const { home } = await new Api(conn).health();
-  return { ...conn, home };
+  const { home, version } = await new Api(conn).health();
+  return { ...conn, home, version };
 }
 
 // Retry after 1, 2, 5, 10 s, then every 10 s.
@@ -123,6 +123,11 @@ export class ServerLink {
 
   get home() {
     return this.conn?.home ?? "";
+  }
+
+  // blimpd's version on this server, once connected.
+  get version() {
+    return this.conn?.version ?? "";
   }
 
   start() {

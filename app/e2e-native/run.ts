@@ -306,6 +306,11 @@ try {
   record("closing the browser tab closes its forward", !!fwdGone, { fwdGone });
   zmx("kill", "blimptest-web");
 
+  // 4d. The update check is allowed (capabilities) and reaches the updater: it answers with
+  // "no update" or a network/release error, never a permission error.
+  const upd = await jsAsync(`return await window.__TAURI_INTERNALS__.invoke('plugin:updater|check', {}).then(v => 'ok ' + JSON.stringify(v), e => 'ERR ' + e)`);
+  record("the app may check for updates (updater plugin wired, allowed)", !/not allowed|denied|permission|unknown command/i.test(upd), upd);
+
   // 4b. The show/hide buttons at the top right.
   const hiddenNow = () => js("const w = document.querySelector('.wb:not([hidden])'); return ['.wb-tree', '.wb-term', '.slist'].map(c => w.querySelector(c).offsetWidth === 0)");
   await click('.layout-toggles button[aria-label="Files"]');
@@ -457,8 +462,11 @@ try {
   const p5 = await probe();
   record("no CSP violations during the run", p5.csp.length === 0, p5.csp);
   record("no uncaught errors / rejections", p5.errors.length === 0, p5.errors);
-  // Besides 4a's upload of a file nobody dropped, which must fail.
-  const failed = p5.invokes.filter((i: any) => i.ok === false && !(i.cmd === "upload" && /Drop it on the window/.test(i.err ?? "")));
+  // Besides 4a's upload of a file nobody dropped, which must fail, and the update check, which
+  // fails while the release it reads (latest.json) isn't there or this machine is offline.
+  const failed = p5.invokes.filter(
+    (i: any) => i.ok === false && !(i.cmd === "upload" && /Drop it on the window/.test(i.err ?? "")) && i.cmd !== "plugin:updater|check",
+  );
   record("no failed IPC calls", failed.length === 0, {
     failed,
     called: [...new Set(p5.invokes.map((i: any) => i.cmd))],

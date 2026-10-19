@@ -25,6 +25,10 @@ const SSH: &str = "ssh";
 // Prints the home folder (for the socket path), then the token.
 const INFO_CMD: &str = r#"printf "%s\n" "$HOME"; cat "$HOME/.blimp/token""#;
 
+// Updates blimpd on the server to the latest release (the release's own install.sh; it
+// restarts blimpd, and sessions keep running: zmx holds them).
+const UPDATE_CMD: &str = "curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh | sh";
+
 // The tunnel's command on the server, in place of -N: it runs until the app's end of ssh's stdin
 // closes. The app holds that pipe, so however the app ends (quit, kill, crash) the kernel closes
 // it, cat sees EOF and exits, and ssh ends with its session. With -N, ssh outlived the app.
@@ -145,6 +149,13 @@ impl Target {
 }
 
 impl Target {
+    fn update_args(&self) -> Vec<String> {
+        let mut args = strings(&["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
+        args.extend(self.dest_args());
+        args.push(UPDATE_CMD.into());
+        args
+    }
+
     /// A browser tab's forward: local `port` to `host:remote` on the server (host is
     /// 127.0.0.1 or ::1). Tied to the app's lifetime the same way as the tunnel (TUNNEL_CMD).
     fn forward_args(&self, port: u16, host: &str, remote: u16) -> Vec<String> {
@@ -439,6 +450,34 @@ pub async fn forward_port(app: AppHandle, server: String, host: String, port: u1
     .map_err(|e| e.to_string())?
 }
 
+/// Update server: runs the latest release's install.sh on the server over ssh. Resolves to the
+/// last lines it printed. The app's events socket then sees blimpd restart and reconnects.
+#[tauri::command]
+pub async fn update_server(app: AppHandle, server: String) -> Result<String, String> {
+    // A debug build pointed at a test blimpd (BLIMP_REMOTE_DIR) must not reinstall the real one.
+    if remote_dir().is_some() {
+        return Err("Not in a test build.".into());
+    }
+    let target = app.state::<Tunnels>().inner.lock().unwrap().map.get(&server).map(|t| t.target.clone()).ok_or("Not connected.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = ssh()
+            .args(target.update_args())
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("Couldn't run ssh: {e}"))?;
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        let tail = tail[tail.len().saturating_sub(4)..].join("\n");
+        if out.status.success() {
+            Ok(tail)
+        } else {
+            Err(with_detail(format!("Updating blimpd on {} failed", target.host), &tail))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// A browser tab on that port closed: the forward goes with the last one.
 #[tauri::command]
 pub fn unforward_port(tunnels: State<'_, Tunnels>, server: String, host: String, port: u16) {
@@ -693,6 +732,13 @@ mod tests {
         assert!(Target::new("claude1.example.com".into(), Some("max-b".into()), None).is_ok());
         assert!(Target::new("::1".into(), None, Some(22)).is_ok());
         assert!(Target::new("100.64.0.1".into(), None, None).is_ok());
+    }
+
+    #[test]
+    fn update_args() {
+        let a = target("claude1", None, Some(2222)).update_args();
+        assert_eq!(a[a.len() - 5..], ["-p", "2222", "--", "claude1", UPDATE_CMD]);
+        assert_eq!(a[..4], ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
     }
 
     #[test]

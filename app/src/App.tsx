@@ -4,6 +4,7 @@ import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
 import { noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
 import { TransferList } from "./components/TransferList";
+import { UpdateBars } from "./components/UpdateBars";
 import { Welcome } from "./components/Welcome";
 import { Workbench, type FileDrop, type Opener, type PageOpener } from "./components/Workbench";
 import { errorText, inTauri, loadServers, saveServers, serverKey, ServerLink, type Server } from "./lib/connection";
@@ -496,6 +497,7 @@ export function App() {
           <LayoutToggle label="Sessions" keys="⌘⌥B" on={show.sessions} onClick={() => toggle("sessions")} pane={<rect x="9.5" y="2.5" width="5" height="11" rx="1.5" />} />
         </div>
       </header>
+      <UpdateBars links={linkList} onNotice={setNotice} />
 
       {layout.tabs.map((t, i) => {
         const l = links.get(t.server);

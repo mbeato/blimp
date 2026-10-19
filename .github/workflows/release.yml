@@ -1,7 +1,9 @@
 name: Release
 
-# A tag like v0.3.0 publishes blimpd for Linux, its checksums, install.sh and the Mac app.
-# A tag with a "-" (v0.3.0-rc.1) is a prerelease, so install.sh's "latest" skips it.
+# A tag like v0.3.0 publishes blimpd for Linux, its checksums, install.sh and the Mac app, with
+# the app's signed update bundle and latest.json, which installed apps check for updates.
+# A tag with a "-" (v0.3.0-rc.1) is a prerelease, so "latest" (install.sh, the app's update
+# check) skips it.
 on:
   push:
     tags: ["v*"]
@@ -72,7 +74,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bun run tauri build --target universal-apple-darwin --bundles dmg -- --locked
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bun run tauri build --target universal-apple-darwin --bundles app,dmg -- --locked
 
       - name: Build the Mac app (unsigned)
         if: env.SIGNED != 'true'
@@ -81,7 +85,20 @@ jobs:
           # Ad-hoc signature: needs no Apple account, and macOS then offers "Open Anyway"
           # instead of calling the app damaged.
           APPLE_SIGNING_IDENTITY: "-"
-        run: bun run tauri build --target universal-apple-darwin --bundles dmg -- --locked
+          # The update bundle (blimp.app.tar.gz) is signed with this key, separate from Apple's;
+          # apps check updates against its public half in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bun run tauri build --target universal-apple-darwin --bundles app,dmg -- --locked
+
+      - name: Write latest.json for the app's updater
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          bundle=app/src-tauri/target/universal-apple-darwin/release/bundle/macos
+          ls -la "$bundle"
+          bun scripts/latest-json.ts "$TAG" "$bundle/blimp.app.tar.gz.sig" > dist/latest.json
+          cat dist/latest.json
 
       # Paths are kept relative to the repo root, so publish sees the same layout.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -93,6 +110,9 @@ jobs:
             dist/SHA256SUMS
             install.sh
             app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz
+            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz.sig
+            dist/latest.json
           if-no-files-found: error
 
   publish:
@@ -133,4 +153,7 @@ jobs:
           case "$tag" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$tag" $prerelease --title "blimp $tag" --notes-file "$notes" \
             dist/blimpd-linux-x64 dist/blimpd-linux-arm64 dist/SHA256SUMS install.sh \
-            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg \
+            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz \
+            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz.sig \
+            dist/latest.json

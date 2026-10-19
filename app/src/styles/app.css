@@ -1848,3 +1848,39 @@ body.dragging-session * {
 .port-notice .tab-close {
   visibility: visible;
 }
+
+/* ---- updates ---- */
+
+/* Under the tabs: a newer blimp is ready, or a server's blimpd is older than the app. */
+.update-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 10px 4px 14px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line);
+}
+
+.update-bar > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.update-bar button {
+  padding: 3px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--hover);
+}
+
+.update-bar button.primary {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: transparent;
+}
+
+.update-error {
+  color: var(--danger);
+}

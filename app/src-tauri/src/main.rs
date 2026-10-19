@@ -5,7 +5,7 @@ mod transfer;
 mod tunnel;
 mod windows;
 
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
 fn main() {
     let builder = tauri::Builder::default();
@@ -16,6 +16,8 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(tunnel::Tunnels::default())
         .manage(transfer::Transfers::default())
         .manage(windows::Windows::default())
@@ -24,6 +26,7 @@ fn main() {
             tunnel::disconnect,
             tunnel::forward_port,
             tunnel::unforward_port,
+            tunnel::update_server,
             windows::open_window,
             windows::focus_project,
             windows::drop_session,
@@ -46,6 +49,15 @@ fn main() {
             WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => window.state::<transfer::Transfers>().allow(paths),
             _ => {}
         })
+        // blimp > Check for Updates…: the focused window checks and says what it found.
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "check-updates" {
+                let w = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false));
+                if let Some(w) = w.or_else(|| app.get_webview_window("main")) {
+                    let _ = w.emit_to(w.label(), "check-updates", ());
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while starting blimp")
         .run(|app, event| match event {
@@ -65,10 +77,12 @@ fn main() {
 /// the app needs from the system and leaves ⌘W, ⌘N, ⌘P and ⌘K to the UI.
 #[cfg(target_os = "macos")]
 fn menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
-    use tauri::menu::{MenuBuilder, SubmenuBuilder};
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
+    let updates = MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
     let app_menu = SubmenuBuilder::new(app, "blimp")
         .about(None)
+        .item(&updates)
         .separator()
         .hide()
         .hide_others()

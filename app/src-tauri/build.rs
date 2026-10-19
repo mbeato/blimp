@@ -8,6 +8,7 @@ fn main() {
                 "disconnect",
                 "forward_port",
                 "unforward_port",
+                "update_server",
                 "open_window",
                 "focus_project",
                 "drop_session",

@@ -29,7 +29,8 @@ export type DirListing = { path: string; entries: DirEntry[] };
 export type FileBody = { bytes: Uint8Array<ArrayBuffer>; mtime: number; contentType: string };
 
 // What the app needs to reach one blimpd: the local end of the tunnel and the token.
-export type Conn = { id: string; base: string; token: string; home: string };
+// version: blimpd's, from /health.
+export type Conn = { id: string; base: string; token: string; home: string; version?: string };
 
 export class ApiError extends Error {
   constructor(

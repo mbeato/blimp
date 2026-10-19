@@ -25,6 +25,14 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: with a server connected, run `ps aux | grep '[s]sh -T'` in Terminal. Quit blimp with ⌘Q and run it again. Then open blimp, close its window with the red button, and run it again. Then open blimp, Force Quit it (⌥⌘Esc), wait 5 seconds, and run it again.
   Expect: blimp's `ssh -T … -L 127.0.0.1:… cat >/dev/null` lines show while blimp runs. After ⌘Q, none are left. After you close the window, none are left, or the app is still running (write down which). After Force Quit, none are left.
 
+- [ ] **The app updates itself.**
+  Do: with v0.2.0 installed (from the `.dmg`, the last time by hand), wait for the next release (v0.2.1), then open blimp, or pick blimp > Check for Updates…. Click Restart to update.
+  Expect: a bar says "blimp 0.2.1 is ready". After Restart to update, blimp closes and opens again as 0.2.1 (blimp > About blimp), with no "Open Anyway" step. Check for Updates… with nothing new says blimp is the newest version.
+
+- [ ] **Update server.**
+  Do: after the app updates to a version newer than blimpd on claude1, look under the tabs.
+  Expect: a bar "blimpd on claude1 is 0.2.0; this app is 0.2.1" with Update server. After clicking it, the bar goes, blimp reconnects, and the sessions are still running (`claude1 ls`).
+
 ## Keyboard
 
 - [ ] **App shortcuts reach the page, not the menu.**

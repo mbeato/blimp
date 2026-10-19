@@ -1,7 +1,5 @@
 # blimp
 
-**Not released yet.** This repository is private, and it has no release yet. Until it is public and has a release, the install steps below do not work: the downloads fail, and there is no `.dmg` to download.
-
 blimp is a Mac app for Claude Code sessions that run on your own Linux server. It is laid out like VS Code: you open a project folder on the server, its files are on the left, the files you open are in tabs, and the terminal is at the bottom. Next to the terminal is the list of Claude sessions in that folder, with what each one is doing. Click a session to use its terminal, as if you had connected with SSH. You do not need to keep a terminal open, and you do not need another editor.
 
 ![blimp in dark mode: files on the left, a Markdown file open at the top, a Claude Code terminal below it, and the folder's sessions on the right](docs/screenshots/main-dark.png)
@@ -80,6 +78,10 @@ The release notes say whether the app is signed and notarized. If it is not, it 
   2. Open System Settings > Privacy & Security. Scroll down and click **Open Anyway** next to the message about blimp. Confirm.
   3. On macOS 14 and earlier, you can also Control-click (or right-click) blimp in Applications and choose **Open**. macOS 15 removed this shortcut, so use step 2 there.
   4. Last resort, in Terminal: `xattr -dr com.apple.quarantine /Applications/blimp.app`
+
+**Updates.** blimp checks for a new version when it opens and every few hours; **blimp > Check for Updates…** checks now. When one is ready, a bar says so: click **Restart to update**. The app downloads it, checks that it was signed by this repository's release build, and restarts into it. Your sessions keep running on the server meanwhile.
+
+When the app is newer than blimpd on a server, a bar offers **Update server**: it runs the latest release's install script on the server over SSH, the same as the install command above. Sessions keep running; blimp reconnects by itself.
 
 ## First run
 
@@ -351,9 +353,10 @@ install.sh      server setup
 
 1. Set the version: `sh scripts/version.sh 0.3.0`. This sets the same version in `package.json`, `app/package.json`, `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml`, then refreshes `Cargo.lock`. With no version, it prints the current one, or lists all four if they differ. Commit the change.
 2. Push a tag for that version: `git tag v0.3.0 && git push origin v0.3.0`.
-3. The release workflow stops if the tag is not `vX.Y.Z` or `vX.Y.Z-rc.N`, or if it does not match the version in the four files. Then it builds both blimpd binaries, `SHA256SUMS` and the Mac `.dmg`, and publishes them with `install.sh` as a GitHub release.
-4. A tag like `v0.3.0-rc.1` makes a prerelease. The installer skips prereleases.
-5. The workflow signs and notarizes the Mac app only when all six Apple secrets are set for the repository: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`. If any secret is missing, the app has only an ad-hoc signature, which needs no Apple account. The release notes say which kind of build it is. How to get the certificate and add the secrets: [docs/SIGNING.md](docs/SIGNING.md).
+3. The release workflow stops if the tag is not `vX.Y.Z` or `vX.Y.Z-rc.N`, or if it does not match the version in the four files. Then it builds both blimpd binaries, `SHA256SUMS`, the Mac `.dmg`, and the app's update (`blimp.app.tar.gz`, its signature, and `latest.json`), and publishes them with `install.sh` as a GitHub release. Installed apps find it through `latest.json` and offer to update.
+4. A tag like `v0.3.0-rc.1` makes a prerelease. The installer and the app's update check both skip prereleases, so put out each version you want installed apps to get as a plain `vX.Y.Z`.
+5. Updates are signed with the updater key, not Apple's: the repository secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, with the public half in `app/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`). Installed apps take only updates signed with it, so keep a copy of the key: without it, the next release can't update existing apps, and everyone has to download the `.dmg` once more.
+6. The workflow signs and notarizes the Mac app only when all six Apple secrets are set for the repository: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`. If any secret is missing, the app has only an ad-hoc signature, which needs no Apple account. The release notes say which kind of build it is. How to get the certificate and add the secrets: [docs/SIGNING.md](docs/SIGNING.md).
 
 ## License
 
