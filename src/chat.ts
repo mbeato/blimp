@@ -11,7 +11,7 @@ export type ChatMessage =
   | { id: string; at: number; role: "assistant"; text: string }
   | ToolMessage;
 
-// tools: tool_use id -> its message, so a later result can fill it in.
+// tools: tool_use id -> its message, so a later result can fill it in (then it's dropped).
 export type ChatScan = { offset: number; dir: string; tools: Map<string, ToolMessage> };
 export const newScan = (dir: string): ChatScan => ({ offset: 0, dir, tools: new Map() });
 
@@ -78,6 +78,7 @@ export function messagesFromLine(line: string, s: ChatScan): ChatMessage[] {
       if (b?.type === "tool_result") {
         const t = s.tools.get(b.tool_use_id);
         if (!t) return;
+        s.tools.delete(b.tool_use_id);
         t.output = cap(resultText(b.content));
         if (b.is_error) t.error = true;
         out.push({ ...t });
@@ -98,24 +99,40 @@ export function messagesFromLine(line: string, s: ChatScan): ChatMessage[] {
 }
 
 // Transcripts only grow. Read the complete lines added since the last read; an unfinished last
-// line is read next time, once it ends.
-export function readAppended(file: string, s: ChatScan): ChatMessage[] {
+// line is read next time, once it ends. At most max bytes, unless one line is longer than that.
+export function readAppended(file: string, s: ChatScan, max = Infinity): ChatMessage[] {
   const size = statSync(file).size;
   if (size < s.offset) Object.assign(s, newScan(s.dir)); // rewritten shorter: start over
   if (size === s.offset) return [];
   const fd = openSync(file, "r");
   try {
-    const buf = Buffer.alloc(size - s.offset);
-    const n = readSync(fd, buf, 0, buf.length, s.offset);
-    const end = buf.lastIndexOf(10, n - 1);
-    if (end < 0) return [];
-    s.offset += end + 1;
-    return buf
-      .toString("utf8", 0, end)
-      .split("\n")
-      .flatMap((l) => messagesFromLine(l, s));
+    for (let len = Math.min(size - s.offset, max); ; len = Math.min(size - s.offset, len * 2)) {
+      const buf = Buffer.alloc(len);
+      const n = readSync(fd, buf, 0, buf.length, s.offset);
+      const end = buf.lastIndexOf(10, n - 1);
+      if (end < 0 && n === len && len < size - s.offset) continue; // a line longer than len
+      if (end < 0) return [];
+      s.offset += end + 1;
+      return buf
+        .toString("utf8", 0, end)
+        .split("\n")
+        .flatMap((l) => messagesFromLine(l, s));
+    }
   } finally {
     closeSync(fd);
+  }
+}
+
+// The last n messages of a whole transcript (50-100 MB is common). Read a chunk at a time, with a
+// turn of the event loop between chunks, so terminals on the same thread keep streaming; only n
+// messages are kept. From the start, so tool results still find their calls. Stops early if gone().
+export async function readLast(file: string, s: ChatScan, n: number, chunk = 4 << 20, gone = () => false): Promise<ChatMessage[]> {
+  let list: ChatMessage[] = [];
+  for (;;) {
+    const from = s.offset;
+    list = mergeById(list, readAppended(file, s, chunk)).slice(-n);
+    if (s.offset === from || gone()) return list;
+    await Bun.sleep(0);
   }
 }
 

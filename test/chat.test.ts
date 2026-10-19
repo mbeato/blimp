@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mergeById, messagesFromLine, newScan, readAppended, toolSummary } from "../src/chat";
+import { mergeById, messagesFromLine, newScan, readAppended, readLast, toolSummary } from "../src/chat";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-chat-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -78,6 +78,28 @@ test("readAppended reads only complete lines added since the last read", () => {
   writeFileSync(file, user("u1", "one") + "\n" + user("u2", "two") + "\n");
   expect(readAppended(file, s).map((m) => m.id)).toEqual(["u2"]);
   expect(readAppended(file, s)).toEqual([]);
+});
+
+test("readLast reads a whole transcript a chunk at a time: the same last messages as reading it at once", async () => {
+  const file = join(tmp, "long.jsonl");
+  const lines: string[] = [];
+  for (let i = 0; i < 1500; i++) {
+    lines.push(user(`u${i}`, `prompt ${i}`));
+    lines.push(assistant(`a${i}`, [{ type: "text", text: `answer ${i}` }, { type: "tool_use", id: `t${i}`, name: "Bash", input: { command: `echo ${i}` } }]));
+    // One result far longer than a chunk.
+    lines.push(user(`r${i}`, [{ type: "tool_result", tool_use_id: `t${i}`, content: i === 1400 ? "z".repeat(5000) : `${i}` }]));
+  }
+  writeFileSync(file, lines.join("\n") + "\n" + user("half", "not finished"));
+  const whole = mergeById([], readAppended(file, newScan("/"))).slice(-200);
+  const s = newScan("/");
+  const last = await readLast(file, s, 200, 1000);
+  expect(last).toEqual(whole);
+  expect(last.length).toBe(200);
+  expect(last.at(-1)).toMatchObject({ id: "a1499#1", output: "1499" });
+  expect(s.tools.size).toBe(0); // every call got its result, so none is kept
+  // It stops at the unfinished line, which the next read picks up once it ends.
+  appendFileSync(file, "\n");
+  expect(readAppended(file, s).map((m) => m.id)).toEqual(["half"]);
 });
 
 test("mergeById replaces by id and appends new ones", () => {

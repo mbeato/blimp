@@ -306,6 +306,15 @@ describe("chat", () => {
     c.ws.close();
   });
 
+  test("history of a long transcript is its last 200 messages", async () => {
+    const lines = Array.from({ length: 3000 }, (_, i) => (i % 2 ? said(`a${i}`, `answer ${i}`) : user(`u${i}`, `prompt ${i}`)));
+    const { name } = await fakeClaude("chat10", "99999999-9999-9999-9999-999999999999", lines);
+    const c = await socket(`/sessions/${name}/chat`);
+    const h = await until(() => c.messages.find((m) => m.type === "history"), "history");
+    expect(h.messages.map((m: any) => m.id)).toEqual(Array.from({ length: 200 }, (_, i) => (i % 2 ? `a${2800 + i}#0` : `u${2800 + i}`)));
+    c.ws.close();
+  });
+
   test("input is typed as a paste plus Enter, once per id, at the viewer's size", async () => {
     const { name } = await fakeClaude("chat2", "33333333-3333-3333-3333-333333333333", []);
     const viewer = await socket(`/sessions/${name}/attach?cols=101&rows=33`);

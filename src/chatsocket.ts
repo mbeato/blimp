@@ -4,7 +4,7 @@
 // screen (the probe in the phone spec).
 
 import type { ServerWebSocket, Subprocess } from "bun";
-import { type ChatMessage, type ChatScan, mergeById, newScan, readAppended } from "./chat";
+import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from "./chat";
 import { answerKeys } from "./prompt";
 import { existsSync } from "node:fs";
 import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
@@ -39,7 +39,7 @@ async function find(name: string): Promise<Session | undefined> {
 }
 
 // The current conversation from the start: the last 200 messages.
-function loadHistory(ws: ServerWebSocket<ChatData>) {
+async function loadHistory(ws: ServerWebSocket<ChatData>) {
   const d = ws.data;
   const s = d.session!;
   d.file = s.sessionId ? transcriptPath(claudeDir(), s.sessionId) : undefined;
@@ -53,8 +53,7 @@ function loadHistory(ws: ServerWebSocket<ChatData>) {
   }
   d.scan = newScan(s.dir);
   try {
-    const all = mergeById([], readAppended(d.file, d.scan));
-    send(ws, { type: "history", messages: all.slice(-HISTORY) });
+    send(ws, { type: "history", messages: await readLast(d.file, d.scan, HISTORY, undefined, () => !!d.closed) });
   } catch {
     d.scan = undefined;
     send(ws, { type: "unreadable" });
@@ -79,14 +78,14 @@ async function tick(ws: ServerWebSocket<ChatData>) {
       d.session = s;
       if (changed) {
         send(ws, { type: "reset" });
-        loadHistory(ws);
+        await loadHistory(ws);
       } else if (s.sessionId && !d.scan) {
         const file = transcriptPath(claudeDir(), s.sessionId);
         if (file && d.fresh) {
           d.file = file; // the first message was written: all of it is new
           d.scan = newScan(s.dir);
           d.fresh = false;
-        } else if (file && existsSync(file)) loadHistory(ws); // it wasn't readable when the socket opened
+        } else if (file && existsSync(file)) await loadHistory(ws); // it wasn't readable when the socket opened
       }
     }
     if (d.file && d.scan) {
@@ -111,8 +110,9 @@ async function start(ws: ServerWebSocket<ChatData>) {
     d.closed = true;
     return ws.close(4000, "ended");
   }
-  if (d.session.sessionId) loadHistory(ws);
+  if (d.session.sessionId) await loadHistory(ws);
   else send(ws, { type: "unreadable" });
+  if (d.closed) return; // closed while the history was read
   d.timer = setInterval(() => tick(ws), 250);
 }
 
