@@ -41,6 +41,14 @@ iPhone app ──HTTPS / WSS──▶ Tailscale (WireGuard, on the tailnet only)
 
 ## 2. blimpd: chat features (new routes; existing ones unchanged)
 
+As built (part 1), see DESIGN.md's Chat section:
+- A Claude session with no transcript file yet gets an empty `history`, then `append`. `unreadable` only without a known `sessionId`, or an unreadable file.
+- Answers name their wait by `Session.prompt.at` (the hook's time when the wait started), not `stateSince`. `prompt` is present while both the derived state and the hook file say waiting.
+- Claude Code 2.1.300 in default permission mode sends a PermissionRequest for AskUserQuestion too; blimpd treats it as the question.
+- zmx 0.5 drops an ESC that is a new client's first input; blimpd sends an empty bracketed paste first.
+- Writes from one socket go one at a time. Before starting its zmx client, blimpd checks the session still exists.
+- `input`, `answer` and `interrupt` are all de-duplicated by `id` (last 100 per session), remembered only after the write succeeded.
+
 ### Messages
 
 `GET /sessions/<name>/chat?token=…` upgrades to a WebSocket. Server → client text frames:
@@ -48,7 +56,7 @@ iPhone app ──HTTPS / WSS──▶ Tailscale (WireGuard, on the tailnet only)
 - `{ "type": "history", "messages": ChatMessage[] }` on connect: the last 200 messages of the session's current transcript.
 - `{ "type": "append", "messages": ChatMessage[] }` when the transcript grows. blimpd reads only bytes added since the last read, as titles do. It checks on the existing 1 s tick and when the session's hook file changes.
 - `{ "type": "reset" }` then a new `history`, when the session's `sessionId` changes (`/clear`, compaction into a new file, resume).
-- `{ "type": "unreadable" }` if the transcript can't be found or parsed. The app shows "Can't show this conversation, open it on the Mac".
+- `{ "type": "unreadable" }` if blimpd doesn't know the session's Claude `sessionId`, or the transcript exists but can't be read. (A new session with no transcript file yet gets an empty `history`, then `append` once the file appears.) The app shows "Can't show this conversation, open it on the Mac".
 - Close code 4000 when the session ends, as with attach.
 
 ```ts

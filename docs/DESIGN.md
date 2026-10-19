@@ -71,6 +71,7 @@ type Session = {
   updatedAt?: number;    // ms, last activity
   state: "working" | "waiting" | "done" | "unknown";
   stateSince?: number;   // ms
+  prompt?: Prompt & { at: number };  // while waiting: what Claude asks, and when the wait started (see Chat)
 };
 ```
 
@@ -130,6 +131,20 @@ Custom kinds: `<socket dir>/kinds.json` = `{ "kinds": [{ "id", "label", "command
 - `{ "type": "fs", "paths": string[] }`: watched paths that changed (debounced 150 ms).
 
 Client → server: `{ "type": "watch", "paths": string[] }` replaces this socket's watch set. Each path is watched non-recursively (a folder: its direct entries; a file: its content). The app sends the expanded folders of the tree plus the open files. Paths outside home are ignored.
+
+### Chat
+
+For the phone: a Claude session as chat messages, and a way to type into it. Only for sessions where Claude Code runs (`sessionId` is known).
+
+`GET /sessions/<name>/chat?token=…` upgrades to a WebSocket (404 for an unknown session). Server → client: `{ "type": "history", "messages": ChatMessage[] }` on connect (the last 200), `{ "type": "append", "messages" }` as the transcript grows (checked every 250 ms; a tool message comes again with its output under the same `id`), `{ "type": "reset" }` then a new `history` when the conversation changes, `{ "type": "unreadable" }` when blimpd doesn't know the session's Claude `sessionId` (Codex, a shell) or the transcript can't be read. A new session has no transcript until its first message: it gets an empty `history`, then `append` once the file appears. Close 4000 when the session ends.
+
+`ChatMessage` (`src/chat.ts`): `user` (typed prompts only: no tool results, meta entries, command wrappers or system reminders), `assistant` (text blocks; thinking is skipped), `tool` (`name`, a one-line `summary`, `input`, later `output` and `error`; input and output at most 20 000 characters).
+
+Client → server: `{ "type": "input", "id", "text" }` (pasted as a bracketed paste, then Enter; ESC is removed; at most 100 000 characters), `{ "type": "answer", "id", "at", "pick" }` (`at` = the prompt's `at`, when that wait started; presses the option's key, or replies "the question changed"), `{ "type": "interrupt", "id" }` (Esc). Replies: `{ "type": "ack", "id" }` or `{ "type": "error", "id", "error" }`. All three are de-duplicated by `id` (the last 100 per session): a repeat is acknowledged and not typed again. An `id` is remembered only after its write succeeded. Writes from one socket go one at a time, in order.
+
+While a socket has sent input, it keeps one zmx client attached for it, at the size the session was last shown at through blimpd (120×36 if never), and resized with it: a client of another size would resize the session for everyone. The client starts on the first write, after checking the session still exists (`zmx attach` would create a missing one; the reply is then "the session ended"). zmx 0.5 drops an ESC that is a new client's first input, so if the first write starts with ESC, blimpd first sends an empty bracketed paste, which zmx passes and Claude ignores.
+
+`Prompt` (`src/prompt.ts`), from the hook's input: `permission` (`tool`, `summary`, `options`, `keys`), `question` (AskUserQuestion's `questions`), `other` (Elicitation). `Session.prompt` is present while both the derived state and blimp's hook file say waiting. Claude Code 2.1.300 in default permission mode also sends a PermissionRequest for AskUserQuestion; blimpd treats it as the question, not a Yes/No. Permission options vary by command and only the screen shows them, so blimpd reads them from `zmx history` once per wait; without them they are Yes (`1`) and No (Esc). `answerable` is true for permissions and for one single-choice question, where a digit picks and submits; several questions or multi-select aren't answerable from the phone yet.
 
 ### Files
 
