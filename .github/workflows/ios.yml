@@ -1,0 +1,22 @@
+name: iOS
+
+# The iPhone app: its logic (BlimpKit) is tested on Linux and macOS; the app is built for the simulator.
+on:
+  push:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kit-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: swift --version
+      - name: BlimpKit tests
+        working-directory: ios/BlimpKit
+        run: swift test

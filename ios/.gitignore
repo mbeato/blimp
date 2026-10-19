@@ -1,0 +1,4 @@
+Blimp.xcodeproj/
+.build/
+.swiftpm/
+DerivedData/
