@@ -972,6 +972,8 @@ This runs only with `BLIMP_REAL_CLAUDE=1` and uses Max's Claude account (a few c
 
 - [ ] **Step 1: Write the test**
 
+The test's name becomes "a message, a permission, a question and a Stop, all through /chat".
+
 ```ts
 // test/real-claude.test.ts
 // The chat socket against a real Claude Code: a message, a permission prompt, and a question, all
@@ -1077,14 +1079,36 @@ test.if(on)("a message, a permission and a question, all through /chat", async (
   await until(() => texts().some((m) => m.role === "tool" && m.name === "AskUserQuestion" && /green/i.test(m.output ?? "")), "the answer in the transcript", 90000);
 
   chat.close();
+
+  // Stop, from a fresh socket: its zmx client is new, and zmx 0.5 drops ESC as a new client's
+  // first input unless it's primed (chatsocket.ts). The turn must end, and Claude must not have
+  // taken the primer for anything.
+  await until(async () => (await session())?.state === "done", "the turn to end", 90000);
+  const got2: any[] = [];
+  const chat2 = new WebSocket(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
+  chat2.onmessage = (e) => got2.push(JSON.parse(e.data as string));
+  await until(() => got2.some((m) => m.type === "history"), "history", 10000);
+  chat2.send(JSON.stringify({ type: "input", id: "m3", text: "Count from 1 to 300, one number per line, without using any tools." }));
+  await until(async () => (await session())?.state === "working", "Claude to start counting", 60000);
+  const fresh = new WebSocket(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
+  const got3: any[] = [];
+  fresh.onmessage = (e) => got3.push(JSON.parse(e.data as string));
+  await until(() => got3.some((m) => m.type === "history"), "history", 10000);
+  fresh.send(JSON.stringify({ type: "interrupt", id: "i1" }));
+  await until(() => got3.some((m) => m.type === "ack" && m.id === "i1"), "ack", 10000);
+  await until(async () => (await session())?.state !== "working", "the interrupt to stop the turn", 20000);
+  const all = [...got2, ...got3].flatMap((m) => m.messages ?? []);
+  expect(all.some((m) => m.role === "user" && m.text.includes("[200~"))).toBe(false);
+  chat2.close();
+  fresh.close();
   term.close();
-}, 300000);
+}, 400000);
 ```
 
 - [ ] **Step 2: Run it**
 
 Run: `BLIMP_REAL_CLAUDE=1 bun test test/real-claude.test.ts`
-Expected: PASS within about 2 minutes. Run without the variable: `bun test test/real-claude.test.ts` → the test is skipped.
+Expected: PASS within about 3 minutes. Run without the variable: `bun test test/real-claude.test.ts` → the test is skipped.
 
 If the permission step times out with the prompt on screen but `prompt` missing: the hook may have recorded `Notification` first. Read `<tmp>/status/<name>.json`, and fix `writeHookStatus` (Task 2) so a waiting event without a prompt doesn't block a later `PermissionRequest` from adding one. If the question was answered but the transcript shows another color: the option order on screen differs from `tool_input`. Stop and report: don't guess at keys.
 
