@@ -5,7 +5,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { fixtureDir, killSession, openApp, openSessionTab, startSession } from "./helpers";
+import { fixtureDir, killSession, openSessionTab, startSession } from "./helpers";
 
 const name = `blimpe2e-mddos-${process.pid}`;
 
@@ -20,9 +20,8 @@ test("Markdown that is slow or too deep for marked shows a note, and the window 
 
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await openApp(page);
   await openSessionTab(page, dir);
-  const ws = page.locator(".workspace:not([hidden])");
+  const ws = page.locator(".wb");
   const tree = ws.locator(".tree");
 
   // The longest gap between timer ticks: how long the main thread was blocked.
@@ -45,8 +44,8 @@ test("Markdown that is slow or too deep for marked shows a note, and the window 
   await expect(ws.locator(".view-note", { hasText: "Can't show this Markdown: Maximum call stack" })).toBeVisible({ timeout: 15_000 });
   expect(await page.evaluate(() => (window as any).__maxGap)).toBeLessThan(1000);
 
-  // Still the whole app: the sidebar, the terminal, and other files render.
-  await expect(page.locator(".row").first()).toBeVisible();
+  // Still the whole app: the session list, the terminal, and other files render.
+  await expect(page.locator(".srow").first()).toBeVisible();
   await expect(page.locator(".term:not([hidden]) .xterm")).toBeVisible();
   await tree.getByText("fine.md").click();
   await expect(ws.locator(".md-view h1")).toHaveText("Fine");

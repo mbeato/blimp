@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Conversation, DirListing, RecentFolder } from "../lib/api";
+import { useEffect, useState, type ReactNode } from "react";
+import { ApiError, type DirListing, type RecentFolder } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
-import { tildify } from "../lib/sidebar";
+import { joinPath } from "../lib/files";
+import { tildify } from "../lib/sessions";
 import { relTime } from "../lib/time";
 import { Dialog } from "./Dialog";
 
@@ -16,37 +17,20 @@ export function expandPath(text: string, home: string): string {
 
 const parent = (p: string) => p.replace(/\/[^/]+$/, "") || "/";
 
-type Props = {
+// ⌘O: pick a folder on a server (recent, browse or typed) to open as the window's project.
+// While browsing, New folder makes one and goes into it.
+export function OpenFolderDialog(props: {
   links: ServerLink[]; // connected servers
   initial: ServerLink;
-  onStart: (link: ServerLink, dir: string, resume?: string) => Promise<void>;
+  onPick: (link: ServerLink, dir: string) => void;
   onClose: () => void;
-};
-
-// ⌘⇧N: pick a folder (recent, browse or typed), then start a new conversation or resume one.
-export function NewSessionDialog(props: Props) {
+}) {
   const [link, setLink] = useState(props.initial);
-  const [dir, setDir] = useState<string | null>(null); // chosen folder; null while picking
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const start = async (resume?: string) => {
-    if (!dir || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await props.onStart(link, dir, resume);
-    } catch (e) {
-      setError(errorText(e));
-      setBusy(false);
-    }
-  };
-
   return (
     <Dialog onClose={props.onClose} className="newsession">
       <div className="dialog-head">
-        <h2>{dir ? tildify(dir, link.home) : "New session in…"}</h2>
-        {!dir && props.links.length > 1 && (
+        <h2>Open folder</h2>
+        {props.links.length > 1 && (
           <select
             value={link.key}
             onChange={(e) => setLink(props.links.find((l) => l.key === e.target.value) ?? link)}
@@ -59,18 +43,8 @@ export function NewSessionDialog(props: Props) {
             ))}
           </select>
         )}
-        {dir && (
-          <button className="link-button" onClick={() => (setDir(null), setError(""))}>
-            Change folder
-          </button>
-        )}
       </div>
-      {dir ? (
-        <ConversationPicker key={link.key + dir} link={link} dir={dir} busy={busy} onPick={start} />
-      ) : (
-        <FolderPicker key={link.key} link={link} onPick={(d) => (setDir(d), setError(""))} />
-      )}
-      {error && <p className="dialog-error">{error}</p>}
+      <FolderPicker key={link.key} link={link} onPick={(d) => props.onPick(link, d)} />
     </Dialog>
   );
 }
@@ -85,6 +59,26 @@ function FolderPicker(props: { link: ServerLink; onPick: (dir: string) => void }
   const [browsePath, setBrowsePath] = useState(home);
   const [error, setError] = useState("");
   const [sel, setSel] = useState(0);
+  const [naming, setNaming] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const [reload, setReload] = useState(0);
+
+  const makeFolder = async (name: string) => {
+    name = name.trim();
+    if (!name) return setNaming(false);
+    if (name.includes("/") || name === "." || name === "..") return setNameError("A name can't contain / or be . or ..");
+    const path = joinPath(listing?.path ?? browsePath, name);
+    try {
+      await api.fsMkdir(path);
+    } catch (e) {
+      return setNameError(e instanceof ApiError && e.status === 409 ? `${name} already exists.` : errorText(e));
+    }
+    setNaming(false);
+    setNameError("");
+    setBrowsePath(path);
+    setSel(0);
+    setReload((n) => n + 1);
+  };
 
   useEffect(() => {
     api.recentFolders().then(setRecent, (e) => setError(errorText(e)));
@@ -97,7 +91,7 @@ function FolderPicker(props: { link: ServerLink; onPick: (dir: string) => void }
       (l) => (setListing(l), setError("")),
       (e) => setError(errorText(e)),
     );
-  }, [api, view, browsePath]);
+  }, [api, view, browsePath, reload]);
 
   const dirs = listing?.entries.filter((e) => e.kind === "dir" && e.name !== ".git") ?? [];
   const count = view === "recent" ? (recent?.length ?? 0) : dirs.length;
@@ -135,7 +129,28 @@ function FolderPicker(props: { link: ServerLink; onPick: (dir: string) => void }
             Up
           </button>
           <span className="browse-path">{tildify(listing?.path ?? browsePath, home)}</span>
-          <button onClick={() => props.onPick(listing?.path ?? browsePath)}>Use this folder</button>
+          <button onClick={() => (setNaming(true), setNameError(""))}>New folder</button>
+          <button className="primary" onClick={() => props.onPick(listing?.path ?? browsePath)}>
+            Open
+          </button>
+        </div>
+      )}
+      {view === "browse" && naming && (
+        <div className="browse-new">
+          <input
+            className="dialog-input"
+            autoFocus
+            aria-label="New folder name"
+            placeholder="New folder name"
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") void makeFolder(e.currentTarget.value);
+              else if (e.key === "Escape") setNaming(false);
+              else return;
+              e.preventDefault();
+            }}
+          />
+          {nameError && <p className="dialog-error">{nameError}</p>}
         </div>
       )}
       <ul className="list" role="listbox">
@@ -158,51 +173,6 @@ function FolderPicker(props: { link: ServerLink; onPick: (dir: string) => void }
         {error && <li className="list-empty error">{error}</li>}
       </ul>
     </>
-  );
-}
-
-function ConversationPicker(props: { link: ServerLink; dir: string; busy: boolean; onPick: (resume?: string) => void }) {
-  const [convs, setConvs] = useState<Conversation[] | null>(null);
-  const [error, setError] = useState("");
-  const [sel, setSel] = useState(0);
-  const list = useRef<HTMLUListElement>(null);
-
-  useEffect(() => list.current?.focus(), []);
-  useEffect(() => {
-    props.link.api!.conversations(props.dir).then(setConvs, (e) => setError(errorText(e)));
-  }, [props.link, props.dir]);
-
-  // Row 0 is "New conversation", the rest resume.
-  const pick = (n: number) => (n === 0 ? props.onPick() : convs?.[n - 1] && props.onPick(convs[n - 1].sessionId));
-  const count = 1 + (convs?.length ?? 0);
-
-  return (
-    <ul
-      className={"list" + (props.busy ? " busy" : "")}
-      role="listbox"
-      tabIndex={0}
-      ref={list}
-      onKeyDown={(e) => {
-        if (e.key === "ArrowDown") setSel((n) => Math.min(n + 1, count - 1));
-        else if (e.key === "ArrowUp") setSel((n) => Math.max(n - 1, 0));
-        else if (e.key === "Enter") pick(sel);
-        else return;
-        e.preventDefault();
-      }}
-    >
-      <Item n={0} sel={sel} setSel={setSel} onClick={() => pick(0)}>
-        <span className="list-main strong">New conversation</span>
-      </Item>
-      {convs && convs.length > 0 && <li className="list-label">Resume</li>}
-      {convs?.map((c, i) => (
-        <Item key={c.sessionId} n={i + 1} sel={sel} setSel={setSel} onClick={() => pick(i + 1)}>
-          <span className="list-main">{c.title}</span>
-          <span className="list-side">{relTime(c.updatedAt)}</span>
-        </Item>
-      ))}
-      {!convs && !error && <li className="list-empty">Loading earlier conversations…</li>}
-      {error && <li className="list-empty error">{error}</li>}
-    </ul>
   );
 }
 

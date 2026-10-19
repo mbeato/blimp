@@ -4,6 +4,7 @@ import { WaitWatcher, type Focus } from "./waiting";
 
 const s = (name: string, state: Session["state"]): Session => ({
   name,
+  kind: "claude",
   pid: 1,
   clients: 0,
   created: 1,

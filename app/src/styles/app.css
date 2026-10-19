@@ -27,7 +27,12 @@ body.dragging {
   cursor: col-resize;
 }
 
-body.dragging * {
+body.dragging-y {
+  cursor: row-resize;
+}
+
+body.dragging *,
+body.dragging-y * {
   pointer-events: none;
 }
 
@@ -71,20 +76,126 @@ h2 {
 
 .app {
   display: flex;
+  flex-direction: column;
   height: 100%;
 }
 
-.main {
-  flex: 1;
+.topbar {
+  flex: none;
   display: flex;
-  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px 0 6px;
+  background: var(--bg-side);
+  border-bottom: 1px solid var(--line);
 }
 
-.center {
+.topbar-place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.topbar-server {
+  margin-right: 8px;
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+
+.topbar-fill {
+  flex: 1;
+}
+
+.conn {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.conn-offline {
+  color: var(--danger);
+}
+
+/* Files on the left, full height; open files over the terminal pane on the right. */
+.wb {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.wb-tree {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-side);
+}
+
+.wb-right {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+.wb-editor {
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.wb-term {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.wb-connecting {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.pane-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pane-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+
+.icon-button.small {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  font-size: 16px;
+}
+
+.icon-button.small:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.icon-button:disabled {
+  opacity: 0.35;
 }
 
 .splitter {
@@ -102,60 +213,14 @@ h2 {
   cursor: col-resize;
 }
 
-/* ---- sidebar ---- */
-
-.sidebar {
-  flex: none;
-  width: var(--sidebar-width, 280px);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-side);
-  min-height: 0;
+.splitter.splitter-y {
+  width: auto;
+  height: 1px;
 }
 
-.sidebar-scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 0 10px;
-}
-
-.sidebar-add {
-  flex: none;
-  text-align: left;
-  padding: 9px 16px;
-  border-top: 1px solid var(--line);
-  color: var(--fg-dim);
-}
-
-.sidebar-add:hover {
-  color: var(--fg);
-}
-
-.server + .server {
-  border-top: 1px solid var(--line);
-  margin-top: 6px;
-  padding-top: 4px;
-}
-
-.server-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 8px 16px 2px;
-  font-weight: 600;
-}
-
-.server-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.server-status {
-  font-weight: 400;
-  font-size: 11px;
-  color: var(--fg-faint);
+.splitter.splitter-y::before {
+  inset: -3px 0;
+  cursor: row-resize;
 }
 
 .server-error {
@@ -178,129 +243,6 @@ h2 {
 .server-error-actions {
   display: flex;
   gap: 6px;
-}
-
-.sidebar-note {
-  margin: 8px 16px;
-  color: var(--fg-faint);
-  font-size: 12px;
-}
-
-.group {
-  margin-top: 10px;
-}
-
-.group-head {
-  display: flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 8px 0 16px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--fg-faint);
-}
-
-.group-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.waiting-group .group-label {
-  color: var(--waiting);
-}
-
-.group-new {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  font-size: 15px;
-  line-height: 20px;
-  color: var(--fg-faint);
-  opacity: 0;
-}
-
-.group-head:hover .group-new,
-.group-new:focus-visible {
-  opacity: 1;
-}
-
-.group-new:hover {
-  background: var(--hover);
-  color: var(--fg);
-}
-
-.row {
-  display: grid;
-  grid-template-columns: 14px 1fr auto;
-  grid-template-areas:
-    "mark title title"
-    "mark state time";
-  column-gap: 4px;
-  width: calc(100% - 16px);
-  margin: 0 8px;
-  padding: 4px 8px 5px 4px;
-  border-radius: 6px;
-  text-align: left;
-}
-
-.row:hover {
-  background: var(--hover);
-}
-
-.row.selected {
-  background: var(--selected);
-}
-
-.row-mark {
-  grid-area: mark;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.row-title {
-  grid-area: title;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-state,
-.row-time {
-  font-size: 11px;
-  color: var(--fg-faint);
-}
-
-.row-state {
-  grid-area: state;
-}
-
-.row-time {
-  grid-area: time;
-  font-variant-numeric: tabular-nums;
-}
-
-.row-state.state-working {
-  color: var(--fg-dim);
-}
-
-.row-state.state-waiting {
-  color: var(--waiting);
-}
-
-.row-where {
-  grid-area: state;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--fg-faint);
-}
-
-.row.stale {
-  opacity: 0.55;
 }
 
 /* The one lit thing in the window: a session waiting for you. */
@@ -342,17 +284,6 @@ h2 {
 }
 
 /* ---- tabs and terminals ---- */
-
-.tabbar {
-  flex: none;
-  display: flex;
-  align-items: stretch;
-  height: 32px;
-  background: var(--bg-side);
-  border-bottom: 1px solid var(--line);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
 
 .tab {
   display: flex;
@@ -400,10 +331,6 @@ h2 {
   color: var(--fg);
 }
 
-.tabbar-fill {
-  flex: 1;
-}
-
 .icon-button {
   flex: none;
   display: grid;
@@ -414,13 +341,6 @@ h2 {
 
 .icon-button:hover {
   color: var(--fg);
-}
-
-.terms {
-  flex: 1;
-  position: relative;
-  min-height: 0;
-  background: var(--term-bg);
 }
 
 .term {
@@ -488,31 +408,425 @@ h2 {
   color: var(--fg-faint);
 }
 
-/* ---- files ---- */
+/* ---- terminal pane: terminals, and the folder's sessions on the right ---- */
 
-.files-wrap {
-  flex: none;
+.tpane {
+  flex: 1;
   min-width: 0;
-  background: var(--bg);
+  display: flex;
+  border-top: 1px solid var(--line);
 }
 
-.files {
-  height: 100%;
+.tpane-terms {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  background: var(--term-bg);
+}
+
+.empty-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.empty-actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--hover);
+}
+
+.empty-actions button.primary {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: transparent;
+}
+
+.empty-actions button:disabled {
+  opacity: 0.4;
+}
+
+.slist {
+  flex: none;
+  width: 230px;
   display: flex;
   flex-direction: column;
+  background: var(--bg-side);
+  border-left: 1px solid var(--line);
 }
 
-.files-head {
-  flex: none;
-  height: 32px;
-  line-height: 32px;
-  padding: 0 12px;
-  background: var(--bg-side);
-  border-bottom: 1px solid var(--line);
+.slist-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 10px;
+}
+
+.srow {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.srow-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  text-align: left;
+}
+
+.srow:hover,
+.srow-main.earlier:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.srow.selected {
+  background: var(--selected);
+}
+
+.srow.stale {
+  opacity: 0.55;
+}
+
+.srow-main.earlier {
+  width: 100%;
   color: var(--fg-dim);
+}
+
+.srow-main.earlier:disabled {
+  opacity: 0.5;
+}
+
+.srow-mark {
+  flex: none;
+  width: 14px;
+  display: grid;
+  place-items: center;
+}
+
+.srow-mark.shell {
+  font: 600 10px ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--fg-dim);
+}
+
+.state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-faint);
+}
+
+.state-working .state-dot {
+  border-color: var(--fg);
+  border-right-color: transparent;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .state-working .state-dot {
+    animation: none;
+    background: var(--fg);
+  }
+}
+
+.srow-title {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.srow-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+/* The trash button covers the time while the row is hovered. */
+.srow-trash {
+  position: absolute;
+  right: 6px;
+  display: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--fg-dim);
+}
+
+.srow:hover .srow-trash,
+.srow-trash:focus-visible {
+  display: grid;
+}
+
+.srow:hover .srow-time {
+  visibility: hidden;
+}
+
+.srow-trash:hover {
+  color: var(--danger);
+}
+
+.srow-confirm {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 6px 0 10px;
+  font-size: 12px;
+}
+
+.srow-confirm span {
+  flex: 1;
+}
+
+.srow-confirm button {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.srow-confirm button.danger {
+  color: var(--danger);
+}
+
+.slist-label {
+  padding: 12px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+}
+
+.slist-note {
+  margin: 6px 12px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.menu-anchor {
+  position: relative;
+}
+
+.menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: 28px;
+  z-index: 6;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.menu button {
+  display: flex;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 5px;
+  text-align: left;
+}
+
+.menu button:hover {
+  background: var(--selected);
+}
+
+.menu-key {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--fg-faint);
+}
+
+/* ---- welcome (Home, no file open) ---- */
+
+.welcome-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.welcome-col {
+  width: 560px;
+  max-width: 100%;
+}
+
+.welcome-col h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.welcome-col h2 {
+  margin: 26px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+
+.welcome-server {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg-dim);
+}
+
+.welcome-server select {
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.welcome-col .server-error {
+  margin: 12px 0 0;
+}
+
+.welcome-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.welcome-actions .link-button,
+.welcome-recent .link-button {
+  color: var(--fg);
+}
+
+.welcome-actions .link-button:hover:not(:disabled),
+.welcome-recent .link-button:hover {
+  text-decoration: underline;
+}
+
+.welcome-recent {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.welcome-recent li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.welcome-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-faint);
+}
+
+.welcome-time {
+  flex: none;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.welcome-forget {
+  flex: none;
+  width: 18px;
+  color: var(--fg-faint);
+  visibility: hidden;
+}
+
+.welcome-recent li:hover .welcome-forget,
+.welcome-forget:focus-visible {
+  visibility: visible;
+}
+
+.welcome-forget:hover {
+  color: var(--fg);
+}
+
+.welcome-note {
+  margin: 0;
+  color: var(--fg-faint);
+}
+
+.welcome-keys {
+  justify-content: start;
+}
+
+.welcome-keys dt {
+  text-align: left;
+}
+
+/* ---- files ---- */
+
+.tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 10px;
+}
+
+.tree-row.target:not(.selected) {
+  box-shadow: inset 2px 0 0 var(--fg-faint);
+}
+
+.tree-create {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-right: 8px;
+}
+
+.tree-create input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--focus);
+  border-radius: 3px;
+  outline: none;
+}
+
+.tree-create-error {
+  flex-basis: 100%;
+  padding: 2px 0 4px 16px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.ftabs-bar {
+  flex: none;
+  display: flex;
+  height: 32px;
+  background: var(--bg-side);
+  border-bottom: 1px solid var(--line);
+}
+
+.browse-new {
+  flex: none;
 }
 
 .empty {
@@ -534,37 +848,8 @@ h2 {
   font-size: 12px;
 }
 
-.workspace {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.workspace:focus {
-  outline: none;
-}
-
 /* The root folder sits above the tree and the file tabs beside it, in one 32 px strip that lines
    up with the terminal tabs. */
-.files-top {
-  flex: none;
-  display: flex;
-  height: 32px;
-  background: var(--bg-side);
-  border-bottom: 1px solid var(--line);
-}
-
-.files-root {
-  flex: none;
-  width: var(--tree-width);
-  border-right: 1px solid var(--line);
-  border-bottom: 0;
-}
-
-.files {
-  --tree-width: 200px;
-}
 
 .ftabs {
   flex: 1;
@@ -599,21 +884,6 @@ h2 {
 .ftabs-toggle:hover {
   background: var(--hover);
   color: var(--fg);
-}
-
-.files-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-.tree {
-  flex: none;
-  width: var(--tree-width);
-  overflow: auto;
-  padding: 4px 0 10px;
-  background: var(--bg-side);
-  border-right: 1px solid var(--line);
 }
 
 .tree-row {
@@ -660,6 +930,7 @@ h2 {
 .viewer {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1004,11 +1275,6 @@ h2 {
   gap: 8px;
   padding: 6px 8px;
   border-radius: 6px;
-}
-
-.list-item .row-mark {
-  width: 10px;
-  flex: none;
 }
 
 .list-item.selected {

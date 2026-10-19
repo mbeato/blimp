@@ -2,9 +2,9 @@
 
 **Not released yet.** This repository is private, and it has no release yet. Until it is public and has a release, the install steps below do not work: the downloads fail, and there is no `.dmg` to download.
 
-blimp is a Mac app for Claude Code sessions that run on your own Linux server. It shows every live session in one window. Each session shows what it is doing, and the ones that wait for your answer are at the top. Click a session to use its terminal, as if you had connected with SSH. The files the session works on are in a pane next to the terminal, where you can read and edit them. You do not need to keep a terminal open, and you do not need another editor.
+blimp is a Mac app for Claude Code sessions that run on your own Linux server. It is laid out like VS Code: you open a project folder on the server, its files are on the left, the files you open are in tabs, and the terminal is at the bottom. Next to the terminal is the list of Claude sessions in that folder, with what each one is doing. Click a session to use its terminal, as if you had connected with SSH. You do not need to keep a terminal open, and you do not need another editor.
 
-![blimp in dark mode: sessions on the left, a Claude Code terminal in the middle, files on the right](docs/screenshots/main-dark.png)
+![blimp in dark mode: files on the left, a Markdown file open at the top, a Claude Code terminal below it, and the folder's sessions on the right](docs/screenshots/main-dark.png)
 
 blimp follows the system setting for light or dark mode. See the [light mode screenshot](docs/screenshots/main.png).
 
@@ -88,36 +88,47 @@ The release notes say whether the app is signed and notarized. If it is not, it 
 3. **User** and **Port** are optional. Leave them empty to use what your `~/.ssh/config` says, as `ssh` does.
 4. Click **Add server**.
 
-The sidebar shows "Connecting to yourserver…". Then it shows your sessions, grouped by folder. If no session runs, it shows "No sessions running. Press ⌘⇧N to start one." If the connection fails, the sidebar shows the error and two buttons: **Try again** and **Remove server**. See [Troubleshooting](#troubleshooting).
+blimp opens on **Home**: your home folder on the server. The Welcome page shows "connecting…", then "connected". If the connection fails, it shows the error and two buttons: **Try again** and **Remove server**. See [Troubleshooting](#troubleshooting).
 
-To add more servers, click **+ Add server** at the bottom of the sidebar. The app keeps your server list on the Mac.
+![Home: the Welcome page with recent projects, the home folder on the left, and the terminal below](docs/screenshots/home.png)
+
+To add more servers, click **Add server** on the Welcome page. The app keeps your server list on the Mac.
 
 ## Using it
 
-**Sidebar**
+**Projects and windows**
 
-- **Waiting for you** is at the top. It lists every session that waits for your answer, on all servers, with a dot. A session in this group does not show again in its folder group.
-- Below that, there is one group per folder (`~/project`), newest session first. Each row shows the title, the state (**working**, **waiting for you** or **done**) and the time since the last activity. The title is your `/rename` title, else Claude's title, else the first prompt.
-- Click **+** on a folder group to start a new session in that folder.
-- With more than one server, each server has its own section with its name. A server that is not connected shows its last list dimmed, because those states can be old.
+- Each window shows one folder on one server, as one VS Code window shows one project.
+- **Home** is your home folder on the server. Its Welcome page lists your recent projects. With more than one server, it has a server picker. The house button at the top left goes back to Home.
+- **Open Folder…** (⌘O, or the button at the top right) picks a folder: from the folders you used Claude in, by browsing the server, or by typing a path (like `~/projects/app`). While browsing, **New folder** makes a folder and goes into it. The folder opens in the current window.
+- **⌘⇧N** opens a new window, on Home. Each window keeps its own folder.
 
-**Sessions and tabs**
+**The window**
 
-- Click a session to open it in a terminal tab. Each open session has a tab. A dot on a tab means that session waits for you.
-- **⌘N** starts a new session in the folder of the current tab, at once. If no tab is open, it opens **New session in…**.
-- **⌘⇧N** opens **New session in…**. Pick a recent folder, browse the server, or type a path (like `~/projects/app`). Then choose **New conversation**, or pick an earlier conversation to resume. This is the same list that `/resume` shows in that folder.
-- blimp starts every session in the real folder on the server, the same as typing `claude` there. So Claude reads that project's CLAUDE.md and settings, and `/resume` shows that folder's history.
-- Closing a tab (**⌘W**, the **×**, or a middle-click) only detaches. The session keeps running on the server.
-- A reboot of the server ends all running sessions. With user systemd and linger, blimpd starts again by itself after the reboot.
-- If the session ends, the tab shows "Session ended". If you detach with `ctrl+\` (zmx's detach key), the tab shows "Detached" and a **Reattach** button. If the connection drops, the tab reconnects by itself.
-- **⌘K** opens a search over all sessions on all servers, by title, folder and name. Use ↑ ↓ to pick one and Enter to open it.
+- **Left:** the folder's files. Click a folder to open it, and a file to open it in a tab. The buttons at the top make a **new file** or a **new folder** in the folder you last clicked, and fold every folder. **⌘B** hides or shows the files.
+- **Top right:** the files you opened, one tab each. With no file open, the terminal fills the right side (on Home, the Welcome page shows instead).
+- **Bottom right:** the terminal of the selected session. **⌘J** hides or shows it while files are open. Drag the line above it to make it taller or shorter.
 
-**Files pane**
+**Sessions**
 
-- The pane on the right opens at the folder of the current session. **⌘B** shows or hides it.
-- Click a file in the tree to open it. **⌘P** opens a file by name.
-- **Text and code** open in Monaco, the editor inside VS Code. It has the same keys, search and replace, and multi-cursor. **⌘S** saves.
-- **Markdown** shows rendered. Click **Edit** to change it and **Preview** to go back. A relative link opens that file in the pane. An `http` or `https` link opens in your default browser. Other links do not open.
+- The list next to the terminal shows the sessions in this folder only, as `claude --resume` shows only this folder's conversations. A session started in a subfolder shows when you open that subfolder.
+- Each running session shows its title and a mark: a spinning ring means **working**, an amber dot means **waiting for you**, an empty ring means **idle**. A plain shell shows `>_` and its session name. The title is your `/rename` title, else Claude's title, else the first prompt.
+- Click a session to show its terminal. When you open a folder, blimp shows the session that waits longest for you, else the newest.
+- **+** (or **⌘N**) starts a new Claude session in this folder. The **+** menu also has **New shell**: a plain terminal in this folder, with your login shell and no Claude.
+- **Earlier** lists this folder's past conversations that are not running. Click one to resume it in a new session.
+- Hover a session and click the trash icon to end it. An idle Claude session ends at once; its conversation is saved, so you can resume it from **Earlier**. A session that is working or waiting, or a shell, asks first.
+- blimp starts every session in the real folder on the server, the same as typing `claude` there. So Claude reads that project's CLAUDE.md and settings.
+- Closing the window or quitting blimp only detaches. Sessions keep running on the server. A reboot of the server ends them. With user systemd and linger, blimpd starts again by itself after the reboot.
+- If you detach with `ctrl+\` (zmx's detach key), the terminal shows "Detached" and a **Reattach** button. If the connection drops, the terminal reconnects by itself.
+- **⌘K** searches all sessions on all servers, by title, folder and name. Pick one in this folder and it shows here. Pick one in another folder and blimp brings up that folder's window, or opens one.
+
+**Files**
+
+- **⌘P** opens a file by name.
+- **⌘-click a file path in the terminal** (like `src/app.ts` or `src/app.ts:42`) to open it in a tab, at that line. Paths are read from the session's folder. Only paths to files that exist become links.
+- **Text and code** open in Monaco, the editor inside VS Code. It has the same keys, search and replace, and multi-cursor.
+- **Edits save by themselves**, one second after you stop typing, and at once when you click away, switch files or switch apps. A dot on the tab means the latest edit is not saved yet. **⌘S** saves at once.
+- **Markdown** shows rendered. Click **Edit** to change it and **Preview** to go back. A relative link opens that file in a tab. An `http` or `https` link opens in your default browser. Other links do not open.
 - **Images** (png, jpg, jpeg, gif, webp, svg, ico, bmp) show fitted to the pane.
 - **PDF** files show all pages, with pdf.js.
 - Other binary files show "Can't show this file" and the file size.
@@ -125,28 +136,29 @@ To add more servers, click **+ Add server** at the bottom of the sidebar. The ap
 
 **When a file changes on the server**
 
-- If you have no unsaved edits, the file reloads by itself.
-- If you have unsaved edits, a bar says "Changed on the server", with **Reload** and **Keep mine**. **Reload** loads the server's version and drops your edits. **Keep mine** saves your version over the server's.
-- The same bar shows if you press ⌘S and the file changed on the server since you opened it.
+- If you have no edits waiting to be saved, the file reloads by itself. This is what you see when Claude edits a file you have open.
+- If an edit of yours was not saved yet, a bar says "Changed on the server", with **Reload** and **Keep mine**. blimp does not save over the server's change by itself. **Reload** loads the server's version and drops your edit. **Keep mine** saves your version over the server's.
 
 **Notifications and Dock badge**
 
-- When a session starts waiting for you, blimp sends a Mac notification: "*title* is waiting for you", with the folder. It does not send one if the window is in focus and that session's tab is the active tab.
+- When a session starts waiting for you, blimp sends a Mac notification: "*title* is waiting for you", with the folder. It does not send one if a blimp window is in focus and shows that session. With several windows, you get one notification, not one per window.
 - macOS asks for permission the first time blimp sends a notification.
-- The Dock icon shows how many sessions wait for you.
+- The Dock icon shows how many sessions wait for you, on all servers.
 
 ### Keyboard shortcuts
 
 | Keys | What it does |
 |---|---|
 | ⌘K | Jump to any session by its title, folder or name. In the editor, ⌘K goes to the editor (its ⌘K chords, as in VS Code). |
-| ⌘N | New session in the current tab's folder. With no tab open, opens "New session in…". |
-| ⌘⇧N | New session in…: pick a folder, then start a new conversation or resume one. |
-| ⌘1 to ⌘9 | Go to session tab 1 to 9. |
-| ⌘W | Close the current session tab. The session keeps running. With focus in the files pane, close the open file instead (it asks first if the file has unsaved changes). |
-| ⌘B | Show or hide the files pane. |
-| ⌘P | Open a file by name in the session's folder. Shows the files pane if it is hidden. |
-| ⌘S | Save the open file (when the files pane shows). |
+| ⌘N | New Claude session in this folder. |
+| ⌘⇧N | New window. |
+| ⌘O | Open Folder…: pick a folder on the server for this window. |
+| ⌘P | Open a file by name in this folder. |
+| ⌘S | Save the open file now (edits also save by themselves). |
+| ⌘W | Close the open file tab. The session and the window stay. |
+| ⌘B | Show or hide the files on the left. |
+| ⌘J | Show or hide the terminal (while files are open). |
+| ⌘-click | In the terminal: open a file path in a tab, or a web link in your browser. |
 | Esc | Close a dialog. |
 | ↑ ↓ Enter | Move and pick in the session search and the dialogs. |
 | ⌘Q | Quit blimp. Sessions keep running on the server. |
@@ -175,7 +187,7 @@ blimpd can start sessions, type into them, and read and write every file in your
 - Files from the server cannot run script in the app. Markdown goes through DOMPurify, SVG shows only as an image, and pdf.js runs with scripting off. A strict content security policy blocks remote and inline script.
 - The installer checks zmx against a pinned SHA-256 sum, and blimpd against the release's `SHA256SUMS`.
 - **Accepted trade-off, keystroke timing:** plain `ssh` (OpenSSH 9.5 and later) sends keystrokes in fixed 20 ms ticks, so that a network observer cannot see your typing rhythm. blimp's tunnel is a port forward, which does not do this. So a network observer can see when you type, but not what you type. VS Code Remote and Tailscale have the same trade-off.
-- The files pane can open anything in your home folder, dotfiles too. Your SSH access already allows that.
+- The files on the left can show anything in your home folder, dotfiles too, and blimp can make files and folders there. Your SSH access already allows that.
 
 ## Latency in brief
 
@@ -191,7 +203,7 @@ On that link, blimp's median was 8 to 12 ms lower than the plain terminal across
 
 ## Troubleshooting
 
-The sidebar shows the error from ssh or blimpd. Most problems show up there.
+Home's Welcome page shows the error from ssh or blimpd. Most problems show up there.
 
 **"SSH to yourserver failed: Permission denied (publickey)."**
 ssh did not find a key that it can use without a prompt. blimp never shows a passphrase prompt.

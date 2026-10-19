@@ -62,6 +62,7 @@ type Session = {
   created: number;       // unix seconds
   dir: string;           // real path Claude runs in
   cmd: string;
+  kind: "claude" | "shell"; // claude: Claude's status file was found or cmd mentions claude
   sessionId?: string;    // Claude's conversation id
   title: string;         // /rename title, else AI title, else first prompt, else "(new session)"
   status: string;        // raw Claude status: busy | idle | waiting | shell | ""
@@ -77,8 +78,10 @@ type Session = {
 - blimp's hook file `<socket dir>/status/<zmx name>.json` (`at`), so `~/.blimp/status/` by default and next to the temp socket for a test blimpd: see Hooks.
 - Neither → `unknown`.
 
-`POST /sessions` body `{ "dir": string, "name"?: string, "resume"?: string }` → 201 `{ "name": string }`.
-`resume` is a Claude conversation id (must match `/^[0-9a-f-]{36}$/`); the session runs `claude --resume <id>`. `dir` must be inside the home folder (see Files).
+`POST /sessions` body `{ "dir": string, "name"?: string, "resume"?: string, "shell"?: boolean }` → 201 `{ "name": string }`.
+`resume` is a Claude conversation id (must match `/^[0-9a-f-]{36}$/`); the session runs `claude --resume <id>`. `shell: true` runs the login shell (`$SHELL -l -i`) instead of Claude, and can't be combined with `resume`. `dir` must be inside the home folder (see Files).
+
+`DELETE /sessions/<name>` → 204: `zmx kill <name>`, then waits (up to 3 s) until zmx no longer lists it. 404 if there's no such session. Attached clients see close code 4000. Claude's conversation stays on disk, so it can be resumed.
 
 `GET /folders/recent` → `[{ "dir": string, "lastUsed": number /* ms */ }]`, newest first, max 30, only folders that still exist. Source: each `<claude dir>/projects/*/` folder, its newest `*.jsonl`, the first `"cwd"` found in its first 50 lines.
 
@@ -118,6 +121,8 @@ Every path must resolve, after following symlinks, to the home folder or somethi
 - If `baseMtime` is given and the file's mtime differs → 409 `{ "error": "changed on the server", "mtime": number }`. Without `baseMtime` it overwrites (the app's "keep mine" path).
 - Writes go to a temp file in the same folder, then rename, keeping the original file's mode.
 
+`POST /fs/mkdir` body `{ "path": string }` → 201 `{ "path": string }`: one new folder (not recursive). `POST /fs/create` body `{ "path": string }` → 201 `{ "path": string, "mtime": number }`: one new empty file. Both: 409 if the name exists, 403 if the parent isn't inside home or doesn't exist.
+
 `GET /fs/files?root=<dir>` → `{ "files": string[] /* relative to root */, "truncated": boolean }` for ⌘P. Inside a git repo: `git ls-files --cached --others --exclude-standard`. Otherwise walk, skipping `.git`, `node_modules` and dot-folders. Max 20 000.
 
 ### Hooks (status backup)
@@ -147,9 +152,10 @@ Commands for the UI (`invoke`):
 
 - `connect({ host: string, user?: string, port?: number }) → { id: string, port: number, token: string, home: string }`. `id` is `user@host:port`. Reuses a live tunnel for the same id. Errors are plain sentences (for example "SSH to claude1 failed: Permission denied (publickey)").
 - `disconnect({ id: string })`.
-- Event `tunnel-closed` with `{ id }` when an ssh child exits. The UI reconnects with backoff (1, 2, 5, 10 s, then every 10 s).
+- Event `tunnel-closed` with `{ id }` when an ssh child exits. The UI reconnects with backoff (1, 2, 5, 10 s, then every 10 s). Every window's links share the one tunnel per server.
+- Windows (`src/windows.rs`): `open_window({ project?, init })` focuses the window showing `project` (`"<server key>\n<folder>"`) and sends it `select-session` with `init`, or opens a new window `w-<n>` that starts from `init` (a query string: `server`, `dir`, `session`), handed to the page as `window.__blimpInit` (JSON-encoded, never pasted into script). `set_window_project({ project? })`: what the calling window shows. `set_viewing({ session? })`: the session on screen while that window has focus. `claim_notice({ session, key }) → bool`: false if a focused window shows `session` or another window already claimed `key` (`<server>/<session>/<wait start>`), so one wait gives one notification across windows. Clicking the Dock icon with no window open opens one.
 
-All ssh children are killed when the app exits normally; on any other exit they end by themselves (see Connection). Plugins: `notification`, `store` (server list in `servers.json`), `opener` (links, http and https only). macOS: a custom menu (see macOS menu). Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
+All ssh children are killed when the app exits normally; on any other exit they end by themselves (see Connection). Plugins: `notification`, `store` (server list in `servers.json`, recent projects per server and the last server in `recent.json`), `opener` (links, http and https only). macOS: a custom menu (see macOS menu). Window 1400×900, min 900×600, title "blimp". Bundle id `dev.blimp.app`.
 
 ### UI (`app/src`)
 
@@ -157,29 +163,24 @@ React + TypeScript + Vite. Libraries: `@xterm/xterm` + `@xterm/addon-fit` + `@xt
 
 **Outside Tauri** (browser, for development and the e2e tests): `src/lib/connection.ts` reads `?blimpd=http://127.0.0.1:PORT&token=T` from the page URL instead of calling `connect`, keeps the server list in localStorage, and uses the web Notification API. Everything else is the same code.
 
-**Layout**: one window, three panes.
+**Layout**: like VS Code. Each window shows one folder (the project) on one server; Home is the server's home folder. The place (`server`, `dir`, `session`) is kept in the page URL, so a reload stays put.
 
-1. **Sidebar (left, 280 px, resizable).**
-   - One section per server (header hidden when there's only one). "Add server" (host, optional user and port) at the bottom.
-   - "Waiting for you" group at the top of the whole sidebar (across servers): every session with state `waiting`, each with an accent dot, its folder, and its server name when there is more than one. A waiting session is shown only there, not again in its folder group.
-   - `~` in folder names means the `home` from `GET /health` (the real path), since session folders are real paths.
-   - Then one group per folder (`~/x` display), sessions newest first. The group header has a "+" that starts a session in that folder.
-   - Row: title (one line, ellipsis), state (working / waiting / done), last activity ("2m ago", refreshed every 30 s), folder shown in the group header only.
-   - Click a row: opens its terminal tab, or focuses it if open.
-2. **Terminal (center).** Tabs of open sessions. ⌘1–9 picks a tab, ⌘W closes the tab (the session keeps running) unless focus is in the files pane (see Shortcuts). Each tab is an xterm.js terminal on `/sessions/<name>/attach`, fitted to its container, resize sent on fit. Font: 13 px, `ui-monospace, "SF Mono", Menlo, monospace` (the same stack for Monaco and code in Markdown; UI text uses the system font). Keys like the VS Code terminal on macOS: ⌘C copies the selection (if any), ⌘V pastes, ⌘K is not sent to the terminal (it's the jump palette), ⌘Backspace sends `\x15`, ⌥Backspace sends `\x17`, ⌘← sends `\x01`, ⌘→ sends `\x05`, ⌥← / ⌥→ send `\x1bb` / `\x1bf`. On close code 4000 the tab shows "Session ended"; on 4001 "Detached" with a Reattach button. On other drops it reconnects. Before connecting (and reconnecting), the tab clears the terminal; it never clears after data has arrived, since zmx sends the current screen first. Links in the terminal open in the system browser (Tauri opener plugin; `window.open` outside Tauri), http and https only, on ⌘-click (Ctrl-click off the Mac), as in the VS Code terminal. A plain click does nothing, so text next to a link can still be selected.
-3. **Files (right, collapsible with ⌘B, default open, 45 % of width, resizable).** Opens at the active tab's session folder.
-   - A tree column (folders expandable, `.git` hidden) beside a viewer/editor area with its own tabs of open files.
-   - ⌘P: fuzzy open by name over `/fs/files` of the session folder.
-   - Text/code: Monaco, language from the extension, theme follows the app. ⌘S saves with `baseMtime`. On 409, or when an `fs` event says an open file changed and it has unsaved edits: a bar "Changed on the server: Reload / Keep mine". Keep mine saves without `baseMtime`. With no unsaved edits it reloads silently.
-   - Markdown: rendered (marked in a Web Worker, 5 s and 1,000,000-character limits, then DOMPurify) with an Edit toggle that switches to Monaco. A file that breaks marked shows "Can't show this Markdown" instead of freezing the app. A click on a relative link opens that file in the pane; an http or https link opens in the system browser, the same way as terminal links (on a plain click); any other link (`javascript:`, `file:`, `data:`, an anchor) does nothing. Nothing navigates the app's window.
+1. **Top bar.** Home button, the server (when there are several) and folder, the connection state when not connected, Open Folder….
+2. **Files (left, full height, 240 px, resizable, ⌘B).** The folder's tree (`.git` hidden). Buttons: New file, New folder (both in the folder last clicked, or the clicked file's folder; inline name field; 409 shows "already exists"), Collapse folders.
+3. **Editor (top right).** One tab per opened file. With no file open it's hidden and the terminal fills the right side; on Home it shows Welcome instead (recent projects, Open Folder, New Window, the server picker, Add server, the offline error with Try again / Remove server, keys).
+   - ⌘P: fuzzy open by name over `/fs/files` of the folder.
+   - Text/code: Monaco, language from the extension, theme follows the app. **Autosave**: 1 s after the last edit, and at once when the editor loses focus, the tab changes, the window blurs or the project changes; ⌘S saves at once. Saves send `baseMtime`. On 409, or when an `fs` event says an open file changed while an edit is unsaved: a bar "Changed on the server: Reload / Keep mine", and autosave leaves the file alone until one is picked. Keep mine saves without `baseMtime`. With nothing unsaved it reloads silently (keeping the cursor). Closing a tab saves first; only a failed save asks ("isn't saved: Try again / Close without saving / Cancel").
+   - Markdown: rendered (marked in a Web Worker, 5 s and 1,000,000-character limits, then DOMPurify) with an Edit toggle that switches to Monaco. A file that breaks marked shows "Can't show this Markdown" instead of freezing the app. A click on a relative link opens that file in a tab; an http or https link opens in the system browser, the same way as terminal links (on a plain click); any other link (`javascript:`, `file:`, `data:`, an anchor) does nothing. Nothing navigates the app's window.
    - Images (png, jpg, jpeg, gif, webp, svg, ico, bmp): shown fitted. SVG goes through an `<img>` from a blob URL, never inline.
    - PDF: pdf.js, all pages, scrollable.
    - Anything else binary (NUL byte in the first 8 KB): "Can't show this file", plus its size.
    - The tree and open files update from `fs` events.
+4. **Terminal pane (bottom right, ⌘J while files are open, resizable).** The selected session's xterm.js terminal on `/sessions/<name>/attach`, fitted, resize sent on fit; sessions shown once stay mounted, so their scrollback survives switching. Font: 13 px, `ui-monospace, "SF Mono", Menlo, monospace` (the same stack for Monaco and code in Markdown; UI text uses the system font). Keys like the VS Code terminal on macOS: ⌘C copies the selection (if any), ⌘V pastes, ⌘ combos go to the app, ⌘Backspace sends `\x15`, ⌥Backspace sends `\x17`, ⌘← sends `\x01`, ⌘→ sends `\x05`, ⌥← / ⌥→ send `\x1bb` / `\x1bf`. On close code 4001 "Detached" with a Reattach button; on 4000 the session leaves the list and the pane shows another. On other drops it reconnects. Before connecting (and reconnecting), the terminal is cleared; never after data has arrived, since zmx sends the current screen first. Web links open in the system browser (Tauri opener plugin; `window.open` outside Tauri), http and https only, on ⌘-click (Ctrl-click off the Mac). File paths (`src/a.ts`, `./x`, `~/x`, `/abs`, with optional `:line[:col]`) are links when the file exists (checked with `/fs/list` of its folder, cached 5 s); ⌘-click opens the file in a tab at that line. A plain click does nothing, so text next to a link can still be selected.
+5. **Session list (right of the terminal, 230 px).** The sessions whose folder is exactly the window's folder, newest first: a mark (working: spinning ring; waiting: amber dot; idle: empty ring; a shell with no state: `>_`), the title (a shell's zmx name), last activity. Hover shows a trash button: an idle Claude session ends at once (`DELETE /sessions/<name>`), anything else asks first. "+" menu: New Claude session (⌘N), New shell. "Earlier": `/conversations?dir=` minus conversations a running session has open; a click resumes one in a new session. With nothing selected, or the selected session gone, the pane shows the session waiting longest, else the newest.
 
-**Shortcuts**: ⌘N new session in the active tab's folder. ⌘⇧N "New session in…" dialog: recent folders (`/folders/recent`), a browse view (`/fs/list`), or a typed path; after choosing a folder, "New conversation" or one of `/conversations?dir=` to resume. ⌘K jump palette: fuzzy over every session's title, folder and name across servers; Enter opens it. Ranking: a contiguous match beats a scattered one, a match at a word start beats one mid-word, and a title match beats a folder or name match. When focus is inside Monaco, ⌘K goes to Monaco (its ⌘K chords, as in VS Code) and does not open the palette. ⌘P quick open. ⌘B toggle files. ⌘1–9 as above. ⌘W closes the active file tab when focus is in the files pane (tree, editor or viewer; a click anywhere in the pane puts focus there), with the usual "unsaved changes: Save / Don't save / Cancel" bar for a file with unsaved edits; anywhere else it closes the session tab. Esc closes dialogs.
+**Shortcuts**: ⌘K jump palette: fuzzy over every session's title, folder and name across servers; Enter shows it here if it's in this folder, else focuses or opens that folder's window (the browser build moves the window there). Ranking: a contiguous match beats a scattered one, a match at a word start beats one mid-word, and a title match beats a folder or name match. When focus is inside Monaco, ⌘K goes to Monaco (its ⌘K chords, as in VS Code). ⌘N new Claude session here. ⌘⇧N new window. ⌘O Open Folder: recent folders (`/folders/recent`), browse (`/fs/list`, with New folder), or a typed path. ⌘P quick open. ⌘S save now. ⌘W close the active file tab (from anywhere in the window; nothing when no file is open). ⌘B files. ⌘J terminal. Esc closes dialogs.
 
-**Waiting**: when a session's state becomes `waiting` (not on first load), send a notification "<title> is waiting for you" (body: the folder), unless the window is focused and that session's tab is active. Dock badge = number of waiting sessions (`getCurrentWindow().setBadgeCount(n || undefined)`), only in Tauri.
+**Waiting**: when a session's state becomes `waiting` (not on first load), send a notification "<title> is waiting for you" (body: the folder), unless this window is focused and shows that session. In the Mac app every window watches, and `claim_notice` lets exactly one notify (none if any focused window shows it). Dock badge = number of waiting sessions on connected servers (`getCurrentWindow().setBadgeCount(n || undefined)`), only in Tauri; it's app-wide, so every window sets the same number.
 
 **Look**: native-feeling Mac app, not a web page. Dark by default (follows system light/dark), compact type (13 px UI, system font), subtle 1 px dividers, no heavy shadows or gradients. Accent for "waiting" only. Colors as CSS variables in one file.
 
@@ -191,11 +192,11 @@ The UI renders files from servers (Markdown, SVG, PDF), so script injection must
 default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'
 ```
 
-(Vite's dev server needs `ws://localhost:*` for hot reload; add it only in dev.) pdf.js (pdfjs-dist 6, which never uses eval) runs with scripting off. Tauri capabilities grant only what the UI uses: the two commands, event listen, set-badge-count, notification, store, and opener limited to `http:`/`https:` URLs. No shell, fs or http plugin.
+(Vite's dev server needs `ws://localhost:*` for hot reload; add it only in dev.) pdf.js (pdfjs-dist 6, which never uses eval) runs with scripting off. Tauri capabilities (for windows `main` and `w-*`) grant only what the UI uses: the app's six commands (`connect`, `disconnect`, `open_window`, `set_window_project`, `set_viewing`, `claim_notice`), event listen, set-badge-count, set-title, notification, store, and opener limited to `http:`/`https:` URLs. No shell, fs or http plugin.
 
 ### macOS menu
 
-A custom menu, so the web page gets ⌘W, ⌘N, ⌘P and ⌘K: app menu (About, Hide, Hide Others, Show All, Quit ⌘Q), Edit (Undo, Redo, Cut, Copy, Paste, Select All with their usual keys), Window (Minimize ⌘M, Zoom). No Close Window ⌘W, no Print ⌘P.
+A custom menu, so the web page gets ⌘W, ⌘N, ⌘⇧N, ⌘O, ⌘P and ⌘K: app menu (About, Hide, Hide Others, Show All, Quit ⌘Q), Edit (Undo, Redo, Cut, Copy, Paste, Select All with their usual keys), Window (Minimize ⌘M, Zoom). No Close Window ⌘W, no Print ⌘P.
 
 ## Tests and checks per milestone
 

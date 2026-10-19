@@ -5,7 +5,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { fixtureDir, killSession, openApp, openSessionTab, startSession, startSessionPty } from "./helpers";
+import { fixtureDir, killSession, openSessionTab, startSession, startSessionPty } from "./helpers";
 
 const term = `blimpe2e-linkterm-${process.pid}`;
 const md = `blimpe2e-linkmd-${process.pid}`;
@@ -32,7 +32,6 @@ test("a terminal link opens on ⌘-click (Ctrl-click off the Mac), not on a plai
   const dir = fixtureDir("linkterm");
   await startSessionPty(term, dir, ["sh", "-c", `printf '${URL_TEXT}\\n'; exec cat`]);
   await recordOpens(page);
-  await openApp(page);
   const t = await openSessionTab(page, dir);
   const text = t.locator(".xterm-rows span", { hasText: URL_TEXT }).first();
   await expect(text).toBeVisible();
@@ -59,9 +58,8 @@ test("an OSC 8 terminal link (hidden URL behind any text) follows the same rule"
   await recordOpens(page);
   let dialogs = 0;
   page.on("dialog", (d) => (dialogs++, void d.dismiss()));
-  await openApp(page);
-  const url = page.url();
   const t = await openSessionTab(page, dir);
+  const url = page.url();
   // Printed after attaching (Enter), since zmx's screen replay on attach drops OSC 8 links.
   await t.locator(".xterm").click();
   await page.keyboard.press("Enter");
@@ -104,10 +102,9 @@ test("Markdown: a web link opens in the browser, a relative link opens the file,
   writeFileSync(join(dir, "other.md"), "# Other\n");
   startSession(md, dir);
   await recordOpens(page);
-  await openApp(page);
-  const url = page.url();
   await openSessionTab(page, dir);
-  const ws = page.locator(".workspace:not([hidden])");
+  const url = page.url();
+  const ws = page.locator(".wb");
   await ws.locator(".tree").getByText("links.md").click();
   const view = ws.locator(".md-view");
   await expect(view.locator("h1")).toHaveText("Links");

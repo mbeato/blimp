@@ -2,8 +2,9 @@
 // Sessions, terminals and files all live in the UI, which talks to blimpd through the tunnel.
 
 mod tunnel;
+mod windows;
 
-use tauri::{Manager, RunEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 fn main() {
     let builder = tauri::Builder::default();
@@ -14,17 +15,31 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(tunnel::Tunnels::default())
+        .manage(windows::Windows::default())
         .invoke_handler(tauri::generate_handler![
             tunnel::connect,
-            tunnel::disconnect
+            tunnel::disconnect,
+            windows::open_window,
+            windows::set_window_project,
+            windows::set_viewing,
+            windows::claim_notice
         ])
+        .on_window_event(|window, event| {
+            if let WindowEvent::Destroyed = event {
+                window.state::<windows::Windows>().forget(window.label());
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while starting blimp")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // ssh children would otherwise outlive the app and keep their tunnels open.
-            if let RunEvent::Exit = event {
-                app.state::<tunnel::Tunnels>().close_all();
+            RunEvent::Exit => app.state::<tunnel::Tunnels>().close_all(),
+            // Clicking the Dock icon with every window closed opens a new one, as Mac apps do.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { has_visible_windows: false, .. } => {
+                let _ = windows::create(app, &app.state::<windows::Windows>(), "");
             }
+            _ => {}
         });
 }
 

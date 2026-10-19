@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Session } from "../lib/api";
 import type { ServerLink } from "../lib/connection";
 import { rank, sessionScore } from "../lib/fuzzy";
-import { tildify } from "../lib/sidebar";
+import { tildify } from "../lib/sessions";
 import { Dialog } from "./Dialog";
 
 type Item = { link: ServerLink; s: Session; folder: string };

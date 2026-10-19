@@ -1,4 +1,4 @@
-# Asks the X window titled argv[1] to close, the way a window manager's close button does
+# Asks the X windows titled argv[1] (or "<folder> — argv[1]", as a project window is titled) to close, the way a window manager's close button does
 # (a WM_DELETE_WINDOW client message), so the app takes its normal exit path. No WM runs under
 # Xvfb, and WebDriver's "close window" is the driver's own teardown, not a user's close.
 import ctypes, ctypes.util, sys
@@ -11,6 +11,9 @@ x.XInternAtom.restype = ctypes.c_ulong
 x.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
 x.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]
 x.XFetchName.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_char_p)]
+x.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong,
+                                 ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong),
+                                 ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_char_p)]
 x.XSendEvent.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_long, ctypes.c_void_p]
 
 
@@ -37,12 +40,24 @@ def windows(w):
         yield from windows(kids[i])
 
 
+# The title as UTF-8 (_NET_WM_NAME). A title with characters outside Latin-1, like the dash in
+# "<folder> — blimp", isn't in plain WM_NAME, which is all XFetchName reads.
+def x_name(w):
+    net, utf8 = x.XInternAtom(d, b"_NET_WM_NAME", 0), x.XInternAtom(d, b"UTF8_STRING", 0)
+    t, f, n, after, data = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_char_p()
+    if x.XGetWindowProperty(d, w, net, 0, 1024, 0, utf8, ctypes.byref(t), ctypes.byref(f), ctypes.byref(n), ctypes.byref(after), ctypes.byref(data)) == 0 and data.value:
+        return data.value
+    s = ctypes.c_char_p()
+    return s.value if x.XFetchName(d, w, ctypes.byref(s)) else None
+
+
 name = sys.argv[1].encode()
 targets = []
 for w in windows(x.XDefaultRootWindow(d)):
-    s = ctypes.c_char_p()
-    if x.XFetchName(d, w, ctypes.byref(s)) and s.value == name:
+    v = x_name(w)
+    if v and (v == name or v.endswith(" — ".encode() + name)):
         targets.append(w)
+print("matched:", [x_name(w) for w in targets])
 if not targets:
     sys.exit(f"no window named {sys.argv[1]}")
 for w in targets:

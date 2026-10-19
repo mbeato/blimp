@@ -5,7 +5,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { cspViolations, e2e, fixtureDir, killSession, openApp, openSessionTab, startSession } from "./helpers";
+import { cspViolations, e2e, fixtureDir, killSession, openSessionTab, startSession } from "./helpers";
 
 // WebGL on here (the other specs turn it off to read the terminal's text), so xterm's WebGL
 // renderer runs under the policy too. SwiftShader gives headless Chromium a software GPU.
@@ -67,12 +67,11 @@ test("hostile Markdown, SVG, HTML and PDF run nothing, and the CSP blocks inline
 
   const dialogs: string[] = [];
   page.on("dialog", (d) => (dialogs.push(d.message()), void d.dismiss()));
-  await openApp(page);
-  const url = page.url();
   const term = await openSessionTab(page, dir);
+  const url = page.url();
   // xterm's WebGL renderer draws into its own canvas.
   await expect(term.locator(".xterm canvas").first()).toBeAttached();
-  const ws = page.locator(".workspace:not([hidden])");
+  const ws = page.locator(".wb");
   const tree = ws.locator(".tree");
 
   await tree.getByText("evil.svg").click();

@@ -1,5 +1,5 @@
 // README screenshots, against made-up sessions. Off unless BLIMP_SHOTS=1. Run it with ZMX_DIR set
-// to an empty temp folder so the sidebar shows only these sessions, not the real ones:
+// to an empty temp folder so blimp shows only these sessions, not the real ones:
 //   ZMX_DIR=$(mktemp -d /tmp/bz.XXXX) BLIMP_SHOTS=1 bun run e2e screenshots
 
 import { execFileSync } from "node:child_process";
@@ -56,8 +56,8 @@ test("screenshots", async ({ page }) => {
   writeFileSync(join(web, "src", "checkout.ts"), "export function total(items: { price: number }[]) {\n  return items.reduce((s, i) => s + i.price, 0);\n}\n");
   writeFileSync(join(web, "package.json"), '{ "name": "webshop" }\n');
 
-  // Outside the session folders, so it isn't in the files tree.
-  const screen = join(e2e().fixtures, ".screen");
+  // Outside the test blimpd's home, so it isn't in any files tree.
+  const screen = join(e2e().statusDir, "..", "screen.txt");
   writeFileSync(screen, SCREEN);
   for (const [name, folder] of FAKE) await startSessionPty(name, fixtureDir(folder), ["sh", "-c", `stty -echo; cat ${screen}; exec cat`]);
   const list = execFileSync("zmx", ["list"], { env: zmxEnv(), encoding: "utf8" });
@@ -70,20 +70,28 @@ test("screenshots", async ({ page }) => {
     mkdirSync(proj, { recursive: true });
     writeFileSync(join(proj, `${sid}.jsonl`), JSON.stringify({ type: "ai-title", aiTitle: title }) + "\n");
   }
+  // Earlier conversations in webshop, for the session list's Earlier section.
+  const webProj = join(claude, "projects", web.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(webProj, { recursive: true });
+  for (const title of ["Fix the flaky cart test", "Move prices to cents"])
+    writeFileSync(join(webProj, `${crypto.randomUUID()}.jsonl`), JSON.stringify({ type: "ai-title", aiTitle: title, cwd: web }) + "\n");
+  const fixtures = e2e().fixtures;
+  const recent = { projects: { localhost: ["webshop", "api", "notes"].map((f, i) => ({ dir: join(fixtures, f), at: Date.now() - i * 3_600_000 })) } };
 
   // Light and dark, as the system setting picks.
   for (const scheme of ["light", "dark"] as const) {
     const suffix = scheme === "dark" ? "-dark" : "";
     // Reduced motion: no waiting beacon caught mid-pulse.
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
-    await openApp(page);
-    await expect(page.getByText("Checkout page loads twice on Safari").first()).toBeVisible({ timeout: 10_000 });
-    await page.getByText("Add Apple Pay to checkout").first().click();
-    await expect(page.locator(".term:not([hidden]) .xterm-rows")).toContainText("Wiring up the payment sheet");
-    const ws = page.locator(".workspace:not([hidden])");
+    await openApp(page, { dir: web, session: "blimpe2e-web-2" });
+    await expect(page.locator(".srow", { hasText: "Checkout page loads twice on Safari" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".tpane-terms .term:not([hidden]) .xterm-rows")).toContainText("Wiring up the payment sheet");
+    await expect(page.locator(".srow-main.earlier").first()).toBeVisible();
+    const ws = page.locator(".wb");
     await ws.locator(".tree").getByText("README.md").click();
     await expect(ws.locator(".md-view h1")).toHaveText("webshop");
     await expect(ws.locator(".ftabs-toggle")).toHaveText("Edit"); // Monaco has loaded
+    await page.mouse.move(0, 0);
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(out, `main${suffix}.png`) });
 
@@ -94,12 +102,19 @@ test("screenshots", async ({ page }) => {
     await page.screenshot({ path: join(out, `editor${suffix}.png`) });
 
     // From the terminal: inside Monaco, ⌘K is Monaco's.
-    await page.locator(".term:not([hidden]) .xterm").click();
+    await page.locator(".tpane-terms .term:not([hidden]) .xterm").click();
     await page.keyboard.press("Meta+k");
     await page.keyboard.type("api");
     await expect(page.locator(".dialog.palette .list-item").first()).toContainText("Rate limits for the public API");
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(out, `palette${suffix}.png`) });
     await page.keyboard.press("Escape");
+
+    // Home, with recent projects (kept on the Mac; here the browser's storage).
+    await page.evaluate((r) => localStorage.setItem("blimp.recent", JSON.stringify(r)), recent);
+    await openApp(page);
+    await expect(page.locator(".welcome-recent li")).toHaveCount(3);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(out, `home${suffix}.png`) });
   }
 });

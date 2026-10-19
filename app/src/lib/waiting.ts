@@ -2,11 +2,15 @@
 
 import { inTauri } from "./connection";
 import type { Session } from "./api";
-import { tildify } from "./sidebar";
+import { claimNotice } from "./place";
+import { tildify } from "./sessions";
 
-export type NotifyFn = (title: string, body: string) => void;
+// session: "<server key>/<session name>". wait: that plus when the wait started, so each wait
+// is announced once even when several windows see it.
+export type NotifyFn = (title: string, body: string, id: { session: string; wait: string }) => void;
 
-// Where the user is looking right now. activeTab is "<server key>/<session name>".
+// Where the user is looking right now. activeTab is "<server key>/<session name>": the session
+// on screen in this window.
 export type Focus = { focused: boolean; activeTab: string | null };
 
 // Remembers each server's last states and notifies when a session becomes waiting.
@@ -27,8 +31,9 @@ export class WaitWatcher {
     const f = this.focus();
     for (const s of sessions) {
       if (s.state !== "waiting" || prev.get(s.name) === "waiting") continue;
-      if (f.focused && f.activeTab === `${server}/${s.name}`) continue;
-      this.notify(`${s.title} is waiting for you`, tildify(s.dir, home));
+      const session = `${server}/${s.name}`;
+      if (f.focused && f.activeTab === session) continue;
+      this.notify(`${s.title} is waiting for you`, tildify(s.dir, home), { session, wait: `${session}/${s.stateSince ?? s.updatedAt ?? Date.now()}` });
     }
   }
 }
@@ -45,10 +50,10 @@ async function allowed(): Promise<boolean> {
   return Notification.permission === "granted";
 }
 
-export const notify: NotifyFn = (title, body) => {
+export const notify: NotifyFn = (title, body, id) => {
   permission ??= allowed().catch(() => false);
   void permission.then(async (ok) => {
-    if (!ok) return;
+    if (!ok || !(await claimNotice(id.session, id.wait))) return;
     if (inTauri()) (await import("@tauri-apps/plugin-notification")).sendNotification({ title, body });
     else new Notification(title, { body });
   });

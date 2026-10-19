@@ -71,7 +71,8 @@ export async function killTestSessions() {
 
 // Records what the app hands the web Notification API (the browser build's notify()), and every
 // content security policy violation (window.__csp).
-export async function openApp(page: Page) {
+// place: open on that folder (and session) instead of Home, as a reload or a new window would.
+export async function openApp(page: Page, place: { dir?: string; session?: string } = {}) {
   await page.addInitScript(() => {
     const csp: string[] = [];
     (window as any).__csp = csp;
@@ -87,19 +88,22 @@ export async function openApp(page: Page) {
     };
   });
   const { base, token } = e2e();
-  await page.goto(`/?blimpd=${encodeURIComponent(base)}&token=${token}`);
+  const q = new URLSearchParams({ blimpd: base, token, ...(place.dir && { server: "localhost", dir: place.dir }), ...(place.session && { session: place.session }) });
+  await page.goto(`/?${q}`);
 }
 
 export const cspViolations = (page: Page) => page.evaluate(() => (window as any).__csp as string[]);
 
 export const notifications = (page: Page) => page.evaluate(() => (window as any).__notifications as { title: string; body?: string }[]);
 
-// A session's row in its folder group (the group header's tooltip is the folder's real path).
-export const folderRow = (page: Page, dir: string) => page.locator(`.group:has(> .group-head[title="${dir}"]) .row`).first();
+// A running session's row in the terminal pane's list.
+export const sessionRow = (page: Page, name: string) => page.locator(`.srow[data-session="${name}"]`);
 
-export async function openSessionTab(page: Page, dir: string) {
-  await folderRow(page, dir).click();
-  const term = page.locator(".term:not([hidden])");
+// Opens the folder as the window's project; the terminal pane shows the session (or the folder's
+// only one).
+export async function openSessionTab(page: Page, dir: string, session?: string) {
+  await openApp(page, { dir, session });
+  const term = page.locator(".tpane-terms .term:not([hidden])");
   await expect(term.locator(".xterm")).toBeVisible();
   return term;
 }

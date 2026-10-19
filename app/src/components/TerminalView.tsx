@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal, type ITheme } from "@xterm/xterm";
+import { Terminal, type ILink, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import { backoff, type ServerLink } from "../lib/connection";
 import { mapKey } from "../lib/keys";
 import { followsLink, openWebLink } from "../lib/links";
+import { ExistsCache, findPaths, resolveAgainst } from "../lib/pathlinks";
 
 const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
 const camel = (s: string) => s.replace(/-(\w)/g, (_, c) => c.toUpperCase());
@@ -32,9 +33,18 @@ function themeFromCss(): ITheme {
 
 type Phase = "connecting" | "live" | "reconnecting" | "ended" | "detached";
 
-// One session's terminal: xterm.js on /sessions/<name>/attach. Stays mounted while its tab is
-// open (hidden when another tab is active) so the scrollback survives tab switches.
-export function TerminalView(props: { link: ServerLink; name: string; active: boolean; onClose: () => void }) {
+// One session's terminal: xterm.js on /sessions/<name>/attach. Stays mounted once shown (hidden
+// while another session is shown) so the scrollback survives switching.
+// dir: the session's folder, which relative paths in its output are read against.
+// onOpenPath: ⌘-click on a file path. onClose: dismiss an ended or detached session.
+export function TerminalView(props: {
+  link: ServerLink;
+  name: string;
+  dir: string;
+  active: boolean;
+  onOpenPath: (path: string, line?: number, col?: number) => void;
+  onClose: () => void;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -44,6 +54,10 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
   linkRef.current = props.link;
   const reconnectNow = useRef(() => {});
   const reattach = useRef(() => {});
+  const dirRef = useRef(props.dir);
+  dirRef.current = props.dir;
+  const openPath = useRef(props.onOpenPath);
+  openPath.current = props.onOpenPath;
 
   useEffect(() => {
     const t = new Terminal({
@@ -74,6 +88,41 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
         if (followsLink(e)) openWebLink(uri);
       }),
     );
+    // File paths: ⌘-click opens them in a file tab. A link shows only for a file that exists.
+    const exists = new ExistsCache(() => linkRef.current.api);
+    t.registerLinkProvider({
+      provideLinks(y, done) {
+        const line = t.buffer.active.getLine(y - 1);
+        if (!line) return done(undefined);
+        // The line's text, with each character's cell: wide characters take two cells.
+        let text = "";
+        const cellAt: number[] = [];
+        for (let x = 0; x < line.length; x++) {
+          const cell = line.getCell(x);
+          if (!cell || cell.getWidth() === 0) continue;
+          const ch = cell.getChars() || " ";
+          for (let i = 0; i < ch.length; i++) cellAt.push(x);
+          text += ch;
+        }
+        const matches = findPaths(text);
+        if (!matches.length) return done(undefined);
+        const home = linkRef.current.home;
+        void Promise.all(
+          matches.map(async (m): Promise<ILink | null> => {
+            const path = resolveAgainst(m.text, dirRef.current, home);
+            if (!(await exists.isFile(path))) return null;
+            return {
+              range: { start: { x: cellAt[m.start] + 1, y }, end: { x: cellAt[m.end - 1] + 1, y } },
+              text: m.text,
+              activate: (e) => followsLink(e) && openPath.current(path, m.line, m.col),
+            };
+          }),
+        ).then((links) => {
+          const found = links.filter((l): l is ILink => !!l);
+          done(found.length ? found : undefined);
+        });
+      },
+    });
     t.open(box.current!);
     // WebGL is much faster for Claude's redraws; without it (or when the GPU context is lost)
     // xterm falls back to its DOM renderer.
@@ -199,7 +248,7 @@ export function TerminalView(props: { link: ServerLink; name: string; active: bo
         <div className="term-banner">
           <span>{phase === "detached" ? "Detached" : "Session ended"}</span>
           {phase === "detached" && <button onClick={() => reattach.current()}>Reattach</button>}
-          <button onClick={props.onClose}>Close tab</button>
+          <button onClick={props.onClose}>Close</button>
         </div>
       )}
       {phase === "reconnecting" && <div className="term-banner quiet">Reconnecting…</div>}

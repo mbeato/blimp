@@ -4,6 +4,7 @@ export type SessionState = "working" | "waiting" | "done" | "unknown";
 
 export type Session = {
   name: string;
+  kind: "claude" | "shell";
   pid: number;
   clients: number;
   created: number; // unix seconds
@@ -74,8 +75,13 @@ export class Api {
     return this.json<Session[]>("/sessions");
   }
 
-  createSession(body: { dir: string; name?: string; resume?: string }) {
+  createSession(body: { dir: string; name?: string; resume?: string; shell?: boolean }) {
     return this.post<{ name: string }>("/sessions", body);
+  }
+
+  // Ends the session (zmx kill). Claude's conversation stays resumable.
+  async endSession(name: string) {
+    await this.req(`/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
   }
 
   recentFolders() {
@@ -119,6 +125,14 @@ export class Api {
   async fsWrite(path: string, body: BodyInit, baseMtime?: number) {
     const res = await this.req("/fs/file", { method: "PUT", body, query: { path, baseMtime } });
     return (await res.json()) as { mtime: number };
+  }
+
+  fsMkdir(path: string) {
+    return this.post<{ path: string }>("/fs/mkdir", { path });
+  }
+
+  fsCreate(path: string) {
+    return this.post<{ path: string; mtime: number }>("/fs/create", { path });
   }
 
   fsFiles(root: string) {

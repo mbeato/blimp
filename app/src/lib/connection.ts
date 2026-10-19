@@ -80,6 +80,7 @@ export const errorText = (e: unknown) => (e instanceof Error ? e.message : Strin
 export type LinkStatus = "connecting" | "connected" | "offline";
 
 const links = new Set<ServerLink>();
+let serial = 0;
 let tunnelListener: Promise<unknown> | null = null;
 
 // The Rust shell says when an ssh child exits; the link that used it reconnects.
@@ -92,6 +93,8 @@ function listenForTunnels() {
 
 // One server: its tunnel, its events socket and its session list, kept alive with retries.
 export class ServerLink {
+  // A server removed and added again gets a new link with the same key; this tells them apart.
+  readonly id = ++serial;
   status: LinkStatus = "connecting";
   error = "";
   sessions: Session[] | null = null; // null until the first list arrives
@@ -180,7 +183,7 @@ export class ServerLink {
     if (inTauri()) invoke("disconnect", { id: this.key }).catch(() => {});
   }
 
-  // The files pane's watch set (expanded folders + open files). Kept here so it survives reconnects.
+  // The workbench's watch set (expanded folders + open files). Kept here so it survives reconnects.
   watch(paths: string[]) {
     this.watching = paths;
     this.events?.watch(paths);
