@@ -93,6 +93,8 @@ final class Socket {
             onState(.closed(code: code))
             if code == 4000 || code == 401 { loop = nil; return }
             try? await Task.sleep(for: .seconds(Backoff.delay(attempt: attempt)))
+            // stopped or replaced by reconnectNow() while it waited, which also reset attempt
+            if Task.isCancelled { return }
             attempt += 1
         }
     }

@@ -7,7 +7,8 @@ struct PromptBar: View {
     let prompt: Prompt
     /// An answer is on its way: the buttons wait.
     let busy: Bool
-    let onPick: (Int) -> Void
+    /// The choice's index, and the `at` of the prompt it was shown for.
+    let onPick: (Int, Double) -> Void
     @State private var height: CGFloat = 0
 
     var body: some View {
@@ -41,14 +42,14 @@ struct PromptBar: View {
         case .permission:
             summary
             ForEach(Array(prompt.choices.enumerated()), id: \.offset) { i, choice in
-                ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice)) { onPick(i) }
+                ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice)) { onPick(i, prompt.at) }
             }
             .disabled(busy)
         case .question:
             if let q = prompt.questions?.first {
                 Text(q.question).font(.callout)
                 ForEach(Array(q.options.enumerated()), id: \.offset) { i, option in
-                    ChoiceButton(label: option.label, detail: option.description, style: .normal) { onPick(i) }
+                    ChoiceButton(label: option.label, detail: option.description, style: .normal) { onPick(i, prompt.at) }
                 }
                 .disabled(busy)
             }

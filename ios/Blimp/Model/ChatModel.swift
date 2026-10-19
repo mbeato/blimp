@@ -29,6 +29,7 @@ final class ChatModel {
     @ObservationIgnored private var watchRound = 0
     @ObservationIgnored private var watching = false
     @ObservationIgnored private var replies: [String: CheckedContinuation<Reply, Never>] = [:]
+    @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
 
     static let notSent = "Not sent. Check the connection."
 
@@ -81,6 +82,8 @@ final class ChatModel {
         watchRound += 1
         for c in replies.values { c.resume(returning: .notSent) }
         replies = [:]
+        for t in timers.values { t.cancel() }
+        timers = [:]
     }
 
     func reconnectNow() {
@@ -93,7 +96,17 @@ final class ChatModel {
         let s = withObservationTracking { session } onChange: { [weak self] in
             Task { @MainActor in self?.watch(round) }
         }
-        if let s { lastSeen = s }
+        if let s, s != lastSeen { lastSeen = s }
+        // gone from the list after being in it: it ended, and its chat socket has nothing more to say
+        if s == nil, lastSeen != nil { endChat() }
+    }
+
+    /// The session is over: no more reconnecting, and what's still waiting for a reply gets none.
+    private func endChat() {
+        socketEnded = true
+        socket?.stop()
+        socket = nil
+        for id in Array(replies.keys) { reply(id, .ended) }
     }
 
     /// Types `text` into the session. true once blimpd acknowledged it; false (and lastError set)
@@ -105,21 +118,24 @@ final class ChatModel {
         defer { inputId = nil }
         switch await request(.input(id: id, text: text), id: id) {
         case .ack: return true
+        case .ended: break
         case .failed(let error): lastError = "Not sent: \(error)"
         case .notSent, .timeout: lastError = Self.notSent
         }
         return false
     }
 
-    /// Picks `pick` (an index in `prompt.choices`) for the prompt showing now.
-    func answer(_ pick: Int) async {
-        guard let prompt, answerId == nil else { return }
+    /// Picks `pick` (an index in `prompt.choices`) for the prompt that was on screen (or read aloud)
+    /// when it was picked, named by its `at`. If a new wait has replaced that prompt since, nothing is
+    /// sent: the index belongs to the old question, and the bar now shows the new one.
+    func answer(_ pick: Int, at: Double) async {
+        guard let prompt, prompt.at == at, answerId == nil else { return }
         let id = UUID().uuidString
         lastError = nil
         answerId = id
         defer { answerId = nil }
-        switch await request(.answer(id: id, at: prompt.at, pick: pick), id: id) {
-        case .ack: break
+        switch await request(.answer(id: id, at: at, pick: pick), id: id) {
+        case .ack, .ended: break
         // Another answer got there first (the Mac, or a new wait); the bar redraws from the latest prompt.
         case .failed(let error) where error == "the question changed": break
         case .failed(let error): lastError = "Not sent: \(error)"
@@ -135,7 +151,7 @@ final class ChatModel {
         stopId = id
         defer { stopId = nil }
         switch await request(.interrupt(id: id), id: id) {
-        case .ack: break
+        case .ack, .ended: break
         case .failed(let error): lastError = "Not sent: \(error)"
         case .notSent, .timeout: lastError = Self.notSent
         }
@@ -173,8 +189,7 @@ final class ChatModel {
         case .open:
             reconnecting = false
         case .closed(code: 4000):
-            socketEnded = true
-            socket = nil  // it stopped itself
+            endChat()
         case .closed(code: 401):
             socket = nil  // the token was refused; the events socket sends the app back to Pair
             reconnecting = true
@@ -187,6 +202,8 @@ final class ChatModel {
 
     private enum Reply: Sendable {
         case ack, failed(String), notSent, timeout
+        /// The session is gone (blimpd said so, or it left the list): not an error to show.
+        case ended
     }
 
     /// Sends one command and waits for blimpd's reply: 10 s, then the same id once more for 10 s
@@ -197,6 +214,11 @@ final class ChatModel {
         defer { sending.remove(id) }
         var result = await attempt(data, id: id)
         if case .timeout = result { result = await attempt(data, id: id) }
+        // blimpd's reply for typing into a session that's no longer there
+        if case .failed("the session ended") = result {
+            endChat()
+            return .ended
+        }
         return result
     }
 
@@ -207,14 +229,15 @@ final class ChatModel {
                 guard let socket = self?.socket else { self?.reply(id, .notSent); return }
                 do { try await socket.send(data) } catch { self?.reply(id, .notSent) }
             }
-            Task { [weak self] in
+            timers[id] = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(10))
-                self?.reply(id, .timeout)
+                if !Task.isCancelled { self?.reply(id, .timeout) }
             }
         }
     }
 
     private func reply(_ id: String, _ r: Reply) {
+        timers.removeValue(forKey: id)?.cancel()
         replies.removeValue(forKey: id)?.resume(returning: r)
     }
 }

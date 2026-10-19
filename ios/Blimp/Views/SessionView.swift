@@ -127,8 +127,8 @@ private struct ChatContent: View {
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 if let prompt = model.prompt {
-                    PromptBar(prompt: prompt, busy: model.answering) { pick in
-                        Task { await model.answer(pick) }
+                    PromptBar(prompt: prompt, busy: model.answering) { pick, at in
+                        Task { await model.answer(pick, at: at) }
                     }
                     Divider()
                 }
