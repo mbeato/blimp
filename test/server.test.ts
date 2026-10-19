@@ -374,15 +374,17 @@ describe("chat", () => {
     expect(c.closed?.code).toBe(4000);
   });
 
-  test("a transcript that doesn't exist yet is unreadable until it does", async () => {
+  test("a transcript that doesn't exist yet starts as an empty history, then its messages are appended", async () => {
     const sid = "66666666-6666-6666-6666-666666666666";
     const { transcript, name } = await fakeClaude("chat6", sid, [user("u1", "first")]);
     rmSync(transcript);
     const c = await socket(`/sessions/${name}/chat`);
-    await until(() => c.messages.find((m) => m.type === "unreadable"), "unreadable");
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    expect(c.messages.find((m) => m.type === "history").messages).toEqual([]);
+    expect(c.messages.some((m) => m.type === "unreadable")).toBe(false);
     writeFileSync(transcript, user("u1", "first"));
-    await until(() => c.messages.find((m) => m.type === "history"), "history", 4000);
-    expect(c.messages.find((m) => m.type === "history").messages.map((m: any) => m.text)).toEqual(["first"]);
+    await until(() => c.messages.find((m) => m.type === "append"), "append", 4000);
+    expect(c.messages.find((m) => m.type === "append").messages.map((m: any) => m.text)).toEqual(["first"]);
     c.ws.close();
   });
 

@@ -17,6 +17,7 @@ export type ChatData = {
   session?: Session;
   file?: string;
   scan?: ChatScan;
+  fresh?: boolean; // sent an empty history: the transcript isn't there yet, and all of it goes out as append
   proc?: Subprocess;
   unfollow?: () => void;
   timer?: ReturnType<typeof setInterval>;
@@ -42,9 +43,13 @@ function loadHistory(ws: ServerWebSocket<ChatData>) {
   const d = ws.data;
   const s = d.session!;
   d.file = s.sessionId ? transcriptPath(claudeDir(), s.sessionId) : undefined;
+  d.scan = undefined;
+  d.fresh = false;
   if (!d.file) {
-    d.scan = undefined;
-    return send(ws, { type: "unreadable" });
+    if (!s.sessionId) return send(ws, { type: "unreadable" });
+    // A new session has no transcript until its first message: an empty chat, then tick appends.
+    d.fresh = true;
+    return send(ws, { type: "history", messages: [] });
   }
   d.scan = newScan(s.dir);
   try {
@@ -75,8 +80,13 @@ async function tick(ws: ServerWebSocket<ChatData>) {
       if (changed) {
         send(ws, { type: "reset" });
         loadHistory(ws);
-      } else if (s.sessionId && !d.scan && existsSync(transcriptPath(claudeDir(), s.sessionId))) {
-        loadHistory(ws); // the transcript wasn't there yet when the socket opened
+      } else if (s.sessionId && !d.scan) {
+        const file = transcriptPath(claudeDir(), s.sessionId);
+        if (file && d.fresh) {
+          d.file = file; // the first message was written: all of it is new
+          d.scan = newScan(s.dir);
+          d.fresh = false;
+        } else if (file && existsSync(file)) loadHistory(ws); // it wasn't readable when the socket opened
       }
     }
     if (d.file && d.scan) {

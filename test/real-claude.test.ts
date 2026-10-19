@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { zmxPath } from "../src/sessions";
 
 const on = process.env.BLIMP_REAL_CLAUDE === "1";
@@ -18,6 +18,12 @@ const env: Record<string, string | undefined> = Object.fromEntries(Object.entrie
 let server: ReturnType<typeof Bun.spawn>;
 let token = "";
 let name = "";
+const sockets: WebSocket[] = []; // closed in afterAll
+const open = (url: string) => {
+  const w = new WebSocket(url);
+  sockets.push(w);
+  return w;
+};
 
 async function until<T>(f: () => T | Promise<T>, what: string, ms = 60000): Promise<T> {
   const end = Date.now() + ms;
@@ -56,21 +62,28 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (!on) return;
+  for (const w of sockets) w.close();
   if (name) Bun.spawnSync([zmxPath(), "kill", name], { env });
   server?.kill();
-  rmSync(tmp, { recursive: true, force: true });
-  rmSync(dir, { recursive: true, force: true });
-  // Claude names its folder from the path it was started in, which may not be the resolved one (/Users/x vs /home/x).
-  const mine = basename(dir).replace(/[^A-Za-z0-9]/g, "-");
-  const projects = join(homedir(), ".claude", "projects");
-  for (const d of readdirSync(projects)) if (d.endsWith(mine)) rmSync(join(projects, d), { recursive: true, force: true });
+  if (tmp) rmSync(tmp, { recursive: true, force: true });
+  // Only this test's own folder: under the home folder, with the name beforeAll gave it.
+  if (dir && dirname(dir) === realpathSync(homedir()) && basename(dir).startsWith(".blimptest-real-")) {
+    rmSync(dir, { recursive: true, force: true });
+    // Claude names its saved-conversation folder from the path it was started in, which may be the
+    // other spelling of this one (/Users/x vs /home/x). Match whole names, never a suffix.
+    const named = (p: string) => p.replace(/[^A-Za-z0-9]/g, "-");
+    const base = basename(dir);
+    const mine = new Set([named(dir), named(join("/Users", basename(dirname(dir)), base)), named(join("/home", basename(dirname(dir)), base))]);
+    const projects = join(homedir(), ".claude", "projects");
+    if (existsSync(projects)) for (const d of readdirSync(projects)) if (mine.has(d)) rmSync(join(projects, d), { recursive: true, force: true });
+  }
 });
 
 test.if(on)("a message, a permission, a question and a Stop, all through /chat", async () => {
   name = ((await (await api("/sessions", { method: "POST", body: JSON.stringify({ dir, kind: "ask" }) })).json()) as any).name;
 
   // A new folder asks whether to trust it, and no hook says so: answer it on a raw terminal.
-  const term = new WebSocket(`ws+unix://${sock}:/sessions/${name}/attach?cols=120&rows=36&token=${token}`);
+  const term = open(`ws+unix://${sock}:/sessions/${name}/attach?cols=120&rows=36&token=${token}`);
   let screen = "";
   term.binaryType = "arraybuffer";
   term.onmessage = (e) => (screen += new TextDecoder().decode(e.data as ArrayBuffer));
@@ -79,10 +92,9 @@ test.if(on)("a message, a permission, a question and a Stop, all through /chat",
   await until(async () => (await session())?.sessionId, "Claude's session id", 30000);
 
   const got: any[] = [];
-  const chat = new WebSocket(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
+  const chat = open(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
   chat.onmessage = (e) => got.push(JSON.parse(e.data as string));
-  // Claude writes its transcript at the first message, so a fresh session says "unreadable" first.
-  await until(() => got.some((m) => m.type === "history" || m.type === "unreadable"), "history", 10000);
+  await until(() => got.some((m) => m.type === "history"), "history", 10000);
   const send = (m: object) => chat.send(JSON.stringify(m));
   const texts = () => got.flatMap((m) => m.messages ?? []);
 
@@ -115,12 +127,12 @@ test.if(on)("a message, a permission, a question and a Stop, all through /chat",
   // taken the primer for anything.
   await until(async () => (await session())?.state === "done", "the turn to end", 90000);
   const got2: any[] = [];
-  const chat2 = new WebSocket(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
+  const chat2 = open(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
   chat2.onmessage = (e) => got2.push(JSON.parse(e.data as string));
   await until(() => got2.some((m) => m.type === "history"), "history", 10000);
   chat2.send(JSON.stringify({ type: "input", id: "m3", text: "Count from 1 to 300, one number per line, without using any tools." }));
   await until(async () => (await session())?.state === "working", "Claude to start counting", 60000);
-  const fresh = new WebSocket(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
+  const fresh = open(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
   const got3: any[] = [];
   fresh.onmessage = (e) => got3.push(JSON.parse(e.data as string));
   await until(() => got3.some((m) => m.type === "history"), "history", 10000);
