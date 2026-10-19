@@ -60,6 +60,28 @@ final class Store {
         connection = .connecting
     }
 
+    /// Starts (or resumes) Claude Code in `dir`; returns the new session's name.
+    func start(dir: String, resume: String?) async throws -> String {
+        guard let api else { throw APIError.offline }
+        return try await api.start(dir: dir, resume: resume)
+    }
+
+    func end(name: String) async throws {
+        guard let api else { throw APIError.offline }
+        try await api.end(name: name)
+    }
+
+    /// An error in plain words for an alert.
+    static func words(for error: Error) -> String {
+        switch error as? APIError {
+        case .offline: "Can't reach the server."
+        case .unauthorized: "The server didn't accept this phone's token."
+        case .server(let message): message
+        case .other(let message): message
+        case nil: error.localizedDescription
+        }
+    }
+
     private func update(_ state: SocketState) {
         switch state {
         case .connecting:

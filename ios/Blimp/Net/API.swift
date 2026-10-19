@@ -54,7 +54,11 @@ struct API {
 
     private func call(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil) async throws -> Data {
         var c = components(path)
-        if !query.isEmpty { c.queryItems = query }
+        if !query.isEmpty {
+            c.queryItems = query
+            // URLComponents leaves "+" as is, and blimpd reads it as a space
+            c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         guard let url = c.url else { throw APIError.other("bad address") }
         var req = URLRequest(url: url, timeoutInterval: 10)
         req.httpMethod = method

@@ -20,36 +20,7 @@ private struct Root: View {
         if store.server == nil || store.connection == .unauthorized {
             PairView()
         } else {
-            SessionsPlaceholder()
-        }
-    }
-}
-
-// Stands in for Home until the Home screen is built.
-private struct SessionsPlaceholder: View {
-    @Environment(Store.self) private var store
-
-    var body: some View {
-        NavigationStack {
-            List(store.sessions) { session in
-                Text(session.title)
-            }
-            .overlay {
-                if store.sessions.isEmpty { Text(status).foregroundStyle(.secondary) }
-            }
-            .navigationTitle("blimp")
-            .toolbar {
-                Button("Sign out") { store.signOut() }
-            }
-        }
-    }
-
-    private var status: String {
-        switch store.connection {
-        case .connecting: "Connecting…"
-        case .online: "No sessions running."
-        case .offline(let reason): reason
-        case .unauthorized: "blimpd didn't accept the token"
+            HomeView()
         }
     }
 }
