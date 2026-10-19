@@ -25,8 +25,8 @@ struct SessionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.title).lineLimit(1)
                 HStack(spacing: 6) {
-                    if !session.kind.isEmpty && session.kind != "claude" {
-                        Text(session.kind)
+                    if let label = session.label, !label.isEmpty {
+                        Text(label)
                             .font(.caption2)
                             .padding(.horizontal, 6).padding(.vertical, 1)
                             .background(.quaternary, in: Capsule())
@@ -55,10 +55,17 @@ struct StateMark: View {
     }
 }
 
-func ago(ms: Double) -> String {
+@MainActor private let relativeFormatter: RelativeDateTimeFormatter = {
     let f = RelativeDateTimeFormatter()
     f.unitsStyle = .short
-    return f.localizedString(for: Date(timeIntervalSince1970: ms / 1000), relativeTo: Date())
+    return f
+}()
+
+// Never reads "in 1 sec" if the phone's clock is a little behind the server's.
+@MainActor func ago(ms: Double) -> String {
+    let now = Date()
+    let then = min(Date(timeIntervalSince1970: ms / 1000), now)
+    return relativeFormatter.localizedString(for: then, relativeTo: now)
 }
 
 extension View {
@@ -93,11 +100,10 @@ private struct EndConfirmation: ViewModifier {
             .confirmationDialog(
                 "End this session? Claude's conversation is kept and can be resumed.",
                 isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
-                titleVisibility: .visible
-            ) {
+                titleVisibility: .visible,
+                presenting: pending
+            ) { session in
                 Button("End", role: .destructive) {
-                    guard let session = pending else { return }
-                    pending = nil
                     Task {
                         do { try await store.end(name: session.name) } catch { failure = Store.words(for: error) }
                     }

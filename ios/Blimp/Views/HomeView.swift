@@ -51,7 +51,7 @@ struct HomeView: View {
                 }
             }
             .refreshable { store.connect() }
-            .task(id: store.home.projects.isEmpty) {
+            .task(id: FolderKey(empty: store.home.projects.isEmpty, online: store.connection == .online)) {
                 guard store.home.projects.isEmpty, let api = store.api else { return }
                 folders = (try? await api.folders()) ?? []
             }
@@ -80,6 +80,11 @@ struct HomeView: View {
     private func name(of dir: String) -> String {
         dir.split(separator: "/").last.map(String.init) ?? dir
     }
+}
+
+private struct FolderKey: Equatable {
+    let empty: Bool
+    let online: Bool
 }
 
 private struct StatusBar: View {
