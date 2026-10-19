@@ -112,11 +112,16 @@ public enum ChatEvent: Sendable, Equatable {
 public enum EventsMessage: Sendable, Equatable {
     case sessions([Session]), other
 
-    private struct Wire: Decodable { let type: String; let sessions: [Session]? }
+    // One malformed session must not blank the whole list, so each element decodes on its own.
+    private struct Lenient: Decodable {
+        let session: Session?
+        init(from decoder: Decoder) throws { session = try? Session(from: decoder) }
+    }
+    private struct Wire: Decodable { let type: String; let sessions: [Lenient]? }
 
     public static func decode(_ data: Data) -> EventsMessage {
         guard let w = try? JSONDecoder().decode(Wire.self, from: data), w.type == "sessions", let s = w.sessions else { return .other }
-        return .sessions(s)
+        return .sessions(s.compactMap(\.session))
     }
 }
 

@@ -62,3 +62,17 @@ let sessionJSON = """
     #expect(try s(.answer(id: "a1", at: 5, pick: 2)) == #"{"at":5,"id":"a1","pick":2,"type":"answer"}"#)
     #expect(try s(.interrupt(id: "i1")) == #"{"id":"i1","type":"interrupt"}"#)
 }
+
+@Test func aMalformedSessionIsDroppedNotTheWholeList() {
+    let good = #"{"name":"a","created":1,"dir":"/","kind":"claude","title":"t","state":"done"}"#
+    let bad = #"{"name":"b","created":1,"dir":"/","kind":"claude","state":"done"}"#
+    let m = EventsMessage.decode(Data(#"{"type":"sessions","sessions":[\#(good),\#(bad)]}"#.utf8))
+    guard case .sessions(let s) = m else { Issue.record("not sessions: \(m)"); return }
+    #expect(s.map(\.name) == ["a"])
+}
+
+@Test func decodesAppend() {
+    let e = ChatEvent.decode(Data(#"{"type":"append","messages":[{"id":"u2","at":3,"role":"user","text":"yo"}]}"#.utf8))
+    guard case .append(let m) = e else { Issue.record("not append: \(e)"); return }
+    #expect(m.map(\.id) == ["u2"])
+}
