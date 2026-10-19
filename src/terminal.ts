@@ -15,6 +15,28 @@ export function termSize(cols: unknown, rows: unknown): { cols: number; rows: nu
   return { cols: clamp(cols, 80), rows: clamp(rows, 24) };
 }
 
+// The size each session was last shown at, from the terminals blimpd proxies. A chat client
+// attaches at this size: a client of another size resizes the session for everyone (zmx 0.5).
+const sizes = new Map<string, { cols: number; rows: number }>();
+const followers = new Map<string, Set<(cols: number, rows: number) => void>>();
+
+export const lastSize = (name: string) => sizes.get(name) ?? { cols: 120, rows: 36 };
+
+export function setSize(name: string, cols: number, rows: number) {
+  sizes.set(name, { cols, rows });
+  for (const f of followers.get(name) ?? []) f(cols, rows);
+}
+
+export function followSize(name: string, f: (cols: number, rows: number) => void): () => void {
+  let set = followers.get(name);
+  if (!set) followers.set(name, (set = new Set()));
+  set.add(f);
+  return () => {
+    set.delete(f);
+    if (!set.size) followers.delete(name);
+  };
+}
+
 // A client that stops reading (a sleeping laptop, a dead network) would make blimpd hold everything the
 // session prints. Past this, drop it: the app reconnects and zmx redraws the screen.
 export const MAX_BUFFERED = 8 << 20;
@@ -22,6 +44,7 @@ export const MAX_BUFFERED = 8 << 20;
 // Output goes out as soon as the PTY gives it to us: no batching or timers, they'd add typing lag.
 export function openAttach(ws: ServerWebSocket<AttachData>) {
   const d = ws.data;
+  setSize(d.name, d.cols, d.rows);
   let proc: Subprocess;
   try {
     proc = Bun.spawn([zmxPath(), "attach", d.name], {
@@ -75,6 +98,7 @@ export function attachMessage(ws: ServerWebSocket<AttachData>, msg: string | Buf
   if (m?.type === "resize") {
     const { cols, rows } = termSize(m.cols, m.rows);
     term.resize(cols, rows);
+    setSize(ws.data.name, cols, rows);
   }
 }
 
