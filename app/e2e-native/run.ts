@@ -466,6 +466,21 @@ try {
     const init = new URLSearchParams({ server: "localhost", dir: target.dir, session: "blimptest-b" }).toString();
     const invoke = (x: number, y: number) =>
       jsAsync(`return await window.__TAURI_INTERNALS__.invoke('drop_session', { init: ${JSON.stringify(init)}, x: ${x}, y: ${y} }).then(String, e => 'ERR ' + e)`);
+    // While it's still being dragged (drag_hover), the window under it draws the row and where it
+    // would land, and stops once the drag leaves it.
+    const hoverAt = (x: number, y: number, on = true) =>
+      jsAsync(`return await window.__TAURI_INTERNALS__.invoke('drag_hover', { init: ${on ? JSON.stringify(init) : "null"}, label: "blimptest-b", x: ${x}, y: ${y} }).then(String, e => 'ERR ' + e)`);
+    const overFirst = await hoverAt(target.x, target.y);
+    await wd("POST", "/window", { handle: first });
+    const drawn = await until(5000, () => js(`return !!document.querySelector('.drag-ghost') && !!document.querySelector('.wb:not([hidden]) .drop-zone') && document.querySelector('.drag-ghost').textContent.includes('blimptest-b')`));
+    await shot("07b-drag-hover-from-other-window");
+    await wd("POST", "/window", { handle: second });
+    const overNone = await hoverAt(-5000, -5000);
+    await wd("POST", "/window", { handle: first });
+    const cleared = await until(5000, () => js("return !document.querySelector('.drag-ghost') && !document.querySelector('.wb:not([hidden]) .drop-zone')"));
+    await wd("POST", "/window", { handle: second });
+    await hoverAt(0, 0, false);
+    record("a session dragged in another window shows over this one (the row and where it lands), and goes when the drag leaves", overFirst === "true" && !!drawn && overNone === "false" && !!cleared, { overFirst, drawn: !!drawn, overNone, cleared: !!cleared });
     const onFirst = await invoke(target.x, target.y);
     const offAll = await invoke(-5000, -5000);
     const three: string[] | undefined = await until(10_000, async () => {

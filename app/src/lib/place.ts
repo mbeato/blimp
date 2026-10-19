@@ -78,6 +78,36 @@ export async function dropSession(p: Place, x: number, y: number): Promise<"move
   return (await invoke<boolean>("drop_session", { init: placeQuery(p), x, y })) ? "moved" : "new";
 }
 
+// A session being dragged out of this window is at (x, y) on screen: the window there shows it
+// coming. null: the drag ended or came back. Calls go one at a time; a move made while one is
+// on its way replaces any waiting, so the hover keeps up without piling up.
+let hoverBusy = false;
+let hoverNext: { p: Place; label: string; x: number; y: number } | null | undefined;
+export function dragHover(to: { p: Place; label: string; x: number; y: number } | null) {
+  if (!inTauri()) return;
+  hoverNext = to;
+  if (hoverBusy) return;
+  hoverBusy = true;
+  void (async () => {
+    while (hoverNext !== undefined) {
+      const t = hoverNext;
+      hoverNext = undefined;
+      await invoke("drag_hover", t ? { init: placeQuery(t.p), label: t.label, x: t.x, y: t.y } : { init: null, label: "", x: 0, y: 0 }).catch(() => {});
+    }
+    hoverBusy = false;
+  })();
+}
+
+// A session dragged in another window is over this one, at (x, y) in this page; null: not anymore.
+export type Hover = { p: Place; label: string; x: number; y: number };
+export async function onDragHover(fn: (h: Hover | null) => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  return getCurrentWebviewWindow().listen<{ init: string; label: string; x: number; y: number } | null>("drag-hover", (e) =>
+    fn(e.payload && { p: placeFromQuery(e.payload.init), label: e.payload.label, x: e.payload.x, y: e.payload.y }),
+  );
+}
+
 // A session from another window was let go here, at (x, y) in this page.
 export async function onDropSession(fn: (p: Place, x: number, y: number) => void): Promise<() => void> {
   if (!inTauri()) return () => {};

@@ -587,19 +587,40 @@ h2 {
   min-width: 230px;
 }
 
+/* The row being dragged, lifted off the list and under the pointer where it was grabbed. */
 .drag-ghost {
   position: fixed;
   z-index: 20;
-  max-width: 240px;
-  padding: 3px 9px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--bg-raised);
+  border: 1px solid var(--focus);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.25);
+  transform: rotate(-1deg);
+  pointer-events: none;
+}
+
+.drag-ghost .srow-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: var(--shadow);
+}
+
+/* A drag from another window over this one, landing in a tab that isn't in front: the whole
+   window is where it goes. */
+.app.drop-window::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  border: 2px solid var(--focus);
+  background: var(--selected);
   pointer-events: none;
 }
 
@@ -702,8 +723,16 @@ body.dragging-session * {
   background: var(--hover);
 }
 
+/* Where the dragged row came from: an empty slot until it's let go. */
 .srow.dragging {
-  opacity: 0.5;
+  outline: 1px dashed var(--fg-faint);
+  outline-offset: -2px;
+  border-radius: 4px;
+  background: none;
+}
+
+.srow.dragging > * {
+  visibility: hidden;
 }
 
 .srow.stale {

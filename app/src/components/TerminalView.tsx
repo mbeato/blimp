@@ -163,8 +163,13 @@ export function TerminalView(props: {
     let everOpened = false;
     const enc = new TextEncoder();
 
+    // Typed before the first connection opens (just after the session is shown): kept and sent
+    // once it does, so the first keys aren't lost. Not after a drop: keys typed while it's
+    // reconnecting could land much later, so those go nowhere, as before.
+    let early: Uint8Array<ArrayBuffer>[] = [];
     const send = (data: Uint8Array<ArrayBuffer> | string) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(data);
+      else if (!everOpened && typeof data !== "string" && early.length < 1000) early.push(data);
     };
 
     t.attachCustomKeyEventHandler((e) => {
@@ -197,6 +202,8 @@ export function TerminalView(props: {
       sock.onopen = () => {
         attempt = 0;
         everOpened = true;
+        for (const d of early) sock.send(d);
+        early = [];
         setPhase("live");
       };
       sock.onmessage = (e) => {

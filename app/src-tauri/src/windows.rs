@@ -55,6 +55,9 @@ struct Inner {
     open: Vec<Open>,
     /// What the last run left, until the first window takes it (restore_windows).
     previous: Option<Vec<Saved>>,
+    /// The window a session dragged out of another one is over (drag_hover), to tell it when
+    /// the drag leaves.
+    hovered: Option<String>,
 }
 
 /// The windows to save: open ones, and ones closed within QUIT_GRACE.
@@ -238,6 +241,15 @@ pub fn open_window(app: AppHandle, windows: State<'_, Windows>, init: String) ->
     create(&app, &windows, &init, None)
 }
 
+/// The blimp window other than `except` at (x, y) on screen (logical pixels), and the point in
+/// its page. Where windows overlap, the most recently focused one (most likely on top).
+fn window_at(app: &AppHandle, windows: &Windows, except: &str, x: f64, y: f64) -> Option<(Window, f64, f64)> {
+    let order = windows.inner.lock().unwrap().focus_order.clone();
+    let mut all: Vec<Window> = app.windows().into_values().filter(|w| w.label() != except).collect();
+    all.sort_by_key(|w| std::cmp::Reverse(order.iter().position(|l| l == w.label())));
+    all.into_iter().find_map(|w| page_point(&w, x, y).map(|(px, py)| (w, px, py)))
+}
+
 /// A session dragged out of this window and let go at (x, y) on screen (logical pixels).
 /// Over another blimp window: that window gets "drop-session" (the place, and the point in its
 /// page) and comes forward; returns true. Over none: a new window opens there; returns false.
@@ -250,20 +262,49 @@ pub fn drop_session(
     x: f64,
     y: f64,
 ) -> Result<bool, String> {
-    let order = windows.inner.lock().unwrap().focus_order.clone();
-    let mut all: Vec<Window> = app.windows().into_values().filter(|w| w.label() != window.label()).collect();
-    // Most recently focused first.
-    all.sort_by_key(|w| std::cmp::Reverse(order.iter().position(|l| l == w.label())));
-    for w in all {
-        if let Some((px, py)) = page_point(&w, x, y) {
-            let _ = w.set_focus();
-            w.emit_to(w.label(), "drop-session", serde_json::json!({ "init": init, "x": px, "y": py }))
-                .map_err(|e| e.to_string())?;
-            return Ok(true);
-        }
+    hover(&app, &windows, None);
+    if let Some((w, px, py)) = window_at(&app, &windows, window.label(), x, y) {
+        let _ = w.set_focus();
+        w.emit_to(w.label(), "drop-session", serde_json::json!({ "init": init, "x": px, "y": py }))
+            .map_err(|e| e.to_string())?;
+        return Ok(true);
     }
     create(&app, &windows, &init, Some((x - 60.0, y - 16.0)))?;
     Ok(false)
+}
+
+/// Says "drag-hover" to the window a drag is now over (`to`: its label and what it shows) and
+/// "drag-hover" null to the one it was over before, if that's another.
+fn hover(app: &AppHandle, windows: &Windows, to: Option<(&str, serde_json::Value)>) {
+    let before = {
+        let mut inner = windows.inner.lock().unwrap();
+        std::mem::replace(&mut inner.hovered, to.as_ref().map(|(l, _)| l.to_string()))
+    };
+    if let Some(b) = before.filter(|b| to.as_ref().is_none_or(|(l, _)| l != b)) {
+        let _ = app.emit_to(b.as_str(), "drag-hover", serde_json::Value::Null);
+    }
+    if let Some((l, v)) = to {
+        let _ = app.emit_to(l, "drag-hover", v);
+    }
+}
+
+/// A session dragged out of this window is at (x, y) on screen (logical pixels), not let go
+/// yet: the blimp window there shows it coming ("drag-hover" with the place, the session's title
+/// and the point in its page), and the one it left stops. `init` None: the drag ended or came
+/// back. Returns whether a window is there.
+#[tauri::command]
+pub fn drag_hover(app: AppHandle, window: Window, windows: State<'_, Windows>, init: Option<String>, label: String, x: f64, y: f64) -> bool {
+    let at = init.as_ref().and_then(|_| window_at(&app, &windows, window.label(), x, y));
+    match (&init, &at) {
+        (Some(init), Some((w, px, py))) => {
+            hover(&app, &windows, Some((w.label(), serde_json::json!({ "init": init, "label": label, "x": px, "y": py }))));
+            true
+        }
+        _ => {
+            hover(&app, &windows, None);
+            false
+        }
+    }
 }
 
 /// Focuses another window that has `project` in a tab and hands it `init` ("select-session").

@@ -120,9 +120,19 @@ test("dragging a session onto the terminal splits it; splits move, close, and Es
     const box = (await terms.boundingBox())!;
     await page.mouse.move(row.x + 40, row.y + row.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width * at, box.y + box.height / 2, { steps: 12 });
+    const to = { x: box.x + box.width * at, y: box.y + box.height / 2 };
+    await page.mouse.move(to.x, to.y, { steps: 12 });
     await expect(terms.locator(".drop-zone")).toBeVisible();
-    await expect(page.locator(".drag-ghost")).toBeVisible();
+    // The row itself moves with the pointer, held where it was grabbed (40 px in, mid-height),
+    // and leaves an empty slot in the list.
+    const ghost = page.locator(".drag-ghost");
+    await expect(ghost).toBeVisible();
+    await expect(ghost).toContainText(name);
+    const g = (await ghost.boundingBox())!;
+    expect(Math.abs(g.x + 40 - to.x)).toBeLessThanOrEqual(3);
+    expect(Math.abs(g.y + g.height / 2 - to.y)).toBeLessThanOrEqual(3);
+    expect(Math.abs(g.width - row.width)).toBeLessThanOrEqual(2);
+    await expect(sessionRow(page, name)).toHaveClass(/dragging/);
     if (opts.cancel) await page.keyboard.press("Escape");
     await page.mouse.up();
     await expect(terms.locator(".drop-zone")).toHaveCount(0);

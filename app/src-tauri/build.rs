@@ -12,6 +12,7 @@ fn main() {
                 "open_window",
                 "focus_project",
                 "drop_session",
+                "drag_hover",
                 "set_shown",
                 "focus_session",
                 "take_session",

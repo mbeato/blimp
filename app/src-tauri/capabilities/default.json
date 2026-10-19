@@ -15,6 +15,7 @@
     "allow-open-window",
     "allow-focus-project",
     "allow-drop-session",
+    "allow-drag-hover",
     "allow-set-shown",
     "allow-focus-session",
     "allow-take-session",

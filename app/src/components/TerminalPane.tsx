@@ -5,6 +5,7 @@ import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane
 import { freeName, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle } from "../lib/sessions";
 import { useOverlay } from "../lib/overlay";
+import { dragHover } from "../lib/place";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
@@ -58,7 +59,9 @@ const MIN_SPLIT_PX = 160;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 // A session being dragged from the list, and where it would land.
-type Drag = { name: string; label: string; x: number; y: number; target: { at: number; side: Side } | null };
+// The row (or split header) being dragged is drawn at the pointer, as grabbed: (dx, dy) from
+// its corner, w wide. out: the pointer is outside the window (the window under it draws it).
+type Drag = { s: Session; label: string; x: number; y: number; dx: number; dy: number; w: number; out: boolean; target: { at: number; side: Side } | null };
 
 // Re-render every 30 s so "2m ago" stays true.
 function useNow(ms: number) {
@@ -91,6 +94,9 @@ export function TerminalPane(props: {
   onMoveOut: (names: string[], at?: { x: number; y: number }) => void;
   elsewhere: (name: string) => boolean;
   onTake: (name: string) => void;
+  // A session dragged in another window is over this pane's window, here (page pixels): show
+  // where it would land.
+  hoverAt?: { x: number; y: number } | null;
   // A port a session here listens on: open it in a browser tab.
   onOpenPort: (p: Port) => void;
   // The chevron's "Models and keys…": Settings, at Models.
@@ -346,8 +352,13 @@ export function TerminalPane(props: {
     const x0 = e.clientX;
     const y0 = e.clientY;
     const label = sessionTitle(s);
+    const box = (e.currentTarget.closest(".srow, .tsplit-head") ?? e.currentTarget).getBoundingClientRect();
+    const grab = { dx: Math.min(x0 - box.left, 260 - 16), dy: y0 - box.top, w: Math.min(box.width, 260) };
+    const place = { server: link.key, dir, session: s.name };
     let on = false;
+    let out = false;
     const done = () => {
+      if (out) dragHover(null);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", done);
@@ -360,7 +371,11 @@ export function TerminalPane(props: {
       if (!on && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
       if (!on) document.body.classList.add("dragging-session");
       on = true;
-      setDrag({ name: s.name, label, x: ev.clientX, y: ev.clientY, target: targetAt(ev.clientX, ev.clientY) });
+      const was = out;
+      out = ev.clientX < 0 || ev.clientY < 0 || ev.clientX >= innerWidth || ev.clientY >= innerHeight;
+      if (out) dragHover({ p: place, label, x: ev.screenX, y: ev.screenY });
+      else if (was) dragHover(null);
+      setDrag({ s, label, x: ev.clientX, y: ev.clientY, ...grab, out, target: targetAt(ev.clientX, ev.clientY) });
     };
     const up = (ev: PointerEvent) => {
       done();
@@ -400,7 +415,8 @@ export function TerminalPane(props: {
     const s = running.find((x) => x.name === name);
     return s ? sessionTitle(s) : name;
   };
-  const t = drag?.target;
+  // A drag of this pane's own, or one from another window over this one (props.hoverAt).
+  const t = drag ? drag.target : props.hoverAt ? targetAt(props.hoverAt.x, props.hoverAt.y) : null;
   const half = t && p.panes.length ? shares[t.at] / 2 : 1;
   const overlay = t && { left: (p.panes.length ? lefts[t.at] + (t.side === "right" ? half : 0) : 0) * 100, width: half * 100 };
 
@@ -422,7 +438,7 @@ export function TerminalPane(props: {
           "srow" +
           (s.name === p.panes[p.focus] ? " selected" : p.panes.includes(s.name) ? " shown" : "") +
           (link.status !== "connected" ? " stale" : "") +
-          (drag?.name === s.name ? " dragging" : "")
+          (drag?.s.name === s.name ? " dragging" : "")
         }
         title={`${s.kind === "shell" ? "Shell" : sessionTitle(s)}${s.label ? ` · ${s.label}` : ""}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
         onContextMenu={(e) => openMenu(e, s.name)}
@@ -659,11 +675,7 @@ export function TerminalPane(props: {
           ))}
         </div>
       </nav>
-      {drag && (
-        <div className="drag-ghost" style={{ left: drag.x + 12, top: drag.y + 10 }}>
-          {drag.label}
-        </div>
-      )}
+      {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} />}
       {ctx && (
         <>
           <div
@@ -686,6 +698,17 @@ export function TerminalPane(props: {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// A session row lifted off the list, under the pointer while it's dragged (also in the window a
+// drag from another one is over, where `s` may not be known).
+export function DragGhost(props: { s?: Session; label: string; x: number; y: number; w: number }) {
+  return (
+    <div className="drag-ghost" style={{ left: props.x, top: props.y, width: props.w }} aria-hidden>
+      {props.s ? <Mark s={props.s} /> : <span className="srow-mark" />}
+      <span className="srow-title">{props.label}</span>
     </div>
   );
 }

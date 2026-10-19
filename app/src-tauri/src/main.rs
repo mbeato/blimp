@@ -37,6 +37,7 @@ fn main() {
             windows::open_window,
             windows::focus_project,
             windows::drop_session,
+            windows::drag_hover,
             windows::set_shown,
             windows::focus_session,
             windows::take_session,

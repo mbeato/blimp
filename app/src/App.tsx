@@ -2,7 +2,8 @@ import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { AddServerDialog } from "./components/AddServerDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
-import { noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
+import { useOverlay } from "./lib/overlay";
+import { DragGhost, noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TransferList } from "./components/TransferList";
 import { UpdateBars } from "./components/UpdateBars";
@@ -16,6 +17,7 @@ import {
   dropSession,
   focusProject,
   focusSession,
+  onDragHover,
   onDropSession,
   onReleaseSession,
   onSelectSession,
@@ -30,6 +32,7 @@ import {
   setWindowProjects,
   takeSession,
   windowLabel,
+  type Hover,
   type Shown,
   setWindowTitle,
   writeLayout,
@@ -266,6 +269,14 @@ export function App() {
     void onDropSession((p, x, y) => onDrop.current(p, x, y)).then((f) => (off = f));
     return () => off();
   }, []);
+  // A session dragged in another window, over this one: drawn here, and where it would land.
+  const [hover, setHover] = useState<Hover | null>(null);
+  useOverlay(!!hover);
+  useEffect(() => {
+    let off = () => {};
+    void onDragHover(setHover).then((f) => (off = f));
+    return () => off();
+  }, []);
   useEffect(() => {
     const d = dropped.current;
     const l = d && links.get(d.server);
@@ -472,8 +483,13 @@ export function App() {
   const select = (i: number) => setLayout((l) => l && { ...l, active: i });
   const close = (i: number) => setLayout((l) => l && closeTab(l, i));
 
+  // Where a drag from another window would land here: in the front tab when it's that session's
+  // folder (the pane shows which half of which split); else the whole window, as a drop does.
+  const hoverHere = (t: Tab) => !!hover?.p.server && t === layout.tabs[layout.active] && hover.p.server === t.server && tabDir(hover.p.server, hover.p.dir) === t.dir;
+  const hoverWindow = !!hover && !hoverHere(layout.tabs[layout.active]);
+
   return (
-    <div className="app">
+    <div className={"app" + (hoverWindow ? " drop-window" : "")}>
       <header className="topbar">
         <div className="ptabs" role="tablist" aria-label="Projects">
           {layout.tabs.map((t, i) => {
@@ -577,6 +593,7 @@ export function App() {
                 onNotice={setNotice}
                 onMoveOut={(names, at) => moveOut(t, names, at)}
                 elsewhere={(n) => elsewhere.has(`${t.server}/${n}`)}
+                hoverAt={hover && hoverHere(t) ? hover : null}
                 onTake={(n) => elsewhere.has(`${t.server}/${n}`) && takeSession(`${t.server}/${n}`)}
                 onOpenPort={(p) => pageOpeners.get(key)?.current(p)}
                 onModels={() => {
@@ -612,6 +629,9 @@ export function App() {
         />
       )}
       <TransferList />
+      {hover && (
+        <DragGhost s={links.get(hover.p.server ?? "")?.sessions?.find((x) => x.name === hover.p.session)} label={hover.label} x={hover.x - 24} y={hover.y - 14} w={230} />
+      )}
       {notice && (
         <div className="toast" role="status" onClick={() => setNotice("")}>
           {notice}

@@ -2,7 +2,7 @@
 // Enter in a shell. `cat -v` shows what the session got: ESC as ^[.
 
 import { expect, test } from "@playwright/test";
-import { fixtureDir, killSession, openSessionTab, screenText, startSession } from "./helpers";
+import { fixtureDir, killSession, openSessionTab, screenText, sessionRow, startSession } from "./helpers";
 
 const pid = process.pid;
 const claude = `blimpe2e-keysc-${pid}`;
@@ -16,6 +16,8 @@ test("Shift+Enter sends a new line to Claude and a plain Enter to a shell", asyn
   startSession(shell, fixtureDir("keys-shell"), ["sh", "-c", "exec cat -v"]);
 
   let term = await openSessionTab(page, fixtureDir("keys-claude"), claude);
+  // Listed: the app knows from the server that it's a Claude session (Shift+Enter depends on it).
+  await expect(sessionRow(page, claude)).toBeVisible();
   await term.locator(".xterm").click();
   await page.keyboard.type("one");
   await page.keyboard.press("Shift+Enter");
