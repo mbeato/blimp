@@ -21,7 +21,10 @@ public enum VoiceAnswer {
         let contained = c.indices.filter { !c[$0].isEmpty && contains(h, c[$0]) }
         if contained.count == 1 {
             let i = contained[0]
-            return isSure(h, label: c[i]) ? .clear(i) : .guess(i)
+            if isSure(h, label: c[i]) { return .clear(i) }
+            // "not red": the person said no to it, so highlight nothing.
+            if let at = start(of: c[i], in: h), at > 0, negators.contains(h[at - 1]) { return .none }
+            return .guess(i)
         }
 
         // A bare yes or no phrase (only politeness words may surround it).
@@ -57,6 +60,13 @@ public enum VoiceAnswer {
                                               "both", "nor", "instead", "actually"]
     private static let yesWords: Set<String> = ["yes", "yeah", "yep", "sure", "ok", "okay", "allow", "ahead"]
     private static let noWords: Set<String> = ["no", "nope", "dont", "deny", "stop", "cancel"]
+
+    private static let negators: Set<String> = ["not", "never", "but", "except", "nope", "dont"]
+
+    private static func start(of needle: [String], in hay: [String]) -> Int? {
+        guard hay.count >= needle.count else { return nil }
+        return (0...(hay.count - needle.count)).first { Array(hay[$0..<($0 + needle.count)]) == needle }
+    }
 
     private static func isSure(_ h: [String], label: [String]) -> Bool {
         let own = Set(label)
