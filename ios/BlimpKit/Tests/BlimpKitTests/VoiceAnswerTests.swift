@@ -49,3 +49,12 @@ private func isClear(_ m: AnswerMatch) -> Bool { if case .clear = m { return tru
     #expect(VoiceAnswer.match("two one", choices: perm) == .none)
     #expect(VoiceAnswer.match("the one", choices: perm) == .none)
 }
+
+@Test func notXHighlightsNothing() {
+    for heard in ["not yes", "nope yes"] { #expect(VoiceAnswer.match(heard, choices: perm) == .none, "\(heard)") }
+    for heard in ["not red", "anything but green", "except blue"] {
+        #expect(VoiceAnswer.match(heard, choices: ["Red", "Green", "Blue"]) == .none, "\(heard)")
+    }
+    #expect(VoiceAnswer.match("yes wait", choices: perm) == .guess(0))
+    #expect(VoiceAnswer.match("no wait", choices: perm) == .guess(3))
+}
