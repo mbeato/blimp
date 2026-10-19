@@ -46,8 +46,39 @@ public struct Prompt: Codable, Sendable, Equatable {
         }
     }
 
-    /// What the phone reads aloud. Filled in by a later task.
-    public var spoken: String { "" }
+    /// What the phone reads aloud.
+    public var spoken: String {
+        switch kind {
+        case .permission:
+            var head = "Claude wants to continue"
+            if let s = summary, !s.isEmpty {
+                var t = s.replacingOccurrences(of: "`", with: "")
+                for (from, to) in [("Ran ", "run "), ("Edited ", "edit "), ("Wrote ", "write "), ("Read ", "read "), ("Searched for ", "search for ")]
+                where t.hasPrefix(from) { t = to + t.dropFirst(from.count); break }
+                var said = SpokenText.from(markdown: t)
+                while let l = said.last, ".!?:".contains(l) { said.removeLast() }
+                if !said.isEmpty { head = "Claude wants to " + said }
+            }
+            return (head + ". " + Prompt.askAloud(choices)).trimmingCharacters(in: .whitespaces)
+        case .question:
+            return (questions ?? []).map { q in
+                (q.question + " " + Prompt.askAloud(q.options.map(\.label))).trimmingCharacters(in: .whitespaces)
+            }.joined(separator: " ")
+        case .other:
+            return "Claude is asking something. Open it on the Mac."
+        }
+    }
+
+    // "A, B, or C?" (two: "A or B?"). Long labels are cut to their first six words.
+    private static func askAloud(_ labels: [String]) -> String {
+        let short = labels.map { $0.split(whereSeparator: { $0.isWhitespace }).prefix(6).joined(separator: " ") }
+        switch short.count {
+        case 0: return ""
+        case 1: return short[0] + "?"
+        case 2: return short[0] + " or " + short[1] + "?"
+        default: return short.dropLast().joined(separator: ", ") + ", or " + short[short.count - 1] + "?"
+        }
+    }
 }
 
 public struct Session: Codable, Sendable, Equatable, Identifiable {
