@@ -171,10 +171,12 @@ And under Accepted: **"No TCP port"** becomes "no TCP port on the public network
 
 ## Order of work (each step usable on its own)
 
-1. **Connection:** Max installs Tailscale (commands above). Measure direct vs relayed. Pick route A or B. `blimpd pair`, phone token, docs. Check: `curl https://claude1.<tailnet>.ts.net/health` with the phone token from another tailnet device works, and without it gets 401.
-2. **Server chat features:** `/chat`, `prompt`, `input`, `answer`, `interrupt`, with tests including real Claude. DESIGN.md gets the routes. Check: a conversation driven only through these routes with `curl`/`websocat`, while the Mac shows it live.
-3. **iPhone app:** Pair, Home, Project, Session, Face ID, TestFlight. Check: Max holds a full conversation from the phone while the Mac shows the same session.
-4. **Voice:** mic, read aloud, voice answers. Check: Max's checklist voice items.
+Max asked to build the app first and do Tailscale later. Nothing before step 4 needs Tailscale: during development the app reaches blimpd at `http://127.0.0.1:<port>`, an SSH forward from the Mac to the socket (`ssh -N -L 7425:<home>/.blimp/blimpd.sock claude1`), which the iPhone simulator on that Mac shares. A dev link `blimp://pair?url=http://127.0.0.1:7425&token=<Mac token>` is pasted on the Pair screen. Debug builds allow plain HTTP to `127.0.0.1` only.
+
+1. **Server chat features:** `/chat`, `prompt`, `input`, `answer`, `interrupt`, with tests including real Claude. DESIGN.md gets the routes. Check: a conversation driven only through these routes with `curl`/`websocat`, while the Mac shows it live.
+2. **iPhone app:** Pair (pasted link), Home, Project, Session, Face ID, built and tested in CI on the simulator. Check: Max holds a full conversation from the simulator on his Mac while the Mac app shows the same session.
+3. **Voice:** mic, read aloud, voice answers. Check: in the simulator (Mac mic and speakers) and the checklist's voice items.
+4. **Connection and the real phone:** Max installs Tailscale (commands above). Measure direct vs relayed. Pick route A or B. `blimpd pair` with QR scanning, phone token, SECURITY.md. TestFlight upload. Check: `curl https://claude1.<tailnet>.ts.net/health` with the phone token from another tailnet device works, and without it gets 401; then the checklist on Max's phone.
 
 ## Later (not v1)
 
