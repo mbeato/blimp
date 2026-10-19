@@ -10,12 +10,6 @@ struct ProjectRoute: Hashable {
     let dir: String
 }
 
-// Task 5 replaces this with the chat.
-struct SessionDestination: View {
-    let name: String
-    var body: some View { Text(name) }
-}
-
 struct SessionRow: View {
     let session: Session
 

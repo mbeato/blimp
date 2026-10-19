@@ -71,7 +71,7 @@ struct ProjectView: View {
         }
         .task { await loadEarlier() }
         .refreshable { await loadEarlier() }
-        .navigationDestination(item: $pushed) { SessionDestination(name: $0.name) }
+        .navigationDestination(item: $pushed) { SessionView(name: $0.name) }
         .endConfirmation($pendingEnd, store: store)
         .plainAlert("Couldn't start it", message: $failure)
     }

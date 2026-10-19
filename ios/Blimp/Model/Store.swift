@@ -50,6 +50,11 @@ final class Store {
         socket.start()
     }
 
+    /// Back from the background: the old link may be dead, so don't wait for a ping to find out.
+    func reconnectNow() {
+        events?.reconnectNow()
+    }
+
     func signOut() {
         events?.stop()
         events = nil

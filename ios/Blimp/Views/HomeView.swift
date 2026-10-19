@@ -60,7 +60,7 @@ struct HomeView: View {
             .toolbar {
                 Button("Settings", systemImage: "gearshape") { showSettings = true }
             }
-            .navigationDestination(for: SessionRoute.self) { SessionDestination(name: $0.name) }
+            .navigationDestination(for: SessionRoute.self) { SessionView(name: $0.name) }
             .navigationDestination(for: ProjectRoute.self) { ProjectView(group: group(for: $0.dir)) }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .endConfirmation($pendingEnd, store: store)
