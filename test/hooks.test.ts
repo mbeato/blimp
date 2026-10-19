@@ -235,6 +235,20 @@ describe("writeHookStatus", () => {
     writeHookStatus(JSON.stringify({ hook_event_name: "PostToolUse", session_id: "s1" }), "p1", dir);
     expect(read("p1").prompt).toBeUndefined();
   });
+
+  test("a question's PreToolUse then PermissionRequest (default mode) is one wait, with one time", async () => {
+    const ask = (event: string, session_id = "s2") =>
+      JSON.stringify({ hook_event_name: event, session_id, tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Color?", options: [{ label: "Red" }] }] } });
+    writeHookStatus(ask("PreToolUse"), "q1", dir);
+    const first = read("q1");
+    await Bun.sleep(5);
+    writeHookStatus(ask("PermissionRequest"), "q1", dir);
+    expect(read("q1")).toMatchObject({ event: "PermissionRequest", at: first.at, prompt: first.prompt });
+    // A new conversation's question is a new wait.
+    await Bun.sleep(5);
+    writeHookStatus(ask("PermissionRequest", "s3"), "q1", dir);
+    expect(read("q1").at).toBeGreaterThan(first.at);
+  });
 });
 
 describe("`blimpd hook`", () => {

@@ -139,13 +139,17 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   const file = join(statusDir, `${session}.json`);
   // What Claude asks, for the phone. The Notification that follows a permission prompt seconds
   // later carries no details, so it keeps the prompt, and the time the wait started, already
-  // recorded for this wait (the phone's answer names the wait by that time).
+  // recorded for this wait (the phone's answer names the wait by that time). In default mode a
+  // question comes as PreToolUse then PermissionRequest: one wait, so it keeps the first time.
   let prompt = codex ? undefined : promptFromHook(ev);
   let at = Date.now();
-  if (!prompt && state === "waiting") {
+  if (state === "waiting" && (!prompt || prompt.kind === "question")) {
     try {
       const prev = JSON.parse(readFileSync(file, "utf8"));
-      if (prev.state === "waiting" && prev.sessionId === ev.session_id && prev.prompt) ({ prompt, at } = prev);
+      if (prev.state === "waiting" && prev.sessionId === ev.session_id && prev.prompt) {
+        if (!prompt) ({ prompt, at } = prev);
+        else if (prev.prompt.kind === "question") at = prev.at;
+      }
     } catch {}
   }
   const tmp = `${file}.${process.pid}.tmp`;
