@@ -33,7 +33,7 @@ private struct Root: View {
         .overlay { if scenePhase != .active && store.server != nil { LockedView() } }
         .onReturnFromBackground { store.reconnectNow() }
         .onChange(of: lock.locked) { _, locked in if !locked { store.reconnectNow() } }
-        .task { await lock.unlock() }
+        .task { if store.server == nil { lock.startUnlocked() } else { await lock.unlock() } }
         .onChange(of: scenePhase) { _, phase in lock.scenePhaseChanged(phase) }
     }
 }

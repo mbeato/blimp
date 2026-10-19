@@ -7,11 +7,15 @@ import SwiftUI
 @Observable @MainActor
 final class Lock {
     private(set) var locked = true
-    private var backgroundedAt: TimeInterval?
+    private var backgroundedAt: ContinuousClock.Instant?
     /// Plain reason shown under Unlock after a failure other than a cancel.
     private(set) var note: String?
     private var asking = false
-    static let grace: TimeInterval = 300
+    static let grace: Duration = .seconds(300)
+
+    /// First launch with nothing paired: nothing to protect and no Face ID ask. Once paired,
+    /// the usual rules apply (the 5-minute rule, and the ask at the next launch).
+    func startUnlocked() { locked = false }
 
     func unlock() async {
         guard locked, !asking else { return }
@@ -44,9 +48,9 @@ final class Lock {
     func scenePhaseChanged(_ phase: ScenePhase) {
         switch phase {
         case .background:
-            if backgroundedAt == nil { backgroundedAt = ProcessInfo.processInfo.systemUptime }
+            if backgroundedAt == nil { backgroundedAt = .now }
         case .active:
-            if let at = backgroundedAt, ProcessInfo.processInfo.systemUptime - at > Self.grace {
+            if let at = backgroundedAt, ContinuousClock.now - at > Self.grace {
                 locked = true
                 Task { await unlock() }
             }
