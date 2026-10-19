@@ -25,7 +25,9 @@ final class ChatModel {
 
     private let store: Store
     @ObservationIgnored private var socket: Socket?
-    @ObservationIgnored private var watcher: Task<Void, Never>?
+    // Bumped by open() and close(), so a change noticed for an earlier open() doesn't watch twice.
+    @ObservationIgnored private var watchRound = 0
+    @ObservationIgnored private var watching = false
     @ObservationIgnored private var replies: [String: CheckedContinuation<Reply, Never>] = [:]
 
     static let notSent = "Not sent. Check the connection."
@@ -37,7 +39,6 @@ final class ChatModel {
 
     isolated deinit {
         socket?.stop()
-        watcher?.cancel()
     }
 
     /// Live from the store; nil until /events lists it (a new session can take a second) and once it's gone.
@@ -58,12 +59,10 @@ final class ChatModel {
 
     /// Opens the chat socket (again, after close()). The screen calls it on appear.
     func open() {
-        if watcher == nil {
-            watcher = Task { [weak self, store, name] in
-                for await s in Observations({ @MainActor in store.sessions.first { $0.name == name } }) {
-                    if let s { self?.lastSeen = s }
-                }
-            }
+        if !watching {
+            watching = true
+            watchRound += 1
+            watch(watchRound)
         }
         guard socket == nil, !socketEnded, let api = store.api else { return }
         let s = Socket(
@@ -78,14 +77,23 @@ final class ChatModel {
     func close() {
         socket?.stop()
         socket = nil
-        watcher?.cancel()
-        watcher = nil
+        watching = false
+        watchRound += 1
         for c in replies.values { c.resume(returning: .notSent) }
         replies = [:]
     }
 
     func reconnectNow() {
         socket?.reconnectNow()
+    }
+
+    // Keeps lastSeen up to date while open: each change to this session in the store calls it again.
+    private func watch(_ round: Int) {
+        guard watching, round == watchRound else { return }
+        let s = withObservationTracking { session } onChange: { [weak self] in
+            Task { @MainActor in self?.watch(round) }
+        }
+        if let s { lastSeen = s }
     }
 
     /// Types `text` into the session. true once blimpd acknowledged it; false (and lastError set)
