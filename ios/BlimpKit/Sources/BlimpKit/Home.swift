@@ -16,17 +16,20 @@ public struct HomeList: Equatable, Sendable {
 
     public static func make(_ sessions: [Session]) -> HomeList {
         let waiting = sessions.filter { $0.state == .waiting }
-            .sorted { ($0.stateSince ?? 0) < ($1.stateSince ?? 0) }
+            .sorted { ($0.stateSince ?? 0, $0.name) < ($1.stateSince ?? 0, $1.name) }
         let groups = Dictionary(grouping: sessions, by: \.dir).map { dir, list in
             ProjectGroup(
                 dir: dir,
                 // "/" has no last component, so it shows whole
                 name: dir.split(separator: "/").last.map(String.init) ?? dir,
-                sessions: list.sorted { $0.created > $1.created },
+                sessions: list.sorted { $0.created != $1.created ? $0.created > $1.created : $0.name < $1.name },
                 waiting: list.contains { $0.state == .waiting },
                 activity: list.map(\.activity).max() ?? 0)
         }
-        let projects = groups.sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.name < $1.name }
+        let projects = groups.sorted {
+            if $0.activity != $1.activity { return $0.activity > $1.activity }
+            return $0.name != $1.name ? $0.name < $1.name : $0.dir < $1.dir
+        }
         return HomeList(waiting: waiting, projects: projects)
     }
 }

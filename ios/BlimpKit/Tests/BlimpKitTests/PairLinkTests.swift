@@ -17,3 +17,12 @@ let tok = String(repeating: "ab", count: 32)
     #expect(ServerLink.parse("blimp://pair?token=\(tok)") == nil)
     #expect(ServerLink.parse("blimp://pair?url=ftp%3A%2F%2Fx&token=\(tok)") == nil)
 }
+
+@Test func refusesATokenWithATrailingNewline() {
+    #expect(ServerLink.parse("blimp://pair?url=https%3A%2F%2Fx.ts.net&token=\(tok)%0A") == nil)
+}
+
+@Test func schemeAndHostAreCaseInsensitive() {
+    #expect(ServerLink.parse("blimp://pair?url=HTTPS%3A%2F%2FX.ts.net&token=\(tok)") != nil)
+    #expect(ServerLink.parse("blimp://pair?url=http%3A%2F%2FLOCALHOST%3A7425&token=\(tok)") != nil)
+}

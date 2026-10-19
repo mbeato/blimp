@@ -39,3 +39,15 @@ import Testing
 @Test func anUnclosedCodeBlockRunsToTheEnd() {
     #expect(MarkdownBlock.parse("```\nabc") == [.code(language: "", text: "abc")])
 }
+
+@Test func crlfGivesTheSameBlocks() {
+    let lf = "# Hi\n\n- a\n- b\n\n```\nx\n\ny\n```\ntext"
+    #expect(MarkdownBlock.parse(lf.replacingOccurrences(of: "\n", with: "\r\n")) == MarkdownBlock.parse(lf))
+    #expect(MarkdownBlock.parse(lf).count == 4)
+}
+
+@Test func starAndPlusBulletsAndBlankLinesInCode() {
+    #expect(MarkdownBlock.parse("* a\n* b") == [.bullets(["a", "b"])])
+    #expect(MarkdownBlock.parse("+ a\n+ b") == [.bullets(["a", "b"])])
+    #expect(MarkdownBlock.parse("```\nx\n\ny\n```") == [.code(language: "", text: "x\n\ny")])
+}

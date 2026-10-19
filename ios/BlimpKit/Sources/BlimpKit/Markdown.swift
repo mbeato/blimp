@@ -11,7 +11,9 @@ public enum MarkdownBlock: Equatable, Sendable {
     case rule
 
     public static func parse(_ text: String) -> [MarkdownBlock] {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // Swift reads "\r\n" as one Character, so split() would never break on it; normalise first.
+        let norm = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        let lines = norm.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var out: [MarkdownBlock] = []
         var i = 0
         while i < lines.count {

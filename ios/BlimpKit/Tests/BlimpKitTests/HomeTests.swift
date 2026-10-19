@@ -18,3 +18,10 @@ func session(_ name: String, dir: String, created: Double, state: SessionState =
     #expect(list.projects[1].sessions.map(\.name) == ["a2", "a1"])
     #expect(list.projects[1].waiting && list.projects[2].waiting && !list.projects[0].waiting)
 }
+
+@Test func sameNamedProjectsKeepAStableOrder() {
+    for input in [[session("x", dir: "/a/app", created: 1), session("y", dir: "/b/app", created: 1)],
+                  [session("y", dir: "/b/app", created: 1), session("x", dir: "/a/app", created: 1)]] {
+        #expect(HomeList.make(input).projects.map(\.dir) == ["/a/app", "/b/app"])
+    }
+}

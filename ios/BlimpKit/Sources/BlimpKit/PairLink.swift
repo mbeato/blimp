@@ -12,13 +12,15 @@ public struct ServerLink: Codable, Equatable, Sendable {
               c.scheme == "blimp", c.host == "pair",
               let raw = c.queryItems?.first(where: { $0.name == "url" })?.value,
               let token = c.queryItems?.first(where: { $0.name == "token" })?.value,
-              token.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+              // exact check: a regex `$` would let a trailing newline through
+              token.count == 64, token.allSatisfy({ "0123456789abcdef".contains($0) })
         else { return nil }
         var s = raw
         while s.hasSuffix("/") { s.removeLast() }
         guard let url = URL(string: s), let host = url.host, !host.isEmpty else { return nil }
         // Plain http only for the SSH-forward development setup; everything else must be https.
-        let ok = url.scheme == "https" || (url.scheme == "http" && (host == "127.0.0.1" || host == "localhost"))
+        let scheme = url.scheme?.lowercased(), h = host.lowercased()
+        let ok = scheme == "https" || (scheme == "http" && (h == "127.0.0.1" || h == "localhost"))
         return ok ? ServerLink(url: url, token: token) : nil
     }
 }
