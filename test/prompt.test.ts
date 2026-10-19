@@ -57,4 +57,7 @@ test("answerKeys", () => {
   const q = promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "?", multiSelect: false, options: [{ label: "a" }, { label: "b" }] }] } })!;
   expect(answerKeys(q, 1)).toBe("2");
   expect(answerKeys({ kind: "other", answerable: false }, 0)).toBeUndefined();
+  // The keys come from a status file: only a digit or Esc is ever pressed, whatever it says.
+  const bad = { kind: "permission" as const, tool: "Bash", summary: "", options: ["a", "b", "c", "d"], keys: ["rm -rf ~\r", "0", "\x1b\x1b", "9"], answerable: true as const };
+  expect([0, 1, 2, 3].map((i) => answerKeys(bad, i))).toEqual([undefined, undefined, undefined, "9"]);
 });

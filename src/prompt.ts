@@ -53,8 +53,10 @@ export function withScreenOptions(p: Prompt, screen: string): Prompt {
   return options.length ? { ...p, options, keys: options.map((_, i) => String(i + 1)) } : p;
 }
 
+// The keys come from the status file, which anything running as you can write: only a digit or Esc
+// is ever typed.
 export function answerKeys(p: Prompt, pick: number): string | undefined {
   if (!Number.isInteger(pick) || pick < 0 || !p.answerable) return;
-  if (p.kind === "permission") return p.keys[pick];
-  if (p.kind === "question" && pick < p.questions[0].options.length) return String(pick + 1);
+  const keys = p.kind === "permission" ? p.keys[pick] : p.kind === "question" && pick < p.questions[0].options.length ? String(pick + 1) : undefined;
+  return typeof keys === "string" && /^[1-9]$|^\x1b$/.test(keys) ? keys : undefined;
 }
