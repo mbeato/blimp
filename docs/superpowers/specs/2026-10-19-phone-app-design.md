@@ -71,22 +71,38 @@ type ChatMessage =
 
 ```ts
 prompt?:
-  | { kind: "permission"; tool: string; summary: string; options: string[] }   // e.g. ["Yes", "Yes, and don't ask again …", "No"]
+  | { kind: "permission"; tool: string; summary: string; options: string[]; answerable: true }  // e.g. ["Yes", "Yes, and don't ask again …", "No"]
   | { kind: "question"; questions: { question: string; header?: string; multiSelect: boolean;
-                                     options: { label: string; description?: string }[] }[] }
-  | { kind: "other" };                                                          // Elicitation, anything unknown: "Open on Mac"
+                                     options: { label: string; description?: string }[] }[];
+      answerable: boolean }                                                    // true only for one single-choice question
+  | { kind: "other"; answerable: false };                                     // Elicitation, anything unknown: "Open on Mac"
 ```
 
-- `blimpd hook` writes it into the status file it already writes, from the hook's input: `PermissionRequest` (`tool_name`, `tool_input`) → `permission`; `PreToolUse` for `AskUserQuestion` (`tool_input.questions`) → `question`; `Elicitation` → `other`. It's cleared when the state leaves `waiting`.
-- `options` for permissions: what Claude Code 2.1.300 shows for that prompt. The plan's first server step records them from a real Claude, along with the keys that pick each one.
+- `blimpd hook` writes it into the status file it already writes, from the hook's input: `PermissionRequest` (`tool_name`, `tool_input`) → `permission`; `PreToolUse` for `AskUserQuestion` (`tool_input.questions`) → `question`; `Elicitation` → `other`. The `Notification` that follows a permission prompt (seconds later) keeps the prompt already in the file for the same `sessionId`. Any state other than `waiting` clears it.
+- Permission `options` vary by command (the probe saw four: "Yes", "Yes, and don't ask again for …", "Yes, and switch to auto mode", "No"), and the hook input doesn't carry them. So blimpd reads them from the screen: `zmx history <name>`, the last 40 lines, the numbered lines (`❯ 1. Yes`, `  2. …`) after "Do you want to proceed?". It reads once per wait (keyed by the hook's `at`). If it finds none, the options are `["Yes", "No"]`, meaning the first and the last option.
+- A question the phone can't answer safely becomes `answerable: false` (see Input). The phone shows it read-only with "Open on Mac to answer".
 
-### Input
+### Input (on the chat socket)
 
-- `POST /sessions/<name>/input` body `{ "id": string, "text": string }` → 204. Text is at most 100 000 characters. blimpd types it into the session as a bracketed paste (`\x1b[200~…\x1b[201~`) and then `\r`, the same as a paste plus Enter on the Mac. `id` is a client-made UUID. blimpd remembers the last 100 ids per session, and a repeat is a 204 that types nothing, so a retry can't send a message twice.
-- `POST /sessions/<name>/answer` body `{ "answers": number[][] }` → 204: one list of picked option indexes per question (a permission prompt counts as one question with one pick). blimpd checks it against the current `prompt` (409 if the session isn't waiting or the prompt changed) and presses the keys that pick those options. The key mapping lives only in blimpd, so a Claude Code change is fixed in one place.
-- `POST /sessions/<name>/interrupt` → 204: sends `\x1b` (Esc).
-- **How blimpd types:** a zmx client in a PTY, as attach does. It is opened at the session's last known size: blimpd records cols×rows from every attach and resize it proxies, and uses 120×36 if it has seen none. The client writes and then detaches. The test checks that an attached viewer's size doesn't change.
-- Only for sessions of kind `claude` or `claude-glm` (400 otherwise). The app says "Open on Mac" for the rest.
+The probe (below) found that opening and closing a zmx client for each keystroke batch confuses Claude's screen. So input goes through the chat socket: while a phone has `/sessions/<name>/chat` open, blimpd keeps one zmx client attached for it. That client's output is thrown away. It is attached at the session's last known size: blimpd records cols×rows from every attach and resize it proxies, and uses 120×36 if it has seen none. When a proxied terminal resizes, the chat clients of that session resize with it. Without this, a second client of another size resizes the session (the probe saw the shell report 20×50 while a 50×20 client was attached).
+
+Client → server text frames on `/chat`:
+
+- `{ "type": "input", "id": string, "text": string }`: typed as a bracketed paste (`\x1b[200~…\x1b[201~`), then `\r`, as a paste plus Enter on the Mac. Text is at most 100 000 characters. `id` is a client-made UUID. blimpd remembers the last 100 ids per session, and a repeat is acknowledged but types nothing, so a retry after a reconnect can't send a message twice.
+- `{ "type": "answer", "id": string, "at": number, "pick": number }`: `at` is the prompt's wait start (from `Session.stateSince`), `pick` an option index. If the session isn't waiting on that prompt any more, the reply is `error` "the question changed". It works for permission prompts and for a single, single-choice question. blimpd presses the option's digit (`1`–`9`), which the probe confirmed picks and submits at once. Several questions or multi-select: not answerable in v1 (`answerable: false`).
+- `{ "type": "interrupt", "id": string }`: sends `\x1b` (Esc).
+- Server → client: `{ "type": "ack", "id" }` once written, or `{ "type": "error", "id", "error": string }`.
+- Only for sessions of kind `claude` or `claude-glm`. Others get `unreadable` and accept no input.
+
+### What the probe found (Claude Code 2.1.300, zmx 0.5.0, 2026-10-19)
+
+- Bracketed paste then `\r` sends a multi-line message intact.
+- A permission prompt: `1` picks "Yes" and runs the command at once.
+- A single-choice AskUserQuestion: `2` picks the second option and submits at once.
+- Multi-question and multi-select AskUserQuestion: digits toggle and arrows move between tabs, but separate attach/detach clients sending them got the wrong boxes ticked, and Esc didn't cancel. Not in v1.
+- A new folder shows a "Do you trust this folder?" screen, and no hook fires for it. A session started from the phone in a folder Claude hasn't seen would be stuck there. v1 starts sessions only in recent folders (already trusted). Anything else shows as `unknown` and "Open on Mac".
+- Starting `zmx attach` for a name right after `zmx kill` of the same name can attach to the dying session. Tests use fresh names.
+- Claude started from inside another Claude session inherits `CLAUDE_CODE_*` variables and turns off transcript saving. blimpd runs outside Claude, so this only matters for tests run from a Claude session: they strip `CLAUDE*` from the environment.
 
 ## 3. The iPhone app (`ios/`)
 
@@ -106,7 +122,7 @@ prompt?:
    - Bubbles for `user` and `assistant`. Assistant Markdown is rendered with a Markdown package (picked in the plan, Swift Package Manager only).
    - `tool` messages are one grey line each, and a tap expands input and output in a monospace block.
    - A "working…" line while the state is `working`, with a Stop button (`interrupt`).
-   - A waiting `prompt` shows as buttons above the input. For questions: options, multi-select toggles, a Send when there are several questions. For `other`: "Open on Mac to answer this".
+   - A waiting `prompt` with `answerable: true` shows its options as buttons above the input. Otherwise the question and its options show read-only, with "Open on Mac to answer this".
    - Input box, Send, and the mic button (section 4). Return adds a new line; Send sends.
    - Not a Claude session, or `unreadable`: "Open on Mac to use this".
    - Session ended: "Session ended" and Resume (when there's a `sessionId`).
@@ -131,7 +147,7 @@ prompt?:
 - **Tailscale off** (the host doesn't resolve or isn't reachable): "Tailscale isn't connected", with a button that opens the Tailscale app.
 - **Send while offline:** the text stays in the box, not sent, not queued. A send that timed out is retried with the same `id`.
 - **401:** back to Pair.
-- **409 on answer** (the prompt changed): the buttons refresh from the latest `prompt`.
+- **"the question changed"** on answer: the buttons refresh from the latest `prompt`.
 
 ## Security (SECURITY.md gets these rows)
 
@@ -155,12 +171,10 @@ And under Accepted: **"No TCP port"** becomes "no TCP port on the public network
 
 - **Server** (`bun test`):
   - Transcript → `ChatMessage` with fixture transcripts: skipped entries, tool summaries, tool results filling in later, appends parsed from added bytes only, reset on a new `sessionId`, unreadable.
-  - `/chat` WebSocket against a fake session.
-  - `input`: bracketed paste + Enter reaches a zmx session; a repeated `id` types nothing; an attached viewer's size is unchanged.
-  - `interrupt`.
+  - `/chat` WebSocket against a fake session: `input` (bracketed paste + Enter reaches the session; a repeated `id` types nothing), `answer` (the digit; a stale `at` is refused), `interrupt` (Esc), and an attached viewer's size unchanged by the chat client.
   - Phone token: accepted, revoked takes effect at once, `pair` makes a 600 file and prints the link.
   - Hook `prompt` from fixture hook inputs.
-  - Real Claude (marked slow, as existing ones): a permission prompt answered through `answer` lets the command run; an AskUserQuestion answered through `answer` gets that option.
+  - Real Claude (new, opt-in with `BLIMP_REAL_CLAUDE=1`, since it uses the account): a permission prompt answered through `answer` runs the command; a single-choice AskUserQuestion answered through `answer` gets that option; a message sent with `input` shows in the transcript and comes back as a `user` ChatMessage.
 - **App** (`xcodebuild test` on the iPhone simulator, in CI on `macos-latest`): spoken-text cleaning, voice answer matching, home grouping and sorting, `ChatMessage` decoding and replace-by-id.
 - **Max's checklist** (`docs/PHONE-CHECKLIST.md`): pairing by QR, Face ID, a full conversation by voice, answering a permission by voice, interrupt, start and resume a session, network switch mid-session, read-aloud quality.
 
@@ -173,7 +187,7 @@ And under Accepted: **"No TCP port"** becomes "no TCP port on the public network
 
 Max asked to build the app first and do Tailscale later. Nothing before step 4 needs Tailscale: during development the app reaches blimpd at `http://127.0.0.1:<port>`, an SSH forward from the Mac to the socket (`ssh -N -L 7425:<home>/.blimp/blimpd.sock claude1`), which the iPhone simulator on that Mac shares. A dev link `blimp://pair?url=http://127.0.0.1:7425&token=<Mac token>` is pasted on the Pair screen. Debug builds allow plain HTTP to `127.0.0.1` only.
 
-1. **Server chat features:** `/chat`, `prompt`, `input`, `answer`, `interrupt`, with tests including real Claude. DESIGN.md gets the routes. Check: a conversation driven only through these routes with `curl`/`websocat`, while the Mac shows it live.
+1. **Server chat features:** `/chat` (messages, `input`, `answer`, `interrupt`) and `prompt`, with tests including real Claude. DESIGN.md gets the routes. Check: a conversation driven only through `/chat` with `websocat`, while the Mac shows it live.
 2. **iPhone app:** Pair (pasted link), Home, Project, Session, Face ID, built and tested in CI on the simulator. Check: Max holds a full conversation from the simulator on his Mac while the Mac app shows the same session.
 3. **Voice:** mic, read aloud, voice answers. Check: in the simulator (Mac mic and speakers) and the checklist's voice items.
 4. **Connection and the real phone:** Max installs Tailscale (commands above). Measure direct vs relayed. Pick route A or B. `blimpd pair` with QR scanning, phone token, SECURITY.md. TestFlight upload. Check: `curl https://claude1.<tailnet>.ts.net/health` with the phone token from another tailnet device works, and without it gets 401; then the checklist on Max's phone.
