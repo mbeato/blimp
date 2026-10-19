@@ -63,7 +63,7 @@ type ChatMessage =
 - `user`: typed prompts only. Skipped: `tool_result` entries, `isMeta` entries, command wrappers (`<command-name>`, `<local-command-stdout>`), and system reminders.
 - `assistant`: `text` blocks. `thinking` is skipped.
 - `tool`: one per `tool_use`, with `output` and `error` filled in when its `tool_result` arrives (the update is sent again as an `append` with the same `id`; the app replaces by `id`). `summary` is one line: Bash → "Ran `<command, first line, 80 chars>`", Edit/Write → "Edited <path relative to the session's folder>" / "Wrote …", Read → "Read <path>", Grep/Glob → "Searched for <pattern>", Task/Agent → "Agent: <description>", anything else → the tool's name.
-- Only for sessions of kind `claude` or `claude-glm`. Others get `unreadable`.
+- Only for sessions where Claude Code runs (blimpd knows its `sessionId`), whatever kind started it. Others (Codex, a shell) get `unreadable`.
 
 ### Waiting prompts
 
@@ -92,7 +92,7 @@ Client → server text frames on `/chat`:
 - `{ "type": "answer", "id": string, "at": number, "pick": number }`: `at` is the prompt's wait start (from `Session.stateSince`), `pick` an option index. If the session isn't waiting on that prompt any more, the reply is `error` "the question changed". It works for permission prompts and for a single, single-choice question. blimpd presses the option's digit (`1`–`9`), which the probe confirmed picks and submits at once. Several questions or multi-select: not answerable in v1 (`answerable: false`).
 - `{ "type": "interrupt", "id": string }`: sends `\x1b` (Esc).
 - Server → client: `{ "type": "ack", "id" }` once written, or `{ "type": "error", "id", "error": string }`.
-- Only for sessions of kind `claude` or `claude-glm`. Others get `unreadable` and accept no input.
+- Only for sessions where Claude Code runs, as above. Others get `unreadable` and accept no input.
 
 ### What the probe found (Claude Code 2.1.300, zmx 0.5.0, 2026-10-19)
 
