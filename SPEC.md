@@ -60,7 +60,7 @@ your server: blimpd (small TypeScript service, listens only on localhost)
 
 - **Office files:** PPTX / DOCX / XLSX preview. The server converts them to PDF with LibreOffice when it's installed, and the PDF viewer shows the result. This is the first post-v1 milestone.
 - **Git pane:** changed files, diffs, and the branch and PR for each session.
-- **Phone app:** Tauri builds iOS from the same code, but the terminal on a phone needs its own design.
+- **Phone app:** a native iPhone app with a chat view and voice, over Tailscale. Design: `docs/superpowers/specs/2026-10-19-phone-app-design.md`.
 - **Extensions:** Monaco can't run VS Code extensions. If we later want the real extension ecosystem, the option is to embed openvscode-server as the editor pane. That's heavier and less integrated. Decide after v1, once we know which viewers are actually missing.
 
 ## Milestones (each one usable on its own)
