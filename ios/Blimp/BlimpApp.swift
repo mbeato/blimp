@@ -29,6 +29,8 @@ private struct Root: View {
                 HomeView()
             }
         }
+        // the app switcher's snapshot is taken as the app goes inactive: show no session titles
+        .overlay { if scenePhase != .active && store.server != nil { LockedView() } }
         .onReturnFromBackground { store.reconnectNow() }
         .onChange(of: lock.locked) { _, locked in if !locked { store.reconnectNow() } }
         .task { await lock.unlock() }

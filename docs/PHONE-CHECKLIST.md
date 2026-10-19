@@ -8,10 +8,12 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 
 - [ ] Pairing by link. Paste the `blimp://pair?...` link on the Pair screen. You land on Home. (Scanning a QR code comes with Tailscale.)
 - [ ] A wrong token. Pair with a made-up token. The app says the server did not accept it and stays on Pair. (This checks that a refused token, HTTP 401, is recognised.)
-- [ ] Plain http to 127.0.0.1. The pairing above worked over `http://127.0.0.1:7425`. Any other `http://` address is refused.
+- [ ] Plain http to 127.0.0.1. The pairing above worked over `http://127.0.0.1:7425`. Now paste a link with a non-local address, for example `blimp://pair?url=http%3A%2F%2F192.168.1.5%3A7425&token=x`. The app says "That isn't a blimp link".
 - [ ] Keychain in a normal Xcode run. Press Run, pair, stop the app, press Run again. It opens on Home without asking to pair. Sign out in Settings. The next run asks to pair.
-- [ ] Face ID. Quit and reopen the app. It shows a blank screen with "Unlock", no session names. Features, Face ID, Matching Face unlocks it.
+- [ ] Face ID. Quit and reopen the app. It shows a blank screen with "Unlock", no session names. In the Simulator menu choose Features, Face ID, Enrolled first. Then Features, Face ID, Matching Face unlocks it.
 - [ ] Face ID fails, passcode works. Choose Non-matching Face. Then use the passcode when asked. It unlocks.
+- [ ] App switcher. Swipe up to the app switcher. blimp's card is blank, with no session names.
+- [ ] Cancelling does not nag. Cancel the Face ID sheet. It stays on "Unlock" and does not ask again until you tap Unlock.
 - [ ] Lock after 5 minutes. Go to the Home Screen, wait more than 5 minutes, come back. It is locked again. Within 5 minutes it is not.
 
 ## Home
@@ -57,4 +59,5 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] Code is skipped. A reply with a code block is read without the code.
 - [ ] A permission answered by voice. Say "yes". The permission is answered.
 - [ ] An unclear answer is highlighted, not sent. Say something that is not yes or no. It shows highlighted and waits for a tap.
+- [ ] Read-aloud sounds good with a Premium voice. In the iPhone's Settings, Accessibility, Spoken Content, Voices, download a Premium voice. Claude's replies sound natural in blimp.
 - [ ] Read-aloud stops on tap. While it speaks, tap. It stops.

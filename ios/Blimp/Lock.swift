@@ -7,7 +7,9 @@ import SwiftUI
 @Observable @MainActor
 final class Lock {
     private(set) var locked = true
-    private var backgroundedAt: Date?
+    private var backgroundedAt: TimeInterval?
+    /// Plain reason shown under Unlock after a failure other than a cancel.
+    private(set) var note: String?
     private var asking = false
     static let grace: TimeInterval = 300
 
@@ -17,11 +19,16 @@ final class Lock {
         defer { asking = false }
         let context = LAContext()
         var error: NSError?
-        // No passcode on the device: nothing to ask, so don't lock the owner out.
+        // No passcode on the device: anyone can open the phone anyway, so don't lock.
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            locked = false
+            if (error as? LAError)?.code == .passcodeNotSet {
+                locked = false
+            } else {
+                note = "This phone can't check it's you right now."
+            }
             return
         }
+        note = nil
         do {
             if try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock blimp") {
                 locked = false
@@ -31,15 +38,19 @@ final class Lock {
         }
     }
 
-    /// Locks when the app comes back after more than five minutes away; asks right away.
+    /// Locks when the app comes back after more than five minutes away, and asks once then.
+    /// It never asks again by itself: the sheet makes the scene inactive, and a cancel returns to
+    /// .active, so asking there would loop. After a cancel, the Unlock button is the way.
     func scenePhaseChanged(_ phase: ScenePhase) {
         switch phase {
         case .background:
-            if backgroundedAt == nil { backgroundedAt = Date() }
+            if backgroundedAt == nil { backgroundedAt = ProcessInfo.processInfo.systemUptime }
         case .active:
-            if let at = backgroundedAt, Date().timeIntervalSince(at) > Self.grace { locked = true }
+            if let at = backgroundedAt, ProcessInfo.processInfo.systemUptime - at > Self.grace {
+                locked = true
+                Task { await unlock() }
+            }
             backgroundedAt = nil
-            if locked { Task { await unlock() } }
         default: break
         }
     }
@@ -54,6 +65,8 @@ struct LockedView: View {
             Image(systemName: "lock").font(.largeTitle).foregroundStyle(.secondary)
             Button("Unlock") { Task { await lock.unlock() } }
                 .buttonStyle(.borderedProminent)
+                .opacity(lock.locked ? 1 : 0)
+            if let note = lock.note, lock.locked { Text(note).font(.footnote).foregroundStyle(.secondary) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
