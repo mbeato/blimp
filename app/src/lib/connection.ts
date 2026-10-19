@@ -104,7 +104,7 @@ export class ServerLink {
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
-  private watching: string[] = [];
+  private watching = new Map<number, string[]>();
   private fsListeners = new Set<(paths: string[]) => void>();
 
   constructor(
@@ -146,7 +146,7 @@ export class ServerLink {
         onFs: (paths) => this.fsListeners.forEach((f) => f(paths)),
         onClose: () => this.retry("Lost the connection to blimpd."),
       });
-      this.events.watch(this.watching);
+      this.events.watch(this.watched());
     } catch (e) {
       this.retry(errorText(e));
     }
@@ -183,10 +183,17 @@ export class ServerLink {
     if (inTauri()) invoke("disconnect", { id: this.key }).catch(() => {});
   }
 
-  // The workbench's watch set (expanded folders + open files). Kept here so it survives reconnects.
-  watch(paths: string[]) {
-    this.watching = paths;
-    this.events?.watch(paths);
+  // Each workbench's watch set (expanded folders + open files), by workbench; blimpd watches them
+  // all, since every tab on this server shares the one events socket. Kept here so it survives
+  // reconnects. An empty list removes the workbench's set.
+  watch(owner: number, paths: string[]) {
+    if (paths.length) this.watching.set(owner, paths);
+    else this.watching.delete(owner);
+    this.events?.watch(this.watched());
+  }
+
+  private watched() {
+    return [...new Set([...this.watching.values()].flat())];
   }
 
   onFs(fn: (paths: string[]) => void) {

@@ -5,8 +5,11 @@ import { tildify } from "../lib/sessions";
 import { relTime } from "../lib/time";
 
 // Home's editor area while no file is open: recent projects, Open Folder, and the servers.
+// shown: Home is the tab in front. The list is read again each time it comes forward, since
+// the folders opened meanwhile were opened from other tabs (and windows).
 export function Welcome(props: {
   link: ServerLink;
+  shown: boolean;
   links: ServerLink[];
   onServer: (link: ServerLink) => void;
   onOpen: (dir: string) => void;
@@ -22,7 +25,7 @@ export function Welcome(props: {
     let live = true;
     recentProjects(link.key).then((r) => live && setRecent(r));
     return () => void (live = false);
-  }, [link.key]);
+  }, [link.key, props.shown]);
 
   return (
     <div className="welcome-page">
@@ -101,10 +104,12 @@ export function Welcome(props: {
           <dd>New Claude session in this folder</dd>
           <dt>⌘P</dt>
           <dd>Open a file by name</dd>
-          <dt>⌘B / ⌘J</dt>
-          <dd>Show or hide files / terminal</dd>
+          <dt>⌘B / ⌘J / ⌘⌥B</dt>
+          <dd>Show or hide files / terminal / sessions</dd>
           <dt>⌘-click</dt>
           <dd>Open a path from the terminal</dd>
+          <dt>Drag a session</dt>
+          <dd>Onto the terminal, to split it</dd>
         </dl>
       </div>
     </div>

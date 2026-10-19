@@ -98,29 +98,36 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 
 **Projects and windows**
 
-- Each window shows one folder on one server, as one VS Code window shows one project.
-- **Home** is your home folder on the server. Its Welcome page lists your recent projects. With more than one server, it has a server picker. The house button at the top left goes back to Home.
-- **Open Folder…** (⌘O, or the button at the top right) picks a folder: from the folders you used Claude in, by browsing the server, or by typing a path (like `~/projects/app`). While browsing, **New folder** makes a folder and goes into it. The folder opens in the current window.
-- **⌘⇧N** opens a new window, on Home. Each window keeps its own folder.
+- Each open folder is a **tab** along the top of the window. Below it is that folder's own row of file tabs. A tab keeps its open files and terminals while you look at another one.
+- **Home** is the first tab: your home folder on the server. Its Welcome page lists your recent projects. With more than one server, it has a server picker.
+- **Open Folder…** (⌘O, or the **+** after the tabs) picks a folder: from the folders you used Claude in, by browsing the server, or by typing a path (like `~/projects/app`). While browsing, **New folder** makes a folder and goes into it. The folder opens in a new tab, or its tab comes to the front if it's already open.
+- Close a tab with its **×** or a middle-click. Its sessions keep running. An amber dot on a tab means a session in that folder is waiting for you.
+- blimp reopens your tabs the next time you open it.
+- **⌘⇧N** opens a new window, on Home. Each window has its own tabs.
 
 **The window**
 
-- **Left:** the folder's files. Click a folder to open it, and a file to open it in a tab. The buttons at the top make a **new file** or a **new folder** in the folder you last clicked, and fold every folder. **⌘B** hides or shows the files.
+- **Left:** the folder's files. Click a folder to open it, and a file to open it in a tab. The buttons at the top make a **new file** or a **new folder** in the folder you last clicked, and fold every folder.
 - **Top right:** the files you opened, one tab each. With no file open, the terminal fills the right side (on Home, the Welcome page shows instead).
-- **Bottom right:** the terminal of the selected session. **⌘J** hides or shows it while files are open. Drag the line above it to make it taller or shorter.
+- **Bottom right:** the terminal, with the folder's sessions next to it. Drag the line above it to make it taller or shorter.
+- **The three buttons at the top right** show or hide the files (⌘B), the terminal (⌘J) and the session list (⌘⌥B), as in VS Code.
 
 **Sessions**
 
 - The list next to the terminal shows the sessions in this folder only, as `claude --resume` shows only this folder's conversations. A session started in a subfolder shows when you open that subfolder.
 - Each running session shows its title and a mark: a spinning ring means **working**, an amber dot means **waiting for you**, an empty ring means **idle**. A plain shell shows `>_` and its session name. The title is your `/rename` title, else Claude's title, else the first prompt.
 - Click a session to show its terminal. When you open a folder, blimp shows the session that waits longest for you, else the newest.
+- **Drag a session onto the terminal** to see it side by side with the one there. Drop it on the left or right half; drag again (its row, or the name on top of its split) to move it. **×** on a split closes the split (the session keeps running). Esc cancels a drag.
+- **Drag a session out of the window** to move it: let go over another blimp window and it goes into that window's tab for its folder, where you let go; let go anywhere else and it opens in a new window there. Drag it back the same way.
+- **Right-click a session** (its row, or the name on top of its split) for **Open in New Window**, and, on a split, **Open All Splits in New Window**. The session moves; this window stops showing it.
+- The files, the session list and each split are as wide as you drag the line beside them.
 - **+** (or **⌘N**) starts a new Claude session in this folder. The **+** menu also has **New shell**: a plain terminal in this folder, with your login shell and no Claude.
 - **Earlier** lists this folder's past conversations that are not running. Click one to resume it in a new session.
 - Hover a session and click the trash icon to end it. An idle Claude session ends at once; its conversation is saved, so you can resume it from **Earlier**. A session that is working or waiting, or a shell, asks first.
 - blimp starts every session in the real folder on the server, the same as typing `claude` there. So Claude reads that project's CLAUDE.md and settings.
 - Closing the window or quitting blimp only detaches. Sessions keep running on the server. A reboot of the server ends them. With user systemd and linger, blimpd starts again by itself after the reboot.
 - If you detach with `ctrl+\` (zmx's detach key), the terminal shows "Detached" and a **Reattach** button. If the connection drops, the terminal reconnects by itself.
-- **⌘K** searches all sessions on all servers, by title, folder and name. Pick one in this folder and it shows here. Pick one in another folder and blimp brings up that folder's window, or opens one.
+- **⌘K** searches all sessions on all servers, by title, folder and name. Pick one and blimp shows it in its folder's tab. If another window has that folder open, that window comes to the front; else the folder opens in a new tab here.
 
 **Files**
 
@@ -152,12 +159,13 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 | ⌘K | Jump to any session by its title, folder or name. In the editor, ⌘K goes to the editor (its ⌘K chords, as in VS Code). |
 | ⌘N | New Claude session in this folder. |
 | ⌘⇧N | New window. |
-| ⌘O | Open Folder…: pick a folder on the server for this window. |
+| ⌘O | Open Folder…: pick a folder on the server, in a new tab. |
 | ⌘P | Open a file by name in this folder. |
 | ⌘S | Save the open file now (edits also save by themselves). |
 | ⌘W | Close the open file tab. The session and the window stay. |
 | ⌘B | Show or hide the files on the left. |
-| ⌘J | Show or hide the terminal (while files are open). |
+| ⌘J | Show or hide the terminal. |
+| ⌘⌥B | Show or hide the session list. |
 | ⌘-click | In the terminal: open a file path in a tab, or a web link in your browser. |
 | Esc | Close a dialog. |
 | ↑ ↓ Enter | Move and pick in the session search and the dialogs. |

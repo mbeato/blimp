@@ -7,7 +7,22 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { e2e, fixtureDir, killSession, killTestSessions, openApp, openSessionTab, sessionRow, startSession, startSessionPty, zmxEnv } from "./helpers";
+import {
+  e2e,
+  fixtureDir,
+  frontTab,
+  frontTerm,
+  killSession,
+  killTestSessions,
+  openApp,
+  openSessionTab,
+  projectTab,
+  screenText,
+  sessionRow,
+  startSession,
+  startSessionPty,
+  zmxEnv,
+} from "./helpers";
 
 const pid = process.pid;
 const pathSession = `blimpe2e-wbpath-${pid}`;
@@ -31,10 +46,11 @@ test("Home: the tree shows home, Open Folder makes a new folder and opens it, an
   const { fixtures } = e2e();
   fixtureDir("wbhome-existing");
   await openApp(page);
-  const ws = page.locator(".wb");
+  const ws = frontTab(page);
   await expect(ws.locator(".welcome-page h1")).toHaveText("blimp");
   await expect(ws.locator(".tree").getByText("wbhome-existing")).toBeVisible();
-  await expect(page.locator(".topbar-place")).toHaveText("~");
+  await expect(page.locator(".ptab")).toHaveCount(1);
+  await expect(projectTab(page, "Home")).toHaveAttribute("aria-selected", "true");
 
   await page.keyboard.press("Meta+o");
   const dialog = page.locator(".dialog");
@@ -47,16 +63,20 @@ test("Home: the tree shows home, Open Folder makes a new folder and opens it, an
   expect(statSync(join(fixtures, "wbhome-made")).isDirectory()).toBe(true);
   await dialog.getByRole("button", { name: "Open", exact: true }).click();
 
-  await expect(page.locator(".topbar-place")).toHaveText("~/wbhome-made");
+  // A new tab, in front.
+  await expect(projectTab(page, "wbhome-made")).toHaveAttribute("aria-selected", "true");
+  await expect(projectTab(page, "wbhome-made")).toHaveAttribute("title", "~/wbhome-made");
   await expect(ws.locator(".pane-head .pane-title").first()).toHaveText("wbhome-made");
   await expect(ws.locator(".welcome-page")).toHaveCount(0);
   // An empty folder: the terminal pane offers to start something.
-  await expect(page.locator(".tpane-terms").getByRole("button", { name: "New shell" })).toBeVisible();
+  await expect(ws.locator(".tpane-terms").getByRole("button", { name: "New shell" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Home" }).click();
-  await expect(page.locator(".welcome-recent")).toContainText("wbhome-made");
-  await page.locator(".welcome-recent").getByRole("button", { name: "wbhome-made" }).click();
-  await expect(page.locator(".topbar-place")).toHaveText("~/wbhome-made");
+  await projectTab(page, "Home").click();
+  await expect(ws.locator(".welcome-recent")).toContainText("wbhome-made");
+  // Opening it again brings its tab forward rather than a second one.
+  await ws.locator(".welcome-recent").getByRole("button", { name: "wbhome-made" }).click();
+  await expect(projectTab(page, "wbhome-made")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".ptab")).toHaveCount(2);
 });
 
 test("the tree makes new files and folders where you last clicked", async ({ page }) => {
@@ -64,7 +84,7 @@ test("the tree makes new files and folders where you last clicked", async ({ pag
   mkdirSync(join(dir, "sub"), { recursive: true });
   startSession(treeSession, dir);
   await openSessionTab(page, dir);
-  const ws = page.locator(".wb");
+  const ws = frontTab(page);
   const tree = ws.locator(".tree");
 
   // A folder clicked: new things go in it.
@@ -124,7 +144,7 @@ test("the session list: only this folder's sessions; New shell; trash ends a ses
   const row = sessionRow(page, shell);
   await expect(row).toHaveClass(/selected/);
   await expect(row.locator(".srow-title")).toHaveText(shell);
-  const term = page.locator(".tpane-terms .term:not([hidden])");
+  const term = frontTerm(page);
   await term.locator(".xterm").click();
   await page.keyboard.type("echo shell-$((40+2))\n");
   await expect.poll(() => term.locator(".xterm-rows").innerText()).toContain("shell-42");
@@ -186,16 +206,31 @@ test("⌘-click on a path in the terminal opens the file at that line", async ({
   await expect(page.locator(".monaco-editor .active-line-number")).toHaveText("12");
 });
 
-test("⌘K to a session in another folder moves the window there", async ({ page }) => {
+test("⌘K to a session in another folder opens it in a tab, and back to the first tab's session", async ({ page }) => {
   const a = fixtureDir("wbjump-a");
   const b = fixtureDir("wbjump-b");
   startSession(jumpA, a);
   startSession(jumpB, b);
-  await openSessionTab(page, a);
-  await page.keyboard.press("Meta+k");
-  await page.getByPlaceholder("Jump to a session").fill(jumpB);
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".topbar-place")).toHaveText("~/wbjump-b");
+  const termA = await openSessionTab(page, a);
+  await termA.locator(".xterm").click();
+  await page.keyboard.type("kept-in-a\n");
+  await expect.poll(() => screenText(termA)).toContain("kept-in-a");
+
+  const jump = async (name: string) => {
+    await page.keyboard.press("Meta+k");
+    await page.getByPlaceholder("Jump to a session").fill(name);
+    await page.keyboard.press("Enter");
+  };
+  await jump(jumpB);
+  await expect(projectTab(page, "wbjump-b")).toHaveAttribute("aria-selected", "true");
   await expect(sessionRow(page, jumpB)).toHaveClass(/selected/);
-  expect(new URL(page.url()).searchParams.get("session")).toBe(jumpB);
+  const layout = JSON.parse(new URL(page.url()).searchParams.get("layout")!);
+  expect(layout.tabs.map((t: { dir: string | null }) => t.dir)).toEqual([null, a, b]);
+  expect(layout.tabs[2].panes).toEqual([jumpB]);
+
+  // Back to a: its tab, not a new one, with its terminal as it was.
+  await jump(jumpA);
+  await expect(page.locator(".ptab")).toHaveCount(3);
+  await expect(projectTab(page, "wbjump-a")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => screenText(frontTerm(page))).toContain("kept-in-a");
 });

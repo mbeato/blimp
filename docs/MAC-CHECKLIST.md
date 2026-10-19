@@ -28,12 +28,36 @@ Each item says what to do, and what should happen. If the result is different, w
 ## Keyboard
 
 - [ ] **App shortcuts reach the page, not the menu.**
-  Do: open a project folder and a file in it. Click in the terminal. Press each key: ⌘K, Esc, ⌘N, ⌘P, Esc, ⌘O, Esc, ⌘B, ⌘B, ⌘J, ⌘J, ⌘W.
-  Expect: ⌘K opens the session search. ⌘N starts a Claude session in this folder and shows it. ⌘P opens the file search, not a print dialog. ⌘O opens Open Folder, not the Mac's file picker. ⌘B hides and shows the files. ⌘J hides and shows the terminal. ⌘W closes the file tab and the window stays open.
+  Do: open a project folder and a file in it. Click in the terminal. Press each key: ⌘K, Esc, ⌘N, ⌘P, Esc, ⌘O, Esc, ⌘B, ⌘B, ⌘J, ⌘J, ⌘⌥B, ⌘⌥B, ⌘W.
+  Expect: ⌘K opens the session search. ⌘N starts a Claude session in this folder and shows it. ⌘P opens the file search, not a print dialog. ⌘O opens Open Folder, not the Mac's file picker. ⌘B hides and shows the files. ⌘J hides and shows the terminal. ⌘⌥B hides and shows the session list (and types no "∫" in the terminal). ⌘W closes the file tab and the window stays open.
 
 - [ ] **Several windows.**
   Do: press ⌘⇧N. In the new window, open a different folder. Press ⌘K and pick a session from the first window's folder. Close every window with the red button, then click blimp in the Dock.
-  Expect: ⌘⇧N opens a second window on Home. ⌘K brings the first window to the front with that session shown; it does not open a third window. The Window menu lists both windows by folder name. Clicking the Dock icon with no window open opens a new one.
+  Expect: ⌘⇧N opens a second window on Home. ⌘K brings the first window to the front with that session shown; it does not open a tab for that folder in the second window. The Window menu lists both windows by folder name. Clicking the Dock icon with no window open opens a new one.
+
+- [ ] **Project tabs.**
+  Do: open two folders with ⌘O. Open a file in each, and type something in each one's terminal. Click between the tabs. Quit with ⌘Q and open blimp again.
+  Expect: each folder is a tab at the top, with its own row of file tabs below. Switching back shows the same open file and the same terminal text. After the restart, the same tabs are open, with the same one in front.
+
+- [ ] **Drag a session to split the terminal.**
+  Do: in a folder with two sessions, drag the second one from the session list onto the right half of the terminal. Type in it. Drag it again onto the left half. Click × on its split. Start one more drag and press Esc before you let go.
+  Expect: while you drag, a label follows the pointer and the half you're over is lit. The two terminals show side by side, and your typing goes to the one you dropped. The second drag moves it to the left, with its text still there. × closes the split, and the session stays in the list. Esc drops nothing.
+
+- [ ] **Drag a session to another window, and back.**
+  Do: open a second window with ⌘⇧N and put it beside the first. Drag a session from the first window's list onto the second window's terminal and let go. Then drag it from the second window (its row or its split's name) back onto the first. Then drag one and let go on the desktop, away from both windows.
+  Expect: it moves to the window you let go over, into that folder's tab, on the half you let go over; the window it left stops showing it. Let go on the desktop, a new window opens about there with it. If it lands in the wrong window or a new window opens while you were over one, write down where the windows were (and which screen, with several).
+
+- [ ] **Right-click a session.**
+  Do: right-click a session in the list, and the name on top of a split.
+  Expect: a small menu with Open in New Window (and on a split, Open All Splits in New Window), not the system's Reload / Inspect menu. Each opens a new window with the session (or all the splits, side by side), and this window stops showing them.
+
+- [ ] **Widths.**
+  Do: drag the line right of the files, the line left of the session list, and the line between two splits.
+  Expect: each pane gets wider or narrower as you drag. None goes narrower than about 160 px.
+
+- [ ] **The show/hide buttons at the top right.**
+  Do: click each of the three buttons twice.
+  Expect: they hide and show the files, the terminal and the session list. A hidden pane's button looks dimmer.
 
 - [ ] **Shortcuts with the editor in focus.**
   Do: open a code file and click in it. Press ⌘K and then ⌘C.

@@ -71,7 +71,7 @@ test("hostile Markdown, SVG, HTML and PDF run nothing, and the CSP blocks inline
   const url = page.url();
   // xterm's WebGL renderer draws into its own canvas.
   await expect(term.locator(".xterm canvas").first()).toBeAttached();
-  const ws = page.locator(".wb");
+  const ws = page.locator(".wb:not([hidden])");
   const tree = ws.locator(".tree");
 
   await tree.getByText("evil.svg").click();

@@ -34,14 +34,16 @@ function themeFromCss(): ITheme {
 type Phase = "connecting" | "live" | "reconnecting" | "ended" | "detached";
 
 // One session's terminal: xterm.js on /sessions/<name>/attach. Stays mounted once shown (hidden
-// while another session is shown) so the scrollback survives switching.
+// while it isn't in a split) so the scrollback survives switching.
 // dir: the session's folder, which relative paths in its output are read against.
+// visible: in a split. focused: the split with the keyboard, in the tab in front.
 // onOpenPath: ⌘-click on a file path. onClose: dismiss an ended or detached session.
 export function TerminalView(props: {
   link: ServerLink;
   name: string;
   dir: string;
-  active: boolean;
+  visible: boolean;
+  focused: boolean;
   onOpenPath: (path: string, line?: number, col?: number) => void;
   onClose: () => void;
 }) {
@@ -236,13 +238,15 @@ export function TerminalView(props: {
   }, [props.link.status]);
 
   useEffect(() => {
-    if (!props.active) return;
-    if (box.current?.offsetWidth) fit.current?.fit();
-    term.current?.focus();
-  }, [props.active]);
+    if (props.visible && box.current?.offsetWidth) fit.current?.fit();
+  }, [props.visible]);
+
+  useEffect(() => {
+    if (props.focused) term.current?.focus();
+  }, [props.focused]);
 
   return (
-    <div className="term" hidden={!props.active}>
+    <div className="term" hidden={!props.visible}>
       <div className="term-box" ref={box} />
       {(phase === "ended" || phase === "detached") && (
         <div className="term-banner">

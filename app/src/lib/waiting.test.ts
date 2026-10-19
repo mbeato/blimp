@@ -15,7 +15,7 @@ const s = (name: string, state: Session["state"]): Session => ({
   state,
 });
 
-function setup(focus: Focus = { focused: false, activeTab: null }) {
+function setup(focus: Focus = { focused: false, viewing: [] }) {
   const calls: [string, string][] = [];
   const w = new WaitWatcher((t, b) => calls.push([t, b]), () => focus);
   return { w, calls, focus };
@@ -51,8 +51,8 @@ test("waiting again after working notifies again", () => {
   expect(calls).toHaveLength(2);
 });
 
-test("silent when the window is focused on that session's tab", () => {
-  const { w, calls, focus } = setup({ focused: true, activeTab: "srv/a" });
+test("silent when the focused window shows that session, in any split", () => {
+  const { w, calls, focus } = setup({ focused: true, viewing: ["srv/c", "srv/a"] });
   w.update("srv", "/home/u", [s("a", "working"), s("b", "working")]);
   w.update("srv", "/home/u", [s("a", "waiting"), s("b", "waiting")]);
   expect(calls.map((c) => c[0])).toEqual(["Title b is waiting for you"]);
@@ -64,7 +64,7 @@ test("silent when the window is focused on that session's tab", () => {
 });
 
 test("servers are tracked separately", () => {
-  const { w, calls } = setup({ focused: true, activeTab: "one/a" });
+  const { w, calls } = setup({ focused: true, viewing: ["one/a"] });
   w.update("one", "/home/u", [s("a", "working")]);
   w.update("two", "/home/u", [s("a", "waiting")]); // first load of "two"
   expect(calls).toEqual([]);

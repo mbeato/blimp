@@ -1,11 +1,13 @@
-// What a window shows (a server, a folder, a session) and the window plumbing around it.
+// What a window shows (its project tabs) and the window plumbing around it.
 // The Mac app can have several windows; Rust keeps track of them (src-tauri/src/windows.rs).
 // A plain browser (development, e2e tests) has one window and does everything in it.
 
 import { invoke } from "@tauri-apps/api/core";
 import { inTauri } from "./connection";
+import { decodeLayout, encodeLayout, newLayout, openTab, type Layout } from "./tabs";
 
-// dir missing: the server's home folder (Home). session: selected in the terminal pane.
+// A place to open: a folder on a server (dir missing: Home), with a session to show there.
+// A new window starts from one, and ⌘K in another window hands one over.
 export type Place = { server?: string; dir?: string; session?: string };
 
 export function placeFromQuery(query: string): Place {
@@ -28,37 +30,76 @@ export function placeQuery(p: Place, base = ""): string {
   return q.toString();
 }
 
-// The URL wins (it's kept current, so a reload stays put); a new window starts from what
-// Rust handed it (window.__blimpInit).
-export function readPlace(): Place {
-  const fromUrl = placeFromQuery(location.search);
-  if (fromUrl.server) return fromUrl;
-  return placeFromQuery((window as any).__blimpInit ?? "");
+// A place as a window's tabs: Home, plus the folder's tab in front when it isn't Home.
+export const layoutFor = (p: Place & { server: string }): Layout => openTab(newLayout(p.server), p.server, p.dir ?? null, p.session);
+
+// The URL wins (it's kept current, so a reload stays put); a new window starts from the layout
+// or place Rust handed it (window.__blimpInit). null: neither, so this is the app starting up.
+export function readLayout(): Layout | null {
+  for (const query of [location.search, (window as any).__blimpInit ?? ""]) {
+    const saved = new URLSearchParams(query).get("layout");
+    const l = saved ? decodeLayout(saved) : null;
+    if (l) return l;
+    const p = placeFromQuery(query);
+    if (p.server) return layoutFor({ ...p, server: p.server });
+  }
+  return null;
 }
 
-export function writePlace(p: Place) {
-  const q = placeQuery(p, location.search);
-  history.replaceState(null, "", q ? `?${q}` : location.pathname);
+// A layout as a query, keeping base's other keys (the browser build's ?blimpd=&token=).
+export function layoutQuery(l: Layout, base = ""): string {
+  const q = new URLSearchParams(placeQuery({}, base));
+  q.set("layout", encodeLayout(l));
+  return q.toString();
 }
 
-// The key Rust matches windows by: one window per (server, folder).
+export function writeLayout(l: Layout) {
+  history.replaceState(null, "", `?${layoutQuery(l, location.search)}`);
+}
+
+// The key Rust matches windows by: (server, folder). A window has one per tab.
 export const projectKey = (server: string, dir: string) => `${server}\n${dir}`;
 
-// ⌘⇧N, or ⌘K to a session in another folder: focus the window showing that folder, or open one.
-// The browser build switches the current window instead (returns false so the caller does).
-export async function openWindow(p: Place): Promise<boolean> {
+// A new window starting from a place (⌘⇧N: Home) or a layout (Open in New Window). The browser
+// build opens a new browser window on the same blimpd.
+export async function openWindow(start: Place | Layout) {
+  const init = (base: string) => ("tabs" in start ? layoutQuery(start, base) : placeQuery(start, base));
+  if (inTauri()) await invoke("open_window", { init: init("") });
+  else window.open(`${location.pathname}?${init(location.search)}`, "_blank");
+}
+
+// A session dragged out of this window, let go at (x, y) on screen. "moved": another window was
+// there and took it. "new": a new window opened there with it.
+export async function dropSession(p: Place, x: number, y: number): Promise<"moved" | "new"> {
+  if (!inTauri()) {
+    await openWindow(p);
+    return "new";
+  }
+  return (await invoke<boolean>("drop_session", { init: placeQuery(p), x, y })) ? "moved" : "new";
+}
+
+// A session from another window was let go here, at (x, y) in this page.
+export async function onDropSession(fn: (p: Place, x: number, y: number) => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  return getCurrentWebviewWindow().listen<{ init: string; x: number; y: number }>("drop-session", (e) => fn(placeFromQuery(e.payload.init), e.payload.x, e.payload.y));
+}
+
+// ⌘K to a folder that another window has in a tab: focus that window, which then shows the
+// session (it gets "select-session"). false: no other window has it.
+export async function focusProject(p: Place & { server: string; dir: string }): Promise<boolean> {
   if (!inTauri()) return false;
-  await invoke("open_window", { project: p.server && p.dir ? projectKey(p.server, p.dir) : null, init: placeQuery(p) });
-  return true;
+  return invoke<boolean>("focus_project", { project: projectKey(p.server, p.dir), init: placeQuery(p) }).catch(() => false);
 }
 
-export function setWindowProject(key: string | null) {
-  if (inTauri()) invoke("set_window_project", { project: key }).catch(() => {});
+export function setWindowProjects(keys: string[]) {
+  if (inTauri()) invoke("set_window_projects", { projects: keys }).catch(() => {});
 }
 
-// The session this window shows while it has focus: no notification for it from any window.
-export function setViewing(session: string | null) {
-  if (inTauri()) invoke("set_viewing", { session }).catch(() => {});
+// The sessions on screen in this window ("<server key>/<name>") while it has focus: no
+// notification for them from any window.
+export function setViewing(sessions: string[]) {
+  if (inTauri()) invoke("set_viewing", { sessions }).catch(() => {});
 }
 
 // One notification per wait across every window. The browser build has one window.
@@ -67,7 +108,7 @@ export async function claimNotice(session: string, key: string): Promise<boolean
   return invoke<boolean>("claim_notice", { session, key }).catch(() => true);
 }
 
-// ⌘K in another window picked a session in this window's folder.
+// ⌘K in another window picked a session in a folder this window has a tab for.
 export async function onSelectSession(fn: (p: Place) => void): Promise<() => void> {
   if (!inTauri()) return () => {};
   const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");

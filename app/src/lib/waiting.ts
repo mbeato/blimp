@@ -9,9 +9,9 @@ import { tildify } from "./sessions";
 // is announced once even when several windows see it.
 export type NotifyFn = (title: string, body: string, id: { session: string; wait: string }) => void;
 
-// Where the user is looking right now. activeTab is "<server key>/<session name>": the session
-// on screen in this window.
-export type Focus = { focused: boolean; activeTab: string | null };
+// Where the user is looking right now. viewing: the sessions on screen in this window
+// ("<server key>/<session name>"), one per terminal split.
+export type Focus = { focused: boolean; viewing: string[] };
 
 // Remembers each server's last states and notifies when a session becomes waiting.
 // The first list from a server only records states, so opening the app doesn't announce
@@ -32,7 +32,7 @@ export class WaitWatcher {
     for (const s of sessions) {
       if (s.state !== "waiting" || prev.get(s.name) === "waiting") continue;
       const session = `${server}/${s.name}`;
-      if (f.focused && f.activeTab === session) continue;
+      if (f.focused && f.viewing.includes(session)) continue;
       this.notify(`${s.title} is waiting for you`, tildify(s.dir, home), { session, wait: `${session}/${s.stateSince ?? s.updatedAt ?? Date.now()}` });
     }
   }

@@ -1,49 +1,57 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { AddServerDialog } from "./components/AddServerDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
-import { TerminalPane, type PaneActions } from "./components/TerminalPane";
+import { noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
 import { Welcome } from "./components/Welcome";
 import { Workbench, type Opener } from "./components/Workbench";
 import { errorText, loadServers, saveServers, serverKey, ServerLink, type Server } from "./lib/connection";
 import { baseName } from "./lib/files";
+import type { Panes } from "./lib/panes";
 import {
+  dropSession,
+  focusProject,
+  onDropSession,
   onSelectSession,
   openWindow,
-  placeQuery,
   projectKey,
-  readPlace,
+  readLayout,
   setViewing,
-  setWindowProject,
+  setWindowProjects,
   setWindowTitle,
-  writePlace,
+  writeLayout,
   type Place,
 } from "./lib/place";
-import { forgetProject, lastServer, rememberProject } from "./lib/recent";
+import { forgetProject, lastLayout, lastServer, rememberLayout, rememberProject } from "./lib/recent";
 import { tildify } from "./lib/sessions";
+import { closeTab, dropHomeTabs, homeTab, keepServers, newLayout, openTab, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
 import { notify, setBadge, WaitWatcher } from "./lib/waiting";
 
 type DialogKind = "palette" | "open" | "add" | null;
 
-// One window: one server and one folder on it (Home is the server's home folder), laid out by
-// Workbench. Several windows each run their own App; Rust shares the SSH tunnels between them.
+// One window: project tabs along the top (Home, the server's home folder, first), each laid out
+// by its own Workbench. Every tab stays mounted while open, so its files and terminals survive
+// switching. Several windows each run their own App; Rust shares the SSH tunnels between them.
 export function App() {
   const [servers, setServers] = useState<Server[] | null>(null);
-  const initial = useRef(readPlace()).current;
-  const [server, setServer] = useState<string | null>(initial.server ?? null);
-  const [dir, setDir] = useState<string | null>(initial.dir ?? null); // null: Home
-  const [session, setSession] = useState<string | null>(initial.session ?? null);
+  // null until the servers have loaded, when a new start reopens the last tabs.
+  const [layout, setLayout] = useState<Layout | null>(() => readLayout());
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [notice, setNotice] = useState("");
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const opener = useRef<Opener>(() => {});
-  const pane = useRef<PaneActions>({ newClaude: () => {} });
+  // Per tab (by workbench key): ⌘-click's file opener and the terminal pane's actions (⌘N).
+  const openers = useRef(new Map<string, { current: Opener }>()).current;
+  const actions = useRef(new Map<string, { current: PaneActions }>()).current;
+  const refFor = <T,>(m: Map<string, { current: T }>, k: string, init: T) => {
+    if (!m.has(k)) m.set(k, { current: init });
+    return m.get(k)!;
+  };
 
   // Links live outside React state: they are long-lived objects that mutate and call back.
   const links = useRef(new Map<string, ServerLink>()).current;
-  const viewingRef = useRef<string | null>(null);
+  const viewingRef = useRef<string[]>([]);
   const watcher = useRef<WaitWatcher | null>(null);
-  watcher.current ??= new WaitWatcher(notify, () => ({ focused: document.hasFocus(), activeTab: viewingRef.current }));
+  watcher.current ??= new WaitWatcher(notify, () => ({ focused: document.hasFocus(), viewing: viewingRef.current }));
   const onLinkChange = useRef((l: ServerLink) => {
     if (l.status === "connected" && l.sessions) watcher.current!.update(l.key, l.home, l.sessions);
     rerender();
@@ -52,10 +60,12 @@ export function App() {
   useEffect(() => {
     loadServers().then(
       async (list) => {
-        // A window with no server named opens on the one Home used last.
-        if (!initial.server) {
+        const keys = list.map(serverKey);
+        if (!layout && keys.length) {
+          // A new start reopens the last window's tabs, or opens Home on the server used last.
+          const saved = await lastLayout();
           const last = await lastServer();
-          setServer(list.some((s) => serverKey(s) === last) ? last! : list[0] ? serverKey(list[0]) : null);
+          setLayout(keepServers(saved ?? newLayout(keys.includes(last ?? "") ? last! : keys[0]), keys));
         }
         setServers(list);
       },
@@ -67,15 +77,15 @@ export function App() {
   // Start a link for every saved server, stop links for removed ones.
   useEffect(() => {
     if (!servers) return;
-    const want = new Set(servers.map(serverKey));
-    for (const [k, l] of links) if (!want.has(k)) (l.stop(), links.delete(k));
+    const want = servers.map(serverKey);
+    for (const [k, l] of links) if (!want.includes(k)) (l.stop(), links.delete(k));
     for (const s of servers) {
       if (links.has(serverKey(s))) continue;
       const l = new ServerLink(s, onLinkChange);
       links.set(l.key, l);
       l.start();
     }
-    if (servers.length && !want.has(server ?? "")) (setServer(serverKey(servers[0])), setDir(null), setSession(null));
+    setLayout((l) => (l ? keepServers(l, want) : want.length ? newLayout(want[0]) : null));
     rerender();
   }, [servers]);
 
@@ -86,26 +96,44 @@ export function App() {
   }, [notice]);
 
   const linkList = (servers ?? []).map((s) => links.get(serverKey(s))).filter((l): l is ServerLink => !!l);
+  // Home folders become known as servers answer.
+  const homesKey = linkList.map((l) => l.home).join("\n");
+  useEffect(() => setLayout((l) => l && dropHomeTabs(l, (s) => links.get(s)?.home || undefined)), [homesKey]);
   const connected = linkList.filter((l) => l.status === "connected");
-  const link = server ? (links.get(server) ?? null) : null;
-  // Home's folder is only known once the server has answered.
-  const root = dir ?? (link?.home || null);
-  const isHome = !!link && (!dir || dir === link.home);
+  const rootOf = (t: Tab) => t.dir ?? (links.get(t.server)?.home || null);
+  const front = layout ? layout.tabs[layout.active] : null;
+  const link = front ? (links.get(front.server) ?? null) : null;
+  const root = front ? rootOf(front) : null;
 
   // Only servers blimp can see right now: an offline server's last list may be long out of date.
   const waitingCount = connected.reduce((n, l) => n + (l.sessions?.filter((s) => s.state === "waiting").length ?? 0), 0);
   useEffect(() => void setBadge(waitingCount), [waitingCount]);
 
-  // The URL keeps the place, so a reload stays put; Rust learns it for ⌘K's focus-or-open.
-  useEffect(() => writePlace({ server: server ?? undefined, dir: dir ?? undefined, session: session ?? undefined }), [server, dir, session]);
-  useEffect(() => setWindowProject(server && root ? projectKey(server, root) : null), [server, root]);
-  useEffect(() => void setWindowTitle(root && !isHome ? `${baseName(root)} — blimp` : "blimp"), [root, isHome]);
-
-  // What this window shows, while it has focus: no notification for that session from any window.
-  const viewing = server && session ? `${server}/${session}` : null;
-  viewingRef.current = viewing;
+  // The URL keeps the tabs, so a reload stays put, and the Mac keeps them for the next launch:
+  // from the window whose tabs changed last. A window that opened on a place (⌘⇧N, a reload)
+  // saves nothing until its tabs change, so an untouched new window doesn't replace them.
+  const sigOf = (l: Layout | null) => (l ? JSON.stringify([l.tabs.map(tabKey), l.active, l.show]) : "");
+  const lastSig = useRef(sigOf(layout));
+  const owner = useRef(false);
   useEffect(() => {
-    const sync = () => setViewing(document.hasFocus() ? viewingRef.current : null);
+    if (!layout) return;
+    writeLayout(layout);
+    const sig = sigOf(layout);
+    if (sig !== lastSig.current) (lastSig.current = sig), (owner.current = true);
+    if (owner.current) void rememberLayout(layout);
+  }, [layout]);
+  const projects = (layout?.tabs ?? []).map((t) => (rootOf(t) ? projectKey(t.server, rootOf(t)!) : "")).filter(Boolean);
+  const projectsKey = projects.join("\t");
+  useEffect(() => setWindowProjects(projects), [projectsKey]);
+  useEffect(() => void setWindowTitle(root && front?.dir ? `${baseName(root)} — blimp` : "blimp"), [root, front?.dir]);
+
+  // What this window shows (the front tab's splits), while it has focus: no notification for
+  // those sessions from any window.
+  const viewing = front ? front.panes.map((n) => `${front.server}/${n}`) : [];
+  viewingRef.current = viewing;
+  const viewingKey = viewing.join("\n");
+  useEffect(() => {
+    const sync = () => setViewing(document.hasFocus() ? viewingRef.current : []);
     sync();
     window.addEventListener("focus", sync);
     window.addEventListener("blur", sync);
@@ -113,24 +141,27 @@ export function App() {
       window.removeEventListener("focus", sync);
       window.removeEventListener("blur", sync);
     };
-  }, [viewing]);
+  }, [viewingKey]);
 
-  // ⌘K in another window picked a session in this window's folder.
+  // A folder as a tab's dir: null for the server's home folder (Home).
+  const tabDir = (server: string, dir: string | null | undefined) => (!dir || dir === links.get(server)?.home ? null : dir);
+
+  const open = (server: string, dir: string | null, session?: string) => {
+    setDialog(null);
+    setLayout((l) => l && openTab(l, server, dir, session));
+    if (dir) void rememberProject(server, dir);
+  };
+
+  // ⌘K in another window picked a session in a folder this window has a tab for.
+  const openRef = useRef(open);
+  openRef.current = open;
   useEffect(() => {
     let off = () => {};
-    void onSelectSession((p) => p.session && setSession(p.session)).then((f) => (off = f));
+    void onSelectSession((p) => p.server && openRef.current(p.server, tabDir(p.server, p.dir), p.session)).then((f) => (off = f));
     return () => off();
   }, []);
 
-  const go = (p: { server: string; dir: string | null; session?: string | null }) => {
-    setServer(p.server);
-    setDir(p.dir);
-    setSession(p.session ?? null);
-    setDialog(null);
-    void rememberProject(p.server, p.dir);
-  };
-
-  // Opens a folder in this window, as VS Code's Open Folder does.
+  // Opens a folder in a tab (or brings its tab forward).
   const openProject = async (l: ServerLink, d: string) => {
     setDialog(null);
     try {
@@ -138,24 +169,69 @@ export function App() {
     } catch (e) {
       return setNotice(`Couldn't open ${tildify(d, l.home)}: ${errorText(e)}`);
     }
-    go({ server: l.key, dir: d === l.home ? null : d });
+    open(l.key, tabDir(l.key, d));
   };
 
-  const newWindow = async (p: Place = { server: server ?? undefined }) => {
-    if (await openWindow(p)) return;
-    window.open(`${location.pathname}?${placeQuery(p, location.search)}`, "_blank");
+  const newWindow = (p: Place = { server: link?.key }) => void openWindow(p);
+
+  // Sessions of tab t leaving for another window: a drag let go at a point on screen (that
+  // window, or a new one there), or Open in New Window (a new window with them split side by
+  // side, in their folder's tab).
+  const moveOut = (t: Tab, names: string[], at?: { x: number; y: number }) => {
+    const dir = rootOf(t);
+    if (!dir) return;
+    if (at && names.length === 1) return void dropSession({ server: t.server, dir, session: names[0] }, at.x, at.y);
+    const folder = { ...homeTab(t.server), dir: t.dir, panes: names };
+    void openWindow(t.dir ? { tabs: [homeTab(t.server), folder], active: 1, show: layout!.show } : { tabs: [folder], active: 0, show: layout!.show });
   };
 
-  // ⌘K: a session here is shown here; one in another folder opens (or focuses) its window.
+  // A session dragged here from another window, let go at (x, y): into its folder's tab, at that
+  // point once the tab is in front (the pane places it after the render that shows the tab).
+  const dropped = useRef<{ server: string; dir: string | null; name: string; x: number; y: number } | null>(null);
+  const onDrop = useRef((_: Place, __: number, ___: number) => {});
+  onDrop.current = (p, x, y) => {
+    if (!p.server || !p.session) return;
+    const dir = tabDir(p.server, p.dir);
+    dropped.current = { server: p.server, dir, name: p.session, x, y };
+    setLayout((l) => l && openTab(l, p.server!, dir));
+    rerender();
+  };
+  useEffect(() => {
+    let off = () => {};
+    void onDropSession((p, x, y) => onDrop.current(p, x, y)).then((f) => (off = f));
+    return () => off();
+  }, []);
+  useEffect(() => {
+    const d = dropped.current;
+    const l = d && links.get(d.server);
+    const r = d && l && (d.dir ?? (l.home || null));
+    if (!d || !l || !r) return;
+    dropped.current = null;
+    actions.get(wbKey(l, r))?.current.dropIn(d.name, d.x, d.y);
+  });
+
+  // ⌘K: a session in a folder with a tab here is shown in that tab; one open in another window
+  // brings that window forward; otherwise its folder opens in a new tab here.
   const pickSession = async (l: ServerLink, name: string) => {
     setDialog(null);
     const s = l.sessions?.find((x) => x.name === name);
-    if (!s) return;
-    if (l.key === server && s.dir === root) return setSession(name);
-    const d = s.dir === l.home ? null : s.dir;
-    // The browser build has one window, so it moves there instead.
-    if (!(await openWindow({ server: l.key, dir: s.dir, session: name }))) go({ server: l.key, dir: d, session: name });
+    if (!s || !layout) return;
+    const dir = tabDir(l.key, s.dir);
+    const here = layout.tabs.some((t) => t.server === l.key && t.dir === dir);
+    if (!here && (await focusProject({ server: l.key, dir: s.dir, session: name }))) return;
+    open(l.key, dir, name);
   };
+
+  const updatePanes = (key: string, f: (p: Panes) => Panes) =>
+    setLayout((l) => {
+      const i = l ? l.tabs.findIndex((t) => tabKey(t) === key) : -1;
+      if (!l || i < 0) return l;
+      const t = l.tabs[i];
+      const p = f(t);
+      return p === t ? l : setPanes(l, i, p);
+    });
+
+  const toggle = (k: keyof Show) => setLayout((l) => l && { ...l, show: { ...l.show, [k]: !l.show[k] } });
 
   const addServer = (s: Server) => {
     setDialog(null);
@@ -163,7 +239,7 @@ export function App() {
     const next = [...(servers ?? []), s];
     setServers(next);
     void saveServers(next);
-    go({ server: serverKey(s), dir: null });
+    setLayout((l) => (l ? openTab(l, serverKey(s), null) : newLayout(serverKey(s))));
   };
 
   const removeServer = (l: ServerLink) => {
@@ -173,16 +249,24 @@ export function App() {
   };
 
   // App shortcuts. Registered once; the ref always points at this render's handler. The
-  // workbench has its own (⌘P, ⌘S, ⌘W, ⌘B, ⌘J).
+  // workbench in front has its own (⌘P, ⌘S, ⌘W).
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
-    if (!e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!e.metaKey || e.ctrlKey) return;
+    // e.code: with ⌥ held, a Mac's e.key for B is "∫".
+    if (e.altKey) {
+      if (e.code !== "KeyB" || e.shiftKey) return;
+      toggle("sessions");
+      return e.preventDefault();
+    }
     const k = e.key.toLowerCase();
     // Inside Monaco, ⌘K starts its chords (⌘K ⌘C and so on), as in VS Code.
     if (k === "k" && (e.target as Element | null)?.closest?.(".monaco-editor")) return;
     if (k === "k" && !e.shiftKey) setDialog((d) => (d === "palette" ? null : "palette"));
-    else if (k === "n" && e.shiftKey) void newWindow();
-    else if (k === "n") pane.current.newClaude();
+    else if (k === "n" && e.shiftKey) newWindow();
+    else if (k === "n") frontActions?.current.newClaude();
+    else if (k === "b" && !e.shiftKey) toggle("files");
+    else if (k === "j" && !e.shiftKey) toggle("term");
     else if (k === "o" && !e.shiftKey) {
       if (connected.length) setDialog("open");
       else setNotice("No server is connected yet.");
@@ -196,6 +280,9 @@ export function App() {
     return () => window.removeEventListener("keydown", h, true);
   }, []);
 
+  const wbKey = (l: ServerLink, r: string) => `${l.id}\n${r}`;
+  const frontActions = link && root ? refFor(actions, wbKey(link, root), noActions) : null;
+
   if (!servers) return <div className="app" />;
   if (!servers.length)
     return (
@@ -203,68 +290,116 @@ export function App() {
         <AddServerDialog onAdd={addServer} />
       </div>
     );
-  if (!link) return <div className="app" />;
+  if (!layout || !link) return <div className="app" />;
 
+  const home = layout.tabs[0];
+  const homeLink = links.get(home.server)!;
   const welcome = (
     <Welcome
-      link={link}
+      link={homeLink}
+      shown={layout.active === 0}
       links={linkList}
-      onServer={(l) => go({ server: l.key, dir: null })}
-      onOpen={(d) => void openProject(link, d)}
+      onServer={(l) => open(l.key, null)}
+      onOpen={(d) => void openProject(homeLink, d)}
       onOpenFolder={() => setDialog("open")}
-      onNewWindow={() => void newWindow()}
+      onNewWindow={() => newWindow()}
       onAddServer={() => setDialog("add")}
       onRemoveServer={removeServer}
-      onForget={(d) => void forgetProject(link.key, d)}
+      onForget={(d) => void forgetProject(homeLink.key, d)}
     />
   );
+  const show = layout.show;
+  const select = (i: number) => setLayout((l) => l && { ...l, active: i });
+  const close = (i: number) => setLayout((l) => l && closeTab(l, i));
 
   return (
     <div className="app">
       <header className="topbar">
-        <button className="icon-button small" title="Home" aria-label="Home" disabled={isHome && !dir} onClick={() => go({ server: link.key, dir: null })}>
-          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-            <path d="M2.5 7.5L8 2.5l5.5 5M4 6.5v7h3v-4h2v4h3v-7" fill="none" stroke="currentColor" />
-          </svg>
-        </button>
-        <span className="topbar-place" title={root ?? ""}>
-          {linkList.length > 1 && <span className="topbar-server">{link.key}</span>}
-          {root ? tildify(root, link.home) : link.server.host}
-        </span>
-        <span className="topbar-fill" />
+        <div className="ptabs" role="tablist" aria-label="Projects">
+          {layout.tabs.map((t, i) => {
+            const l = links.get(t.server);
+            const r = rootOf(t);
+            const name = t.dir ? baseName(t.dir) || t.dir : "Home";
+            const waiting = !!r && l?.status === "connected" && !!l.sessions?.some((s) => s.dir === r && s.state === "waiting");
+            const where = r && l ? tildify(r, l.home) : "";
+            return (
+              <div
+                key={tabKey(t)}
+                role="tab"
+                aria-selected={i === layout.active}
+                aria-label={name}
+                className={"ptab" + (i === layout.active ? " active" : "") + (i === 0 ? " home" : "")}
+                title={linkList.length > 1 ? `${t.server} · ${where}` : where}
+                onMouseDown={(e) => e.button === 0 && select(i)}
+                onAuxClick={(e) => e.button === 1 && close(i)}
+              >
+                {i === 0 && (
+                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+                    <path d="M2.5 7.5L8 2.5l5.5 5M4 6.5v7h3v-4h2v4h3v-7" fill="none" stroke="currentColor" />
+                  </svg>
+                )}
+                {linkList.length > 1 && <span className="ptab-server">{t.server}</span>}
+                {i > 0 && <span className="ptab-title">{name}</span>}
+                {waiting && <span className="dot" aria-label="A session is waiting for you" />}
+                {i > 0 && (
+                  <button className="tab-close" aria-label={`Close ${name}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => close(i)}>
+                    ×
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          <button className="icon-button small ptabs-add" title="Open Folder… (⌘O)" aria-label="Open Folder" disabled={!connected.length} onClick={() => setDialog("open")}>
+            +
+          </button>
+        </div>
         {link.status !== "connected" && (
           <span className={"conn conn-" + link.status} title={link.error}>
             {link.status === "offline" ? "offline" : "connecting…"}
           </span>
         )}
-        <button className="link-button" disabled={!connected.length} onClick={() => setDialog("open")}>
-          Open Folder…
-        </button>
+        <div className="layout-toggles">
+          <LayoutToggle label="Files" keys="⌘B" on={show.files} onClick={() => toggle("files")} pane={<rect x="1.5" y="2.5" width="5" height="11" rx="1.5" />} />
+          <LayoutToggle label="Terminal" keys="⌘J" on={show.term} onClick={() => toggle("term")} pane={<rect x="1.5" y="9.5" width="13" height="4" rx="1.5" />} />
+          <LayoutToggle label="Sessions" keys="⌘⌥B" on={show.sessions} onClick={() => toggle("sessions")} pane={<rect x="9.5" y="2.5" width="5" height="11" rx="1.5" />} />
+        </div>
       </header>
 
-      {root ? (
-        <Workbench
-          key={`${link.id}\n${root}`}
-          link={link}
-          root={root}
-          welcome={isHome ? welcome : undefined}
-          opener={opener}
-          terminal={
-            <TerminalPane
-              link={link}
-              dir={root}
-              selected={session}
-              onSelect={setSession}
-              onOpenPath={(p, line, col) => opener.current(p, line, col)}
-              onNotice={setNotice}
-              actions={pane}
-            />
-          }
-        />
-      ) : (
+      {layout.tabs.map((t, i) => {
+        const l = links.get(t.server);
+        const r = rootOf(t);
+        const isFront = i === layout.active;
         // Home before the server has answered: there's no folder to show yet.
-        <div className="wb-connecting">{welcome}</div>
-      )}
+        if (!l || !r) return isFront ? <div key={tabKey(t)} className="wb-connecting">{welcome}</div> : null;
+        const key = wbKey(l, r);
+        const opener = refFor(openers, key, () => {});
+        return (
+          <Workbench
+            key={key}
+            link={l}
+            root={r}
+            front={isFront}
+            showFiles={show.files}
+            showTerm={show.term}
+            welcome={i === 0 ? welcome : undefined}
+            opener={opener}
+            terminal={
+              <TerminalPane
+                link={l}
+                dir={r}
+                panes={t}
+                onPanes={(f) => updatePanes(tabKey(t), f)}
+                front={isFront}
+                showList={show.sessions}
+                onOpenPath={(p, line, col) => opener.current(p, line, col)}
+                onNotice={setNotice}
+                onMoveOut={(names, at) => moveOut(t, names, at)}
+                actions={refFor(actions, key, noActions)}
+              />
+            }
+          />
+        );
+      })}
 
       {dialog === "palette" && <Palette links={linkList} onPick={(l, name) => void pickSession(l, name)} onClose={() => setDialog(null)} />}
       {dialog === "open" && connected.length > 0 && (
@@ -282,5 +417,18 @@ export function App() {
         </div>
       )}
     </div>
+  );
+}
+
+// A show/hide button at the top right, as in VS Code: a window outline with the pane drawn in
+// it, filled while the pane shows.
+function LayoutToggle(props: { label: string; keys: string; on: boolean; onClick: () => void; pane: ReactNode }) {
+  return (
+    <button className="icon-button small" title={`${props.on ? "Hide" : "Show"} ${props.label} (${props.keys})`} aria-label={props.label} aria-pressed={props.on} onClick={props.onClick}>
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor">
+        <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+        <g fill={props.on ? "currentColor" : "none"}>{props.pane}</g>
+      </svg>
+    </button>
   );
 }

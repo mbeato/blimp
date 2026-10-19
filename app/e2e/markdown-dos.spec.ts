@@ -21,7 +21,7 @@ test("Markdown that is slow or too deep for marked shows a note, and the window 
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await openSessionTab(page, dir);
-  const ws = page.locator(".wb");
+  const ws = page.locator(".wb:not([hidden])");
   const tree = ws.locator(".tree");
 
   // The longest gap between timer ticks: how long the main thread was blocked.
@@ -46,7 +46,7 @@ test("Markdown that is slow or too deep for marked shows a note, and the window 
 
   // Still the whole app: the session list, the terminal, and other files render.
   await expect(page.locator(".srow").first()).toBeVisible();
-  await expect(page.locator(".term:not([hidden]) .xterm")).toBeVisible();
+  await expect(page.locator(".wb:not([hidden]) .term:not([hidden]) .xterm")).toBeVisible();
   await tree.getByText("fine.md").click();
   await expect(ws.locator(".md-view h1")).toHaveText("Fine");
   expect(errors).toEqual([]);

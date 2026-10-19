@@ -20,14 +20,16 @@ fn main() {
             tunnel::connect,
             tunnel::disconnect,
             windows::open_window,
-            windows::set_window_project,
+            windows::focus_project,
+            windows::drop_session,
+            windows::set_window_projects,
             windows::set_viewing,
             windows::claim_notice
         ])
-        .on_window_event(|window, event| {
-            if let WindowEvent::Destroyed = event {
-                window.state::<windows::Windows>().forget(window.label());
-            }
+        .on_window_event(|window, event| match event {
+            WindowEvent::Destroyed => window.state::<windows::Windows>().forget(window.label()),
+            WindowEvent::Focused(true) => window.state::<windows::Windows>().focused(window.label()),
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while starting blimp")
@@ -37,7 +39,7 @@ fn main() {
             // Clicking the Dock icon with every window closed opens a new one, as Mac apps do.
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { has_visible_windows: false, .. } => {
-                let _ = windows::create(app, &app.state::<windows::Windows>(), "");
+                let _ = windows::create(app, &app.state::<windows::Windows>(), "", None);
             }
             _ => {}
         });

@@ -46,7 +46,9 @@ export default async function setup() {
   const children: ChildProcess[] = [];
   // No pipes to children: a zmx daemon started under them would inherit and hold them open.
   const blimpd = spawn("bun", [join(repo, "src/main.ts"), "serve"], {
-    env: { ...process.env, HOME: fixtures, BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude") },
+    // SHELL: New shell starts a login shell in the empty home, where zsh would open its
+    // first-run menu (and take the test's typing) for want of a .zshrc.
+    env: { ...process.env, HOME: fixtures, SHELL: "/bin/bash", BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude") },
     stdio: ["ignore", log, log],
   });
   children.push(blimpd);

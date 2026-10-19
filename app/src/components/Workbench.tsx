@@ -88,17 +88,26 @@ const sameSync = (a: Sync, b: Sync) =>
 
 type Creating = { kind: "file" | "dir"; dir: string; error: string };
 
-// One window's project, laid out like VS Code: the file tree on the left, open files in tabs at
-// the top right, and the terminal pane (props.terminal) below them. With no file open the
-// terminal takes the whole right side, except on Home, where props.welcome fills the top.
+// Tells apart the workbenches sharing a server link: each tab has its own watch set.
+let workbenches = 0;
+
+// One project tab, laid out like VS Code: the file tree on the left, open files in tabs at the
+// top right, and the terminal pane (props.terminal) below them. With no file open the terminal
+// takes the whole right side, except on Home, where props.welcome fills the top.
+// front: this tab is the one shown (the others stay mounted, hidden, so nothing is lost).
+// showFiles, showTerm: the window's show/hide buttons for the tree and the terminal.
 export function Workbench(props: {
   link: ServerLink;
   root: string;
+  front: boolean;
+  showFiles: boolean;
+  showTerm: boolean;
   welcome?: ReactNode;
   terminal: ReactNode;
   opener: { current: Opener };
 }) {
   const { link, root } = props;
+  const id = useRef(++workbenches).current;
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   // The tree and the open files are long-lived mutable objects that async work and fs events
   // update; React state only holds what's on screen.
@@ -112,8 +121,6 @@ export function Workbench(props: {
   const [active, setActiveState] = useState<string | null>(null);
   const [closing, setClosing] = useState<string | null>(null);
   const [quick, setQuick] = useState(false);
-  const [treeOpen, setTreeOpen] = useState(true);
-  const [termOpen, setTermOpen] = useState(true);
   const [treeWidth, setTreeWidth] = useState(240);
   const [editorShare, setEditorShare] = useState(0.6);
   // The folder new files and folders go in: the last folder clicked, or the clicked file's folder.
@@ -306,7 +313,7 @@ export function Workbench(props: {
     if (docs.get(doc.path) !== doc) return;
     if (doc.deleted) {
       doc.deleted = false; // it came back
-      link.watch(watchPaths(expanded.current, docs.keys()));
+      link.watch(id, watchPaths(expanded.current, docs.keys()));
       rerender();
     }
     if (dispatch(doc, { type: "remote", mtime: body.mtime }) === "reload") await applyBody(doc, body);
@@ -353,7 +360,7 @@ export function Workbench(props: {
         doc.notice = "";
         if (doc.deleted) {
           doc.deleted = false;
-          link.watch(watchPaths(expanded.current, docs.keys()));
+          link.watch(id, watchPaths(expanded.current, docs.keys()));
         }
         dispatch(doc, { type: "saved", mtime });
         // Typing while the save was in flight leaves the file dirty: save that too, later.
@@ -430,7 +437,8 @@ export function Workbench(props: {
 
   // blimpd watches the expanded folders and open files for this window's events socket.
   const watchKey = watchPaths(expanded.current, docs.keys()).join("\n");
-  useEffect(() => link.watch(watchKey ? watchKey.split("\n") : []), [watchKey, link]);
+  useEffect(() => link.watch(id, watchKey ? watchKey.split("\n") : []), [watchKey, link]);
+  useEffect(() => () => link.watch(id, []), [link]);
 
   // Leaving the window, or the project, saves what's pending.
   const flushRef = useRef(flushAll);
@@ -496,10 +504,11 @@ export function Workbench(props: {
     [],
   );
 
-  // ⌘P quick open, ⌘S save now, ⌘W close the open file, ⌘B files, ⌘J terminal.
+  // ⌘P quick open, ⌘S save now, ⌘W close the open file. Only in the tab in front. (⌘B and ⌘J,
+  // files and terminal, are the window's.)
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
   onKey.current = (e) => {
-    if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (!props.front || !e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     const k = e.key.toLowerCase();
     if (k === "p") setQuick(true);
     else if (k === "s") {
@@ -507,9 +516,7 @@ export function Workbench(props: {
     } else if (k === "w") {
       if (quick) setQuick(false);
       else if (active) void closeDoc(active);
-    } else if (k === "b") setTreeOpen((o) => !o);
-    else if (k === "j") setTermOpen((o) => !o);
-    else return;
+    } else return;
     e.preventDefault();
   };
   useEffect(() => {
@@ -587,12 +594,13 @@ export function Workbench(props: {
 
   const doc = activeDoc;
   const closingDoc = closing ? docs.get(closing) : undefined;
-  const showEditor = docs.size > 0 || !!props.welcome;
-  // The terminal can only hide while something else fills the right side.
-  const showTerm = termOpen || !showEditor;
+  const showTerm = props.showTerm;
+  // With the terminal hidden and no file open, the editor area shows how to open one.
+  const showEditor = docs.size > 0 || !!props.welcome || !showTerm;
+  const treeOpen = props.showFiles;
 
   return (
-    <div className="wb" ref={box}>
+    <div className="wb" ref={box} hidden={!props.front}>
       <aside className="wb-tree" hidden={!treeOpen} style={{ width: treeWidth }}>
         <div className="pane-head">
           <span className="pane-title" title={root}>
@@ -673,6 +681,12 @@ export function Workbench(props: {
             </div>
           )}
           {docs.size === 0 && props.welcome}
+          {docs.size === 0 && !props.welcome && (
+            <div className="empty">
+              No file open
+              <div className="empty-sub">⌘P to open one, or pick it in the files on the left</div>
+            </div>
+          )}
           <div className="viewer" hidden={docs.size === 0}>
             {closingDoc && (
               <div className="fbar" role="alert">

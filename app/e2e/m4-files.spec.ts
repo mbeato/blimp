@@ -32,7 +32,7 @@ test("edits autosave to git diff; Claude's edit reloads the file; a clash shows 
   startSession(name, dir);
 
   await openSessionTab(page, dir);
-  const ws = page.locator(".wb");
+  const ws = page.locator(".wb:not([hidden])");
   await ws.locator(".tree").getByText("notes.txt").click();
   const editor = ws.locator(".monaco-editor .view-lines");
   await expect(editor).toContainText("first line");
@@ -72,7 +72,7 @@ test("a file deleted on the server shows a bar, and only Save brings it back; âŒ
   startSession(del, dir);
 
   const term = await openSessionTab(page, dir);
-  const ws = page.locator(".wb");
+  const ws = page.locator(".wb:not([hidden])");
   await ws.locator(".tree").getByText("gone.txt").click();
   const editor = ws.locator(".monaco-editor .view-lines");
   await expect(editor).toContainText("still here");
@@ -111,7 +111,7 @@ test("âŒ˜W closes the open file from anywhere in the window, saving it first", a
   startSession(closeW, dir);
 
   const term = await openSessionTab(page, dir);
-  const ws = page.locator(".wb");
+  const ws = page.locator(".wb:not([hidden])");
   const fileTabs = ws.locator(".ftabs .tab");
   await ws.locator(".tree").getByText("readme.md").click();
   await expect(ws.locator(".md-view h1")).toHaveText("Read me");
@@ -160,7 +160,7 @@ test("the active file tab scrolls into view, and the Markdown Edit toggle stays 
   startSession(tabs, dir);
 
   await openSessionTab(page, dir);
-  const ws = page.locator(".wb");
+  const ws = page.locator(".wb:not([hidden])");
   const strip = ws.locator(".ftabs");
   // Fully inside the strip's visible box (the strip scrolls sideways with no scrollbar).
   const shown = (el: string) =>

@@ -178,30 +178,33 @@ try {
   record("Home shows the server's home folder and Welcome", !!home, await js("return document.querySelector('.wb')?.innerText.slice(0, 300)"));
   await shot("02-home");
 
-  // Open Folder (the top bar's button), typed path.
-  await click(".topbar .link-button");
+  // Open Folder (the + after the project tabs), typed path.
+  await click(".ptabs-add");
   await until(5000, () => js("return !!document.querySelector('.dialog .dialog-input')"));
   await typeKeys([..."~/proj", "\uE007"]);
-  const rows = await until(20_000, async () => ((await js("return document.querySelectorAll('.srow').length")) >= 2 ? true : undefined));
-  record("Open Folder opens the project; its 2 sessions are listed", !!rows, await js("return [...document.querySelectorAll('.srow')].map(r => r.innerText.replace(/\\n/g,' '))"));
+  const rows = await until(20_000, async () => ((await js("return document.querySelectorAll('.wb:not([hidden]) .srow').length")) >= 2 ? true : undefined));
+  record("Open Folder opens the project in a new tab; its 2 sessions are listed", !!rows && (await js("return [...document.querySelectorAll('.ptab')].map(t => t.getAttribute('aria-label')).join(',')")) === "Home,proj", {
+    tabs: await js("return [...document.querySelectorAll('.ptab')].map(t => t.getAttribute('aria-label') + (t.classList.contains('active') ? '*' : ''))"),
+    rows: await js("return [...document.querySelectorAll('.wb:not([hidden]) .srow')].map(r => r.innerText.replace(/\\n/g,' '))"),
+  });
   const title = await until(5000, () => js("return document.title === 'proj — blimp' ? document.title : undefined"));
   const p1b = await probe();
-  record("window title and set_window_project / set_viewing go through", !!title && ["set_window_project", "set_viewing"].every((c) => p1b.invokes.some((i: any) => i.cmd === c && i.ok)), {
+  record("window title and set_window_projects / set_viewing go through", !!title && ["set_window_projects", "set_viewing"].every((c) => p1b.invokes.some((i: any) => i.cmd === c && i.ok)), {
     title: await js("return document.title"),
     invokes: p1b.invokes.filter((i: any) => /window|viewing/.test(i.cmd)),
   });
   await shot("02b-project");
 
   // 3. Terminal: existing screen, then type.
-  await click('.srow[data-session="blimptest-a"] .srow-main');
-  await until(10_000, () => js("return !!document.querySelector('.tpane-terms .term:not([hidden]) .xterm-screen')"));
+  await click('.wb:not([hidden]) .srow[data-session="blimptest-a"] .srow-main');
+  await until(10_000, () => js("return !!document.querySelector('.wb:not([hidden]) .tpane-terms .term:not([hidden]) .xterm-screen')"));
   await sleep(1500);
   // xterm's WebGL renderer draws into a canvas, so the screen is checked in the screenshot.
-  const renderer = await js("const t = document.querySelector('.tpane-terms .term:not([hidden])'); return t.querySelector('.xterm-rows') ? 'dom' : 'webgl (canvas)'");
-  const screenText = () => js("const r = document.querySelector('.tpane-terms .term:not([hidden]) .xterm-rows'); return r ? r.innerText : ''");
+  const renderer = await js("const t = document.querySelector('.wb:not([hidden]) .tpane-terms .term:not([hidden])'); return t.querySelector('.xterm-rows') ? 'dom' : 'webgl (canvas)'");
+  const screenText = () => js("const r = document.querySelector('.wb:not([hidden]) .tpane-terms .term:not([hidden]) .xterm-rows'); return r ? r.innerText : ''");
   await shot("03a-terminal-before-typing");
   record("terminal attaches (existing screen: see 03a-terminal-before-typing.png)", true, { renderer, domText: (await screenText()).trim().slice(0, 200) });
-  await click(".tpane-terms .term:not([hidden]) .xterm-screen");
+  await click(".wb:not([hidden]) .tpane-terms .term:not([hidden]) .xterm-screen");
   await typeKeys([..."echo native-ok", "\uE007"]);
   await sleep(1500);
   const hist = zmx("history", "blimptest-a");
@@ -211,11 +214,11 @@ try {
 
   // 4. Files pane: tree, .md, .ts (Monaco + worker), .png, .pdf (pdf.js + worker).
   const tree = await until(10_000, async () => {
-    const t: string[] = await js("return [...document.querySelectorAll('.tree .tree-name')].map(e => e.textContent)");
+    const t: string[] = await js("return [...document.querySelectorAll('.wb:not([hidden]) .tree .tree-name')].map(e => e.textContent)");
     return t.includes("README.md") ? t : undefined;
   });
   record("files tree loads", !!tree, tree ?? (await js("return document.querySelector('.wb-tree')?.innerText")));
-  const openFile = (name: string) => click(`.tree-row[title="${name}"]`);
+  const openFile = (name: string) => click(`.wb:not([hidden]) .tree-row[title="${name}"]`);
   await openFile("README.md");
   const md = await until(10_000, () => js("return document.querySelector('.md-view h1')?.textContent"));
   record("README.md renders", md === "Native heading", md ?? (await js("return document.querySelector('.viewer')?.innerText")));
@@ -240,8 +243,52 @@ try {
   });
   await shot("06-pdf");
 
+  // 4b. The show/hide buttons at the top right.
+  const hiddenNow = () => js("const w = document.querySelector('.wb:not([hidden])'); return ['.wb-tree', '.wb-term', '.slist'].map(c => w.querySelector(c).offsetWidth === 0)");
+  await click('.layout-toggles button[aria-label="Files"]');
+  await click('.layout-toggles button[aria-label="Sessions"]');
+  const hid = await hiddenNow();
+  await click('.layout-toggles button[aria-label="Files"]');
+  await click('.layout-toggles button[aria-label="Sessions"]');
+  const back = await hiddenNow();
+  record("the Files and Sessions buttons hide and show their panes", hid[0] && !hid[1] && hid[2] && !back.some(Boolean), { hidden: hid, after: back });
+
+  // 4c. Drag blimptest-b from the list onto the right half of the terminal: two splits.
+  const box = (css: string) => js(`const r = document.querySelector(${JSON.stringify(css)}).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }`);
+  const from = await box('.wb:not([hidden]) .srow[data-session="blimptest-b"]');
+  const to = await box(".wb:not([hidden]) .tpane-terms");
+  const pt = (x: number, y: number) => ({ type: "pointerMove", origin: "viewport", x: Math.round(x), y: Math.round(y), duration: 0 });
+  await wd("POST", "/actions", {
+    actions: [
+      {
+        type: "pointer",
+        id: "mouse",
+        parameters: { pointerType: "mouse" },
+        actions: [
+          pt(from.x + 40, from.y + from.h / 2),
+          { type: "pointerDown", button: 0 },
+          pt(from.x + 30, from.y + from.h / 2 + 20),
+          pt(to.x + to.w * 0.6, to.y + to.h / 2),
+          pt(to.x + to.w * 0.8, to.y + to.h / 2),
+          { type: "pointerUp", button: 0 },
+        ],
+      },
+    ],
+  });
+  await wd("DELETE", "/actions").catch(() => {});
+  const splits = await until(5000, async () => {
+    const v: { name: string; x: number }[] = await js("return [...document.querySelectorAll('.wb:not([hidden]) .tsplit:not([hidden])')].map(e => ({ name: e.dataset.split, x: e.getBoundingClientRect().x })).sort((a, b) => a.x - b.x)");
+    return v.length === 2 ? v : undefined;
+  });
+  record("dragging a session onto the terminal splits it (WebKit pointer events)", !!splits && splits[1].name === "blimptest-b" && splits[1].x > splits[0].x, splits ?? (await js("return document.querySelector('.wb:not([hidden]) .tpane-terms').innerHTML.slice(0, 300)")));
+  await shot("06b-split");
+  // Close that split again (blimptest-b keeps running): step 6 needs b off screen to notify.
+  await click('.wb:not([hidden]) .tsplit[data-split="blimptest-b"] .tab-close');
+  const one = await until(3000, () => js("return document.querySelectorAll('.wb:not([hidden]) .tsplit:not([hidden])').length === 1"));
+  record("a split's × closes it, the session stays listed", !!one && (await js(`return !!document.querySelector('.wb:not([hidden]) .srow[data-session="blimptest-b"]')`)), await js("return document.querySelectorAll('.wb:not([hidden]) .tsplit:not([hidden])').length"));
+
   // 5. Palette: the UI binds metaKey only (App.tsx), so on Linux that is Super+K; no Ctrl+K mapping.
-  await click(".slist .pane-title");
+  await click(".wb:not([hidden]) .slist .pane-title");
   await chord("\uE03D", "k");
   const pal = await until(3000, () => js("return !!document.querySelector('.palette')"));
   record("⌘K (Meta+K) opens the palette", !!pal, pal ? await js("return document.querySelector('.palette').innerText") : "no .palette after Meta+K");
@@ -263,6 +310,56 @@ try {
     const welcome = await until(20_000, () => js("return document.querySelector('.welcome-page .conn')?.textContent === 'connected'"));
     await shot("07b-second-window");
     record("⌘⇧N opens a second window on Home, sharing the tunnel", !!welcome && tunnels().length === 1, { handles, tunnels: tunnels().length });
+    // ⌘K here to a session in the first window's proj tab: that window comes forward, and no
+    // second proj tab opens here (focus_project).
+    await click(".welcome-page h1");
+    await chord("\uE03D", "k");
+    await until(3000, () => js("return !!document.querySelector('.palette')"));
+    await typeKeys([..."blimptest-a", "\uE007"]);
+    await sleep(1000);
+    const p2w = await js("return window.__probe ? window.__probe.invokes.filter(i => i.cmd === 'focus_project') : 'no probe'");
+    const tabs2 = await js("return document.querySelectorAll('.ptab').length");
+    const picked = await js("return !document.querySelector('.palette')");
+    record("⌘K to a session another window has open focuses that window instead of opening a tab", tabs2 === 1 && picked, { tabsHere: tabs2, paletteClosed: picked, focusProject: p2w });
+
+    // A session dragged out of this window (drop_session): let go over the first window, it
+    // moves into that window's proj tab; let go where no window is, a new window opens.
+    await wd("POST", "/window", { handle: first });
+    const target = await js(`const r = document.querySelector('.wb:not([hidden]) .tpane-terms').getBoundingClientRect();
+      const l = JSON.parse(new URLSearchParams(location.search).get('layout'));
+      return { x: screenX + r.x + r.width * 0.8, y: screenY + (outerHeight - innerHeight) + r.y + r.height / 2, dir: l.tabs[l.active].dir }`);
+    await wd("POST", "/window", { handle: second });
+    const init = new URLSearchParams({ server: "localhost", dir: target.dir, session: "blimptest-b" }).toString();
+    const invoke = (x: number, y: number) =>
+      jsAsync(`return await window.__TAURI_INTERNALS__.invoke('drop_session', { init: ${JSON.stringify(init)}, x: ${x}, y: ${y} }).then(String, e => 'ERR ' + e)`);
+    const onFirst = await invoke(target.x, target.y);
+    const offAll = await invoke(-5000, -5000);
+    const three: string[] | undefined = await until(10_000, async () => {
+      const h: string[] = await wd("GET", "/window/handles");
+      return h.length === 3 ? h : undefined;
+    });
+    await wd("POST", "/window", { handle: first });
+    const panes = await until(5000, async () => {
+      const l = JSON.parse(await js("return new URLSearchParams(location.search).get('layout')"));
+      const p: string[] = l.tabs[l.active].panes;
+      return p.includes("blimptest-b") ? p : undefined;
+    });
+    record("a session let go over another window moves into it; let go over no window, a new window opens", onFirst === "true" && offAll === "false" && !!three && !!panes, {
+      overFirst: onFirst,
+      overNone: offAll,
+      windows: three?.length,
+      firstWindowSplits: panes ?? (await js("return new URLSearchParams(location.search).get('layout')")),
+    });
+    await shot("07c-dropped-from-other-window");
+    // Close what this added: the new window, and b's split here (step 6 needs b off screen).
+    for (const h of three ?? []) {
+      if (h === first || h === second) continue;
+      await wd("POST", "/window", { handle: h });
+      await wd("DELETE", "/window");
+    }
+    await wd("POST", "/window", { handle: first });
+    await click('.wb:not([hidden]) .tsplit[data-split="blimptest-b"] .tab-close').catch(() => {});
+    await wd("POST", "/window", { handle: second });
     await wd("DELETE", "/window");
     await wd("POST", "/window", { handle: first });
   } else record("⌘⇧N opens a second window on Home, sharing the tunnel", false, await wd("GET", "/window/handles"));
@@ -330,10 +427,13 @@ try {
 
   // 8. Store persists the server list and recent projects across a restart.
   await openApp();
-  const again = await until(20_000, () => js("return [...document.querySelectorAll('.welcome-recent button')].some(b => b.textContent === 'proj')"));
+  const again = await until(20_000, () =>
+    js("return document.querySelector('.ptab.active')?.getAttribute('aria-label') === 'proj' && [...document.querySelectorAll('.welcome-recent button')].some(b => b.textContent === 'proj')"),
+  );
   const store = join(appHome, ".local/share/dev.blimp.app/servers.json");
   const recentStore = join(appHome, ".local/share/dev.blimp.app/recent.json");
-  record("servers and recent projects persist across restart (store plugin)", !!again && !(await js("return !!document.querySelector('.welcome form')")), {
+  record("servers, recent projects and the open tabs persist across restart (store plugin)", !!again && !(await js("return !!document.querySelector('.welcome form')")), {
+    tabs: await js("return [...document.querySelectorAll('.ptab')].map(t => t.getAttribute('aria-label') + (t.classList.contains('active') ? '*' : ''))"),
     page: await js("return document.querySelector('.welcome-page')?.innerText.slice(0, 200)"),
     servers_json: existsSync(store) ? readFileSync(store, "utf8") : "missing " + store,
     recent_json: existsSync(recentStore) ? readFileSync(recentStore, "utf8").slice(0, 300) : "missing " + recentStore,

@@ -1,10 +1,11 @@
 // Recent projects, per server, kept on this Mac (the store plugin; localStorage in a browser).
-// Also which server Home opened last.
+// Also which server Home opened last, and the last window's tabs, which the next launch reopens.
 
 import { inTauri } from "./connection";
+import { decodeLayout, encodeLayout, type Layout } from "./tabs";
 
 export type Recent = { dir: string; at: number };
-type Saved = { projects: Record<string, Recent[]>; lastServer?: string };
+type Saved = { projects: Record<string, Recent[]>; lastServer?: string; layout?: string };
 
 const MAX = 20;
 const LS_KEY = "blimp.recent";
@@ -20,7 +21,11 @@ async function load(): Promise<Saved> {
     if (inTauri()) {
       const { load } = await import("@tauri-apps/plugin-store");
       const store = await load("recent.json");
-      return { projects: (await store.get<Saved["projects"]>("projects")) ?? {}, lastServer: await store.get<string>("lastServer") };
+      return {
+        projects: (await store.get<Saved["projects"]>("projects")) ?? {},
+        lastServer: await store.get<string>("lastServer"),
+        layout: await store.get<string>("layout"),
+      };
     }
     const saved = JSON.parse(localStorage.getItem(LS_KEY) ?? "null");
     if (saved && typeof saved === "object" && saved.projects) return saved;
@@ -35,6 +40,7 @@ async function save(s: Saved) {
       const store = await load("recent.json");
       await store.set("projects", s.projects);
       if (s.lastServer) await store.set("lastServer", s.lastServer);
+      if (s.layout) await store.set("layout", s.layout);
       await store.save();
       return;
     }
@@ -66,3 +72,11 @@ export const rememberProject = (server: string, dir: string | null) =>
 
 export const forgetProject = (server: string, dir: string) =>
   change((s) => void (s.projects[server] = dropRecent(s.projects[server] ?? [], dir)));
+
+// Every change to a window's tabs. With several windows, the one changed last is what reopens.
+export const rememberLayout = (l: Layout) => change((s) => void (s.layout = encodeLayout(l)));
+
+export async function lastLayout(): Promise<Layout | null> {
+  const saved = (await load()).layout;
+  return saved ? decodeLayout(saved) : null;
+}

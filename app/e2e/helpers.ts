@@ -96,17 +96,28 @@ export const cspViolations = (page: Page) => page.evaluate(() => (window as any)
 
 export const notifications = (page: Page) => page.evaluate(() => (window as any).__notifications as { title: string; body?: string }[]);
 
-// A running session's row in the terminal pane's list.
-export const sessionRow = (page: Page, name: string) => page.locator(`.srow[data-session="${name}"]`);
+// A running session's row in the front tab's session list.
+export const sessionRow = (page: Page, name: string) => page.locator(`.wb:not([hidden]) .srow[data-session="${name}"]`);
 
 // Opens the folder as the window's project; the terminal pane shows the session (or the folder's
 // only one).
 export async function openSessionTab(page: Page, dir: string, session?: string) {
   await openApp(page, { dir, session });
-  const term = page.locator(".tpane-terms .term:not([hidden])");
+  const term = frontTerm(page);
   await expect(term.locator(".xterm")).toBeVisible();
   return term;
 }
+
+// The tab in front's workbench (other tabs stay mounted, hidden), and its focused split's terminal
+// (or its only one).
+export const frontTab = (page: Page) => page.locator(".wb:not([hidden])");
+export const frontTerm = (page: Page) => frontTab(page).locator(".tpane-terms .term:not([hidden])").first();
+
+// A split's terminal, by session.
+export const splitTerm = (page: Page, name: string) => frontTab(page).locator(`.tsplit[data-split="${name}"] .term`);
+
+// The project tabs along the top.
+export const projectTab = (page: Page, name: string) => page.locator(".ptabs").getByRole("tab", { name, exact: true });
 
 // The terminal's text, from xterm's DOM renderer (the config turns WebGL off, so xterm uses it).
 export const screenText = (term: ReturnType<Page["locator"]>) =>

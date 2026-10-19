@@ -45,6 +45,7 @@ const SCREEN = [
 ].join("\r\n");
 
 test("screenshots", async ({ page }) => {
+  const fixtures = e2e().fixtures;
   const claude = process.env.BLIMP_E2E_CLAUDE!;
   mkdirSync(join(claude, "sessions"), { recursive: true });
   const web = fixtureDir("webshop");
@@ -75,7 +76,6 @@ test("screenshots", async ({ page }) => {
   mkdirSync(webProj, { recursive: true });
   for (const title of ["Fix the flaky cart test", "Move prices to cents"])
     writeFileSync(join(webProj, `${crypto.randomUUID()}.jsonl`), JSON.stringify({ type: "ai-title", aiTitle: title, cwd: web }) + "\n");
-  const fixtures = e2e().fixtures;
   const recent = { projects: { localhost: ["webshop", "api", "notes"].map((f, i) => ({ dir: join(fixtures, f), at: Date.now() - i * 3_600_000 })) } };
 
   // Light and dark, as the system setting picks.
@@ -83,11 +83,26 @@ test("screenshots", async ({ page }) => {
     const suffix = scheme === "dark" ? "-dark" : "";
     // Reduced motion: no waiting beacon caught mid-pulse.
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
-    await openApp(page, { dir: web, session: "blimpe2e-web-2" });
-    await expect(page.locator(".srow", { hasText: "Checkout page loads twice on Safari" })).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator(".tpane-terms .term:not([hidden]) .xterm-rows")).toContainText("Wiring up the payment sheet");
-    await expect(page.locator(".srow-main.earlier").first()).toBeVisible();
-    const ws = page.locator(".wb");
+    // A fresh window each time: the api tab opened below would otherwise come back.
+    await page.goto("about:blank");
+    await page.evaluate(() => localStorage.clear()).catch(() => {});
+    await openApp(page, { dir: join(fixtures, "api"), session: "blimpe2e-api-2" });
+    await expect(page.locator(".wb:not([hidden]) .tpane-terms .term:not([hidden]) .xterm-rows")).toContainText("Wiring up the payment sheet");
+    // webshop in a second tab, in front, with its two sessions split side by side.
+    await page.keyboard.press("Meta+k");
+    await page.keyboard.type("Add Apple Pay");
+    await page.keyboard.press("Enter");
+    const ws = page.locator(".wb:not([hidden])");
+    await expect(ws.locator(".srow", { hasText: "Checkout page loads twice on Safari" })).toBeVisible({ timeout: 10_000 });
+    await expect(ws.locator(".tpane-terms .term:not([hidden]) .xterm-rows")).toContainText("Wiring up the payment sheet");
+    await expect(ws.locator(".srow-main.earlier").first()).toBeVisible();
+    const row = (await ws.locator(".srow", { hasText: "Checkout page loads twice on Safari" }).boundingBox())!;
+    const terms = (await ws.locator(".tpane-terms").boundingBox())!;
+    await page.mouse.move(row.x + 40, row.y + row.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(terms.x + terms.width * 0.85, terms.y + terms.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await expect(ws.locator(".tsplit-head")).toHaveCount(2);
     await ws.locator(".tree").getByText("README.md").click();
     await expect(ws.locator(".md-view h1")).toHaveText("webshop");
     await expect(ws.locator(".ftabs-toggle")).toHaveText("Edit"); // Monaco has loaded
@@ -102,7 +117,7 @@ test("screenshots", async ({ page }) => {
     await page.screenshot({ path: join(out, `editor${suffix}.png`) });
 
     // From the terminal: inside Monaco, ⌘K is Monaco's.
-    await page.locator(".tpane-terms .term:not([hidden]) .xterm").click();
+    await ws.locator(".tpane-terms .term:not([hidden]) .xterm").first().click();
     await page.keyboard.press("Meta+k");
     await page.keyboard.type("api");
     await expect(page.locator(".dialog.palette .list-item").first()).toContainText("Rate limits for the public API");
@@ -110,10 +125,11 @@ test("screenshots", async ({ page }) => {
     await page.screenshot({ path: join(out, `palette${suffix}.png`) });
     await page.keyboard.press("Escape");
 
-    // Home, with recent projects (kept on the Mac; here the browser's storage).
-    await page.evaluate((r) => localStorage.setItem("blimp.recent", JSON.stringify(r)), recent);
-    await openApp(page);
-    await expect(page.locator(".welcome-recent li")).toHaveCount(3);
+    // Home, with recent projects (kept on the Mac; here the browser's storage). Home reads them
+    // again as it comes forward.
+    await page.evaluate((r) => localStorage.setItem("blimp.recent", JSON.stringify({ ...JSON.parse(localStorage.getItem("blimp.recent") ?? "{}"), ...r })), recent);
+    await page.getByRole("tab", { name: "Home", exact: true }).click();
+    await expect(page.locator(".wb:not([hidden]) .welcome-recent li")).toHaveCount(3);
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(out, `home${suffix}.png`) });
   }

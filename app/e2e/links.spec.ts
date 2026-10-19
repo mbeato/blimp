@@ -104,7 +104,7 @@ test("Markdown: a web link opens in the browser, a relative link opens the file,
   await recordOpens(page);
   await openSessionTab(page, dir);
   const url = page.url();
-  const ws = page.locator(".wb");
+  const ws = page.locator(".wb:not([hidden])");
   await ws.locator(".tree").getByText("links.md").click();
   const view = ws.locator(".md-view");
   await expect(view.locator("h1")).toHaveText("Links");
