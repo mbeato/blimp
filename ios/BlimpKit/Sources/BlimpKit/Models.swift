@@ -51,27 +51,52 @@ public struct Prompt: Codable, Sendable, Equatable {
         switch kind {
         case .permission:
             var head = "Claude wants to continue"
-            if let s = summary, !s.isEmpty {
-                var t = s.replacingOccurrences(of: "`", with: "")
-                for (from, to) in [("Ran ", "run "), ("Edited ", "edit "), ("Wrote ", "write "), ("Read ", "read "), ("Searched for ", "search for ")]
-                where t.hasPrefix(from) { t = to + t.dropFirst(from.count); break }
-                var said = SpokenText.from(markdown: t)
-                while let l = said.last, ".!?:".contains(l) { said.removeLast() }
-                if !said.isEmpty { head = "Claude wants to " + said }
-            }
+            if let s = summary, let said = Prompt.spokenSummary(s) { head = "Claude wants to " + said }
             return (head + ". " + Prompt.askAloud(choices)).trimmingCharacters(in: .whitespaces)
         case .question:
             return (questions ?? []).map { q in
-                (q.question + " " + Prompt.askAloud(q.options.map(\.label))).trimmingCharacters(in: .whitespaces)
+                // SpokenText adds a full stop to a question that has none, which is the break before the options.
+                (Prompt.say(q.question) + " " + Prompt.askAloud(q.options.map(\.label))).trimmingCharacters(in: .whitespaces)
             }.joined(separator: " ")
         case .other:
             return "Claude is asking something. Open it on the Mac."
         }
     }
 
-    // "A, B, or C?" (two: "A or B?"). Long labels are cut to their first six words.
+    private static func say(_ s: String) -> String { SpokenText.from(markdown: s) }
+
+    // The summary as speech, without reading a long command or a full path.
+    private static func spokenSummary(_ s: String) -> String? {
+        let verbs: [(String, String, Bool)] = [("Ran ", "run ", false), ("Edited ", "edit ", true), ("Wrote ", "write ", true),
+                                                ("Read ", "read ", true), ("Searched for ", "search for ", false)]
+        var text = s
+        if let v = verbs.first(where: { s.hasPrefix($0.0) }) {
+            let parts = String(s.dropFirst(v.0.count)).components(separatedBy: "`")
+            let code = parts.indices.filter { $0 % 2 == 1 && $0 < parts.count - 1 }.map { parts[$0] }
+            if v.0 == "Ran ", code.contains(where: { $0.count > 40 }) { return "run a command" }
+            let joined = parts.enumerated().map { i, p in
+                v.2 && i % 2 == 1 ? String(p.split(separator: "/").last ?? Substring(p)) : p
+            }.joined()
+            text = v.1 + joined
+        }
+        var said = say(text)
+        while let l = said.last, ".!?:".contains(l) { said.removeLast() }
+        return said.isEmpty ? nil : said
+    }
+
+    // "A, B, or C?" (two: "A or B?"). A long label is cut at " for " or at a comma after its first word.
     private static func askAloud(_ labels: [String]) -> String {
-        let short = labels.map { $0.split(whereSeparator: { $0.isWhitespace }).prefix(6).joined(separator: " ") }
+        let short = labels.map { label -> String in
+            var cut = label
+            if let sp = label.firstIndex(where: { $0.isWhitespace }) {
+                let ends = [label.range(of: " for ", range: sp..<label.endIndex)?.lowerBound,
+                            label[label.index(after: sp)...].firstIndex(of: ",")].compactMap { $0 }
+                if let e = ends.min() { cut = String(label[..<e]) }
+            }
+            var t = say(cut)
+            while let l = t.last, ".!?:".contains(l) { t.removeLast() }
+            return t
+        }
         switch short.count {
         case 0: return ""
         case 1: return short[0] + "?"

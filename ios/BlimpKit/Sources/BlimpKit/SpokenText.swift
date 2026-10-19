@@ -36,6 +36,9 @@ public enum SpokenText {
 
     // Inline code is cut out first so nothing inside it is touched; the text between is cleaned.
     private static func inline(_ s: String) -> String {
+        // Images give their alt text, links their text; done first so code inside link text survives.
+        var s = replace(s, #"!\[([^\]]*)\]\([^)]*\)"#, "$1")
+        s = replace(s, #"\[([^\]]*)\]\([^)]*\)"#, "$1")
         let parts = s.components(separatedBy: "`")
         var out = ""
         for (i, part) in parts.enumerated() {
@@ -49,8 +52,7 @@ public enum SpokenText {
     }
 
     private static func plain(_ s: String) -> String {
-        var t = replace(s, #"\[([^\]]*)\]\([^)]*\)"#, "$1")
-        t = replace(t, #"https?://\S*[^\s.,;:!?)]"#, "link")
+        var t = replace(s, #"https?://\S*[^\s.,;:!?)]"#, "link")
         t = t.replacingOccurrences(of: "*", with: "")
         t = replace(t, #"(?<![A-Za-z0-9])_+|_+(?![A-Za-z0-9])"#, "")
         t = replace(t, #"(?:[\w.~-]*/){3,}([\w.~-]+)"#, "$1")

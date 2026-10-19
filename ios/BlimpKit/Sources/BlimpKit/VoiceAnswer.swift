@@ -19,14 +19,18 @@ public enum VoiceAnswer {
             if let i = prefixed.first { return .clear(i) }
         }
         let contained = c.indices.filter { !c[$0].isEmpty && contains(h, c[$0]) }
-        if contained.count == 1 { return .clear(contained[0]) }
+        if contained.count == 1 {
+            let i = contained[0]
+            return isSure(h, label: c[i]) ? .clear(i) : .guess(i)
+        }
 
-        let hs = h.joined(separator: " ")
-        if yes.contains(hs) {
+        // A bare yes or no phrase (only politeness words may surround it).
+        let core = h.filter { !polite.contains($0) }.joined(separator: " ")
+        if yes.contains(core) {
             if let i = c.firstIndex(where: { $0.first == "yes" }) { return .clear(i) }
             return .none
         }
-        if no.contains(hs) {
+        if no.contains(core) {
             if let i = c.lastIndex(where: { $0.first == "no" }) { return .clear(i) }
             return .none
         }
@@ -41,6 +45,25 @@ public enum VoiceAnswer {
         let best = order[0]
         let second = order.count > 1 ? shares[order[1]] : -1
         return shares[best] >= 0.6 && shares[best] > second ? .guess(best) : .none
+    }
+
+    // `.clear` is sent with no tap, so it needs more than a label match: every heard word must belong to
+    // the label or be a small filler word, and nothing may negate or hedge ("not yes", "yes but wait",
+    // "go ahead no"). Anything less sure is only a guess, which waits for a tap.
+    private static let filler: Set<String> = ["please", "thanks", "thank", "you", "i", "think", "option", "the", "a",
+                                              "ok", "okay", "sure", "go", "ahead"]
+    private static let polite: Set<String> = ["please", "thanks", "thank", "you", "i", "think"]
+    private static let hedges: Set<String> = ["not", "no", "nope", "dont", "never", "but", "except", "wait", "neither",
+                                              "both", "nor", "instead", "actually"]
+    private static let yesWords: Set<String> = ["yes", "yeah", "yep", "sure", "ok", "okay", "allow", "ahead"]
+    private static let noWords: Set<String> = ["no", "nope", "dont", "deny", "stop", "cancel"]
+
+    private static func isSure(_ h: [String], label: [String]) -> Bool {
+        let own = Set(label)
+        if !h.allSatisfy({ own.contains($0) || filler.contains($0) }) { return false }
+        // "no" only counts as a negation when it isn't the word being matched.
+        if h.contains(where: { hedges.contains($0) && !own.contains($0) }) { return false }
+        return !(h.contains(where: yesWords.contains) && h.contains(where: noWords.contains))
     }
 
     private static let yes: Set<String> = ["yes", "yeah", "yep", "sure", "ok", "okay", "allow", "do it", "go ahead"]
@@ -58,9 +81,12 @@ public enum VoiceAnswer {
     // "two", "option 3", "the second one": a lone number word or digit, with optional filler around it.
     private static func number(_ h: [String]) -> Int? {
         var w = ArraySlice(h)
-        while let f = w.first, ["option", "number", "the"].contains(f) { w = w.dropFirst() }
-        if w.count == 2, w.last == "one" { w = w.dropLast() }
+        var lead: [String] = []
+        while let f = w.first, ["option", "number", "the"].contains(f) { lead.append(f); w = w.dropFirst() }
+        // "the second one" is a number; "two one" and "the one" are not.
+        if w.count == 2, w.last == "one", lead.contains("the"), ordinals.contains(w.first!) { w = w.dropLast() }
         guard w.count == 1, let t = w.first else { return nil }
+        if t == "one" && lead == ["the"] { return nil }
         if let d = Int(t), (1...9).contains(d), t.count == 1 { return d }
         if let i = cardinals.firstIndex(of: t) { return i + 1 }
         if let i = ordinals.firstIndex(of: t) { return i + 1 }
