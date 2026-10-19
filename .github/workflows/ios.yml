@@ -42,4 +42,4 @@ jobs:
           set -o pipefail
           xcodegen generate
           xcodebuild -project Blimp.xcodeproj -scheme Blimp -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build | tail -80
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build | tail -80
