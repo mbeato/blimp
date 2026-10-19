@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindowBuilder, Window};
 use tauri_plugin_store::StoreExt;
 
 /// A window closed this long before the app quits counts as part of quitting (⌘Q closes every
@@ -81,7 +81,7 @@ impl Windows {
         let list = {
             let mut inner = self.inner.lock().unwrap();
             for o in inner.open.iter_mut().filter(|o| o.closed.is_none()) {
-                if let Some(w) = app.get_webview_window(&o.label) {
+                if let Some(w) = app.get_window(&o.label) {
                     o.saved.bounds = bounds(&w).or(o.saved.bounds);
                 }
             }
@@ -119,8 +119,7 @@ impl Windows {
     /// A window moved or was resized: remember where it is (written with the next save, so a
     /// drag doesn't write the file at every step).
     pub fn moved(&self, window: &tauri::Window) {
-        let Some(w) = window.app_handle().get_webview_window(window.label()) else { return };
-        let b = bounds(&w);
+        let b = bounds(window);
         let mut inner = self.inner.lock().unwrap();
         if let Some(o) = inner.open.iter_mut().find(|o| o.label == window.label() && o.closed.is_none()) {
             o.saved.bounds = b.or(o.saved.bounds);
@@ -159,7 +158,7 @@ fn create_sized(app: &AppHandle, windows: &Windows, init: &str, at: Option<(f64,
     b.build().map(|_| ()).map_err(|e| e.to_string())
 }
 
-fn bounds(w: &WebviewWindow) -> Option<[f64; 4]> {
+fn bounds(w: &Window) -> Option<[f64; 4]> {
     let scale = w.scale_factor().ok()?;
     let p = w.outer_position().ok()?.to_logical::<f64>(scale);
     let s = w.inner_size().ok()?.to_logical::<f64>(scale);
@@ -181,7 +180,7 @@ fn percent(s: &str) -> String {
 
 /// The window's tabs changed (the page's layout, as JSON): saved for the next launch.
 #[tauri::command]
-pub fn save_window_layout(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, layout: String) {
+pub fn save_window_layout(app: AppHandle, window: Window, windows: State<'_, Windows>, layout: String) {
     {
         let mut inner = windows.inner.lock().unwrap();
         let label = window.label().to_string();
@@ -197,7 +196,7 @@ pub fn save_window_layout(app: AppHandle, window: WebviewWindow, windows: State<
 /// of them (its tabs are returned, and it moves to where that window was); the others open where
 /// they were. None: nothing to restore (or already done), so the caller starts as usual.
 #[tauri::command]
-pub fn restore_windows(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>) -> Option<String> {
+pub fn restore_windows(app: AppHandle, window: Window, windows: State<'_, Windows>) -> Option<String> {
     let mut list = windows.inner.lock().unwrap().previous.take()?;
     if list.is_empty() {
         return None;
@@ -215,7 +214,7 @@ pub fn restore_windows(app: AppHandle, window: WebviewWindow, windows: State<'_,
 }
 
 /// Whether the point (logical screen pixels) is on the window, and where in its page if so.
-fn page_point(w: &WebviewWindow, x: f64, y: f64) -> Option<(f64, f64)> {
+fn page_point(w: &Window, x: f64, y: f64) -> Option<(f64, f64)> {
     let scale = w.scale_factor().ok()?;
     let pos = w.outer_position().ok()?.to_logical::<f64>(scale);
     let size = w.outer_size().ok()?.to_logical::<f64>(scale);
@@ -228,7 +227,7 @@ fn page_point(w: &WebviewWindow, x: f64, y: f64) -> Option<(f64, f64)> {
 
 /// The window says which projects its tabs have open.
 #[tauri::command]
-pub fn set_window_projects(window: WebviewWindow, windows: State<'_, Windows>, projects: Vec<String>) {
+pub fn set_window_projects(window: Window, windows: State<'_, Windows>, projects: Vec<String>) {
     let mut inner = windows.inner.lock().unwrap();
     inner.projects.insert(window.label().to_string(), projects);
 }
@@ -245,14 +244,14 @@ pub fn open_window(app: AppHandle, windows: State<'_, Windows>, init: String) ->
 #[tauri::command]
 pub fn drop_session(
     app: AppHandle,
-    window: WebviewWindow,
+    window: Window,
     windows: State<'_, Windows>,
     init: String,
     x: f64,
     y: f64,
 ) -> Result<bool, String> {
     let order = windows.inner.lock().unwrap().focus_order.clone();
-    let mut all: Vec<WebviewWindow> = app.webview_windows().into_values().filter(|w| w.label() != window.label()).collect();
+    let mut all: Vec<Window> = app.windows().into_values().filter(|w| w.label() != window.label()).collect();
     // Most recently focused first.
     all.sort_by_key(|w| std::cmp::Reverse(order.iter().position(|l| l == w.label())));
     for w in all {
@@ -272,7 +271,7 @@ pub fn drop_session(
 #[tauri::command]
 pub fn focus_project(
     app: AppHandle,
-    window: WebviewWindow,
+    window: Window,
     windows: State<'_, Windows>,
     project: String,
     init: String,
@@ -285,7 +284,7 @@ pub fn focus_project(
             .find(|(k, v)| *k != window.label() && v.contains(&project))
             .map(|(k, _)| k.clone())
     };
-    let Some(w) = label.and_then(|l| app.get_webview_window(&l)) else {
+    let Some(w) = label.and_then(|l| app.get_window(&l)) else {
         return Ok(false);
     };
     let _ = w.unminimize();
@@ -299,7 +298,7 @@ pub fn focus_project(
 #[tauri::command]
 pub fn set_shown(
     app: AppHandle,
-    window: WebviewWindow,
+    window: Window,
     windows: State<'_, Windows>,
     sessions: Vec<String>,
 ) -> HashMap<String, Vec<String>> {
@@ -317,7 +316,7 @@ pub fn set_shown(
 #[tauri::command]
 pub fn focus_session(
     app: AppHandle,
-    window: WebviewWindow,
+    window: Window,
     windows: State<'_, Windows>,
     session: String,
     init: String,
@@ -326,7 +325,7 @@ pub fn focus_session(
         let inner = windows.inner.lock().unwrap();
         inner.shown.iter().find(|(k, v)| *k != window.label() && v.contains(&session)).map(|(k, _)| k.clone())
     };
-    let Some(w) = label.and_then(|l| app.get_webview_window(&l)) else {
+    let Some(w) = label.and_then(|l| app.get_window(&l)) else {
         return Ok(false);
     };
     let _ = w.unminimize();
@@ -338,7 +337,7 @@ pub fn focus_session(
 /// This window took a session another window showed (dragged it into a split here): those
 /// windows stop showing it ("release-session"), so it's never on screen twice.
 #[tauri::command]
-pub fn take_session(app: AppHandle, window: WebviewWindow, windows: State<'_, Windows>, session: String) {
+pub fn take_session(app: AppHandle, window: Window, windows: State<'_, Windows>, session: String) {
     let labels: Vec<String> = {
         let inner = windows.inner.lock().unwrap();
         inner.shown.iter().filter(|(k, v)| *k != window.label() && v.contains(&session)).map(|(k, _)| k.clone()).collect()
@@ -350,7 +349,7 @@ pub fn take_session(app: AppHandle, window: WebviewWindow, windows: State<'_, Wi
 
 /// What this window shows while it has focus (empty when it loses focus).
 #[tauri::command]
-pub fn set_viewing(window: WebviewWindow, windows: State<'_, Windows>, sessions: Vec<String>) {
+pub fn set_viewing(window: Window, windows: State<'_, Windows>, sessions: Vec<String>) {
     let mut inner = windows.inner.lock().unwrap();
     if sessions.is_empty() {
         inner.viewing.remove(window.label());

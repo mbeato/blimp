@@ -18,7 +18,7 @@
 // Max's ~/.blimp, blimpd.service and zmx sessions are never touched.
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, copyFileSync, openSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync, copyFileSync, openSync } from "node:fs";
 import { rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
@@ -129,6 +129,7 @@ async function openApp() {
     const F = w.fetch; w.fetch = function (u, o) { const url = String(u && u.url || u);
       if (!/^ipc:|ipc\\.localhost/.test(url)) return F.apply(this, arguments);
       const rec = { cmd: decodeURIComponent(url.split('/').pop()), ok: null }; w.__probe.invokes.push(rec);
+      if (/^browser_/.test(rec.cmd) && o && typeof o.body === 'string') rec.body = o.body.slice(0, 300);
       return F.apply(this, arguments).then(r => { rec.ok = r.headers.get('Tauri-Response') === 'ok'; if (!rec.ok) r.clone().text().then(t => rec.err = t); return r; },
         e => { rec.ok = false; rec.err = 'fetch failed: ' + e; throw e; }); };
     const W = w.Worker; w.Worker = function (url, opts) { const rec = { url: String(url), error: null }; w.__probe.workers.push(rec);
@@ -272,38 +273,85 @@ try {
     upNo,
   });
 
-  // 4c'. A session's web server in a browser tab, through a port forward (forward_port), shown
-  // in the app's WebKit under its CSP.
+  // 4c'. A session's web server in a browser tab: a native web view (src-tauri/src/browser.rs),
+  // through a port forward (forward_port). On Linux every web view of a window is packed into
+  // its box (tauri-runtime-wry), so where it sits is checked on the Mac (checklist), not here.
   const webPort = await new Promise<number>((resolve) => {
     const srv = createServer().listen(0, "127.0.0.1", () => {
       const p = (srv.address() as { port: number }).port;
       srv.close(() => resolve(p));
     });
   });
-  await startSession("blimptest-web", ["bun", "-e", `'Bun.serve({ hostname: "127.0.0.1", port: ${webPort}, fetch: () => new Response("<h1>native page</h1>", { headers: { "content-type": "text/html" } }) }); setInterval(() => {}, 1e9)'`]);
+  // /: a titled page; /two: another; /escape: tries to go to the app's own page; /ipc: tries
+  // to call one of the app's commands and puts the answer in its title.
+  const pages = {
+    "/": "<title>native title</title><h1>native page</h1>",
+    "/two": "<title>page two</title><h1>two</h1>",
+    "/escape": `<title>escape</title><h1>escape page</h1><script>setTimeout(() => { location.href = "tauri://localhost/"; }, 200)</script>`,
+    "/ipc": `<title>ipc</title><script>setTimeout(() => { try { window.__TAURI_INTERNALS__.invoke("set_window_projects", { projects: ["x"] }).then(() => document.title = "ipc allowed", () => document.title = "ipc denied"); } catch (e) { document.title = "ipc missing"; } }, 200)</script>`,
+  };
+  await startSession("blimptest-web", ["bun", "-e", `'const P = ${JSON.stringify(pages)}; Bun.serve({ hostname: "127.0.0.1", port: ${webPort}, fetch: (r) => new Response(P[new URL(r.url).pathname] ?? "none", { headers: { "content-type": "text/html" } }) }); setInterval(() => {}, 1e9)'`]);
   const portRow = await until(15_000, () => js(`return !!document.querySelector('.wb:not([hidden]) .port-row')`));
   if (portRow) await click(".wb:not([hidden]) .port-row");
-  const frameEl = await until(15_000, async () => {
-    try {
-      return await find(".wb:not([hidden]) .viewer:not([hidden]) iframe.page-frame");
-    } catch {
-      return undefined;
-    }
-  });
-  let pageText = "";
-  if (frameEl) {
-    await sleep(1500);
-    await wd("POST", "/frame", { id: { "element-6066-11e4-a52e-4f735466cecf": frameEl } });
-    pageText = await until(10_000, () => js("return document.querySelector('h1')?.textContent")) ?? "";
-    await wd("POST", "/frame/parent", {});
-  }
+  const label = (await until(15_000, () => js("return document.querySelector('.wb:not([hidden]) .viewer:not([hidden]) .page-native')?.dataset.view"))) ?? "";
+  const read = () => jsAsync(`return await window.__TAURI_INTERNALS__.invoke('browser_read', { label: ${JSON.stringify(label)} }).then(v => v, e => ({ err: String(e) }))`);
+  const tabTitle = () => js("return document.querySelector('.wb:not([hidden]) .ftabs .page-tab.active .tab-title')?.textContent");
+  const address = () => js("return document.querySelector('.wb:not([hidden]) .viewer:not([hidden]) input[aria-label=Address]')?.value");
+  // Read once it has loaded (the title came): a page still loading may not answer.
+  const titled = await until(10_000, async () => (await tabTitle()) === "native title");
+  const firstRead = label ? await read() : undefined;
   const forwards = execFileSync("ps", ["-eo", "args"], { encoding: "utf8" }).split("\n").filter((l) => l.includes(`:127.0.0.1:${webPort}`));
-  record("a session's port opens in a browser tab, through an ssh forward", !!portRow && pageText === "native page" && forwards.length === 1, { portRow, pageText, forwards });
+  record("a session's port opens in a native browser tab, through an ssh forward; its text is read", !!portRow && firstRead?.text === "native page" && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(firstRead.url) && forwards.length === 1, { portRow, label, firstRead, forwards });
+  const addr0 = await address();
+  record("the tab takes the page's title; the bar shows the server's localhost:<port>", !!titled && addr0 === `localhost:${webPort}/`, { title: await tabTitle(), address: addr0 });
   await shot("05b-browser-tab");
-  // Closing the tab closes the forward.
+
+  // Typed address, then Back and Forward (the bar follows the view's url events).
+  const bar = await find(".wb:not([hidden]) .viewer:not([hidden]) input[aria-label=Address]");
+  const go = async (text: string) => {
+    await wd("POST", `/element/${bar}/clear`, {});
+    await wd("POST", `/element/${bar}/value`, { text: text + "\uE007" });
+  };
+  await go(`localhost:${webPort}/two`);
+  const atTwo = await until(8000, async () => (await address()) === `localhost:${webPort}/two`);
+  await click(".wb:not([hidden]) .viewer:not([hidden]) button[aria-label=Back]");
+  const wentBack = await until(8000, async () => (await address()) === `localhost:${webPort}/`);
+  await click(".wb:not([hidden]) .viewer:not([hidden]) button[aria-label=Forward]");
+  const fwd = await until(8000, async () => (await address()) === `localhost:${webPort}/two`);
+  record("typed address, Back and Forward move the view; the bar follows", !!atTwo && !!wentBack && !!fwd, { atTwo, wentBack, fwd, now: await address() });
+
+  // Hidden while a dialog is over it (a native view is drawn above the page), shown after.
+  const shows = async () => ((await probe()).invokes as any[]).filter((i) => i.cmd === "browser_show").map((i) => JSON.parse(i.body ?? "{}").shown);
+  await chord("\uE03D", "k");
+  const hidden = await until(3000, async () => (await shows()).at(-1) === false);
+  await typeKeys(["\uE00C"]);
+  const shownAgain = await until(3000, async () => (await shows()).at(-1) === true);
+  record("the view hides while ⌘K is open and comes back after", !!hidden && !!shownAgain, await shows());
+
+  // A page can't reach the app: it can't go to the app's own page, and can't call its commands.
+  await go(`localhost:${webPort}/escape`);
+  await sleep(2500);
+  const esc = await read();
+  const refused = await jsAsync(`return await window.__TAURI_INTERNALS__.invoke('browser_go', { label: ${JSON.stringify(label)}, url: 'tauri://localhost/' }).then(() => 'went', e => 'refused: ' + e)`);
+  await go(`localhost:${webPort}/ipc`);
+  const ipc = await until(8000, async () => ((await tabTitle()) ?? "").startsWith("ipc ") && (await tabTitle()));
+  record("a page in a browser tab stays on the web and can't call the app's commands", /\/escape$/.test(esc?.url ?? "") && refused.startsWith("refused") && (ipc === "ipc denied" || ipc === "ipc missing"), { esc, refused, ipc });
+
+  // Send to session: the page's text goes to ~/.blimp/uploads, its path into the session.
+  await go(`localhost:${webPort}/`);
+  await until(8000, async () => (await tabTitle()) === "native title");
+  const uploads = join(tmp, "home", ".blimp", "uploads");
+  await click(".wb:not([hidden]) .viewer:not([hidden]) .page-bar button[aria-expanded]");
+  await click(".wb:not([hidden]) .send-menu button[role=menuitem]");
+  const sent = await until(10_000, () => (existsSync(uploads) ? readdirSync(uploads).find((f) => f.startsWith("page-")) : undefined));
+  const body = sent ? readFileSync(join(uploads, sent), "utf8") : "";
+  record("Send to session uploads the page's address, title and text", body.includes("# native title") && body.includes("native page") && /http:\/\/127\.0\.0\.1:\d+\//.test(body), { sent, body: body.slice(0, 300) });
+
+  // Closing the tab closes the view and the forward.
   await click(".wb:not([hidden]) .ftabs .page-tab .tab-close").catch(() => {});
   const fwdGone = await until(5000, () => !execFileSync("ps", ["-eo", "args"], { encoding: "utf8" }).includes(`:127.0.0.1:${webPort}`));
-  record("closing the browser tab closes its forward", !!fwdGone, { fwdGone });
+  const closed = ((await probe()).invokes as any[]).some((i) => i.cmd === "browser_close" && i.ok);
+  record("closing the browser tab closes its view and its forward", !!fwdGone && closed, { fwdGone, closed });
   zmx("kill", "blimptest-web");
 
   // 4d. The update check is allowed (capabilities) and reaches the updater: it answers with
@@ -370,7 +418,7 @@ try {
   );
   record("Settings > Models renders, with the server's key state", !!models, models ?? (await js("return document.querySelector('.dialog.settings')?.innerText.slice(0, 300) ?? 'no settings dialog'")));
   await shot("06d-settings-models");
-  await typeKeys([""]);
+  await typeKeys(["\uE00C"]);
   await until(3000, () => js("return !document.querySelector('.dialog.settings')"));
 
   // 5. Palette: the UI binds metaKey only (App.tsx), so on Linux that is Super+K; no Ctrl+K mapping.
@@ -482,10 +530,15 @@ try {
   const p5 = await probe();
   record("no CSP violations during the run", p5.csp.length === 0, p5.csp);
   record("no uncaught errors / rejections", p5.errors.length === 0, p5.errors);
-  // Besides 4a's upload of a file nobody dropped, which must fail, and the update check, which
+  // Besides 4a's upload of a file nobody dropped and 4c's browser_go to the app's own page, which
+  // must fail, and the update check, which
   // fails while the release it reads (latest.json) isn't there or this machine is offline.
   const failed = p5.invokes.filter(
-    (i: any) => i.ok === false && !(i.cmd === "upload" && /Drop it on the window/.test(i.err ?? "")) && i.cmd !== "plugin:updater|check",
+    (i: any) =>
+      i.ok === false &&
+      !(i.cmd === "upload" && /Drop it on the window/.test(i.err ?? "")) &&
+      !(i.cmd === "browser_go" && /tauri:\/\/localhost/.test(i.body ?? "")) &&
+      i.cmd !== "plugin:updater|check",
   );
   record("no failed IPC calls", failed.length === 0, {
     failed,

@@ -1,7 +1,9 @@
 import { useEffect, type ReactNode } from "react";
+import { useOverlay } from "../lib/overlay";
 
 // A sheet over the window. Esc or a click outside closes it.
 export function Dialog(props: { onClose: () => void; className?: string; children: ReactNode }) {
+  useOverlay();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;

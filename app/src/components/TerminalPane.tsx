@@ -4,6 +4,7 @@ import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
 import { freeName, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle } from "../lib/sessions";
+import { useOverlay } from "../lib/overlay";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
@@ -12,14 +13,26 @@ import { TerminalView } from "./TerminalView";
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
 // release: another window took the session into one of its splits, so stop showing it here.
 // dropFiles: files from Finder let go on a session's terminal.
+// targets / send: a browser tab's Send to session (the folder's sessions, the focused split's
+// first; a page's file pasted into one after a line saying where it's from).
 export type PaneActions = {
   newClaude: () => void;
   startKind: (kind: string) => void;
   dropIn: (name: string, x: number, y: number) => void;
   release: (name: string) => void;
   dropFiles: (name: string, items: Item[]) => void;
+  targets: () => { name: string; title: string }[];
+  send: (name: string, item: Item, prefix: string) => Promise<void>;
 };
-export const noActions: PaneActions = { newClaude: () => {}, startKind: () => {}, dropIn: () => {}, release: () => {}, dropFiles: () => {} };
+export const noActions: PaneActions = {
+  newClaude: () => {},
+  startKind: () => {},
+  dropIn: () => {},
+  release: () => {},
+  dropFiles: () => {},
+  targets: () => [],
+  send: async () => {},
+};
 
 const EARLIER_KEY = "blimp.earlierOpen";
 
@@ -102,6 +115,8 @@ export function TerminalPane(props: {
   const [drag, setDrag] = useState<Drag | null>(null);
   // Right-click menu on a session (its row or its split's header), at the pointer.
   const [ctx, setCtx] = useState<{ name: string; x: number; y: number } | null>(null);
+  // A browser tab's native view would cover these: it hides meanwhile.
+  useOverlay(menu || !!ctx || !!drag);
   const [listWidth, setListWidth] = useState(230);
   const box = useRef<HTMLDivElement>(null);
   // Moved to another window: not picked to fill an empty terminal here (the user can still
@@ -198,21 +213,40 @@ export function TerminalPane(props: {
     // Uploads them to ~/.blimp/uploads under plain names, then types their paths in, as a paste:
     // Claude reads a file (a screenshot, say) from a path in the prompt.
     dropFiles: async (name, items) => {
-      const api = link.api;
-      if (!api || !link.home || !items.length) return;
-      const dir = `${link.home}/${UPLOADS}`;
-      // Each folder of the path (409 once it's there).
-      for (let i = 1; i <= UPLOADS.split("/").length; i++) await api.fsMkdir(`${link.home}/${UPLOADS.split("/").slice(0, i).join("/")}`).catch(() => {});
-      const taken = new Set((await api.fsList(dir).catch(() => ({ entries: [] }))).entries.map((e) => e.name));
-      const paths: string[] = [];
-      for (const item of items) {
-        const as = freeName(plainName(item.name), taken);
-        taken.add(as);
-        const path = await upload(link, dir, item, "new", as);
-        if (path) paths.push(path);
-      }
+      const paths = await uploadAll(items);
       if (paths.length) pastes.get(name)?.(paths.join(" ") + " ");
     },
+    targets: () => {
+      const focused = p.panes[p.focus];
+      const list = listed.filter((s) => !ended.has(s.name));
+      return [...list.filter((s) => s.name === focused), ...list.filter((s) => s.name !== focused)].map((s) => ({ name: s.name, title: sessionTitle(s) }));
+    },
+    // On one line, so a shell doesn't run it. A session not on screen is shown first (its
+    // terminal takes the paste once it's up).
+    send: async (name, item, prefix) => {
+      const [path] = await uploadAll([item]);
+      if (!path) return;
+      if (!pastes.has(name)) showHere(name);
+      for (let i = 0; i < 50 && !pastes.has(name); i++) await new Promise((r) => setTimeout(r, 100));
+      pastes.get(name)?.(prefix + path + " ");
+    },
+  };
+
+  const uploadAll = async (items: Item[]): Promise<string[]> => {
+    const api = link.api;
+    if (!api || !link.home || !items.length) return [];
+    const dir = `${link.home}/${UPLOADS}`;
+    // Each folder of the path (409 once it's there).
+    for (let i = 1; i <= UPLOADS.split("/").length; i++) await api.fsMkdir(`${link.home}/${UPLOADS.split("/").slice(0, i).join("/")}`).catch(() => {});
+    const taken = new Set((await api.fsList(dir).catch(() => ({ entries: [] }))).entries.map((e) => e.name));
+    const paths: string[] = [];
+    for (const item of items) {
+      const as = freeName(plainName(item.name), taken);
+      taken.add(as);
+      const path = await upload(link, dir, item, "new", as);
+      if (path) paths.push(path);
+    }
+    return paths;
   };
 
   const showHere = (name: string) => {

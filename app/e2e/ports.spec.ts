@@ -44,10 +44,11 @@ test("a session's port is listed, a new one is announced, and either opens in a 
   const frame = frontTab(page).locator(".viewer:not([hidden]) iframe.page-frame");
   await expect(frame.contentFrame().locator("h1")).toHaveText("first /");
 
-  // Another path from the address bar, then Reload.
-  const path = frontTab(page).getByLabel("Path");
-  await path.fill("/about");
-  await path.press("Enter");
+  // Another path from the address bar (shown as the server's localhost:<port>), then Reload.
+  const address = frontTab(page).getByLabel("Address");
+  await expect(address).toHaveValue(`localhost:${p1}/`);
+  await address.fill(`localhost:${p1}/about`);
+  await address.press("Enter");
   await expect(frame.contentFrame().locator("h1")).toHaveText("first /about");
   await frontTab(page).getByRole("button", { name: "Reload" }).click();
   await expect(frame.contentFrame().locator("h1")).toHaveText("first /about");

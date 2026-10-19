@@ -1,6 +1,7 @@
 // The native half of the blimp app: it opens SSH tunnels to blimpd and hosts the UI.
 // Sessions, terminals and files all live in the UI, which talks to blimpd through the tunnel.
 
+mod browser;
 mod transfer;
 mod tunnel;
 mod windows;
@@ -21,6 +22,7 @@ fn main() {
         .manage(tunnel::Tunnels::default())
         .manage(transfer::Transfers::default())
         .manage(windows::Windows::default())
+        .manage(browser::Browsers::default())
         .setup(|app| {
             // The last run's windows, for the first window to reopen (restore_windows).
             app.state::<windows::Windows>().load(app.handle());
@@ -46,7 +48,14 @@ fn main() {
             transfer::cancel_transfer,
             windows::set_window_projects,
             windows::set_viewing,
-            windows::claim_notice
+            windows::claim_notice,
+            browser::browser_open,
+            browser::browser_bounds,
+            browser::browser_show,
+            browser::browser_go,
+            browser::browser_nav,
+            browser::browser_close,
+            browser::browser_read
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Destroyed => window.state::<windows::Windows>().forget(window.app_handle(), window.label()),
@@ -61,8 +70,8 @@ fn main() {
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             if id == "check-updates" || id == "open-settings" {
-                let w = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false));
-                if let Some(w) = w.or_else(|| app.get_webview_window("main")) {
+                let w = app.windows().into_values().find(|w| w.is_focused().unwrap_or(false));
+                if let Some(w) = w.or_else(|| app.get_window("main")) {
                     let _ = w.emit_to(w.label(), id, ());
                 }
             }

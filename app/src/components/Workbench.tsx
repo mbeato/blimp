@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/editor/editor.api";
 import { ApiError, type DirEntry, type FileBody, type Port } from "../lib/api";
-import { errorText, type ServerLink } from "../lib/connection";
+import { errorText, inTauri, type ServerLink } from "../lib/connection";
 import {
   baseName,
   collapse,
@@ -18,15 +18,25 @@ import {
   type SyncEvent,
   type Viewer,
 } from "../lib/files";
+import { onViewChange, pageTitle, view } from "../lib/browser";
+import { useOverlay, useOverlayOpen } from "../lib/overlay";
 import { closePort, openPort } from "../lib/ports";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
 import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
 import { Dialog } from "./Dialog";
 import { ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
-import { PageView, type Page } from "./PageView";
+import { PageView, sendItem, type Page } from "./PageView";
+import type { PaneActions } from "./TerminalPane";
 import { QuickOpen } from "./QuickOpen";
 import { Splitter } from "./Splitter";
+
+const pageIcon = (
+  <svg className="page-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+    <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" />
+    <path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" fill="none" stroke="currentColor" />
+  </svg>
+);
 
 // Monaco is big, so it loads the first time a text file opens.
 let monaco: typeof Monaco | null = null;
@@ -42,8 +52,8 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 // terminal's ⌘-click.
 export type Opener = (path: string, line?: number, col?: number) => void;
 
-// Opens a server port in a browser tab (or brings its tab forward).
-export type PageOpener = (p: Pick<Port, "port" | "host">) => void;
+// Opens a server port in a browser tab (or brings its tab forward); with none, a new browser tab.
+export type PageOpener = (p?: Pick<Port, "port" | "host">) => void;
 
 // Files dropped on the window (from Finder): into this folder, or null for the folder new files
 // go in (the one last clicked in the tree).
@@ -124,6 +134,9 @@ export function Workbench(props: {
   opener: { current: Opener };
   onDrop: { current: FileDrop };
   pages: { current: PageOpener };
+  // The terminal pane's, for a browser tab's Send to session.
+  pane: { current: PaneActions };
+  onNotice: (text: string) => void;
 }) {
   const { link, root } = props;
   const id = useRef(++workbenches).current;
@@ -133,8 +146,8 @@ export function Workbench(props: {
   const expanded = useRef(new Set([root]));
   const listings = useRef(new Map<string, DirEntry[]>()).current;
   const docs = useRef(new Map<string, Doc>()).current;
-  // Browser tabs on server ports, after the file tabs. Their keys ("port:<n>") share `active`
-  // with file paths, which are absolute and so never look like one.
+  // Browser tabs, after the file tabs: on server ports ("port:<n>") or any address ("web:<n>").
+  // Their keys share `active` with file paths, which are absolute and so never look like one.
   const pages = useRef(new Map<string, Page>()).current;
   // Saves not finished yet (sent, or waiting for the one before). Models are disposed only after
   // these finish, so leaving a project mid-save still sends what was typed meanwhile.
@@ -149,6 +162,7 @@ export function Workbench(props: {
   const [target, setTarget] = useState(root);
   const [creating, setCreating] = useState<Creating | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  useOverlay(!!menu);
   const [ask, setAsk] = useState<Ask | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
@@ -474,13 +488,15 @@ export function Workbench(props: {
 
   // ---- browser tabs ----
 
+  const blank = (key: string): Page => ({ key, base: null, url: null, title: "", loading: false, error: "", nonce: 0 });
   const openPage: PageOpener = (p) => {
+    if (!p) return newPage();
     const key = `port:${p.port}`;
     if (!pages.has(key)) {
-      const page: Page = { key, port: p.port, host: p.host, base: null, path: "/", error: "", nonce: 0 };
+      const page: Page = { ...blank(key), port: { port: p.port, host: p.host } };
       pages.set(key, page);
       openPort(link, p).then(
-        (base) => ((page.base = base), rerender()),
+        (base) => ((page.base = base), (page.url = base + "/"), rerender()),
         (e) => ((page.error = errorText(e)), rerender()),
       );
     }
@@ -489,10 +505,48 @@ export function Workbench(props: {
   };
   props.pages.current = openPage;
 
+  // + in the tab strip: a browser tab with no address yet.
+  const nextWeb = useRef(0);
+  const newPage = () => {
+    const key = `web:${++nextWeb.current}`;
+    pages.set(key, blank(key));
+    setActive(key);
+    rerender();
+  };
+
+  const goPage = (page: Page, url: string) => {
+    page.error = "";
+    if (page.label) return void view.go(page.label, url).catch((e) => props.onNotice(String(e)));
+    page.url = url;
+    page.nonce++;
+    rerender();
+  };
+  const reloadPage = (page: Page) => (page.label ? void view.nav(page.label, "reload").catch(() => {}) : (page.nonce++, rerender()));
+
+  // What the native views say: address, title, loading.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    if (inTauri())
+      void onViewChange((c) => {
+        const page = [...pages.values()].find((p) => p.label === c.label);
+        if (!page) return;
+        if (c.url !== undefined) page.url = c.url;
+        if (c.title !== undefined) page.title = c.title;
+        if (c.loading !== undefined) page.loading = c.loading;
+        rerender();
+      }).then((f) => (gone ? f() : (off = f)));
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
+
   const closePage = (key: string) => {
     const page = pages.get(key);
     if (!page) return;
-    closePort(link, page);
+    if (page.port) closePort(link, page.port);
+    if (page.label) void view.close(page.label).catch(() => {});
     const order = [...docs.keys(), ...pages.keys()];
     pages.delete(key);
     const rest = order.filter((k) => k !== key);
@@ -502,7 +556,14 @@ export function Workbench(props: {
   };
   // A file tab or a browser tab.
   const closeTab = (key: string) => (pages.has(key) ? closePage(key) : void closeDoc(key));
-  useEffect(() => () => pages.forEach((p) => closePort(link, p)), []);
+  useEffect(
+    () => () =>
+      pages.forEach((p) => {
+        if (p.port) closePort(link, p.port);
+        if (p.label) void view.close(p.label).catch(() => {});
+      }),
+    [],
+  );
 
   // ---- live updates ----
 
@@ -706,6 +767,7 @@ export function Workbench(props: {
   const showTerm = props.showTerm;
   // With the terminal hidden and no file open, the editor area shows how to open one.
   const showEditor = docs.size + pages.size > 0 || !!props.welcome || !showTerm;
+  const overlay = useOverlayOpen();
   const treeOpen = props.showFiles;
 
   return (
@@ -794,20 +856,22 @@ export function Workbench(props: {
                     role="tab"
                     aria-selected={pg.key === active}
                     className={"tab page-tab" + (pg.key === active ? " active" : "")}
-                    title={`localhost:${pg.port} on the server`}
+                    title={pg.port ? `localhost:${pg.port.port} on the server` : (pg.url ?? "New tab")}
                     onMouseDown={(e) => e.button === 0 && setActive(pg.key)}
                     onAuxClick={(e) => e.button === 1 && closePage(pg.key)}
                   >
-                    <svg className="page-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-                      <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" />
-                      <path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" fill="none" stroke="currentColor" />
-                    </svg>
-                    <span className="tab-title">localhost:{pg.port}</span>
-                    <button className="tab-close" aria-label={`Close localhost:${pg.port}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => closePage(pg.key)}>
+                    {pageIcon}
+                    <span className="tab-title">{pageTitle(pg)}</span>
+                    <button className="tab-close" aria-label={`Close ${pageTitle(pg)}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => closePage(pg.key)}>
                       ×
                     </button>
                   </div>
                 ))}
+                <button className="icon-button small ftabs-new" title="New browser tab" aria-label="New browser tab" onClick={newPage}>
+                  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+                    <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" />
+                  </svg>
+                </button>
               </div>
               {/* Outside the scrolling strip, so many open files never push it out of sight. */}
               {doc?.viewer === "markdown" && doc.model && (
@@ -829,14 +893,25 @@ export function Workbench(props: {
             <div className="empty">
               No file open
               <div className="empty-sub">⌘P to open one, or pick it in the files on the left</div>
+              <button className="link-button" onClick={newPage}>
+                New browser tab
+              </button>
             </div>
           )}
           {[...pages.values()].map((pg) => (
             <div key={pg.key} className="viewer" hidden={pg.key !== active}>
               <PageView
                 page={pg}
-                onGo={(path) => ((pg.path = path), pg.nonce++, rerender())}
-                onReload={() => (pg.nonce++, rerender())}
+                shown={pg.key === active && props.front && showEditor && !overlay}
+                onGo={(url) => goPage(pg, url)}
+                onReload={() => reloadPage(pg)}
+                onLabel={(label) => ((pg.label = label), rerender())}
+                targets={() => props.pane.current.targets()}
+                onSend={(to, text) => {
+                  const { item, prefix } = sendItem(text);
+                  return props.pane.current.send(to, item, prefix);
+                }}
+                onNotice={props.onNotice}
               />
             </div>
           ))}

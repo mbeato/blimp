@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::tunnel::Tunnels;
@@ -73,7 +73,7 @@ struct Progress {
 
 /// Progress events to the window that asked, at most every 100 ms, and the cancel flag.
 struct Meter {
-    window: WebviewWindow,
+    window: Window,
     id: u64,
     done: u64,
     total: u64,
@@ -180,7 +180,7 @@ fn disposition_name(h: Option<&str>) -> Option<String> {
 /// Downloads a file (or a folder, as .tar.gz) from the server to ~/Downloads, under a name that
 /// isn't taken there. Resolves to where it was saved. Progress: "transfer" events with `id`.
 #[tauri::command]
-pub async fn download(window: WebviewWindow, server: String, path: String, id: u64) -> Result<String, String> {
+pub async fn download(window: Window, server: String, path: String, id: u64) -> Result<String, String> {
     let app = window.app_handle().clone();
     let (port, token) = app.state::<Tunnels>().endpoint(&server).ok_or("Not connected.")?;
     // A Mac always has one; a Linux desktop may not say where it is.
@@ -295,7 +295,7 @@ fn send(local: &Path, remote: &str, mode: &str, port: u16, token: &str, meter: &
 /// a folder of that name is merged into. Resolves to the number of files sent.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn upload(window: WebviewWindow, server: String, local: String, remote_dir: String, name: String, mode: String, id: u64) -> Result<u32, String> {
+pub async fn upload(window: Window, server: String, local: String, remote_dir: String, name: String, mode: String, id: u64) -> Result<u32, String> {
     let app = window.app_handle().clone();
     let Some(local) = app.state::<Transfers>().may_read(Path::new(&local)) else {
         return Err("Drop it on the window, or pick it with Upload…, to send it.".into());

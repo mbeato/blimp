@@ -354,6 +354,7 @@ export function App() {
     else if (k === "b" && !e.shiftKey) toggle("files");
     else if (k === "j" && !e.shiftKey) toggle("term");
     else if (k === "," && !e.shiftKey) setDialog((d) => (d === "settings" ? null : "settings"));
+    else if (k === "t" && !e.shiftKey) newBrowserTab();
     else if (k === "o" && !e.shiftKey) {
       if (connected.length) setDialog("open");
       else setNotice("No server is connected yet.");
@@ -368,6 +369,7 @@ export function App() {
   }, []);
 
   const wbKey = (l: ServerLink, r: string) => `${l.id}\n${r}`;
+  const newBrowserTab = () => frontKey && pageOpeners.get(frontKey)?.current();
 
   // ---- files dragged in from Finder ----
   // Over the tree: into the folder under the pointer (a file's own folder). Over a terminal: up
@@ -525,6 +527,12 @@ export function App() {
           <LayoutToggle label="Files" keys="⌘B" on={show.files} onClick={() => toggle("files")} pane={<rect x="1.5" y="2.5" width="5" height="11" rx="1.5" />} />
           <LayoutToggle label="Terminal" keys="⌘J" on={show.term} onClick={() => toggle("term")} pane={<rect x="1.5" y="9.5" width="13" height="4" rx="1.5" />} />
           <LayoutToggle label="Sessions" keys="⌘⌥B" on={show.sessions} onClick={() => toggle("sessions")} pane={<rect x="9.5" y="2.5" width="5" height="11" rx="1.5" />} />
+          <button className="icon-button small" title="New browser tab (⌘T)" aria-label="New browser tab" disabled={!frontKey} onClick={newBrowserTab}>
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor">
+              <circle cx="8" cy="8" r="5.5" />
+              <path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" />
+            </svg>
+          </button>
           <button className="icon-button small" title="Settings (⌘,)" aria-label="Settings" onClick={() => setDialog("settings")}>
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor">
               <circle cx="8" cy="8" r="2.2" />
@@ -555,6 +563,8 @@ export function App() {
             opener={opener}
             onDrop={refFor(fileDrops, key, () => {})}
             pages={refFor(pageOpeners, key, () => {})}
+            pane={refFor(actions, key, noActions)}
+            onNotice={setNotice}
             terminal={
               <TerminalPane
                 link={l}
