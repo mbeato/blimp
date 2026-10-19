@@ -285,6 +285,10 @@ describe("chat", () => {
   }
   const user = (uuid: string, text: string) => tline({ type: "user", uuid, message: { role: "user", content: text } });
   const said = (uuid: string, text: string) => tline({ type: "assistant", uuid, message: { role: "assistant", content: [{ type: "text", text }] } });
+  // Enter from the viewer until what the chat client typed shows up: under load the chat client's
+  // keys can land after the viewer's first Enter.
+  const enterUntil = (v: Awaited<ReturnType<typeof socket>>, want: string, what: string) =>
+    until(() => (type(v.ws, "\r"), v.text.includes(want)), what);
 
   test("history on connect, appends as the transcript grows, reset on a new conversation", async () => {
     const sid = "11111111-1111-1111-1111-111111111111";
@@ -352,8 +356,7 @@ describe("chat", () => {
     expect(c.messages.find((m) => m.id === "q1")).toEqual({ type: "error", id: "q1", error: "the question changed" });
     c.ws.send(JSON.stringify({ type: "answer", id: "q2", at, pick: 0 }));
     await until(() => c.messages.find((m) => m.type === "ack" && m.id === "q2"), "ack");
-    type(viewer.ws, "\r");
-    await until(() => viewer.text.includes("got:1"), "the digit reached the session");
+    await enterUntil(viewer, "got:1", "the digit reached the session");
     c.ws.close();
     viewer.ws.close();
   });
@@ -365,8 +368,7 @@ describe("chat", () => {
     await until(() => c.messages.find((m) => m.type === "history"), "history");
     c.ws.send(JSON.stringify({ type: "interrupt", id: "i1" }));
     await until(() => c.messages.find((m) => m.type === "ack" && m.id === "i1"), "ack");
-    type(viewer.ws, "\r");
-    await until(() => viewer.text.includes("got:~"), "Esc reached the session");
+    await enterUntil(viewer, "got:~", "Esc reached the session");
     c.ws.close();
     viewer.ws.close();
   });
@@ -418,8 +420,7 @@ describe("chat", () => {
     c.ws.send(JSON.stringify({ type: "interrupt", id: "i1" }));
     c.ws.send(JSON.stringify({ type: "interrupt", id: "i1" }));
     await until(() => c.messages.filter((m) => m.type === "ack" && m.id === "i1").length === 2, "both acks");
-    type(viewer.ws, "\r");
-    await until(() => viewer.text.includes("got:~"), "Esc reached the session");
+    await enterUntil(viewer, "got:~", "Esc reached the session");
     await Bun.sleep(300);
     expect(viewer.text).not.toContain("got:~~");
     c.ws.close();
@@ -441,6 +442,35 @@ describe("chat", () => {
     await until(() => viewer.text.includes("got:~[200~still here~[201~"), "the next input through the same client");
     expect(clients(name)).toBe(2);
     c.ws.close();
+    viewer.ws.close();
+  });
+
+  test("input sent just before the socket closes is still typed", async () => {
+    const { name } = await fakeClaude("chat12", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "z1", text: "last words" }));
+    c.ws.close();
+    await until(() => viewer.text.includes("got:~[200~last words~[201~"), "the line reached the session");
+    await until(() => clients(name) === 1, "the chat client to go");
+    viewer.ws.close();
+  });
+
+  test("the same input id sent on two sockets at once is typed once", async () => {
+    const { name } = await fakeClaude("chat13", "cccccccc-cccc-cccc-cccc-cccccccccccc", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c1 = await socket(`/sessions/${name}/chat`);
+    const c2 = await socket(`/sessions/${name}/chat`);
+    await until(() => c1.messages.find((m) => m.type === "history") && c2.messages.find((m) => m.type === "history"), "history");
+    c1.ws.send(JSON.stringify({ type: "input", id: "d1", text: "only once" }));
+    c2.ws.send(JSON.stringify({ type: "input", id: "d1", text: "only once" }));
+    await until(() => c1.messages.find((m) => m.type === "ack") && c2.messages.find((m) => m.type === "ack"), "both acks");
+    await until(() => viewer.text.includes("got:~[200~only once~[201~"), "the line reached the session");
+    await Bun.sleep(300);
+    expect(viewer.text.split("~[200~only once").length - 1).toBe(1); // as the stand-in prints it, not the echo
+    c1.ws.close();
+    c2.ws.close();
     viewer.ws.close();
   });
 
