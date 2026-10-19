@@ -417,6 +417,24 @@ describe("chat", () => {
     viewer.ws.close();
   });
 
+  test("a permission prompt's options come from the screen, even when the hook fires before it's drawn", async () => {
+    const name = await shSession("chat9");
+    const at = Date.now();
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    writeFileSync(
+      join(tmp, "status", `${name}.json`),
+      JSON.stringify({ state: "waiting", at, event: "PermissionRequest",
+        prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }),
+    );
+    const options = async () => ((await (await api("/sessions")).json()) as any[]).find((s) => s.name === name)?.prompt?.options;
+    expect(await options()).toEqual(["Yes", "No"]); // nothing on screen yet
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    type(viewer.ws, "printf 'Do you want to proceed?\\n 1. Yes\\n 2. Yes, and always\\n 3. No\\n'\r");
+    await until(async () => (await options())?.length === 3, "the options on screen", 1500);
+    expect(await options()).toEqual(["Yes", "Yes, and always", "No"]);
+    viewer.ws.close();
+  });
+
   test("404 for an unknown session", async () => {
     expect((await api(`/sessions/${tag}-none/chat?token=${token}`)).status).toBe(404);
   });

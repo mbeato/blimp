@@ -233,6 +233,7 @@ export function rememberKind(name: string, kind: string, live: string[], file = 
 }
 
 // A permission prompt's options come from the screen, read once per wait (keyed by the hook's `at`).
+// The hook can fire before Claude has drawn the dialog, so for 2 s a screen without it is read again.
 const screenPrompts = new Map<string, Prompt>();
 function promptFor(name: string, hook: any): Prompt | undefined {
   const p = hook.prompt as Prompt | undefined;
@@ -243,7 +244,7 @@ function promptFor(name: string, hook: any): Prompt | undefined {
     const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore" });
     done = withScreenOptions(p, r.stdout.toString().split("\n").slice(-40).join("\n"));
     if (screenPrompts.size > 200) screenPrompts.clear();
-    screenPrompts.set(key, done);
+    if (done !== p || Date.now() > hook.at + 2000) screenPrompts.set(key, done);
   }
   return done;
 }
