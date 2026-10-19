@@ -15,15 +15,21 @@ import {
   readFileSync,
   readSync,
   realpathSync,
+  renameSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { kindLabel, readKindsFile, type Launch } from "./kinds";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
 
 export type Session = ZmxSession & {
-  kind: "claude" | "shell"; // shell: anything that isn't Claude, like blimp's "New shell"
+  // The kind it was started with (kinds.ts). Sessions from before kinds, or from outside blimp:
+  // "claude" if Claude runs in it, else "shell".
+  kind: string;
+  label?: string; // the small label for kinds other than Claude Code and a shell: GLM, Codex…
   sessionId?: string;
   title: string;
   status: string; // busy | idle | waiting | shell, or "" when Claude isn't running
@@ -43,6 +49,9 @@ export const socketPath = () => process.env.BLIMPD_SOCKET || join(homedir(), ".b
 
 // Where blimpd keeps its token and the hook status files: next to the socket, ~/.blimp by default.
 export const blimpDir = () => dirname(socketPath());
+
+// The login shell sessions start in.
+export const loginShell = () => process.env.SHELL || userInfo().shell || "/bin/sh";
 
 // zmx names become file names (zmx's own sockets, blimp's status files), so only allow plain ones.
 export const isSafeName = (name: string) => /^[A-Za-z0-9_.-]+$/.test(name) && name !== "." && name !== "..";
@@ -209,18 +218,37 @@ function findTranscript(dir: string, sessionId: string): string | undefined {
   return hits.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
 }
 
+// Which kind each session was started with, by zmx name (only sessions that were live at the last start).
+export const kindsMemoFile = () => join(blimpDir(), "session-kinds.json");
+
+// An empty live list is more likely a zmx list that failed than no sessions at all, so then nothing is dropped.
+export function rememberKind(name: string, kind: string, live: string[], file = kindsMemoFile()) {
+  const memo = readJson(file);
+  const next: Record<string, string> = { [name]: kind };
+  for (const [n, k] of Object.entries(memo)) if ((!live.length || live.includes(n)) && typeof k === "string") next[n] ??= k;
+  writeFileSync(file + ".tmp", JSON.stringify(next));
+  renameSync(file + ".tmp", file);
+}
+
 export function listSessions(
   dir = claudeDir(),
   zmxOut = runZmxList(),
   statusDir = join(blimpDir(), "status"),
+  memoFile = kindsMemoFile(),
 ): Session[] {
+  const memo = readJson(memoFile);
+  const custom = readKindsFile().kinds; // for the labels, once per list
   return parseZmxList(zmxOut).map((z) => {
     const info = readJson(join(dir, "sessions", `${z.pid}.json`));
     const hook = isSafeName(z.name) ? readJson(join(statusDir, `${z.name}.json`)) : {};
     const file = info.sessionId ? transcriptPath(dir, info.sessionId) : undefined;
+    // A shell someone then typed `claude` in is Claude Code now.
+    let kind = typeof memo[z.name] === "string" ? memo[z.name] : info.sessionId || /\bclaude\b/.test(z.cmd) ? "claude" : "shell";
+    if (kind === "shell" && info.sessionId) kind = "claude";
     return {
       ...z,
-      kind: info.sessionId || /\bclaude\b/.test(z.cmd) ? "claude" : "shell",
+      kind,
+      label: kindLabel(kind, custom),
       dir: realDir(info.cwd || z.dir || "/"),
       sessionId: info.sessionId,
       title: file ? transcriptTitle(file) : "(new session)",
@@ -293,11 +321,11 @@ export function newSessionName(dir: string, at: Date, taken: string[], custom?: 
   return name;
 }
 
-// Starts `claude` (or, with shell, just the login shell) in dir inside a new zmx session and
-// returns its name. Claude is started
-// through the user's login shell so it gets the same environment as typing `claude` there,
-// and the shell execs it so the session's pid is Claude's (that's how the status file is found).
-// Claude's arguments go to the shell as "$@", never pasted into the command string.
+// Starts a kind of session (kinds.ts says how) in dir inside a new zmx session and returns its
+// name. Everything but a shell is started through the user's login shell, so it gets the same
+// environment as typing `claude` (or `codex`…) there, and the shell execs it so the session's pid
+// is the program's (that's how Claude's status file is found). Arguments go to the shell as "$@",
+// never pasted into the command string; a kind's env (the GLM key) goes in the environment.
 //
 // The creating zmx client runs in a 120x36 PTY, not with stdin at /dev/null: the session then has a real
 // size from the start, so Claude draws its first screen properly and the first viewer sees it.
@@ -305,22 +333,26 @@ export function newSessionName(dir: string, at: Date, taken: string[], custom?: 
 //
 // One start at a time: two in the same second would pick the same name, and the second would just attach.
 let starting: Promise<unknown> = Promise.resolve();
-export type StartOptions = { name?: string; resume?: string; shell?: boolean };
+export type StartOptions = { name?: string; kind?: string; run?: Launch };
 export function startSession(dir: string, opts: StartOptions = {}): Promise<string> {
   const p = starting.then(() => start(dir, opts));
   starting = p.catch(() => {});
   return p;
 }
 
-async function start(dir: string, { name: custom, resume, shell: plain }: StartOptions): Promise<string> {
+const CLAUDE: Launch = { script: 'exec claude "$@"', args: ["claude"] };
+
+async function start(dir: string, { name: custom, kind = "claude", run = CLAUDE }: StartOptions): Promise<string> {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`not a folder: ${dir}`);
-  const name = newSessionName(dir, new Date(), parseZmxList(await zmxListAsync()).map((s) => s.name), custom);
-  const shell = process.env.SHELL || userInfo().shell || "/bin/sh";
-  const args = resume ? ["--resume", resume] : [];
-  const cmd = plain ? [shell, "-l", "-i"] : [shell, "-l", "-i", "-c", 'exec claude "$@"', "claude", ...args];
+  const taken = parseZmxList(await zmxListAsync()).map((s) => s.name);
+  const name = newSessionName(dir, new Date(), taken, custom);
+  const shell = loginShell();
+  const cmd = run.script ? [shell, "-l", "-i", "-c", run.script, ...run.args] : [shell, "-l", "-i"];
+  // Before it's listed, so it never shows up as the wrong kind.
+  rememberKind(name, kind, taken);
   const proc = Bun.spawn([zmxPath(), "attach", name, ...cmd], {
     cwd: dir,
-    env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor" },
+    env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor", ...run.env },
     terminal: { cols: 120, rows: 36, data() {} }, // nobody watches this client; zmx keeps the screen
   });
   try {

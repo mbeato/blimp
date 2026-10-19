@@ -51,6 +51,8 @@ export function App() {
   // null until the servers have loaded, when a new start reopens the last tabs.
   const [layout, setLayout] = useState<Layout | null>(() => readLayout());
   const [dialog, setDialog] = useState<DialogKind>(null);
+  // Settings opened at a section (the session chevron's "Models and keys…" opens it at Models).
+  const [settingsAt, setSettingsAt] = useState<"models" | undefined>();
   const [notice, setNotice] = useState("");
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   // Per tab (by workbench key): ⌘-click's file opener and the terminal pane's actions (⌘N).
@@ -271,6 +273,26 @@ export function App() {
     if (!d || !l || !r) return;
     dropped.current = null;
     actions.get(wbKey(l, r))?.current.dropIn(d.name, d.x, d.y);
+  });
+
+  // Settings' Codex sign-in: a session in the front tab's folder, if that tab is on the server;
+  // else in the server's Home tab, once it's in front (its pane starts it after that render).
+  const pendingKind = useRef<{ server: string; kind: string } | null>(null);
+  const startKind = (l: ServerLink, kind: string) => {
+    setDialog(null);
+    setSettingsAt(undefined);
+    pendingKind.current = { server: l.key, kind };
+    if (front?.server !== l.key) open(l.key, null);
+    rerender();
+  };
+  useEffect(() => {
+    const k = pendingKind.current;
+    const l = k && links.get(k.server);
+    const r = l && front?.server === k.server ? rootOf(front) : null;
+    const a = l && r ? actions.get(wbKey(l, r)) : undefined;
+    if (!k || !a || a.current === noActions) return;
+    pendingKind.current = null;
+    a.current.startKind(k.kind);
   });
 
   // ⌘K: a session in a folder with a tab here is shown in that tab; one open in another window
@@ -545,9 +567,12 @@ export function App() {
                 onNotice={setNotice}
                 onMoveOut={(names, at) => moveOut(t, names, at)}
                 elsewhere={(n) => elsewhere.has(`${t.server}/${n}`)}
-                onFocusElsewhere={(n) => focusSession({ server: t.server, dir: r, session: n })}
                 onTake={(n) => elsewhere.has(`${t.server}/${n}`) && takeSession(`${t.server}/${n}`)}
                 onOpenPort={(p) => pageOpeners.get(key)?.current(p)}
+                onModels={() => {
+                  setSettingsAt("models");
+                  setDialog("settings");
+                }}
                 actions={refFor(actions, key, noActions)}
               />
             }
@@ -565,7 +590,17 @@ export function App() {
         />
       )}
       {dialog === "add" && <AddServerDialog onAdd={addServer} onClose={() => setDialog(null)} />}
-      {dialog === "settings" && <SettingsDialog onClose={() => setDialog(null)} />}
+      {dialog === "settings" && (
+        <SettingsDialog
+          at={settingsAt}
+          links={connected}
+          onCodexSignIn={(l) => startKind(l, "codex-login")}
+          onClose={() => {
+            setDialog(null);
+            setSettingsAt(undefined);
+          }}
+        />
+      )}
       <TransferList />
       {notice && (
         <div className="toast" role="status" onClick={() => setNotice("")}>

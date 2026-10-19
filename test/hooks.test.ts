@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installHooks, uninstallHooks, writeHookStatus } from "../src/hooks";
+import { CODEX_HOOKS, installHooks, uninstallHooks, writeHookStatus } from "../src/hooks";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-hooks-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -252,9 +252,73 @@ test("`blimpd uninstall-hooks` takes them out of $CLAUDE_CONFIG_DIR/settings.jso
   mkdirSync(dir);
   writeFileSync(join(dir, "settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "'/u/blimpd' hook" }] }] } }));
   const r = Bun.spawnSync(["bun", join(import.meta.dir, "..", "src", "main.ts"), "uninstall-hooks"], {
-    env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: dir, CODEX_HOME: join(dir, "no-codex") },
   });
   expect(r.exitCode).toBe(0);
   expect(r.stdout.toString()).toBe("hooks: removed Stop\n");
   expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"))).toEqual({});
+});
+
+test("`blimpd uninstall-hooks` skips a Codex hooks.json that isn't strict JSON, leaving it as it was", () => {
+  const dir = join(tmp, "cli-codex");
+  mkdirSync(join(dir, "codex"), { recursive: true });
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "'/u/blimpd' hook" }] }] } }));
+  const mine = '{\n  // mine\n  "hooks": {},\n}\n';
+  writeFileSync(join(dir, "codex", "hooks.json"), mine);
+  const r = Bun.spawnSync(["bun", join(import.meta.dir, "..", "src", "main.ts"), "uninstall-hooks"], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: dir, CODEX_HOME: join(dir, "codex") },
+  });
+  expect(r.exitCode).toBe(0);
+  expect(r.stderr.toString()).toBe("");
+  expect(r.stdout.toString()).toMatch(/^hooks: removed Stop\ncodex hooks: skipped \(.+\)\n$/);
+  expect(readFileSync(join(dir, "codex", "hooks.json"), "utf8")).toBe(mine);
+});
+
+// Codex's ~/.codex/hooks.json takes the same format. Only temp folders here, never the real ~/.codex.
+describe("Codex hooks", () => {
+  test("added after the user's own (Codex trusts hooks by their place), backed up once, taken out cleanly", () => {
+    const dir = join(tmp, "codex");
+    const file = join(dir, "hooks.json");
+    const original = {
+      hooks: {
+        PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "guard.sh" }] }],
+        Stop: [{ hooks: [{ type: "command", command: "say done" }] }],
+        SessionStart: [{ hooks: [{ type: "command", command: "hello" }] }],
+      },
+    };
+    mkdirSync(dir);
+    writeFileSync(file, JSON.stringify(original), { mode: 0o600 });
+
+    expect(installHooks("/x/blimpd", file, CODEX_HOOKS)).toEqual(["UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop"]);
+    const ours = { hooks: [{ type: "command", command: "'/x/blimpd' hook codex", timeout: 5 }] };
+    const s = JSON.parse(readFileSync(file, "utf8"));
+    expect(s.hooks.PreToolUse).toEqual([original.hooks.PreToolUse[0], ours]); // no matcher: every tool
+    expect(s.hooks.Stop).toEqual([original.hooks.Stop[0], ours]);
+    expect(s.hooks.SessionStart).toEqual(original.hooks.SessionStart);
+    expect(s.hooks.PermissionRequest).toEqual([ours]);
+    expect(JSON.parse(readFileSync(file + ".blimp-backup", "utf8"))).toEqual(original);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(installHooks("/x/blimpd", file, CODEX_HOOKS)).toEqual([]);
+
+    expect(uninstallHooks("/x/blimpd", file, CODEX_HOOKS)).toHaveLength(5);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(original);
+  });
+
+  test("states: prompt and every tool call are working, a permission request waiting, Stop done", () => {
+    const dir = join(tmp, "codex-status");
+    const read = () => JSON.parse(readFileSync(join(dir, "cx-1.json"), "utf8")).state;
+    const ev = (name: string, extra = {}) => JSON.stringify({ hook_event_name: name, session_id: "t1", ...extra });
+    for (const [event, state] of [
+      ["UserPromptSubmit", "working"],
+      ["PermissionRequest", "waiting"],
+      ["PreToolUse", "working"],
+      ["Stop", "done"],
+      ["PostToolUse", "working"],
+    ]) {
+      writeHookStatus(ev(event, { tool_name: "shell" }), "cx-1", dir, true);
+      expect(read()).toBe(state);
+    }
+    writeHookStatus(ev("SessionStart"), "cx-1", dir, true);
+    expect(read()).toBe("working");
+  });
 });

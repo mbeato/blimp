@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import type { Conversation, Port, Session } from "../lib/api";
+import type { Conversation, Kind, Port, Session } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
 import { freeName, plainName, upload, type Item } from "../lib/transfers";
-import { earlier, folderSessions, lastActivity, pickSession } from "../lib/sessions";
+import { earlier, folderSessions, hasState, isClaude, lastActivity, pickSession, sessionTitle } from "../lib/sessions";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
 
-// Things the window reaches into the pane for: ⌘N, and a session dropped here from another
-// window at (x, y) in the page.
+// Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
+// (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
 // release: another window took the session into one of its splits, so stop showing it here.
 // dropFiles: files from Finder let go on a session's terminal.
 export type PaneActions = {
   newClaude: () => void;
+  startKind: (kind: string) => void;
   dropIn: (name: string, x: number, y: number) => void;
   release: (name: string) => void;
   dropFiles: (name: string, items: Item[]) => void;
 };
-export const noActions: PaneActions = { newClaude: () => {}, dropIn: () => {}, release: () => {}, dropFiles: () => {} };
+export const noActions: PaneActions = { newClaude: () => {}, startKind: () => {}, dropIn: () => {}, release: () => {}, dropFiles: () => {} };
 
 const EARLIER_KEY = "blimp.earlierOpen";
 
@@ -31,6 +32,12 @@ const STATE_LABEL: Record<Session["state"], string> = {
   done: "Idle",
   unknown: "",
 };
+
+// The chevron's kinds until the server's list comes (or if it can't be had).
+const FALLBACK_KINDS: Kind[] = [
+  { id: "claude", label: "Claude Code", available: true },
+  { id: "shell", label: "Shell", available: true },
+];
 
 // No split narrower than this.
 const MIN_SPLIT_PX = 160;
@@ -57,8 +64,8 @@ function useNow(ms: number) {
 // front: this tab is the one in front. showList: the list's show/hide button.
 // onMoveOut: sessions leaving for another window (right-click > Open in New Window, or a drag let
 // go outside the window at a point on screen); the pane then stops showing them.
-// elsewhere: another window shows the session; a click on its row goes there (onFocusElsewhere,
-// false if that window has gone), and dragging it into a split here takes it (onTake).
+// elsewhere: another window of this app shows the session. It's listed only there, and never picked
+// to fill a terminal here. onTake: a session dragged into a split here (App lets that window know).
 export function TerminalPane(props: {
   link: ServerLink;
   dir: string;
@@ -70,10 +77,11 @@ export function TerminalPane(props: {
   onNotice: (msg: string) => void;
   onMoveOut: (names: string[], at?: { x: number; y: number }) => void;
   elsewhere: (name: string) => boolean;
-  onFocusElsewhere: (name: string) => Promise<boolean>;
   onTake: (name: string) => void;
   // A port a session here listens on: open it in a browser tab.
   onOpenPort: (p: Port) => void;
+  // The chevron's "Models and keys…": Settings, at Models.
+  onModels: () => void;
   actions: { current: PaneActions };
 }) {
   const { link, dir, panes: p, onPanes } = props;
@@ -87,6 +95,8 @@ export function TerminalPane(props: {
   const pending = useRef(new Map<string, number>()).current;
   const [convs, setConvs] = useState<Conversation[] | null>(null);
   const [menu, setMenu] = useState(false);
+  // The server's kinds of session, fetched each time the chevron opens.
+  const [kinds, setKinds] = useState<Kind[] | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -118,7 +128,7 @@ export function TerminalPane(props: {
   // Splits whose session ended close; with none left, show another one of this folder's.
   const fill = (q: Panes) => {
     const next = prune(q, alive);
-    const pick = next.panes.length ? null : pickSession(live.filter((s) => !away.has(s.name)));
+    const pick = next.panes.length ? null : pickSession(live.filter((s) => !away.has(s.name) && !props.elsewhere(s.name)));
     return pick ? show(next, pick.name) : next;
   };
   const stale = loaded && fill(p) !== p;
@@ -157,7 +167,7 @@ export function TerminalPane(props: {
     return () => void (live = false);
   }, [api, dir, ids]);
 
-  const start = async (body: { shell?: boolean; resume?: string }) => {
+  const start = async (body: { kind?: string; resume?: string }) => {
     setMenu(false);
     if (!api) return props.onNotice("Not connected.");
     if (busy) return;
@@ -174,6 +184,7 @@ export function TerminalPane(props: {
   };
   props.actions.current = {
     newClaude: () => void start({}),
+    startKind: (kind) => void start({ kind }),
     // At the drop point, or on the right when it's not over the terminal (or the tab just came forward).
     dropIn: (name, x, y) => {
       away.delete(name);
@@ -231,7 +242,7 @@ export function TerminalPane(props: {
 
   // An idle Claude session ends at once: nothing is lost, its conversation can be resumed.
   // Anything that may be busy (working, waiting, a shell) asks first.
-  const trash = (s: Session) => (s.kind === "claude" && s.state === "done" ? void end(s) : setConfirm(s.name));
+  const trash = (s: Session) => (isClaude(s) && s.state === "done" ? void end(s) : setConfirm(s.name));
 
   const past = convs ? earlier(convs, running) : [];
   // Earlier conversations fold away (folded at first); the choice is kept on this computer.
@@ -300,7 +311,7 @@ export function TerminalPane(props: {
     } catch {}
     const x0 = e.clientX;
     const y0 = e.clientY;
-    const label = s.kind === "shell" ? s.name : s.title;
+    const label = sessionTitle(s);
     let on = false;
     const done = () => {
       window.removeEventListener("pointermove", move);
@@ -353,7 +364,7 @@ export function TerminalPane(props: {
   };
   const titleOf = (name: string) => {
     const s = running.find((x) => x.name === name);
-    return s ? (s.kind === "shell" ? s.name : s.title) : name;
+    return s ? sessionTitle(s) : name;
   };
   const t = drag?.target;
   const half = t && p.panes.length ? shares[t.at] / 2 : 1;
@@ -362,13 +373,14 @@ export function TerminalPane(props: {
   // The splits on screen come first in the list, in their left-to-right order, joined as a group
   // and numbered as their headers are; then the kept split groups, the same way but dimmer (a
   // click on one brings its group back). (One session alone stays where it is.)
-  const toSessions = (g: string[]) => g.map(sessionOf).filter((x): x is Session => !!x);
+  // A session another window shows is listed only there (unless it's in a split here too).
+  const listed = running.filter((s) => p.panes.includes(s.name) || !props.elsewhere(s.name));
+  const toSessions = (g: string[]) => g.map((n) => listed.find((x) => x.name === n)).filter((x): x is Session => !!x);
   const group = split ? toSessions(p.panes) : [];
   const kept = p.groups.map(toSessions).filter((g) => g.length > 1);
   const grouped = new Set([...group, ...kept.flat()]);
-  const rest = running.filter((s) => !grouped.has(s));
+  const rest = listed.filter((s) => !grouped.has(s));
   const row = (s: Session, num?: number) => {
-    const far = !p.panes.includes(s.name) && props.elsewhere(s.name);
     return (
       <div
         key={s.name}
@@ -377,10 +389,9 @@ export function TerminalPane(props: {
           "srow" +
           (s.name === p.panes[p.focus] ? " selected" : p.panes.includes(s.name) ? " shown" : "") +
           (link.status !== "connected" ? " stale" : "") +
-          (drag?.name === s.name ? " dragging" : "") +
-          (far ? " elsewhere" : "")
+          (drag?.name === s.name ? " dragging" : "")
         }
-        title={`${s.kind === "shell" ? "Shell" : s.title}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}${far ? "\nIn another window: click to go there" : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
+        title={`${s.kind === "shell" ? "Shell" : sessionTitle(s)}${s.label ? ` · ${s.label}` : ""}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
         onContextMenu={(e) => openMenu(e, s.name)}
       >
         {confirm === s.name ? (
@@ -396,23 +407,18 @@ export function TerminalPane(props: {
             <button
               className="srow-main"
               onPointerDown={(e) => startDrag(e, s)}
-              onClick={async () => {
+              onClick={() => {
                 if (dragged.current) return void (dragged.current = false);
-                if (far && (await props.onFocusElsewhere(s.name))) return;
                 showHere(s.name);
               }}
             >
               <Mark s={s} />
               {num && <span className="split-num">{num}</span>}
-              <span className="srow-title">{s.kind === "shell" ? s.name : s.title}</span>
-              {far && (
-                <svg className="srow-away" width="14" height="14" viewBox="0 0 16 16" aria-label="In another window">
-                  <path d="M5.5 2.5h8v7h-8zM2.5 6.5v7h8" fill="none" stroke="currentColor" />
-                </svg>
-              )}
+              <span className="srow-title">{sessionTitle(s)}</span>
+              {s.label && <span className="kind-label">{s.label}</span>}
               <span className="srow-time">{relTime(lastActivity(s), now)}</span>
             </button>
-            <button className="srow-trash" title="End session" aria-label={`End ${s.kind === "shell" ? s.name : s.title}`} onClick={() => trash(s)}>
+            <button className="srow-trash" title="End session" aria-label={`End ${sessionTitle(s)}`} onClick={() => trash(s)}>
               <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
                 <path d="M2.5 4.5h11M6 4.5V2.5h4v2M4 4.5l.7 9h6.6l.7-9M6.8 7v4.5M9.2 7v4.5" fill="none" stroke="currentColor" />
               </svg>
@@ -452,6 +458,7 @@ export function TerminalPane(props: {
                 >
                   <span className="split-num">{i + 1}</span>
                   <span className="tsplit-title">{titleOf(name)}</span>
+                  {sessionOf(name)?.label && <span className="kind-label">{sessionOf(name)!.label}</span>}
                   <button className="tab-close" title="Close split (the session keeps running)" aria-label={`Close split: ${titleOf(name)}`} onClick={() => closeSplit(name)}>
                     ×
                   </button>
@@ -512,7 +519,7 @@ export function TerminalPane(props: {
               <button className="primary" disabled={!api || busy} onClick={() => void start({})}>
                 New Claude session
               </button>
-              <button disabled={!api || busy} onClick={() => void start({ shell: true })}>
+              <button disabled={!api || busy} onClick={() => void start({ kind: "shell" })}>
                 New shell
               </button>
             </div>
@@ -531,7 +538,13 @@ export function TerminalPane(props: {
             <button className="icon-button small" title="New Claude session (⌘N)" aria-label="New Claude session" disabled={!api || busy} onClick={() => void start({})}>
               +
             </button>
-            <button className="icon-button small new-more" title="More kinds of session" aria-label="More kinds of session" aria-expanded={menu} disabled={!api} onClick={() => setMenu((m) => !m)}>
+            <button className="icon-button small new-more" title="More kinds of session" aria-label="More kinds of session" aria-expanded={menu}
+              disabled={!api}
+              onClick={() => {
+                if (!menu) api?.kinds().then(setKinds, () => {});
+                setMenu(!menu);
+              }}
+            >
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
                 <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" />
               </svg>
@@ -539,12 +552,26 @@ export function TerminalPane(props: {
             {menu && (
               <>
                 <div className="menu-scrim" onClick={() => setMenu(false)} />
-                <div className="menu" role="menu">
-                  <button role="menuitem" onClick={() => void start({})}>
-                    New Claude session<span className="menu-key">⌘N</span>
-                  </button>
-                  <button role="menuitem" onClick={() => void start({ shell: true })}>
-                    New shell
+                <div className="menu kinds-menu" role="menu">
+                  {/* Every kind the server knows; one that can't start here is greyed, saying why. */}
+                  {(kinds ?? FALLBACK_KINDS).map((k) => (
+                    <button key={k.id} role="menuitem" disabled={!k.available || busy} title={k.note} onClick={() => void start({ kind: k.id })}>
+                      <span className="menu-label">
+                        {k.label}
+                        {k.note && <span className="menu-note">{k.note}</span>}
+                      </span>
+                      {k.id === "claude" && <span className="menu-key">⌘N</span>}
+                    </button>
+                  ))}
+                  <div className="menu-sep" role="separator" />
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenu(false);
+                      props.onModels();
+                    }}
+                  >
+                    Models and keys…
                   </button>
                 </div>
               </>
@@ -563,7 +590,7 @@ export function TerminalPane(props: {
             </div>
           ))}
           {rest.map((s) => row(s))}
-          {loaded && running.length === 0 && <p className="slist-note">Nothing running here.</p>}
+          {loaded && listed.length === 0 && <p className="slist-note">Nothing running here.</p>}
           {ports.length > 0 && <div className="slist-label">Ports</div>}
           {ports.map((x) => (
             <button
@@ -630,8 +657,8 @@ export function TerminalPane(props: {
 
 function Mark(props: { s: Session }) {
   const { s } = props;
-  // A shell has no state (Claude's files and hooks are where states come from).
-  if (s.kind === "shell" && s.state === "unknown") return <span className="srow-mark shell" aria-label="Shell">{">_"}</span>;
+  // A shell, or a kind without hooks, has no state (Claude's and Codex's hooks are where states come from).
+  if (!hasState(s) && s.state === "unknown") return <span className="srow-mark shell" aria-label={s.label ?? "Shell"}>{">_"}</span>;
   return (
     <span className={"srow-mark state-" + s.state} aria-label={STATE_LABEL[s.state] || undefined}>
       {s.state === "waiting" ? <span className="dot" /> : <span className="state-dot" />}

@@ -1,5 +1,5 @@
 // The window layout: Home, Open Folder (with New folder), the tree's New file and New folder, the
-// terminal pane's session list (New shell, trash, Earlier), ⌘-click on a path, and ⌘K to another
+// terminal pane's session list (Shell from the chevron, trash, Earlier), ⌘-click on a path, and ⌘K to another
 // folder. Sessions blimpd starts here are named after their folder, so the folders are named
 // blimpe2e-* and only those sessions are ever ended.
 
@@ -142,10 +142,10 @@ test("the session list: only this folder's sessions; New shell; trash ends a ses
   // + is New Claude session itself; the chevron beside it has the other kinds.
   await expect(frontTab(page).getByRole("button", { name: "New Claude session", exact: true })).toBeVisible();
 
-  // New shell from the + menu: listed with its name, shown in the terminal.
+  // Shell from the chevron's kinds: listed with its name, shown in the terminal.
   const before = zmxNames();
   await page.getByRole("button", { name: "More kinds of session" }).click();
-  await page.getByRole("menuitem", { name: "New shell" }).click();
+  await page.getByRole("menuitem", { name: "Shell", exact: true }).click();
   await expect.poll(() => zmxNames().filter((n) => !before.includes(n)).length).toBe(1);
   const shell = zmxNames().find((n) => !before.includes(n))!;
   expect(shell.startsWith(`blimpe2e-wblist-${pid}-`)).toBe(true);

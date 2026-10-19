@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   formatList,
   newSessionName,
   parseZmxList,
+  rememberKind,
   titleFromTranscript,
   transcriptTitle,
   zmxDir,
@@ -150,6 +151,29 @@ test("listSessions joins zmx with Claude's session file, transcript and blimp's 
     { name: "web-1", pid: 42, clients: 1, created: 5, kind: "claude", dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123 },
     { name: "sh-2", pid: 43, clients: 0, created: 6, kind: "shell", dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000 },
   ]);
+});
+
+test("a session remembered as a shell that Claude now runs in is Claude Code", async () => {
+  const home = mkdtempSync(join(tmpdir(), "blimp-"));
+  mkdirSync(join(home, "sessions"));
+  writeFileSync(join(home, "sessions", "50.json"), JSON.stringify({ sessionId: "s9", status: "idle" }));
+  const memo = join(home, "session-kinds.json");
+  writeFileSync(memo, JSON.stringify({ "sh-1": "shell", "sh-2": "shell", "cx-3": "codex" }));
+  const { listSessions } = await import("../src/sessions");
+  const zmxOut = "  name=sh-1\tpid=50\tclients=0\tcreated=5\tcwd=/tmp\n  name=sh-2\tpid=51\tclients=0\tcreated=6\tcwd=/tmp\n  name=cx-3\tpid=52\tclients=0\tcreated=7\tcwd=/tmp";
+  expect(listSessions(home, zmxOut, join(home, "status"), memo).map((s) => s.kind)).toEqual(["claude", "shell", "codex"]);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("rememberKind drops ended sessions, but nothing when zmx listed none (a failed list)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "blimp-"));
+  const memo = join(dir, "session-kinds.json");
+  writeFileSync(memo, JSON.stringify({ a: "codex", b: "shell" }));
+  rememberKind("c", "claude-glm", [], memo);
+  expect(JSON.parse(readFileSync(memo, "utf8"))).toEqual({ c: "claude-glm", a: "codex", b: "shell" });
+  rememberKind("d", "claude", ["a", "c"], memo);
+  expect(JSON.parse(readFileSync(memo, "utf8"))).toEqual({ d: "claude", a: "codex", c: "claude-glm" });
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe("deriveState", () => {

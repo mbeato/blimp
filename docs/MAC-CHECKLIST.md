@@ -73,7 +73,7 @@ Each item says what to do, and what should happen. If the result is different, w
 
 - [ ] **Split groups and other windows.**
   Do: split two sessions side by side. Then open a second window and show one of this folder's sessions there.
-  Expect: in the list, the two splits are at the top, joined by a blue line, numbered 1 and 2 like their headers, and the project tab shows "2". In the first window, the session the second window shows has a small window mark; clicking it brings the second window forward.
+  Expect: in the list, the two splits are at the top, joined by a blue line, numbered 1 and 2 like their headers, and the project tab shows "2". The session the second window shows is not in the first window's list at all: it's listed only in the window that shows it. Close it there, and it's back in the first window's list.
 
 - [ ] **Upload by drag from Finder.**
   Do: drag a file from Finder over the tree, and move it over a folder. Let go. Drag the same file onto the same folder again. Then drag a folder in. Then drag a screenshot onto a Claude session.

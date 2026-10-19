@@ -2,15 +2,27 @@
 // blimpd: the server half of blimp.
 //   blimpd sessions [--json]   list live sessions (same columns as `claude1 ls`)
 //   blimpd serve               serve the API on a unix socket only you can open
-//   blimpd install-hooks       add blimp's status hooks to Claude Code's settings.json
+//   blimpd install-hooks       add blimp's status hooks to Claude Code's settings.json (and Codex's hooks.json)
 //   blimpd uninstall-hooks     take them out again
-//   blimpd hook                what those hooks run (reads Claude's hook JSON on stdin)
+//   blimpd hook [codex]        what those hooks run (reads Claude's or Codex's hook JSON on stdin)
 //   blimpd --version
 
 import pkg from "../package.json";
-import { installHooks, runHook, uninstallHooks } from "./hooks";
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
+
+// Codex's part of install-hooks and uninstall-hooks. A hooks.json that isn't strict JSON (comments,
+// say) is left as it is, and Claude Code's hooks still count as done.
+function codexHooks(f: () => void) {
+  try {
+    f();
+  } catch (e) {
+    console.log(`codex hooks: skipped (${(e as Error).message})`);
+  }
+}
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "sessions") {
@@ -32,14 +44,24 @@ if (cmd === "sessions") {
   }
   const added = installHooks(process.execPath);
   console.log(added.length ? `hooks: added ${added.join(", ")}` : "hooks: already installed");
+  // Codex only where it has been used (it makes ~/.codex). It runs new hooks only once you trust them.
+  if (existsSync(dirname(codexHooksFile())))
+    codexHooks(() => {
+      const codex = installHooks(process.execPath, codexHooksFile(), CODEX_HOOKS);
+      console.log(codex.length ? `codex hooks: added ${codex.join(", ")} (trust them once in Codex: /hooks)` : "codex hooks: already installed");
+    });
 } else if (cmd === "uninstall-hooks") {
   const removed = uninstallHooks(process.execPath);
   console.log(removed.length ? `hooks: removed ${removed.join(", ")}` : "hooks: none installed");
+  codexHooks(() => {
+    const codex = uninstallHooks(process.execPath, codexHooksFile(), CODEX_HOOKS);
+    if (codex.length) console.log(`codex hooks: removed ${codex.join(", ")}`);
+  });
 } else if (cmd === "hook") {
-  await runHook();
+  await runHook(args[0] === "codex");
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | --version");
   process.exit(cmd ? 1 : 0);
 }

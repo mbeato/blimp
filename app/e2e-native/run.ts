@@ -355,6 +355,24 @@ try {
   const one = await until(3000, () => js("return document.querySelectorAll('.wb:not([hidden]) .tsplit:not([hidden])').length === 1"));
   record("a split's × closes it, the session stays listed", !!one && (await js(`return !!document.querySelector('.wb:not([hidden]) .srow[data-session="blimptest-b"]')`)), await js("return document.querySelectorAll('.wb:not([hidden]) .tsplit:not([hidden])').length"));
 
+  // Kinds: the chevron fetches GET /kinds through the tunnel. Without the server's answer it would
+  // show only Claude Code and Shell; "Claude Code on GLM" (greyed: the test home has no key) is from it.
+  await click(".wb:not([hidden]) .new-more");
+  const kinds = await until(5000, () =>
+    js("const m = document.querySelector('.wb:not([hidden]) .kinds-menu'); return m && m.innerText.includes('Claude Code on GLM') ? [...m.querySelectorAll('[role=menuitem]')].map(b => b.innerText.replace(/\\n/g, ' | ') + (b.disabled ? ' (greyed)' : '')) : undefined"),
+  );
+  record("the chevron lists the server's kinds (GET /kinds)", !!kinds && kinds.some((k: string) => /^Claude Code on GLM.*\(greyed\)$/.test(k)) && kinds.at(-1) === "Models and keys…", kinds ?? "no kinds menu");
+  await shot("06c-kinds-menu");
+  // "Models and keys…" opens Settings at Models: the key's state comes from GET /keys.
+  await click(".wb:not([hidden]) .kinds-menu [role=menuitem]:last-child");
+  const models = await until(5000, () =>
+    js("const m = document.querySelector('.dialog.settings section[aria-label=Models]'); return m && /Not set/.test(m.innerText) && m.querySelector('input[type=password]') ? m.innerText : undefined"),
+  );
+  record("Settings > Models renders, with the server's key state", !!models, models ?? (await js("return document.querySelector('.dialog.settings')?.innerText.slice(0, 300) ?? 'no settings dialog'")));
+  await shot("06d-settings-models");
+  await typeKeys([""]);
+  await until(3000, () => js("return !document.querySelector('.dialog.settings')"));
+
   // 5. Palette: the UI binds metaKey only (App.tsx), so on Linux that is Super+K; no Ctrl+K mapping.
   await click(".wb:not([hidden]) .slist .pane-title");
   await chord("\uE03D", "k");
@@ -429,18 +447,20 @@ try {
     await click('.wb:not([hidden]) .tsplit[data-split="blimptest-b"] .tab-close').catch(() => {});
     await wd("POST", "/window", { handle: second });
 
-    // "In another window": this window says it shows b (set_shown); the first window marks b's
-    // row, and a click there brings this window forward with b shown (focus_session).
-    await jsAsync(`return await window.__TAURI_INTERNALS__.invoke('set_shown', { sessions: ['localhost/blimptest-b'] }).then(() => 'ok', e => 'ERR ' + e)`);
+    // "In another window": this window says it shows b (set_shown); the first window's list then
+    // leaves b out (it's listed only where it's shown), and lists it again once that stops.
+    const shown = (list: string[]) =>
+      jsAsync(`return await window.__TAURI_INTERNALS__.invoke('set_shown', { sessions: ${JSON.stringify(list)} }).then(() => 'ok', e => 'ERR ' + e)`);
+    await shown(["localhost/blimptest-b"]);
     await wd("POST", "/window", { handle: first });
-    const marked = await until(5000, () => js(`return !!document.querySelector('.wb:not([hidden]) .srow.elsewhere[data-session="blimptest-b"]')`));
-    await click('.wb:not([hidden]) .srow[data-session="blimptest-b"] .srow-main');
+    const bRow = () => js(`return !!document.querySelector('.wb:not([hidden]) .srow[data-session="blimptest-b"]')`);
+    const gone = await until(5000, async () => !(await bRow()));
     await wd("POST", "/window", { handle: second });
-    const there = await until(5000, async () => {
-      const l = JSON.parse((await js("return new URLSearchParams(location.search).get('layout')")) ?? "null");
-      return l && l.tabs[l.active]?.panes?.includes("blimptest-b") ? l.tabs.map((t: any) => t.dir) : undefined;
-    });
-    record("a session another window shows is marked; a click on it goes to that window", !!marked && !!there, { marked: !!marked, secondWindowTabs: there });
+    await shown([]);
+    await wd("POST", "/window", { handle: first });
+    const back = await until(5000, bRow);
+    await wd("POST", "/window", { handle: second });
+    record("a session another window shows is left out of this window's list, and comes back when it's not shown there", !!gone && !!back, { gone: !!gone, back: !!back });
     // Close that tab again before this window goes: step 6 needs b on no window's screen.
     await click(".ptab.active .tab-close").catch(() => {});
     await until(3000, () => js("return document.querySelectorAll('.ptab').length === 1"));

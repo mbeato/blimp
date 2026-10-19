@@ -51,7 +51,7 @@ The script does these things (see [install.sh](install.sh)):
 2. It installs into `~/.local/bin`. It does not need root.
 3. **zmx:** if you already have zmx, the script keeps it. If not, it downloads zmx 0.8.1 from zmx's GitHub releases. It checks the download against a SHA-256 sum that is written in the script, and stops if the sum does not match.
 4. **blimpd:** it downloads `blimpd-linux-x64` or `blimpd-linux-arm64` from the latest blimp release on GitHub. It also downloads `SHA256SUMS` from the same release, and stops if the binary does not match.
-5. **Claude Code hooks:** it runs `blimpd install-hooks`. This adds blimp's status hooks to `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`). It keeps all your other settings and hooks. Before the first change, it saves a copy as `settings.json.blimp-backup`. These hooks tell blimp the moment a session starts to wait for you.
+5. **Claude Code hooks:** it runs `blimpd install-hooks`. This adds blimp's status hooks to `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`). It keeps all your other settings and hooks. Before the first change, it saves a copy as `settings.json.blimp-backup`. These hooks tell blimp the moment a session starts to wait for you. If you use Codex on the server (`~/.codex` exists), it also adds blimp's hooks to `~/.codex/hooks.json` the same way (backup `hooks.json.blimp-backup`), after any hooks you have there. Codex runs a new hook only after you trust it: the first time Codex says hooks need review, open `/hooks` in Codex and trust blimp's. Your `notify` setting in `~/.codex/config.toml` is not touched.
 6. It tells you if `claude` is not found. It does not install Claude Code for you.
 7. **Service:** if user systemd works, it writes `~/.config/systemd/user/blimpd.service`, then enables and starts it. If not, it prints the command to start blimpd yourself.
 8. It prints this server's own name and your user name. In the app, enter the name that you use with ssh. That name can be different: for example an alias from `~/.ssh/config`, a full domain name, or an IP address.
@@ -117,16 +117,25 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 **Sessions**
 
 - The list next to the terminal shows the sessions in this folder only, as `claude --resume` shows only this folder's conversations. A session started in a subfolder shows when you open that subfolder.
-- Each running session shows its title and a mark: a spinning ring means **working**, an amber dot means **waiting for you**, an empty ring means **idle**. A plain shell shows `>_` and its session name. The title is your `/rename` title, else Claude's title, else the first prompt.
+- Each running session shows its title and a mark: a spinning ring means **working**, an amber dot means **waiting for you**, an empty ring means **idle**. A plain shell shows `>_` and its session name. The title is your `/rename` title, else Claude's title, else the first prompt. Codex sessions get the same marks (from blimp's Codex hooks) and show their session name.
+- A session of another kind has a small label after its title: **GLM** (Claude Code on GLM), **Codex**, **Codex sign-in**, or the label of one of your own kinds.
 - Click a session to show its terminal. When you open a folder, blimp shows the session that waits longest for you, else the newest.
 - **Drag a session onto the terminal** to see it side by side with the one there. Drop it on the left or right half; drag again (its row, or the name on top of its split) to move it. **×** on a split closes the split (the session keeps running). Esc cancels a drag.
 - **Drag a session out of the window** to move it: let go over another blimp window and it goes into that window's tab for its folder, where you let go; let go anywhere else and it opens in a new window there. Drag it back the same way.
 - **Right-click a session** (its row, or the name on top of its split) for **Open in New Window**, and, on a split, **Open All Splits in New Window**. The session moves; this window stops showing it.
 - The files, the session list and each split are as wide as you drag the line beside them.
 - **Splits are groups, as in VS Code's terminal.** Click any session of a split group and the whole group shows, with that one focused. Click a session outside it and that session shows on its own; the group stays together, and a click on either of its sessions brings it back. In the list, the group on screen comes first, joined by a blue line and numbered like its splits' headers; other split groups follow, dimmer. A project tab says how many sessions it shows side by side.
-- A session another blimp window shows has a small window mark in the list. Click it to go to that window.
+- A session another blimp window shows is listed only in that window, not in this one. ⌘K still finds it and takes you there.
 - **Shift+Enter** starts a new line in a Claude session, as in VS Code (it sends what Claude reads as Option+Enter). In a plain shell it's Enter.
-- **+** (or **⌘N**) starts a new Claude session in this folder. The arrow next to it has **New shell**: a plain terminal in this folder, with your login shell and no Claude.
+- **+** (or **⌘N**) starts a new Claude session in this folder. The arrow next to it lists every kind of session the server can start:
+  - **Claude Code**: the same as +.
+  - **Claude Code on GLM**: Claude Code on Z.ai's GLM models, with your Z.ai key (set it in Settings > Models). Greyed until the server has a key.
+  - **Codex**: OpenAI's Codex CLI, with "signed in" or "not signed in" under it. Greyed if `codex` isn't installed on the server.
+  - Your own kinds, from `~/.blimp/kinds.json` on the server (see below).
+  - **Shell**: a plain terminal in this folder, with your login shell and no Claude.
+  - **Models and keys…** opens Settings at Models.
+
+  A kind that can't start says why under its name. blimp looks for `claude` and `codex` the way your login shell does, so ones that nvm or `~/.local/bin` put on PATH are found.
 - **Earlier** lists this folder's past conversations that are not running, with how many there are. Click it to unfold or fold the list (blimp remembers which), and click a conversation to resume it in a new session.
 - Hover a session and click the trash icon to end it. An idle Claude session ends at once; its conversation is saved, so you can resume it from **Earlier**. A session that is working or waiting, or a shell, asks first.
 - blimp starts every session in the real folder on the server, the same as typing `claude` there. So Claude reads that project's CLAUDE.md and settings.
@@ -170,6 +179,21 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - macOS asks for permission the first time blimp sends a notification.
 - The Dock icon shows how many sessions wait for you, on all servers.
 
+### Models and keys
+
+Sessions run on the server, so keys and sign-ins live there too. **Settings > Models** has one part per connected server:
+
+- **Z.ai key** (Set or Not set): paste the key and click **Save**. blimp sends it once to the server, which saves it in `~/.config/zai/key` (only you can read it), and clears the field. The app never keeps it, and the server never sends it back. **Remove** deletes it. With a key, **Claude Code on GLM** can start: Claude Code with the Z.ai endpoint and the GLM models (GLM-5.3, and GLM-5.3-Flash for fast work), the same settings as a `claude-glm` script.
+- **Codex** (Signed in or Not signed in): **Sign in** closes Settings and starts `codex login --device-auth` in a session in the front tab's folder. Finish there: it shows a code to enter in your browser.
+- Your own kinds of session live in `~/.blimp/kinds.json` on the server:
+
+  ```json
+  { "kinds": [{ "id": "review", "label": "Codex review", "command": ["codex", "--profile", "review"], "env": { "SOME_VAR": "x" } }],
+    "glm": { "model": "GLM-5.3", "fast": "GLM-5.3-Flash" } }
+  ```
+
+  Each kind shows in the arrow menu by its label and runs its command in your login shell, in the folder. An `id` is letters, digits, `-` and `_`, and can't be a built-in one. `glm` changes the models Claude Code on GLM uses. If the file is wrong, blimp ignores all of it, and the menu says why.
+
 ### Keyboard shortcuts
 
 | Keys | What it does |
@@ -181,7 +205,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 | ⌘P | Open a file by name in this folder. |
 | ⌘S | Save the open file now (edits also save by themselves). |
 | ⌘W | Close the open file tab. The session and the window stay. |
-| ⌘, | Settings: theme, text sizes, terminal cursor and scrollback, Option as Meta, autosave, word wrap, minimap, notifications, Dock badge, automatic update checks. |
+| ⌘, | Settings: theme, text sizes, terminal cursor and scrollback, Option as Meta, autosave, word wrap, minimap, notifications, Dock badge, models and keys, automatic update checks. |
 | ⌘B | Show or hide the files on the left. |
 | ⌘J | Show or hide the terminal. |
 | ⌘⌥B | Show or hide the session list. |
@@ -282,7 +306,7 @@ Apps opened from Finder get a short `PATH`. blimp adds `/opt/homebrew/bin` and `
 **Server.** Run these on the server, in this order.
 
 1. End the sessions that you want to end. Uninstalling does not stop them. `zmx list` shows them, and `zmx kill <name>` ends one. Do this before step 4, because step 4 can remove zmx.
-2. Remove the Claude Code hooks: `~/.local/bin/blimpd uninstall-hooks`
+2. Remove the Claude Code and Codex hooks: `~/.local/bin/blimpd uninstall-hooks`
 3. Stop the service: `systemctl --user disable --now blimpd`
 4. Remove the files:
    - `rm ~/.config/systemd/user/blimpd.service && systemctl --user daemon-reload` (the folder is `$XDG_CONFIG_HOME/systemd/user` if you set `XDG_CONFIG_HOME`)

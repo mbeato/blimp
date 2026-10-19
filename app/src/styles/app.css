@@ -697,16 +697,6 @@ body.dragging-session * {
   opacity: 0.3;
 }
 
-/* Shown by another window: dimmer, with a window mark. A click goes there. */
-.srow.elsewhere .srow-title {
-  color: var(--fg-dim);
-}
-
-.srow-away {
-  flex: none;
-  color: var(--fg-faint);
-}
-
 /* In a split, but not the focused one. */
 .srow.shown {
   background: var(--hover);
@@ -902,6 +892,38 @@ body.dragging-session * {
 
 .menu button:hover {
   background: var(--selected);
+}
+
+.menu button:disabled {
+  opacity: 0.45;
+}
+
+.menu-label {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Why a kind can't start, or Codex's sign-in, under its name. */
+.menu-note {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line);
+}
+
+/* A session's kind beside its title (GLM, Codex, or one of the user's own). */
+.kind-label {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--fg-dim);
 }
 
 .menu-key {
@@ -1971,4 +1993,29 @@ body.dragging-session * {
 
 .settings-row input[type="number"] {
   width: 84px;
+}
+
+.settings-row input[type="password"] {
+  width: 150px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-input);
+}
+
+.models h4 {
+  margin: 10px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.models > .settings-note {
+  margin: 4px 0;
+}
+
+.settings-error {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--danger);
 }

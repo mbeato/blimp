@@ -9,6 +9,7 @@ import { backoff, type ServerLink } from "../lib/connection";
 import { mapKey } from "../lib/keys";
 import { followsLink, openWebLink } from "../lib/links";
 import { ExistsCache, findPaths, resolveAgainst } from "../lib/pathlinks";
+import { isClaude } from "../lib/sessions";
 import { getSettings, onSettings, type Settings } from "../lib/settings";
 
 // The settings a terminal follows (Settings > Terminal), as xterm options.
@@ -72,9 +73,10 @@ export function TerminalView(props: {
   dirRef.current = props.dir;
   const openPath = useRef(props.onOpenPath);
   openPath.current = props.onOpenPath;
-  // Shell or Claude, from the server's list (a session's kind can show up after it starts).
+  // Claude Code or not, from the server's list (a session's kind can show up after it starts).
   const claudeRef = useRef(false);
-  claudeRef.current = props.link.sessions?.find((s) => s.name === props.name)?.kind === "claude";
+  const session = props.link.sessions?.find((s) => s.name === props.name);
+  claudeRef.current = !!session && isClaude(session);
 
   useEffect(() => {
     const t = new Terminal({

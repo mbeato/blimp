@@ -1,7 +1,10 @@
 // Claude Code hooks that record each session's state in blimp's own files, as a backup for
 // Claude's internal status files. `blimpd install-hooks` adds them; Claude runs `blimpd hook`.
+// Codex takes hooks in the same format in ~/.codex/hooks.json and sends the same JSON, so the same
+// install adds blimp's there too (`blimpd hook codex`): for Codex they are the only source of state.
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { blimpDir, claudeDir, isSafeName } from "./sessions";
 
@@ -27,6 +30,22 @@ const STATES: Record<string, string> = {
 // finished turn) and auth_success. Only these mean Claude is stuck until the user answers.
 const WAITING_NOTIFICATIONS = ["permission_prompt", "elicitation_dialog", "elicitation_url_dialog"];
 
+// Codex: every tool call is work (there's no question tool), PermissionRequest is Codex asking
+// before it runs something. Its own `notify` program is left alone.
+const CODEX_STATES: Record<string, string> = {
+  UserPromptSubmit: "working",
+  PreToolUse: "working",
+  PostToolUse: "working",
+  PermissionRequest: "waiting",
+  Stop: "done",
+};
+
+// Which file, which events, and what the hook runs: `blimpd hook` for Claude, `blimpd hook codex`.
+export type HookSet = { events: string[]; matchers: Record<string, string>; arg: string };
+export const CLAUDE_HOOKS: HookSet = { events: EVENTS, matchers: MATCHERS, arg: "hook" };
+export const CODEX_HOOKS: HookSet = { events: Object.keys(CODEX_STATES), matchers: {}, arg: "hook codex" };
+export const codexHooksFile = () => join(process.env.CODEX_HOME || join(homedir(), ".codex"), "hooks.json");
+
 const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 // Ours: any blimpd's hook (an older install, another path), or this exact command whatever the binary is called.
@@ -35,17 +54,19 @@ const isOurs = (h: any, command: string) =>
   (h.command === command || h.command.includes("blimpd' hook") || h.command.includes("blimpd hook"));
 
 // Merges blimp's hooks into settings.json, keeping everything else. Returns the events it added.
-export function installHooks(blimpdPath: string, settingsPath = join(claudeDir(), "settings.json")): string[] {
+// New entries go at the end of each event's list: Codex remembers which hooks you trusted by their
+// place in the list, so the ones already there keep theirs.
+export function installHooks(blimpdPath: string, settingsPath = join(claudeDir(), "settings.json"), set = CLAUDE_HOOKS): string[] {
   const exists = existsSync(settingsPath);
   // Unreadable JSON throws here: better to stop than overwrite someone's settings.
   const settings = exists ? JSON.parse(readFileSync(settingsPath, "utf8")) : {};
   settings.hooks ??= {};
-  const command = `${shellQuote(blimpdPath)} hook`;
+  const command = `${shellQuote(blimpdPath)} ${set.arg}`;
   const added = [];
-  for (const event of EVENTS) {
+  for (const event of set.events) {
     const groups = (settings.hooks[event] ??= []);
     if (groups.some((g: any) => Array.isArray(g?.hooks) && g.hooks.some((h: any) => isOurs(h, command)))) continue;
-    const matcher = MATCHERS[event];
+    const matcher = set.matchers[event];
     groups.push({ ...(matcher && { matcher }), hooks: [{ type: "command", command, timeout: 5 }] });
     added.push(event);
   }
@@ -60,13 +81,13 @@ export function installHooks(blimpdPath: string, settingsPath = join(claudeDir()
 // Takes out the hooks installHooks added (any blimpd's, or this exact command) and keeps everything else.
 // A group or event left empty goes too, so install then uninstall gives back the same settings.
 // Returns the events it removed them from.
-export function uninstallHooks(blimpdPath: string, settingsPath = join(claudeDir(), "settings.json")): string[] {
+export function uninstallHooks(blimpdPath: string, settingsPath = join(claudeDir(), "settings.json"), set = CLAUDE_HOOKS): string[] {
   if (!existsSync(settingsPath)) return [];
   const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
   const hooks = settings.hooks;
-  const command = `${shellQuote(blimpdPath)} hook`;
+  const command = `${shellQuote(blimpdPath)} ${set.arg}`;
   const removed = [];
-  for (const event of EVENTS) {
+  for (const event of set.events) {
     const groups = hooks?.[event];
     if (!Array.isArray(groups)) continue;
     const ours = (g: any) => Array.isArray(g?.hooks) && g.hooks.some((h: any) => isOurs(h, command));
@@ -97,9 +118,9 @@ function writeSettings(settingsPath: string, settings: unknown) {
   renameSync(tmp, target);
 }
 
-// Runs inside Claude (which zmx started, so ZMX_SESSION names the session). Never fails Claude's turn:
-// any problem is swallowed, and nothing is printed.
-export function writeHookStatus(input: string, session: string | undefined, statusDir = join(blimpDir(), "status")) {
+// Runs inside Claude or Codex (which zmx started, so ZMX_SESSION names the session). Never fails their
+// turn: any problem is swallowed, and nothing is printed.
+export function writeHookStatus(input: string, session: string | undefined, statusDir = join(blimpDir(), "status"), codex = false) {
   // The name becomes a file name: "../x" or "a/b" must not write anywhere else.
   if (!session || !isSafeName(session)) return;
   let ev: any;
@@ -108,10 +129,11 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   } catch {
     return;
   }
-  const state = STATES[ev?.hook_event_name];
+  const state = (codex ? CODEX_STATES : STATES)[ev?.hook_event_name];
   if (!state) return;
-  if (ev.hook_event_name === "Notification" && !WAITING_NOTIFICATIONS.includes(ev.notification_type)) return;
-  if (ev.hook_event_name === "PreToolUse" && ev.tool_name !== MATCHERS.PreToolUse) return;
+  // Codex has no Notification event or question tool to tell apart.
+  if (!codex && ev.hook_event_name === "Notification" && !WAITING_NOTIFICATIONS.includes(ev.notification_type)) return;
+  if (!codex && ev.hook_event_name === "PreToolUse" && ev.tool_name !== MATCHERS.PreToolUse) return;
   mkdirSync(statusDir, { recursive: true, mode: 0o700 });
   const file = join(statusDir, `${session}.json`);
   const tmp = `${file}.${process.pid}.tmp`;
@@ -119,9 +141,9 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   renameSync(tmp, file); // the server never reads half a file
 }
 
-export async function runHook() {
+export async function runHook(codex = false) {
   try {
-    writeHookStatus(await Bun.stdin.text(), process.env.ZMX_SESSION);
+    writeHookStatus(await Bun.stdin.text(), process.env.ZMX_SESSION, undefined, codex);
   } catch {}
   process.exit(0);
 }

@@ -1,11 +1,20 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { Kind } from "../lib/api";
+import { errorText, type ServerLink } from "../lib/connection";
 import { changeSettings, DEFAULTS, useSettings, type Settings } from "../lib/settings";
 import { appVersion } from "../lib/version";
 import { Dialog } from "./Dialog";
 
 // Settings (⌘,): every change applies at once, in every window, and is kept on this Mac.
-export function SettingsDialog(props: { onClose: () => void }) {
+// Models is the exception: keys and sign-ins belong to each server, where sessions run.
+// at: open scrolled to that section (the session chevron's "Models and keys…").
+// onCodexSignIn: start Codex's sign-in in a session on that server.
+export function SettingsDialog(props: { onClose: () => void; at?: "models"; links: ServerLink[]; onCodexSignIn: (l: ServerLink) => void }) {
   const s = useSettings();
+  const models = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (props.at === "models") models.current?.scrollIntoView({ block: "start" });
+  }, []);
   const set = (patch: Partial<Settings>) => void changeSettings(patch);
   const check = (k: keyof Settings, label: string, note?: string) => (
     <Row label={label} note={note}>
@@ -64,6 +73,13 @@ export function SettingsDialog(props: { onClose: () => void }) {
           {check("notifications", "Notify when a session waits for you")}
           {check("dockBadge", "Dock badge with the number waiting")}
         </section>
+        <section ref={models} aria-label="Models">
+          <h3>Models</h3>
+          {props.links.length === 0 && <p className="settings-note">Connect to a server to set its keys.</p>}
+          {props.links.map((l) => (
+            <Models key={l.key} link={l} named={props.links.length > 1} onCodexSignIn={() => props.onCodexSignIn(l)} />
+          ))}
+        </section>
         <section>
           <h3>Updates</h3>
           {check("autoUpdate", "Check for updates automatically", `This is blimp ${appVersion}. blimp > Check for Updates… checks now.`)}
@@ -73,14 +89,73 @@ export function SettingsDialog(props: { onClose: () => void }) {
   );
 }
 
-function Row(props: { label: string; note?: string; children: ReactNode }) {
+// One server's keys and sign-ins. A key typed here is sent once (PUT /keys/zai) and the field
+// cleared: the app never keeps it, and the server never sends it back.
+function Models(props: { link: ServerLink; named: boolean; onCodexSignIn: () => void }) {
+  const api = props.link.api!;
+  const [zai, setZai] = useState<boolean | null>(null);
+  const [kinds, setKinds] = useState<Kind[] | null>(null);
+  const [key, setKey] = useState("");
+  const [error, setError] = useState("");
+  const load = () => {
+    api.keys().then((k) => setZai(k.zai), (e) => setError(errorText(e)));
+    api.kinds().then(setKinds, () => {});
+  };
+  useEffect(load, [api]);
+  const change = async (f: () => Promise<void>) => {
+    try {
+      await f();
+      setError("");
+      load();
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+  const save = () =>
+    key.trim() &&
+    change(async () => {
+      await api.setZaiKey(key.trim());
+      setKey("");
+    });
+  const codex = kinds?.find((k) => k.id === "codex");
   return (
-    <label className="settings-row">
+    <div className="models" data-server={props.link.key}>
+      {props.named && <h4>{props.link.key}</h4>}
+      <Row div label="Z.ai key" note={`For Claude Code on GLM. ${zai === null ? "" : zai ? "Set" : "Not set"}`}>
+        <input
+          type="password"
+          aria-label="Z.ai key"
+          placeholder={zai ? "Replace key" : "Paste key"}
+          autoComplete="off"
+          spellCheck={false}
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void save()}
+        />
+        <button disabled={!key.trim()} onClick={() => void save()}>
+          Save
+        </button>
+        {zai && <button onClick={() => void change(() => api.removeZaiKey())}>Remove</button>}
+      </Row>
+      <Row div label="Codex" note={!codex ? "" : !codex.available ? "Not installed" : codex.note === "signed in" ? "Signed in" : "Not signed in"}>
+        {codex?.available && <button onClick={props.onCodexSignIn}>Sign in</button>}
+      </Row>
+      <p className="settings-note">Your own kinds of session live in ~/.blimp/kinds.json on the server.</p>
+      {error && <p className="settings-error">{error}</p>}
+    </div>
+  );
+}
+
+// div: for rows with buttons, where a click on the text mustn't press one.
+function Row(props: { label: string; note?: string; div?: boolean; children: ReactNode }) {
+  const Tag = props.div ? "div" : "label";
+  return (
+    <Tag className="settings-row">
       <span className="settings-label">
         {props.label}
         {props.note && <span className="settings-note">{props.note}</span>}
       </span>
       {props.children}
-    </label>
+    </Tag>
   );
 }

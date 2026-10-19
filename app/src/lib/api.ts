@@ -5,9 +5,14 @@ export type SessionState = "working" | "waiting" | "done" | "unknown";
 // A port a program in a session listens on (blimpd's ports.ts). host: where it is on the server.
 export type Port = { port: number; host: "127.0.0.1" | "::1"; session: string; pid: number; command: string };
 
+// A way to start a session (GET /kinds): claude, claude-glm, codex, shell, or one from the
+// server's ~/.blimp/kinds.json. note: why it can't start, or Codex's sign-in.
+export type Kind = { id: string; label: string; available: boolean; note?: string };
+
 export type Session = {
   name: string;
-  kind: "claude" | "shell";
+  kind: string; // a Kind's id ("codex-login" for Settings' Codex sign-in)
+  label?: string; // the small label rows show for kinds other than Claude Code and a shell
   pid: number;
   clients: number;
   created: number; // unix seconds
@@ -79,8 +84,25 @@ export class Api {
     return this.json<Session[]>("/sessions");
   }
 
-  createSession(body: { dir: string; name?: string; resume?: string; shell?: boolean }) {
+  createSession(body: { dir: string; name?: string; resume?: string; kind?: string }) {
     return this.post<{ name: string }>("/sessions", body);
+  }
+
+  kinds() {
+    return this.json<Kind[]>("/kinds");
+  }
+
+  // Whether the server has each key. Keys only ever go to it, never come back.
+  keys() {
+    return this.json<{ zai: boolean }>("/keys");
+  }
+
+  async setZaiKey(key: string) {
+    await this.req("/keys/zai", { method: "PUT", body: JSON.stringify({ key }), headers: { "Content-Type": "application/json" } });
+  }
+
+  async removeZaiKey() {
+    await this.req("/keys/zai", { method: "DELETE" });
   }
 
   // Ends the session (zmx kill). Claude's conversation stays resumable.

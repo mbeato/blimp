@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Session } from "./api";
-import { earlier, folderSessions, lastActivity, pickSession, tildify } from "./sessions";
+import { earlier, folderSessions, hasState, isClaude, lastActivity, pickSession, sessionTitle, tildify } from "./sessions";
 
 const s = (name: string, dir: string, created: number, extra: Partial<Session> = {}): Session => ({
   name,
@@ -49,4 +49,16 @@ test("last activity falls back from updatedAt to stateSince to created", () => {
   expect(lastActivity(s("a", "/", 5, { updatedAt: 9000, stateSince: 8000 }))).toBe(9000);
   expect(lastActivity(s("a", "/", 5, { stateSince: 8000 }))).toBe(8000);
   expect(lastActivity(s("a", "/", 5))).toBe(5000);
+});
+
+test("kinds: Claude Code on Claude or GLM is titled by its conversation; Codex has state; others are plain", () => {
+  const of = (kind: string) => s("web-1", "/w", 1, { kind, title: "Fix the build" });
+  expect(["claude", "claude-glm", "codex", "codex-login", "shell", "aider"].map((k) => [isClaude(of(k)), hasState(of(k)), sessionTitle(of(k))])).toEqual([
+    [true, true, "Fix the build"],
+    [true, true, "Fix the build"],
+    [false, true, "web-1"],
+    [false, false, "web-1"],
+    [false, false, "web-1"],
+    [false, false, "web-1"],
+  ]);
 });

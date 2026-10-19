@@ -6,6 +6,15 @@ import type { Conversation, Session } from "./api";
 export const tildify = (dir: string, home: string) =>
   home && (dir === home || dir.startsWith(home + "/")) ? "~" + dir.slice(home.length) : dir;
 
+// Claude Code, on Claude or on GLM: titled by its conversation, ends at once when idle.
+export const isClaude = (s: Pick<Session, "kind">) => s.kind === "claude" || s.kind === "claude-glm";
+
+// Kinds whose hooks report working / waiting / idle. Anything else shows a plain mark, like a shell.
+export const hasState = (s: Pick<Session, "kind">) => isClaude(s) || s.kind === "codex";
+
+// What a row shows: Claude's conversation title, or the zmx name for anything else.
+export const sessionTitle = (s: Session) => (isClaude(s) ? s.title : s.name);
+
 export const lastActivity = (s: Session) => s.updatedAt ?? s.stateSince ?? s.created * 1000;
 
 // Sessions started in exactly this folder, newest first, so a new one lands on top and rows

@@ -2,9 +2,10 @@
 // Every zmx session made here is named blimptest-* and killed at the end; nothing else is touched.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import pkg from "../package.json";
 import { parseZmxList, zmxPath } from "../src/sessions";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-server-"));
@@ -67,15 +68,44 @@ const type = (ws: WebSocket, keys: string) => ws.send(new TextEncoder().encode(k
 // A busy session can be listed as unreachable, with no pid or client count: that's not 0 clients.
 const clients = (name: string) => parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name && s.pid > 0)?.clients;
 
-// POST /sessions runs `$SHELL -l -i -c 'exec claude "$@"'`. This stand-in for the shell prints the
-// terminal size it was started with, then echoes input, so no real Claude starts.
+// POST /sessions runs `$SHELL -l -i -c 'exec claude "$@"' claude`. This stand-in for the login shell
+// runs such a script with sh (blimpd's lookup too), after $BLIMP_TEST_PROFILE as a login profile
+// when there is one, and is a plain shell that echoes input otherwise. The scripts find the stand-ins for claude and codex
+// below, first on PATH: they print the terminal size they were started with, their arguments and
+// the GLM settings they got, then echo input, so no real Claude starts.
 const fakeShell = join(tmp, "fake-shell");
-writeFileSync(fakeShell, '#!/bin/sh\necho "fake-claude size=$(stty size)"\nexec cat\n');
+writeFileSync(
+  fakeShell,
+  `#!/bin/sh
+[ "$1" = -l ] && shift
+[ "$1" = -i ] && shift
+[ -n "$BLIMP_TEST_PROFILE" ] && [ -f "$BLIMP_TEST_PROFILE" ] && . "$BLIMP_TEST_PROFILE"
+[ "$1" = -c ] && shift && exec /bin/sh -c "$@"
+echo "fake-shell size=$(stty size)"
+exec cat
+`,
+);
 chmodSync(fakeShell, 0o755);
+const fakeBin = join(tmp, "bin");
+mkdirSync(fakeBin);
+for (const cmd of ["claude", "codex"]) {
+  writeFileSync(
+    join(fakeBin, cmd),
+    `#!/bin/sh
+echo "fake-${cmd} size=$(stty size)"
+echo "args:[$*]"
+echo "url=$ANTHROPIC_BASE_URL zaitoken=\${BLIMP_ZAI_TOKEN-unset}"
+echo "model=$ANTHROPIC_MODEL fast=$ANTHROPIC_DEFAULT_HAIKU_MODEL apikey=\${ANTHROPIC_API_KEY-unset} custom=$CUSTOM_VAR"
+[ -n "$ANTHROPIC_AUTH_TOKEN" ] && [ "$ANTHROPIC_AUTH_TOKEN" = "$(cat "$HOME/.config/zai/key")" ] && echo "token=from-key-file"
+exec cat
+`,
+  );
+  chmodSync(join(fakeBin, cmd), 0o755);
+}
 
 beforeAll(async () => {
   server = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "serve"], {
-    env: { ...env, SHELL: fakeShell },
+    env: { ...env, SHELL: fakeShell, PATH: `${fakeBin}:${env.PATH}` },
     stdout: "pipe",
     stderr: "inherit",
   });
@@ -88,12 +118,13 @@ beforeAll(async () => {
   }, "blimpd to start");
 });
 
+// More than the default 5 s: this many zmx kills one after another take longer.
 afterAll(() => {
   server?.kill();
   for (const name of made) zmx("kill", name);
   rmSync(tmp, { recursive: true, force: true });
   rmSync(homeDir, { recursive: true, force: true });
-});
+}, 30000);
 
 describe("token", () => {
   test("token file is 64 hex chars, readable only by you; socket and folder too", () => {
@@ -114,7 +145,7 @@ describe("token", () => {
     const ok = await api("/health");
     expect(ok.status).toBe(200);
     expect(ok.headers.get("access-control-allow-origin")).toBe("*");
-    expect(await ok.json()).toEqual({ version: "0.2.0", home: realpathSync(homedir()) });
+    expect(await ok.json()).toEqual({ version: pkg.version, home: realpathSync(homedir()) });
   });
 
   test("preflight needs no token", async () => {
@@ -269,7 +300,7 @@ describe("starting sessions", () => {
     made.push(name);
     const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
     // The fake shell got the login-shell arguments and no "-c exec claude".
-    await until(() => s.text.includes("fake-claude"), "the shell's first output");
+    await until(() => s.text.includes("fake-shell size="), "the shell's first output");
     s.ws.close();
     const list = await (await api("/sessions")).json();
     expect(list.find((x: any) => x.name === name)?.kind).toBe("shell");
@@ -332,8 +363,9 @@ describe("events", () => {
     }, "the two ports", 10_000);
     expect(ports.find((x: any) => x.port === p4)).toMatchObject({ port: p4, host: "127.0.0.1", session: v4, command: "bun" });
     expect(ports.find((x: any) => x.port === p6)).toMatchObject({ port: p6, host: "::1", session: v6 });
-    // blimpd's own socket, and anything outside blimp's sessions, isn't listed.
-    expect(ports.every((x: any) => x.session.startsWith(tag))).toBe(true);
+    // Only this test's two sessions' ports, not blimpd's own socket. (Real sessions on this
+    // machine may be serving something too, so only the test's are counted.)
+    expect(ports.filter((x: any) => x.session.startsWith(tag)).map((x: any) => x.port).sort()).toEqual([p4, p6].sort());
 
     const e = await socket("/events");
     const msg = await until(() => e.messages.find((m) => m.type === "ports"), "ports message", 5000);
@@ -491,4 +523,206 @@ describe("files over HTTP", () => {
     expect((await post({ dir: tmp })).status).toBe(403);
     expect((await post({})).status).toBe(400);
   });
+});
+
+// A second blimpd, with a temp home: the Z.ai key, ~/.codex and kinds.json it reads and writes
+// are all in there, never in the real home. The fake launchers are first on its PATH.
+describe("kinds and keys", () => {
+  const kTmp = mkdtempSync(join(tmpdir(), "blimp-kinds-"));
+  const kHome = realpathSync(mkdtempSync(join(tmpdir(), "blimp-kinds-home-")));
+  const kSock = join(kTmp, "blimpd.sock");
+  const keyFile = join(kHome, ".config", "zai", "key");
+  const KEY = "zai-test-key.0123456789abcdef";
+  let kServer: ReturnType<typeof Bun.spawn>;
+  let kToken = "";
+  const kApi = (path: string, init: RequestInit = {}) =>
+    fetch(`http://blimpd${path}`, { ...init, unix: kSock, headers: { Authorization: `Bearer ${kToken}`, ...(init.headers as any) } } as any);
+  const post = (body: object) => kApi("/sessions", { method: "POST", body: JSON.stringify(body) });
+  const kinds = async () => (await (await kApi("/kinds")).json()) as { id: string; label: string; available: boolean; note?: string }[];
+  const dir = join(kHome, tag);
+  const blimpdLog = join(kTmp, "blimpd.log");
+
+  // Starts a session of this kind and returns its name and what it printed first.
+  async function startKind(kind: string, name: string, waitFor: string, extra = {}) {
+    const r = await post({ dir, name, kind, ...extra });
+    expect(r.status).toBe(201);
+    const { name: made_ } = await r.json();
+    made.push(made_);
+    const s = await new Promise<Awaited<ReturnType<typeof socket>>>((res, rej) => {
+      const ws = new WebSocket(`ws+unix://${kSock}:/sessions/${made_}/attach?token=${kToken}`);
+      ws.binaryType = "arraybuffer";
+      const x = { ws, text: "", messages: [] as any[], closed: undefined as any };
+      ws.onmessage = (e) => (x.text += typeof e.data === "string" ? "" : new TextDecoder().decode(e.data));
+      ws.onopen = () => res(x);
+      ws.onerror = () => rej(new Error("attach failed"));
+    });
+    await until(() => s.text.includes(waitFor), `${kind} output`);
+    s.ws.close();
+    return { name: made_, text: s.text };
+  }
+
+  beforeAll(async () => {
+    mkdirSync(dir);
+    const out = Bun.file(blimpdLog);
+    const kEnv: Record<string, string | undefined> = {
+      ...env,
+      HOME: kHome,
+      BLIMPD_SOCKET: kSock,
+      SHELL: fakeShell,
+      PATH: `${fakeBin}:${env.PATH}`,
+      BLIMP_TEST_PROFILE: join(kHome, "profile"),
+    };
+    delete kEnv.CODEX_HOME;
+    kServer = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "serve"], { env: kEnv, stdout: out, stderr: out });
+    await until(() => {
+      try {
+        return statSync(kSock).isSocket() && (kToken = readFileSync(join(kTmp, "token"), "utf8").trim());
+      } catch {
+        return false;
+      }
+    }, "the second blimpd to start");
+  });
+
+  afterAll(() => {
+    kServer?.kill();
+    rmSync(kTmp, { recursive: true, force: true });
+    rmSync(kHome, { recursive: true, force: true });
+  });
+
+  test("GET /kinds: in order, with why one isn't available, and Codex's sign-in", async () => {
+    expect(await kinds()).toEqual([
+      { id: "claude", label: "Claude Code", available: true },
+      { id: "claude-glm", label: "Claude Code on GLM", available: false, note: "Add a Z.ai key in Settings" },
+      { id: "codex", label: "Codex", available: true, note: "not signed in" },
+      { id: "shell", label: "Shell", available: true },
+    ]);
+    mkdirSync(join(kHome, ".codex"));
+    writeFileSync(join(kHome, ".codex", "auth.json"), "{}");
+    expect((await kinds()).find((k) => k.id === "codex")?.note).toBe("signed in");
+    expect((await post({ dir, kind: "claude-glm" })).status).toBe(400);
+    expect((await post({ dir, kind: "nope" })).status).toBe(400);
+    expect((await post({ dir, kind: 3 })).status).toBe(400);
+    expect((await post({ dir, kind: "codex", shell: true })).status).toBe(400);
+    expect((await post({ dir, kind: "codex", resume: "0123abcd-0123-0123-0123-0123456789ab" })).status).toBe(400);
+  });
+
+  test("PUT /keys/zai: 600 in a 700 folder, 400 for a bad key, never returned; DELETE takes it out", async () => {
+    const put = (body: unknown) => kApi("/keys/zai", { method: "PUT", body: JSON.stringify(body) });
+    for (const bad of ["short", "has a space in it", "x".repeat(501), "tab\there-and-more", 42, undefined])
+      expect((await put({ key: bad })).status).toBe(400);
+    expect((await kApi("/keys/zai", { method: "PUT", body: "not json" })).status).toBe(400);
+    expect(existsSync(keyFile)).toBe(false);
+
+    expect((await put({ key: KEY })).status).toBe(204);
+    expect(readFileSync(keyFile, "utf8")).toBe(KEY);
+    expect(statSync(keyFile).mode & 0o777).toBe(0o600);
+    expect(statSync(join(kHome, ".config", "zai")).mode & 0o777).toBe(0o700);
+    expect(readdirSync(join(kHome, ".config", "zai"))).toEqual(["key"]); // no temp file left
+    const keys = await kApi("/keys");
+    expect(await keys.text()).toBe('{"zai":true}');
+    expect((await kinds()).find((k) => k.id === "claude-glm")).toEqual({ id: "claude-glm", label: "Claude Code on GLM", available: true });
+
+    expect((await kApi("/keys/zai", { method: "DELETE" })).status).toBe(204);
+    expect(existsSync(keyFile)).toBe(false);
+    expect(await (await kApi("/keys")).json()).toEqual({ zai: false });
+    expect((await kinds()).find((k) => k.id === "claude-glm")?.available).toBe(false);
+  });
+
+  test("POST /sessions starts each kind's command; the GLM key goes in the environment only", async () => {
+    expect((await kApi("/keys/zai", { method: "PUT", body: JSON.stringify({ key: KEY }) })).status).toBe(204);
+    // A login profile with its own Anthropic settings: they must not win over GLM's.
+    writeFileSync(
+      join(kHome, "profile"),
+      "export ANTHROPIC_BASE_URL=https://elsewhere.example ANTHROPIC_AUTH_TOKEN=theirs ANTHROPIC_MODEL=their-model ANTHROPIC_API_KEY=theirs\n",
+    );
+    const claude = await startKind("claude", "k-claude", "custom=");
+    expect(claude.text).toContain("fake-claude size=36 120");
+    expect(claude.text).toContain("args:[]");
+    expect(claude.text).not.toContain("token=from-key-file");
+    const conv = "0123abcd-0123-0123-0123-0123456789ab";
+    const glm = await startKind("claude-glm", "k-glm", "token=from-key-file", { resume: conv });
+    expect(glm.text).toContain("fake-claude size=36 120");
+    expect(glm.text).toContain(`args:[--resume ${conv}]`);
+    // Claude Code's own key is unset, as claude-glm does, so the Z.ai one is used, at Z.ai.
+    expect(glm.text).toContain("model=GLM-5.3 fast=GLM-5.3-Flash apikey=unset");
+    expect(glm.text).toContain("url=https://api.z.ai/api/anthropic zaitoken=unset");
+    const codex = await startKind("codex", "k-codex", "custom=");
+    expect(codex.text).toContain("fake-codex size=36 120");
+    expect(codex.text).toContain("args:[]");
+    expect(codex.text).not.toContain("token=from-key-file");
+    const login = await startKind("codex-login", "k-login", "custom=");
+    expect(login.text).toContain("args:[login --device-auth]");
+    const sh = await startKind("shell", "k-sh", "fake-shell size=");
+    expect(sh.text).not.toContain("fake-claude");
+
+    // The key is in no command line, no zmx list, no API answer and no log.
+    const ps = Bun.spawnSync(["ps", "-eo", "args"]).stdout.toString();
+    expect(ps).not.toContain(KEY);
+    const zmxList = zmx("list").stdout.toString();
+    expect(zmxList).toContain(glm.name);
+    expect(zmxList).not.toContain(KEY);
+    for (const path of ["/sessions", "/kinds", "/keys"]) expect(await (await kApi(path)).text()).not.toContain(KEY);
+    expect(readFileSync(blimpdLog, "utf8")).not.toContain(KEY);
+    expect(readFileSync(join(kTmp, "session-kinds.json"), "utf8")).not.toContain(KEY);
+
+    // Each session reports the kind it was started with; one made outside blimp is still a shell.
+    const outside = await shSession("k-outside");
+    const list: any[] = await (await kApi("/sessions")).json();
+    const of = (n: string) => list.find((x) => x.name === n);
+    expect(of(claude.name)).toMatchObject({ kind: "claude" });
+    expect(of(claude.name).label).toBeUndefined();
+    expect(of(glm.name)).toMatchObject({ kind: "claude-glm", label: "GLM" });
+    expect(of(codex.name)).toMatchObject({ kind: "codex", label: "Codex" });
+    expect(of(login.name)).toMatchObject({ kind: "codex-login", label: "Codex sign-in" });
+    expect(of(sh.name)).toMatchObject({ kind: "shell" });
+    expect(of(outside)).toMatchObject({ kind: "shell" });
+
+    // Ended sessions leave the remembered kinds at the next start.
+    zmx("kill", codex.name);
+    await until(() => !zmxNames().includes(codex.name), "codex session to end");
+    await startKind("shell", "k-sh2", "fake-shell size=");
+    expect(Object.keys(JSON.parse(readFileSync(join(kTmp, "session-kinds.json"), "utf8")))).not.toContain(codex.name);
+  }, 30000);
+
+  test("custom kinds from kinds.json: listed before Shell and started; a bad file is ignored with a note", async () => {
+    const file = join(kTmp, "kinds.json");
+    writeFileSync(
+      file,
+      JSON.stringify({ kinds: [{ id: "review", label: "Codex review", command: ["codex", "--profile", "x y"], env: { CUSTOM_VAR: "hi" } }], glm: { model: "GLM-9", fast: "GLM-9-Air" } }),
+    );
+    const list = await kinds();
+    expect(list.map((k) => k.id)).toEqual(["claude", "claude-glm", "codex", "review", "shell"]);
+    expect(list.find((k) => k.id === "review")).toEqual({ id: "review", label: "Codex review", available: true });
+    writeFileSync(
+      file,
+      JSON.stringify({ kinds: [...JSON.parse(readFileSync(file, "utf8")).kinds, { id: "gone", label: "Gone", command: ["not-installed-anywhere"] }], glm: { model: "GLM-9", fast: "GLM-9-Air" } }),
+    );
+    expect((await kinds()).find((k) => k.id === "gone")).toEqual({ id: "gone", label: "Gone", available: false, note: "not-installed-anywhere isn't installed" });
+    expect((await post({ dir, kind: "gone" })).status).toBe(400);
+    const r = await startKind("review", "k-review", "custom=hi");
+    expect(r.text).toContain("fake-codex size=");
+    expect(r.text).toContain("args:[--profile x y]");
+    const glm = await startKind("claude-glm", "k-glm9", "token=from-key-file");
+    expect(glm.text).toContain("model=GLM-9 fast=GLM-9-Air");
+    const sessions: any[] = await (await kApi("/sessions")).json();
+    expect(sessions.find((x) => x.name === r.name)).toMatchObject({ kind: "review", label: "Codex review" });
+
+    for (const [bad, why] of [
+      ["{ not json", "is ignored"],
+      [JSON.stringify({ kinds: [{ id: "codex", label: "Mine", command: ["x"] }] }), "built-in"],
+      [JSON.stringify({ kinds: [{ id: "a b", label: "Mine", command: ["x"] }] }), "plain id"],
+      [JSON.stringify({ kinds: [{ id: "mine", label: "Mine", command: "x --y" }] }), "list of words"],
+      [JSON.stringify({ kinds: [{ id: "mine", label: "Mine", command: ["x"], env: { A: 1 } }] }), "env"],
+    ]) {
+      writeFileSync(file, bad);
+      const list = await kinds();
+      expect(list.map((k) => k.id)).toEqual(["claude", "claude-glm", "codex", "kinds.json", "shell"]);
+      const note = list.find((k) => k.id === "kinds.json")!;
+      expect(note.available).toBe(false);
+      expect(note.note).toContain(why);
+    }
+    expect((await post({ dir, kind: "review" })).status).toBe(400);
+    expect((await post({ dir, kind: "kinds.json" })).status).toBe(400);
+    rmSync(file);
+  }, 30000);
 });

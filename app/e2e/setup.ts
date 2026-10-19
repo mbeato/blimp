@@ -4,7 +4,7 @@
 // token, hook status files, CLAUDE_CONFIG_DIR and the test blimpd's home all live in the temp folder.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,13 +42,21 @@ export default async function setup() {
   const fixtures = join(tmp, "home");
   mkdirSync(fixtures);
 
+  // Stand-ins for claude and codex, for the test blimpd's login shell to find: they print what they
+  // were started with and echo input. Max's real ones, his keys and ~/.codex are never used.
+  const bin = join(tmp, "bin");
+  mkdirSync(bin);
+  for (const cmd of ["claude", "codex"]) writeFileSync(join(bin, cmd), `#!/bin/sh\necho "fake ${cmd} [$*]"\nexec cat\n`, { mode: 0o755 });
+  // The login shell's profile puts it on PATH, as nvm does for the real one (/etc/profile resets PATH).
+  writeFileSync(join(fixtures, ".profile"), `PATH="${bin}:$PATH"\n`);
+
   const log = openSync(join(tmp, "blimpd.log"), "a");
   const children: ChildProcess[] = [];
   // No pipes to children: a zmx daemon started under them would inherit and hold them open.
   const blimpd = spawn("bun", [join(repo, "src/main.ts"), "serve"], {
     // SHELL: New shell starts a login shell in the empty home, where zsh would open its
     // first-run menu (and take the test's typing) for want of a .zshrc.
-    env: { ...process.env, HOME: fixtures, SHELL: "/bin/bash", BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude") },
+    env: { ...process.env, HOME: fixtures, SHELL: "/bin/bash", BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude"), PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: "" },
     stdio: ["ignore", log, log],
   });
   children.push(blimpd);

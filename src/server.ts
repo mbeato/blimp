@@ -10,6 +10,7 @@ import pkg from "../package.json";
 import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders } from "./folders";
+import { CLAUDE_KINDS, installed, launchFor, listKinds, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { sessionPorts } from "./ports";
 import {
   checkZmxDir,
@@ -74,16 +75,33 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
 
   if (path === "/sessions" && get) return Response.json(listSessions(claudeDir(), await zmxListAsync()));
   if (path === "/sessions" && req.method === "POST") {
-    const { dir, name, resume, shell } = (await req.json()) as Record<string, unknown>;
+    const { dir, name, resume, shell, kind } = (await req.json()) as Record<string, unknown>;
     if (typeof dir !== "string") throw new HttpError(400, "dir is required");
     if (name !== undefined && typeof name !== "string") throw new HttpError(400, "name must be a string");
     if (resume !== undefined && (typeof resume !== "string" || !/^[0-9a-f-]{36}$/.test(resume)))
       throw new HttpError(400, "resume must be a conversation id");
     if (shell !== undefined && typeof shell !== "boolean") throw new HttpError(400, "shell must be true or false");
-    if (shell && resume) throw new HttpError(400, "a shell can't resume a conversation");
+    if (kind !== undefined && typeof kind !== "string") throw new HttpError(400, "kind must be a string");
+    if (shell && kind !== undefined && kind !== "shell") throw new HttpError(400, "shell: true and a kind other than shell");
+    // shell: true is what the app sent before kinds.
+    const k = shell ? "shell" : (kind ?? "claude");
+    if (resume && !CLAUDE_KINDS.includes(k)) throw new HttpError(400, "only Claude Code can resume a conversation");
     const real = guard(dir);
     if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
-    return Response.json({ name: await startSession(real, { name: name || undefined, resume, shell }) }, { status: 201 });
+    const run = await launchFor(k, resume);
+    return Response.json({ name: await startSession(real, { name: name || undefined, kind: k, run }) }, { status: 201 });
+  }
+
+  if (path === "/kinds" && get) return Response.json(listKinds(await installed()));
+  // Keys go in, never out: GET /keys only says whether there is one.
+  if (path === "/keys" && get) return Response.json({ zai: !!zaiKey() });
+  if (path === "/keys/zai" && req.method === "PUT") {
+    setZaiKey(((await req.json()) as Record<string, unknown> | null)?.key);
+    return new Response(null, { status: 204 });
+  }
+  if (path === "/keys/zai" && req.method === "DELETE") {
+    removeZaiKey();
+    return new Response(null, { status: 204 });
   }
 
   const one = path.match(/^\/sessions\/([^/]+)$/);
