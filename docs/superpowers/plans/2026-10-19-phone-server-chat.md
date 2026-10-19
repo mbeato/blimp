@@ -288,7 +288,7 @@ git commit -m "blimpd reads a Claude transcript as chat messages"
   - `promptFromHook(ev: any): Prompt | undefined`
   - `parseScreenOptions(screen: string): string[]`
   - `answerKeys(p: Prompt, pick: number): string | undefined`
-  - `Session.prompt?: Prompt`, present only while `state === "waiting"`
+  - `Session.prompt?: Prompt & { at: number }`, present only while `state === "waiting"` and blimp's hook file says waiting. `at` is the hook's `at`: when this wait started. The phone sends it back with an answer, so an answer can't land on a later question. (It is not `stateSince`: Claude's own status file can be newer than the hook's and set `stateSince` to another time.)
   - `transcriptPath(dir: string, sessionId: string): string | undefined` exported from `sessions.ts` (it exists, unexported)
 
 - [ ] **Step 1: Write the failing tests**
@@ -466,7 +466,7 @@ And extend the hooks test with: `expect(JSON.parse(readFileSync(join(dir, "p1.js
 - [ ] **Step 5: Add `prompt` to `listSessions` in `src/sessions.ts`**
 
 1. `export` the existing `function transcriptPath`.
-2. In `type Session`, after `stateSince?: number; // ms`, add: `prompt?: Prompt; // what a waiting Claude asks (prompt.ts), only while waiting`. Import the type: `import { type Prompt, withScreenOptions } from "./prompt";`
+2. In `type Session`, after `stateSince?: number; // ms`, add: `prompt?: Prompt & { at: number }; // what a waiting Claude asks (prompt.ts), and when the wait started`. Import the type: `import { type Prompt, withScreenOptions } from "./prompt";`
 3. Add above `listSessions`:
 
 ```ts
@@ -491,8 +491,10 @@ function promptFor(name: string, hook: any): Prompt | undefined {
 
 ```ts
     const st = deriveState(info, hook, z.created);
-    // Only the hook knows what's asked, so only when the hook file is what says waiting.
-    const prompt = st.state === "waiting" && st.stateSince === hook.at ? promptFor(z.name, hook) : undefined;
+    // Only the hook knows what's asked. Claude's own status file may be the newer of the two, so
+    // don't require the hook to be what set the state, only that both say waiting.
+    const asked = st.state === "waiting" && hook.state === "waiting" && hook.at >= z.created * 1000 ? promptFor(z.name, hook) : undefined;
+    const prompt = asked && { ...asked, at: hook.at as number };
 ```
 
 and replace `...deriveState(info, hook, z.created),` in the returned object with `...st, ...(prompt && { prompt }),`. (`hook` is `{}` for an unsafe name, so `promptFor` never sees one.)
@@ -607,8 +609,9 @@ Add to `test/server.test.ts`, after `describe("terminal", …)`. They use the fi
 
 ```ts
 describe("chat", () => {
-  // A stand-in Claude: reads lines, answers `size` with its terminal size, echoes the rest.
-  const LOOP = `while IFS= read -r l; do case "$l" in size) echo "sz=$(stty size)";; *) echo "got:$l";; esac; done`;
+  // A stand-in Claude: reads lines, answers `size` with its terminal size, echoes the rest with
+  // ESC shown as ~ (zmx draws output through a terminal emulator, which would swallow a raw ESC).
+  const LOOP = `while IFS= read -r l; do case "$l" in size) echo "sz=$(stty size)";; *) printf 'got:%s\\n' "$(printf %s "$l" | tr '\\033' '~')";; esac; done`;
   const claudeDir = join(tmp, "claude");
   const T = new Date().toISOString();
   const tline = (o: object) => JSON.stringify({ timestamp: T, ...o }) + "\n";
@@ -655,7 +658,7 @@ describe("chat", () => {
     c.ws.send(JSON.stringify({ type: "input", id: "m1", text: "hel\x1blo\nworld" }));
     await until(() => c.messages.find((m) => m.type === "ack" && m.id === "m1"), "ack");
     // ESC is stripped from the text, the paste markers wrap it, and the newline stays inside the paste.
-    await until(() => viewer.text.includes("got:\x1b[200~hello"), "pasted text reached the session");
+    await until(() => viewer.text.includes("got:~[200~hello"), "pasted text reached the session");
     c.ws.send(JSON.stringify({ type: "input", id: "m1", text: "again" }));
     await until(() => c.messages.filter((m) => m.type === "ack" && m.id === "m1").length === 2, "second ack");
     await Bun.sleep(300);
@@ -698,7 +701,7 @@ describe("chat", () => {
     c.ws.send(JSON.stringify({ type: "interrupt", id: "i1" }));
     await until(() => c.messages.find((m) => m.type === "ack" && m.id === "i1"), "ack");
     type(viewer.ws, "\r");
-    await until(() => viewer.text.includes("got:\x1b"), "Esc reached the session");
+    await until(() => viewer.text.includes("got:~"), "Esc reached the session");
     c.ws.close();
     viewer.ws.close();
   });
@@ -878,7 +881,7 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
     }
     if (m.type === "answer") {
       const s = await find(d.name);
-      const keys = s?.state === "waiting" && s.prompt && s.stateSince === m.at ? answerKeys(s.prompt, m.pick) : undefined;
+      const keys = s?.state === "waiting" && s.prompt && s.prompt.at === m.at ? answerKeys(s.prompt, m.pick) : undefined;
       if (!keys) return fail("the question changed");
       await write(ws, [keys]);
       return send(ws, { type: "ack", id });
@@ -1007,7 +1010,18 @@ const session = async () => ((await (await api("/sessions")).json()) as any[]).f
 beforeAll(async () => {
   if (!on) return;
   // Permission prompts need the default mode: Max's settings run auto mode, which asks nothing.
-  writeFileSync(join(tmp, "kinds.json"), JSON.stringify({ kinds: [{ id: "ask", label: "Ask", command: ["claude", "--permission-mode", "default"] }] }));
+  // The hooks in ~/.claude/settings.json run the installed blimpd, not this code, so this session
+  // gets this code's hook through --settings, and the installed one writes to a decoy folder
+  // (it finds its folder from BLIMPD_SOCKET; ours is told the real one).
+  const hook = `BLIMPD_SOCKET='${sock}' '${process.execPath}' '${join(import.meta.dir, "..", "src", "main.ts")}' hook`;
+  const ours = { hooks: [{ type: "command", command: hook, timeout: 5 }] };
+  const settings = join(tmp, "test-settings.json");
+  writeFileSync(settings, JSON.stringify({ hooks: {
+    Notification: [ours], Stop: [ours], UserPromptSubmit: [ours], PostToolUse: [ours], PermissionRequest: [ours],
+    PreToolUse: [{ matcher: "AskUserQuestion", ...ours }], Elicitation: [ours] } }));
+  writeFileSync(join(tmp, "kinds.json"), JSON.stringify({ kinds: [{ id: "ask", label: "Ask",
+    command: ["claude", "--permission-mode", "default", "--settings", settings],
+    env: { BLIMPD_SOCKET: join(tmp, "decoy", "blimpd.sock") } }] }));
   server = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "serve"], { env, stdout: "ignore", stderr: "inherit" });
   await until(() => existsSync(sock) && statSync(sock).isSocket() && (token = readFileSync(join(tmp, "token"), "utf8").trim()), "blimpd", 10000);
 });
@@ -1048,7 +1062,7 @@ test.if(on)("a message, a permission and a question, all through /chat", async (
     return s?.prompt?.kind === "permission" && s;
   }, "a permission prompt");
   expect(perm.prompt.options[0]).toBe("Yes");
-  send({ type: "answer", id: "a1", at: perm.stateSince, pick: 0 });
+  send({ type: "answer", id: "a1", at: perm.prompt.at, pick: 0 });
   await until(() => existsSync(join(dir, "real.txt")), "the command to run");
 
   await until(async () => (await session())?.state === "done", "the turn to end", 90000);
@@ -1059,7 +1073,7 @@ test.if(on)("a message, a permission and a question, all through /chat", async (
   }, "a question");
   expect(q.prompt.answerable).toBe(true);
   const green = q.prompt.questions[0].options.findIndex((o: any) => /green/i.test(o.label));
-  send({ type: "answer", id: "a2", at: q.stateSince, pick: green });
+  send({ type: "answer", id: "a2", at: q.prompt.at, pick: green });
   await until(() => texts().some((m) => m.role === "tool" && m.name === "AskUserQuestion" && /green/i.test(m.output ?? "")), "the answer in the transcript", 90000);
 
   chat.close();
@@ -1095,7 +1109,7 @@ git commit -m "An opt-in test of the chat socket against a real Claude Code"
 In the `type Session` block, after `stateSince?: number;   // ms`, add:
 
 ```ts
-  prompt?: Prompt;       // while waiting: what Claude asks (see Chat)
+  prompt?: Prompt & { at: number };  // while waiting: what Claude asks, and when the wait started (see Chat)
 ```
 
 Add after the Events section:
@@ -1109,7 +1123,7 @@ For the phone: a Claude session as chat messages, and a way to type into it. Onl
 
 `ChatMessage` (`src/chat.ts`): `user` (typed prompts only: no tool results, meta entries, command wrappers or system reminders), `assistant` (text blocks; thinking is skipped), `tool` (`name`, a one-line `summary`, `input`, later `output` and `error`; input and output at most 20 000 characters).
 
-Client → server: `{ "type": "input", "id", "text" }` (pasted as a bracketed paste, then Enter; ESC is removed; at most 100 000 characters; an `id` seen in the last 100 is acknowledged and not typed again), `{ "type": "answer", "id", "at", "pick" }` (`at` = the prompt's `stateSince`; presses the option's key, or replies "the question changed"), `{ "type": "interrupt", "id" }` (Esc). Replies: `{ "type": "ack", "id" }` or `{ "type": "error", "id", "error" }`.
+Client → server: `{ "type": "input", "id", "text" }` (pasted as a bracketed paste, then Enter; ESC is removed; at most 100 000 characters; an `id` seen in the last 100 is acknowledged and not typed again), `{ "type": "answer", "id", "at", "pick" }` (`at` = the prompt's `at`, when that wait started; presses the option's key, or replies "the question changed"), `{ "type": "interrupt", "id" }` (Esc). Replies: `{ "type": "ack", "id" }` or `{ "type": "error", "id", "error" }`.
 
 While a socket has sent input, it keeps one zmx client attached for it, at the size the session was last shown at through blimpd (120×36 if never), and resized with it: a client of another size would resize the session for everyone.
 
