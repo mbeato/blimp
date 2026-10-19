@@ -14,12 +14,13 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 
 export function promptFromHook(ev: any): Prompt | undefined {
   const e = ev?.hook_event_name;
-  if (e === "PermissionRequest") {
+  // In default mode Claude also sends PermissionRequest for the question tool: that is the question.
+  if (e === "PermissionRequest" && ev.tool_name !== "AskUserQuestion") {
     const tool = str(ev.tool_name);
     // Without the screen: Yes is the first option, and Esc says no.
     return { kind: "permission", tool, summary: toolSummary(tool, ev.tool_input, str(ev.cwd)), options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true };
   }
-  if (e === "PreToolUse" && ev.tool_name === "AskUserQuestion") {
+  if ((e === "PreToolUse" || e === "PermissionRequest") && ev.tool_name === "AskUserQuestion") {
     const questions: Question[] = (Array.isArray(ev.tool_input?.questions) ? ev.tool_input.questions : []).map((q: any) => ({
       question: str(q?.question),
       ...(typeof q?.header === "string" && { header: q.header }),

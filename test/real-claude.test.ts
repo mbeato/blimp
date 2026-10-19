@@ -10,12 +10,11 @@ import { basename, join } from "node:path";
 import { zmxPath } from "../src/sessions";
 
 const on = process.env.BLIMP_REAL_CLAUDE === "1";
-const tmp = mkdtempSync(join(tmpdir(), "blimp-real-"));
-const sock = join(tmp, "blimpd.sock");
-const dir = realpathSync(mkdtempSync(join(homedir(), ".blimptest-real-")));
+let tmp = "";
+let sock = "";
+let dir = "";
 // From inside a Claude session, CLAUDE_* variables would turn off the child's transcript.
 const env: Record<string, string | undefined> = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CLAUDE") && k !== "ZMX_SESSION"));
-env.BLIMPD_SOCKET = sock;
 let server: ReturnType<typeof Bun.spawn>;
 let token = "";
 let name = "";
@@ -34,6 +33,10 @@ const session = async () => ((await (await api("/sessions")).json()) as any[]).f
 
 beforeAll(async () => {
   if (!on) return;
+  tmp = mkdtempSync(join(tmpdir(), "blimp-real-"));
+  sock = join(tmp, "blimpd.sock");
+  dir = realpathSync(mkdtempSync(join(homedir(), ".blimptest-real-")));
+  env.BLIMPD_SOCKET = sock;
   // Permission prompts need the default mode: Max's settings run auto mode, which asks nothing.
   // The hooks in ~/.claude/settings.json run the installed blimpd, not this code, so this session
   // gets this code's hook through --settings, and the installed one writes to a decoy folder

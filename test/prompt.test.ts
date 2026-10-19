@@ -35,6 +35,8 @@ test("promptFromHook", () => {
   const multi = { ...one, multiSelect: true };
   expect(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [multi] } })?.answerable).toBe(false);
   expect(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [one, one] } })?.answerable).toBe(false);
+  // In default mode real Claude also sends PermissionRequest for the question tool: still a question.
+  expect(promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions: [one] } })).toEqual(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [one] } }));
   expect(promptFromHook({ hook_event_name: "Elicitation" })).toEqual({ kind: "other", answerable: false });
   expect(promptFromHook({ hook_event_name: "Stop" })).toBeUndefined();
 });
