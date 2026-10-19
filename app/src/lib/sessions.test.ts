@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Session } from "./api";
-import { earlier, folderSessions, hasState, isClaude, lastActivity, pickSession, sessionTitle, tildify } from "./sessions";
+import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle, tildify } from "./sessions";
 
 const s = (name: string, dir: string, created: number, extra: Partial<Session> = {}): Session => ({
   name,
@@ -27,6 +27,16 @@ test("folder sessions: exactly this folder (not subfolders), newest first", () =
   const list = [s("a", "/p", 1), s("b", "/p/sub", 3), s("c", "/p", 2), s("d", "/q", 4)];
   expect(folderSessions(list, "/p").map((x) => x.name)).toEqual(["c", "a"]);
   expect(folderSessions([], "/p")).toEqual([]);
+});
+
+test("list: newest first; a split group sits where its newest session is, in its own order", () => {
+  const listed = folderSessions([s("a", "/p", 1), s("b", "/p", 2), s("c", "/p", 3), s("d", "/p", 4), s("e", "/p", 5)], "/p");
+  const names = (items: ReturnType<typeof listItems>) => items.map((i) => (Array.isArray(i) ? i.map((x) => x.name) : i.name));
+  const by = (...n: string[]) => n.map((x) => listed.find((y) => y.name === x)!);
+  expect(names(listItems(listed, []))).toEqual(["e", "d", "c", "b", "a"]);
+  // An old pair doesn't jump above newer sessions; its left-to-right order stays.
+  expect(names(listItems(listed, [by("a", "c")]))).toEqual(["e", "d", ["a", "c"], "b"]);
+  expect(names(listItems(listed, [by("b", "a"), by("e", "d")]))).toEqual([["e", "d"], "c", ["b", "a"]]);
 });
 
 test("earlier leaves out conversations a running session has open", () => {

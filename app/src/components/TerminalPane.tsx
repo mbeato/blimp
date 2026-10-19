@@ -3,7 +3,7 @@ import type { Conversation, Kind, Port, Session } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
 import { freeName, plainName, upload, type Item } from "../lib/transfers";
-import { earlier, folderSessions, hasState, isClaude, lastActivity, pickSession, sessionTitle } from "../lib/sessions";
+import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle } from "../lib/sessions";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
@@ -370,16 +370,15 @@ export function TerminalPane(props: {
   const half = t && p.panes.length ? shares[t.at] / 2 : 1;
   const overlay = t && { left: (p.panes.length ? lefts[t.at] + (t.side === "right" ? half : 0) : 0) * 100, width: half * 100 };
 
-  // The splits on screen come first in the list, in their left-to-right order, joined as a group
-  // and numbered as their headers are; then the kept split groups, the same way but dimmer (a
-  // click on one brings its group back). (One session alone stays where it is.)
+  // Newest first. The splits on screen are joined as a group, in their left-to-right order and
+  // numbered as their headers are; kept split groups the same way but dimmer (a click on one
+  // brings its group back). Each group sits where its newest session would be.
   // A session another window shows is listed only there (unless it's in a split here too).
   const listed = running.filter((s) => p.panes.includes(s.name) || !props.elsewhere(s.name));
   const toSessions = (g: string[]) => g.map((n) => listed.find((x) => x.name === n)).filter((x): x is Session => !!x);
   const group = split ? toSessions(p.panes) : [];
   const kept = p.groups.map(toSessions).filter((g) => g.length > 1);
-  const grouped = new Set([...group, ...kept.flat()]);
-  const rest = listed.filter((s) => !grouped.has(s));
+  const items = listItems(listed, group.length > 1 ? [group, ...kept] : kept);
   const row = (s: Session, num?: number) => {
     return (
       <div
@@ -579,17 +578,19 @@ export function TerminalPane(props: {
           </div>
         </div>
         <div className="slist-scroll">
-          {group.length > 1 && (
-            <div className="sgroup" role="group" aria-label="Side by side">
-              {group.map((s, i) => row(s, i + 1))}
-            </div>
+          {items.map((it) =>
+            !Array.isArray(it) ? (
+              row(it)
+            ) : it === group ? (
+              <div key={it.map((s) => s.name).join("\n")} className="sgroup" role="group" aria-label="Side by side">
+                {it.map((s, i) => row(s, i + 1))}
+              </div>
+            ) : (
+              <div key={it.map((s) => s.name).join("\n")} className="sgroup kept" role="group" aria-label="Side by side, not on screen">
+                {it.map((s, i) => row(s, i + 1))}
+              </div>
+            ),
           )}
-          {kept.map((g) => (
-            <div key={g.map((s) => s.name).join("\n")} className="sgroup kept" role="group" aria-label="Side by side, not on screen">
-              {g.map((s, i) => row(s, i + 1))}
-            </div>
-          ))}
-          {rest.map((s) => row(s))}
           {loaded && listed.length === 0 && <p className="slist-note">Nothing running here.</p>}
           {ports.length > 0 && <div className="slist-label">Ports</div>}
           {ports.map((x) => (

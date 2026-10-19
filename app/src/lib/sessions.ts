@@ -22,6 +22,19 @@ export const lastActivity = (s: Session) => s.updatedAt ?? s.stateSince ?? s.cre
 export const folderSessions = (sessions: Session[], dir: string) =>
   sessions.filter((s) => s.dir === dir).sort((a, b) => b.created - a.created || a.name.localeCompare(b.name));
 
+// The list's rows, newest first: a split group (its sessions in left-to-right order) sits where
+// its newest session would be, so an old pair doesn't jump above sessions started after it.
+export function listItems(listed: Session[], groups: Session[][]): (Session | Session[])[] {
+  const items: (Session | Session[])[] = [];
+  const placed = new Set<Session[]>();
+  for (const s of listed) {
+    const g = groups.find((g) => g.includes(s));
+    if (!g) items.push(s);
+    else if (!placed.has(g)) placed.add(g), items.push(g);
+  }
+  return items;
+}
+
 // Earlier conversations, minus the ones a running session already has open.
 export function earlier(convs: Conversation[], running: Session[]): Conversation[] {
   const open = new Set(running.map((s) => s.sessionId).filter(Boolean));

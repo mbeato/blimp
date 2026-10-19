@@ -258,7 +258,7 @@ test("a session dragged out of the window opens in a new window", async ({ page,
   await win.close();
 });
 
-test("the splits on screen show as a group: first in the list, joined, numbered like their headers; the tab says how many", async ({ page }) => {
+test("the splits on screen show as a group: joined, numbered like their headers; the tab says how many", async ({ page }) => {
   const dir = fixtureDir("tabs-split");
   startSession(left, dir);
   startSession(right, dir);
@@ -293,6 +293,8 @@ test("as in VS Code: clicking another session keeps the split group; clicking ei
   const third = `blimpe2e-splitt-${pid}`;
   startSession(left, dir);
   startSession(right, dir);
+  // zmx counts start times in seconds: a second later, so it's the newest.
+  await new Promise((r) => setTimeout(r, 1100));
   startSession(third, dir);
   try {
     await splitTwo(page, dir);
@@ -301,6 +303,9 @@ test("as in VS Code: clicking another session keeps the split group; clicking ei
     expect(layoutOf(page).tabs[1].groups).toEqual([[left, right]]);
     // The kept group still shows in the list, joined and numbered.
     await expect(frontTab(page).locator(".sgroup.kept .srow")).toHaveCount(2);
+    // Newest first: the session started last is above the older pair.
+    const order = () => frontTab(page).locator(".slist-scroll .srow").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-session")));
+    await expect.poll(order).toEqual([third, left, right]);
     await expect(splitTerm(page, left)).toBeHidden();
 
     await sessionRow(page, right).locator(".srow-main").click();
@@ -309,6 +314,8 @@ test("as in VS Code: clicking another session keeps the split group; clicking ei
     await expect(splitTerm(page, left)).toBeVisible();
     await expect(splitTerm(page, right)).toBeVisible();
     await expect(frontTab(page).locator(".sgroup.kept")).toHaveCount(0);
+    // On screen again, the pair stays below it.
+    await expect.poll(order).toEqual([third, left, right]);
   } finally {
     killSession(third);
   }
