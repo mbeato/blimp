@@ -511,13 +511,13 @@ export function TerminalPane(props: {
                 showHere(s.name);
               }}
             >
-              <span className="srow-line">
-                <Mark s={s} />
-                {num && <span className="split-num">{num}</span>}
-                <span className="srow-title">{sessionTitle(s)}</span>
+              <Mark s={s} />
+              {num && <span className="split-num">{num}</span>}
+              <span className="srow-title">{sessionTitle(s)}</span>
+              <span className="srow-side">
                 <span className="srow-time">{relTime(lastActivity(s), now)}</span>
+                <Doing s={s} />
               </span>
-              <Doing s={s} />
             </button>
             <button className="srow-trash" title="End session" aria-label={`End ${sessionTitle(s)}`} onClick={() => trash(s)}>
               <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>

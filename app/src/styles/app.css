@@ -693,14 +693,28 @@ body.dragging-session * {
   text-align: left;
 }
 
-/* A running session's row is two lines: its mark, title and time; under them, smaller, what it's
-   doing. Earlier conversations and ports stay one line. */
+/* A running session's row is two lines tall: its title wraps onto the second line, and on the right,
+   small, the time over what it's doing. Earlier conversations and ports stay one line. */
 .srow > .srow-main {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 1px;
   height: 40px;
+}
+
+.srow > .srow-main .srow-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 16px;
+}
+
+.srow-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: 45%;
 }
 
 .srow-line {
@@ -710,9 +724,9 @@ body.dragging-session * {
   min-width: 0;
 }
 
-/* Under the title (past the 14 px mark and its gap). */
+/* Under the time. */
 .srow-doing {
-  padding-left: 22px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
