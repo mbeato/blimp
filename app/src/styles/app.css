@@ -1921,6 +1921,58 @@ body.dragging-session * {
   background: #fff;
 }
 
+/* The server browser's picture: frames drawn at the screen's pixel ratio, from the top left. */
+.page-live {
+  position: relative;
+  overflow: hidden;
+}
+
+.page-live canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  cursor: default;
+}
+
+.page-live.lost canvas {
+  opacity: 0.5;
+}
+
+/* Typing goes through this field (input methods, accents, emoji), out of sight. */
+.page-keys {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  resize: none;
+  border: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.page-status {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+/* A tab a session opened. */
+.page-tab-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  flex: none;
+}
+
 .port-row .srow-time {
   max-width: 80px;
   overflow: hidden;

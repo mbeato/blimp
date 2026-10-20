@@ -7,11 +7,15 @@
 //   blimpd hook [codex]        what those hooks run (reads Claude's or Codex's hook JSON on stdin)
 //   blimpd pair [--url <url>]  make the phone's token and show the link for the iPhone app as a QR code
 //   blimpd pair --revoke       delete the phone's token (the Mac keeps working)
+//   blimpd browser             which Chrome the server browser runs, if any
+//   blimpd browser-mcp         the browser MCP a session runs (browser/mcp.ts)
 //   blimpd --version
 
 import pkg from "../package.json";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
+import { findChrome } from "./browser/chrome";
+import { runBrowserMcp } from "./browser/mcp";
 import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
 import { runPair } from "./pair";
 import { serve } from "./server";
@@ -64,9 +68,13 @@ if (cmd === "sessions") {
   await runHook(args[0] === "codex");
 } else if (cmd === "pair") {
   process.exit(runPair(args));
+} else if (cmd === "browser") {
+  console.log(findChrome() ?? "no Chrome or Chromium found; install one: npx playwright install chromium");
+} else if (cmd === "browser-mcp") {
+  process.exit(await runBrowserMcp());
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | browser | browser-mcp | --version");
   process.exit(cmd ? 1 : 0);
 }

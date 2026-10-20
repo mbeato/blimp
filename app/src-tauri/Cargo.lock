@@ -274,7 +274,6 @@ dependencies = [
 name = "blimp"
 version = "0.2.8"
 dependencies = [
- "plist",
  "serde",
  "serde_json",
  "tauri",

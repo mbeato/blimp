@@ -9,6 +9,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, wri
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { HttpError } from "./files";
+import { browserReady } from "./browser/service";
+import { mcpConfigPath, selfCommand } from "./browser/mcp";
 import { blimpDir, loginShell } from "./sessions";
 
 // What GET /kinds lists. note: why one can't start, or a status (Codex signed in or not).
@@ -76,7 +78,8 @@ function parseKinds(f: any): KindsFile {
 // as sessions do (-l -i): Debian's .bashrc stops early unless the shell is interactive, and that's
 // where nvm is set up. One shell for all of them, kept 30 s. Finding nothing (a profile that hung or
 // failed) isn't kept: the next call asks again.
-const LOOK_FOR = ["claude", "codex"];
+// npx runs the browser MCP (browser/mcp.ts).
+const LOOK_FOR = ["claude", "codex", "npx"];
 let found: { at: number; key: string; names: Promise<Set<string>> } | undefined;
 
 export function installed(file = kindsFile()): Promise<Set<string>> {
@@ -162,9 +165,13 @@ export function listKinds(have: Set<string>, home = homedir(), file = kindsFile(
 }
 
 // How to start kind `id`, or 400 if it's unknown or can't start here. resume: Claude Code only.
-export async function launchFor(id: string, resume?: string, home = homedir(), file = kindsFile()): Promise<Launch> {
+// Claude Code and Codex get the server browser's MCP when there's a Chrome to run and npx to run
+// the MCP with (browser: whether the first holds; a parameter for tests).
+export async function launchFor(id: string, resume?: string, home = homedir(), file = kindsFile(), browser = browserReady): Promise<Launch> {
   const have = await installed(file);
   const resumeArgs = resume ? ["--resume", resume] : [];
+  const mcp = have.has("npx") && browser();
+  const claudeArgs = ["claude", ...(mcp ? ["--mcp-config", mcpConfigPath()] : []), ...resumeArgs];
   // The login shell found nothing at all, so it couldn't tell: Claude Code is tried anyway, as
   // before kinds. A missing claude then shows in the session itself.
   if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", ...resumeArgs] };
@@ -177,8 +184,13 @@ export async function launchFor(id: string, resume?: string, home = homedir(), f
   if (!kind) throw new HttpError(400, `no kind of session called ${id}`);
   if (!kind.available) throw new HttpError(400, `${kind.label} can't start here: ${kind.note}`);
   if (id === "shell") return { args: [] };
-  if (id === "claude") return { script: 'exec claude "$@"', args: ["claude", ...resumeArgs] };
-  if (id === "codex") return { script: 'exec codex "$@"', args: ["codex"] };
+  if (id === "claude") return { script: 'exec claude "$@"', args: claudeArgs };
+  if (id === "codex") {
+    // Codex takes MCP servers as config overrides; values are TOML, which JSON strings and arrays are.
+    const [cmd, ...rest] = selfCommand();
+    const server = mcp ? ["-c", `mcp_servers.blimp-browser.command=${JSON.stringify(cmd)}`, "-c", `mcp_servers.blimp-browser.args=${JSON.stringify([...rest, "browser-mcp"])}`] : [];
+    return { script: 'exec codex "$@"', args: ["codex", ...server] };
+  }
   if (id === "claude-glm") {
     // What claude-glm sets. The login profile runs before the script, so these are set in the script,
     // after it: a profile's own ANTHROPIC_BASE_URL can't send the Z.ai key elsewhere. The key itself
@@ -197,7 +209,7 @@ export async function launchFor(id: string, resume?: string, home = homedir(), f
     const exports = Object.entries(set).map(([n, v]) => `${n}=${quote(v)}`).join(" ");
     return {
       script: `export ${exports}; export ANTHROPIC_AUTH_TOKEN="$BLIMP_ZAI_TOKEN"; unset BLIMP_ZAI_TOKEN ANTHROPIC_API_KEY; exec claude "$@"`,
-      args: ["claude", ...resumeArgs],
+      args: claudeArgs,
       env: { BLIMP_ZAI_TOKEN: zaiKey(home) },
     };
   }

@@ -1,10 +1,10 @@
 // Ports that programs in a session listen on: listed under Ports, announced when one opens, and
-// shown in a browser tab next to the files. (The browser build runs on the server's machine, so it
-// uses the port as it is; the Mac app forwards one over SSH: e2e-native.)
+// shown in a browser tab next to the files: a tab of the server's Chrome, at the server's
+// localhost:<port>. Pages are checked by their titles, which blimpd lists with the tab.
 
 import { createServer } from "node:net";
 import { expect, test } from "@playwright/test";
-import { cspViolations, fixtureDir, frontTab, killSession, openSessionTab, startSession } from "./helpers";
+import { cspViolations, e2e, fixtureDir, frontTab, killSession, openSessionTab, startSession } from "./helpers";
 
 const pid = process.pid;
 const first = `blimpe2e-portsa-${pid}`;
@@ -23,7 +23,7 @@ const freePort = () =>
 const web = (name: string, port: number) => [
   "bun",
   "-e",
-  `Bun.serve({ hostname: "127.0.0.1", port: ${port}, fetch: (r) => new Response("<h1>${name} " + new URL(r.url).pathname + "</h1>", { headers: { "content-type": "text/html" } }) }); setInterval(() => {}, 1e9)`,
+  `Bun.serve({ hostname: "127.0.0.1", port: ${port}, fetch: (r) => new Response("<title>${name} " + new URL(r.url).pathname + "</title><h1>${name}</h1>", { headers: { "content-type": "text/html" } }) }); setInterval(() => {}, 1e9)`,
 ];
 
 test("a session's port is listed, a new one is announced, and either opens in a browser tab", async ({ page }) => {
@@ -39,19 +39,25 @@ test("a session's port is listed, a new one is announced, and either opens in a 
   await expect(frontTab(page).locator(".port-notice")).toHaveCount(0);
 
   await row1.click();
+  const tabs = frontTab(page).locator(".ftabs .tab");
   const tab1 = frontTab(page).locator(".ftabs .tab.active");
-  await expect(tab1).toHaveText(/localhost:\d+/);
-  const frame = frontTab(page).locator(".viewer:not([hidden]) iframe.page-frame");
-  await expect(frame.contentFrame().locator("h1")).toHaveText("first /");
+  await expect(tab1).toHaveText(/first \//, { timeout: 10_000 });
+  // The page itself: a frame drawn in the canvas.
+  const canvas = frontTab(page).locator(".viewer:not([hidden]) .page-live canvas");
+  await expect.poll(() => canvas.evaluate((c: HTMLCanvasElement) => c.width), { timeout: 10_000 }).toBeGreaterThan(0);
 
-  // Another path from the address bar (shown as the server's localhost:<port>), then Reload.
-  const address = frontTab(page).getByLabel("Address");
-  await expect(address).toHaveValue(`localhost:${p1}/`);
+  // Another path from the address bar, then Reload.
+  const address = frontTab(page).locator(".viewer:not([hidden])").getByLabel("Address");
+  await expect(address).toHaveValue(`http://localhost:${p1}/`);
   await address.fill(`localhost:${p1}/about`);
   await address.press("Enter");
-  await expect(frame.contentFrame().locator("h1")).toHaveText("first /about");
-  await frontTab(page).getByRole("button", { name: "Reload" }).click();
-  await expect(frame.contentFrame().locator("h1")).toHaveText("first /about");
+  await expect(tab1).toHaveText(/first \/about/, { timeout: 10_000 });
+  await expect(address).toHaveValue(`http://localhost:${p1}/about`);
+  await frontTab(page).locator(".viewer:not([hidden])").getByRole("button", { name: "Reload" }).click();
+  await expect(tab1).toHaveText(/first \/about/);
+  // Opening the port again brings its tab forward instead of another.
+  await row1.click();
+  await expect(tabs).toHaveCount(1);
 
   // A port that opens later is announced; Open shows it in a second tab.
   startSession(second, dir, web("second", p2));
@@ -59,13 +65,15 @@ test("a session's port is listed, a new one is announced, and either opens in a 
   await expect(notice).toContainText(`Port ${p2} is open`, { timeout: 10_000 });
   await notice.getByRole("button", { name: "Open" }).click();
   await expect(notice).toHaveCount(0);
-  await expect(frontTab(page).locator(".ftabs .tab")).toHaveCount(2);
-  await expect(frontTab(page).locator(".viewer:not([hidden]) iframe.page-frame").contentFrame().locator("h1")).toHaveText("second /");
+  await expect(tabs).toHaveCount(2, { timeout: 10_000 });
+  await expect(frontTab(page).locator(".ftabs .tab.active")).toHaveText(/second \//, { timeout: 10_000 });
 
-  // Closing a browser tab; the first one comes forward, as it was.
-  await frontTab(page).getByRole("button", { name: `Close localhost:${p2}` }).click();
-  await expect(frontTab(page).locator(".ftabs .tab")).toHaveCount(1);
-  await expect(frame.contentFrame().locator("h1")).toHaveText("first /about");
+  // Closing a browser tab closes it on the server; the first one comes forward.
+  await frontTab(page).getByRole("button", { name: "Close second /" }).click();
+  await expect(tabs).toHaveCount(1);
+  await expect(frontTab(page).locator(".ftabs .tab.active")).toHaveText(/first \/about/);
+  const { base, token } = e2e();
+  await expect.poll(async () => ((await (await fetch(`${base}/browser/tabs`, { headers: { Authorization: `Bearer ${token}` } })).json()) as any[]).some((t) => t.url.includes(`:${p2}/`))).toBe(false);
 
   // A session that ends takes its port off the list.
   killSession(second);

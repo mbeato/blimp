@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/editor/editor.api";
-import { ApiError, type DirEntry, type FileBody, type Port } from "../lib/api";
-import { errorText, inTauri, type ServerLink } from "../lib/connection";
+import { ApiError, type BrowserTab, type DirEntry, type FileBody, type Port } from "../lib/api";
+import { errorText, type ServerLink } from "../lib/connection";
 import {
   baseName,
   collapse,
@@ -18,15 +18,13 @@ import {
   type SyncEvent,
   type Viewer,
 } from "../lib/files";
-import { HOME, onViewChange, pageTitle, view } from "../lib/browser";
-import { useOverlay, useOverlayOpen } from "../lib/overlay";
-import { closePort, openPort } from "../lib/ports";
+import { HOME, hostOf, serverTabTarget } from "../lib/browser";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
 import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
 import { Dialog } from "./Dialog";
 import { ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
-import { PageView, sendItem, type Page } from "./PageView";
+import { PageView } from "./PageView";
 import type { PaneActions } from "./TerminalPane";
 import { QuickOpen } from "./QuickOpen";
 import { Splitter } from "./Splitter";
@@ -52,8 +50,9 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 // terminal's ⌘-click.
 export type Opener = (path: string, line?: number, col?: number) => void;
 
-// Opens a server port in a browser tab (or brings its tab forward); with none, a new browser tab.
-export type PageOpener = (p?: Pick<Port, "port" | "host">) => void;
+// Opens a server port in a browser tab (or brings its tab forward); with none, a new browser tab;
+// with a server browser tab's address, that address (lib/browser.ts serverTabTarget).
+export type PageOpener = (p?: Pick<Port, "port" | "host"> | string) => void;
 
 // Files dropped on the window (from Finder): into this folder, or null for the folder new files
 // go in (the one last clicked in the tree).
@@ -146,9 +145,6 @@ export function Workbench(props: {
   const expanded = useRef(new Set([root]));
   const listings = useRef(new Map<string, DirEntry[]>()).current;
   const docs = useRef(new Map<string, Doc>()).current;
-  // Browser tabs, after the file tabs: on server ports ("port:<n>") or any address ("web:<n>").
-  // Their keys share `active` with file paths, which are absolute and so never look like one.
-  const pages = useRef(new Map<string, Page>()).current;
   // Saves not finished yet (sent, or waiting for the one before). Models are disposed only after
   // these finish, so leaving a project mid-save still sends what was typed meanwhile.
   const pending = useRef(new Set<Promise<void>>()).current;
@@ -162,7 +158,6 @@ export function Workbench(props: {
   const [target, setTarget] = useState(root);
   const [creating, setCreating] = useState<Creating | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
-  useOverlay(!!menu);
   const [ask, setAsk] = useState<Ask | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
@@ -488,88 +483,68 @@ export function Workbench(props: {
 
   // ---- browser tabs ----
 
-  const blank = (key: string): Page => ({ key, base: null, url: null, title: "", loading: false, error: "", nonce: 0 });
+  // This folder's tabs in the server's browser ("tab:<id>"), after the file tabs. Their keys share
+  // `active` with file paths, which are absolute and so never look like one. A tab opened here is
+  // in `opening` until the server lists it; one closed here is in `gone` until it stops listing it.
+  const opening = useRef(new Set<string>()).current;
+  const gone = useRef(new Set<string>()).current;
+  const pages = new Map(
+    link.browserTabs
+      .filter((t) => t.folder === root)
+      .map((t): [string, BrowserTab] => [`tab:${t.id}`, t])
+      .filter(([k]) => !gone.has(k)),
+  );
+  const openTab = (url: string) => {
+    const api = link.api;
+    if (!api) return;
+    api.openBrowserTab(root, url).then(
+      ({ id }) => {
+        opening.add(`tab:${id}`);
+        setActive(`tab:${id}`);
+      },
+      (e) => props.onNotice(`Couldn't open a browser tab: ${errorText(e)}`),
+    );
+  };
+  // A server port (its tab, if one is open on it), an address, or (none) a new tab at Google.
   const openPage: PageOpener = (p) => {
-    if (!p) return newPage();
-    const key = `port:${p.port}`;
-    if (!pages.has(key)) {
-      const page: Page = { ...blank(key), port: { port: p.port, host: p.host } };
-      pages.set(key, page);
-      openPort(link, p).then(
-        (base) => ((page.base = base), (page.url = base + "/"), rerender()),
-        (e) => ((page.error = errorText(e)), rerender()),
-      );
-    }
-    setActive(key);
-    rerender();
+    if (!p) return openTab(HOME);
+    if (typeof p === "string") return openTab(p);
+    const have = [...pages].find(([, t]) => {
+      const to = serverTabTarget(t.url);
+      return "port" in to && to.port === p.port;
+    });
+    if (have) return setActive(have[0]);
+    openTab(`http://${p.host === "::1" ? "[::1]" : "localhost"}:${p.port}/`);
   };
   props.pages.current = openPage;
 
-  // + in the tab strip: a browser tab at Google in the Mac app (a browser's iframe can show only
-  // local pages, so there no address yet); a link that asked for a new window: one at its address.
-  const nextWeb = useRef(0);
-  const newPage = (url?: string) => {
-    const key = `web:${++nextWeb.current}`;
-    pages.set(key, { ...blank(key), url: url ?? (inTauri() ? HOME : null) });
-    setActive(key);
-    rerender();
-  };
-  // The current one, for the views' listener below (set up once).
-  const latestNewPage = useRef(newPage);
-  latestNewPage.current = newPage;
-
-  const goPage = (page: Page, url: string) => {
-    page.error = "";
-    if (page.label) return void view.go(page.label, url).catch((e) => props.onNotice(String(e)));
-    page.url = url;
-    page.nonce++;
-    rerender();
-  };
-  const reloadPage = (page: Page) => (page.label ? void view.nav(page.label, "reload").catch(() => {}) : (page.nonce++, rerender()));
-
-  // What the native views say: address, title, loading, a new tab to open.
-  useEffect(() => {
-    let off: (() => void) | undefined;
-    let gone = false;
-    if (inTauri())
-      void onViewChange((c) => {
-        // Every project tab hears every view of the window; only the one with this view acts.
-        const page = [...pages.values()].find((p) => p.label === c.label);
-        if (!page) return;
-        if (c.open) return latestNewPage.current(c.open);
-        if (c.url !== undefined) page.url = c.url;
-        if (c.title !== undefined) page.title = c.title;
-        if (c.loading !== undefined) page.loading = c.loading;
-        rerender();
-      }).then((f) => (gone ? f() : (off = f)));
-    return () => {
-      gone = true;
-      off?.();
-    };
-  }, []);
-
   const closePage = (key: string) => {
-    const page = pages.get(key);
-    if (!page) return;
-    if (page.port) closePort(link, page.port);
-    if (page.label) void view.close(page.label).catch(() => {});
+    const tab = pages.get(key);
+    if (tab)
+      void link.api?.closeBrowserTab(tab.id).catch((e) => {
+        // Still open on the server: back in the strip.
+        gone.delete(key);
+        props.onNotice(`Couldn't close the tab: ${errorText(e)}`);
+        rerender();
+      });
+    gone.add(key);
+    opening.delete(key);
     const order = [...docs.keys(), ...pages.keys()];
-    pages.delete(key);
     const rest = order.filter((k) => k !== key);
     const i = order.indexOf(key);
     setActiveState((a) => (a === key ? (rest[Math.min(i, rest.length - 1)] ?? null) : a));
     rerender();
   };
   // A file tab or a browser tab.
-  const closeTab = (key: string) => (pages.has(key) ? closePage(key) : void closeDoc(key));
-  useEffect(
-    () => () =>
-      pages.forEach((p) => {
-        if (p.port) closePort(link, p.port);
-        if (p.label) void view.close(p.label).catch(() => {});
-      }),
-    [],
-  );
+  const closeTab = (key: string) => (key.startsWith("tab:") ? closePage(key) : void closeDoc(key));
+  // A tab closed elsewhere (another Mac, a session) takes this one off it, if it was in front.
+  const pageKeys = [...pages.keys()].join(",");
+  const listed = link.browserTabs.map((t) => t.id).join(",");
+  useEffect(() => {
+    for (const k of opening) if (pages.has(k)) opening.delete(k);
+    for (const k of gone) if (!link.browserTabs.some((t) => `tab:${t.id}` === k)) gone.delete(k);
+    if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...pages.keys()].at(-1) ?? null);
+  }, [pageKeys, listed]);
 
   // ---- live updates ----
 
@@ -773,7 +748,6 @@ export function Workbench(props: {
   const showTerm = props.showTerm;
   // With the terminal hidden and no file open, the editor area shows how to open one.
   const showEditor = docs.size + pages.size > 0 || !!props.welcome || !showTerm;
-  const overlay = useOverlayOpen();
   const treeOpen = props.showFiles;
 
   return (
@@ -856,24 +830,28 @@ export function Workbench(props: {
                     </button>
                   </div>
                 ))}
-                {[...pages.values()].map((pg) => (
-                  <div
-                    key={pg.key}
-                    role="tab"
-                    aria-selected={pg.key === active}
-                    className={"tab page-tab" + (pg.key === active ? " active" : "")}
-                    title={pg.port ? `localhost:${pg.port.port} on the server` : (pg.url ?? "New tab")}
-                    onMouseDown={(e) => e.button === 0 && setActive(pg.key)}
-                    onAuxClick={(e) => e.button === 1 && closePage(pg.key)}
-                  >
-                    {pageIcon}
-                    <span className="tab-title">{pageTitle(pg)}</span>
-                    <button className="tab-close" aria-label={`Close ${pageTitle(pg)}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => closePage(pg.key)}>
-                      ×
-                    </button>
-                  </div>
-                ))}
-                <button className="icon-button small ftabs-new" title="New browser tab" aria-label="New browser tab" onClick={() => newPage()}>
+                {[...pages].map(([key, t]) => {
+                  const title = t.title || hostOf(t.url) || "New tab";
+                  return (
+                    <div
+                      key={key}
+                      role="tab"
+                      aria-selected={key === active}
+                      className={"tab page-tab" + (key === active ? " active" : "")}
+                      title={`${t.url}${t.openedBy ? "\nOpened by a session" : ""}`}
+                      onMouseDown={(e) => e.button === 0 && setActive(key)}
+                      onAuxClick={(e) => e.button === 1 && closePage(key)}
+                    >
+                      {pageIcon}
+                      {t.openedBy && <span className="page-tab-mark" aria-label="Opened by a session" />}
+                      <span className="tab-title">{title}</span>
+                      <button className="tab-close" aria-label={`Close ${title}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => closePage(key)}>
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+                <button className="icon-button small ftabs-new" title="New browser tab" aria-label="New browser tab" onClick={() => openPage()}>
                   <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
                     <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" />
                   </svg>
@@ -899,29 +877,24 @@ export function Workbench(props: {
             <div className="empty">
               No file open
               <div className="empty-sub">⌘P to open one, or pick it in the files on the left</div>
-              <button className="link-button" onClick={() => newPage()}>
+              <button className="link-button" onClick={() => openPage()}>
                 New browser tab
               </button>
             </div>
           )}
-          {[...pages.values()].map((pg) => (
-            <div key={pg.key} className="viewer" hidden={pg.key !== active}>
+          {[...pages].map(([key, t]) => (
+            <div key={key} className="viewer" hidden={key !== active}>
               <PageView
-                page={pg}
-                shown={pg.key === active && props.front && showEditor && !overlay}
-                onGo={(url) => goPage(pg, url)}
-                onReload={() => reloadPage(pg)}
-                onLabel={(label) => ((pg.label = label), rerender())}
+                tab={t}
+                link={link}
+                shown={key === active && props.front && showEditor}
                 targets={() => props.pane.current.targets()}
-                onSend={(to, text) => {
-                  const { item, prefix } = sendItem(text);
-                  return props.pane.current.send(to, item, prefix);
-                }}
+                onSend={(to, text) => props.pane.current.send(to, text)}
                 onNotice={props.onNotice}
               />
             </div>
           ))}
-          <div className="viewer" hidden={docs.size === 0 || !!(active && pages.has(active))}>
+          <div className="viewer" hidden={docs.size === 0 || !!active?.startsWith("tab:")}>
             {closingDoc && (
               <div className="fbar" role="alert">
                 <span>{closingDoc.name} isn't saved.</span>

@@ -7,8 +7,9 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } f
 import { dirname, join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
+import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
-import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
+import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
@@ -27,8 +28,10 @@ import {
 } from "./sessions";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
+// A live view of a server browser tab (browser/view.ts): input waits in queue until it's open.
+type ViewData = { kind: "view"; id: string; view?: Awaited<ReturnType<typeof viewTab>>; queue: string[]; gone?: boolean };
 // `phone`: the phone token a socket came in with. It is closed once that token is gone (see serve).
-type WsData = (AttachData | EventsData | ChatData) & { phone?: string };
+type WsData = (AttachData | EventsData | ChatData | ViewData) & { phone?: string };
 
 // <socket dir>/token, made once: 32 random bytes as hex, readable only by you.
 export function loadToken(dir: string): string {
@@ -156,6 +159,34 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     throw new HttpError(400, "expected a WebSocket");
   }
 
+  // The server browser's tabs (browser/service.ts): all of them, or one folder's.
+  if (path === "/browser/tabs" && get) {
+    const dir = q.get("dir");
+    const real = dir === null ? null : guard(dir);
+    return Response.json(browserTabs().filter((t) => real === null || t.folder === real));
+  }
+  if (path === "/browser/tabs" && req.method === "POST") {
+    const { dir, url } = (await req.json()) as Record<string, unknown>;
+    if (typeof dir !== "string") throw new HttpError(400, "dir is required");
+    if (typeof url !== "string" || !/^https?:\/\/[^/\s]+/i.test(url)) throw new HttpError(400, "url must be an http or https address");
+    const real = guard(dir);
+    if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
+    return Response.json({ id: await openTab(real, url) }, { status: 201 });
+  }
+  const view = path.match(/^\/browser\/tabs\/([^/]+)\/view$/);
+  if (view && get) {
+    const id = decodeURIComponent(view[1]);
+    if (!hasTab(id)) throw new HttpError(404, "no such browser tab");
+    // Through upgrade(), so a view the phone opened closes when its token is revoked.
+    if (upgrade({ kind: "view", id, queue: [] })) return;
+    throw new HttpError(400, "expected a WebSocket");
+  }
+  const tab = path.match(/^\/browser\/tabs\/([^/]+)$/);
+  if (tab && req.method === "DELETE") {
+    await closeTab(decodeURIComponent(tab[1]));
+    return new Response(null, { status: 204 });
+  }
+
   if (path === "/ports" && get) return Response.json(await sessionPorts(parseZmxList(await zmxListAsync())));
   if (path === "/folders/recent" && get) return Response.json(recentFolders());
   if (path === "/conversations" && get) {
@@ -190,6 +221,19 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   }
 
   return error(404, "not found");
+}
+
+function openViewSocket(ws: ServerWebSocket<ViewData>) {
+  Promise.resolve()
+    .then(() => viewTab(ws.data.id, { send: (d) => void ws.send(d), close: (code, reason) => ws.close(code, reason) }))
+    .then(
+      (v) => {
+        if (ws.data.gone) return v.close();
+        ws.data.view = v;
+        for (const m of ws.data.queue.splice(0)) v.message(m);
+      },
+      (e) => ws.close(1011, String((e as Error).message).slice(0, 120)),
+    );
 }
 
 export function serve(): Server {
@@ -240,22 +284,33 @@ export function serve(): Server {
         if (ws.data.phone) phoneSockets.add(ws);
         if (ws.data.kind === "attach") openAttach(ws as any);
         else if (ws.data.kind === "chat") openChat(ws as any);
+        else if (ws.data.kind === "view") openViewSocket(ws as any);
         else openEvents(ws as any, server);
       },
       message(ws, msg) {
         if (ws.data.kind === "attach") attachMessage(ws as any, msg);
         else if (ws.data.kind === "chat") chatMessage(ws as any, msg);
-        else eventsMessage(ws as any, msg);
+        else if (ws.data.kind === "view") {
+          const d = ws.data;
+          if (d.view) d.view.message(String(msg));
+          else d.queue.push(String(msg));
+        } else eventsMessage(ws as any, msg);
       },
       close(ws) {
         phoneSockets.delete(ws);
         if (ws.data.kind === "attach") closeAttach(ws as any);
         else if (ws.data.kind === "chat") closeChat(ws as any);
-        else closeEvents(ws as any);
+        else if (ws.data.kind === "view") {
+          ws.data.gone = true;
+          ws.data.view?.close();
+        } else closeEvents(ws as any);
       },
     },
   });
   chmodSync(sock, 0o600);
+  onBrowserChange(() => server.publish("sessions", browserMessage()));
+  // Without it, sessions just don't get the browser.
+  startBrowserGate().catch((e) => console.log(`browser: ${(e as Error).message}`));
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

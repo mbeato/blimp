@@ -32,6 +32,10 @@ export default async function setup() {
   process.env.PATH = `${join(homedir(), ".local/bin")}:${join(homedir(), ".bun/bin")}:${process.env.PATH}`;
   // Inside a zmx session, `zmx attach` would switch sessions instead of creating one.
   delete process.env.ZMX_SESSION;
+  // Its own zmx socket folder (short, for zmx's socket-path limit), so test sessions never show in
+  // the live session list. The workers inherit it.
+  const zmxDir = mkdtempSync("/tmp/bz-");
+  process.env.ZMX_DIR = zmxDir;
 
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "blimpe2e-")));
   chmodSync(tmp, 0o700);
@@ -56,7 +60,8 @@ export default async function setup() {
   const blimpd = spawn("bun", [join(repo, "src/main.ts"), "serve"], {
     // SHELL: New shell starts a login shell in the empty home, where zsh would open its
     // first-run menu (and take the test's typing) for want of a .zshrc.
-    env: { ...process.env, HOME: fixtures, SHELL: "/bin/bash", BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude"), PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: "" },
+    // The server browser's Chromium is Playwright's, in the real home (blimpd's is the fixtures).
+    env: { ...process.env, HOME: fixtures, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), ".cache", "ms-playwright"), SHELL: "/bin/bash", BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude"), PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: "" },
     stdio: ["ignore", log, log],
   });
   children.push(blimpd);
@@ -65,6 +70,7 @@ export default async function setup() {
     await killTestSessions().catch(() => {});
     for (const c of children) c.kill();
     rmSync(tmp, { recursive: true, force: true });
+    rmSync(zmxDir, { recursive: true, force: true });
   };
 
   try {

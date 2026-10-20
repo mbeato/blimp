@@ -156,7 +156,7 @@ impl Target {
         args
     }
 
-    /// A browser tab's forward: local `port` to `host:remote` on the server (host is
+    /// A port forward (Open in Browser on the server's localhost): local `port` to `host:remote` on the server (host is
     /// 127.0.0.1 or ::1). Tied to the app's lifetime the same way as the tunnel (TUNNEL_CMD).
     fn forward_args(&self, port: u16, host: &str, remote: u16) -> Vec<String> {
         let mut args = strings(&[
@@ -261,7 +261,7 @@ struct Tunnel {
     serial: u64,
     child: Child,
     conn: Conn,
-    /// For more ssh children to the same server (browser tabs' port forwards).
+    /// For more ssh children to the same server (port forwards).
     target: Target,
 }
 
@@ -281,7 +281,7 @@ struct Inner {
     starting: HashMap<u64, (String, Child)>,
     /// Set once the app is exiting; no tunnel may start after that.
     closing: bool,
-    /// Browser tabs' port forwards: (server id, host, port on the server) -> the forward. Two
+    /// Port forwards: (server id, host, port on the server) -> the forward. Two
     /// tabs on one port share it; it closes when the last one does.
     forwards: HashMap<(String, String, u16), Forward>,
 }
@@ -394,13 +394,13 @@ pub fn disconnect(tunnels: State<'_, Tunnels>, id: String) {
 /// The UI found the tunnel on `port` dead (no /health answer after the Mac woke or changed
 /// networks), while ssh would run on for up to a minute and `connect` would keep handing it
 /// back. Stops just that tunnel: if another window already replaced it, the new one stays, and
-/// browser tabs' port forwards (their own ssh children) are left alone.
+/// port forwards (their own ssh children) are left alone.
 #[tauri::command]
 pub fn drop_tunnel(tunnels: State<'_, Tunnels>, id: String, port: u16) {
     tunnels.drop_if(&id, port);
 }
 
-/// A browser tab on a server's port: forwards a free local port to `host:port` on the server
+/// Open in Browser on a server's port (a browser tab at its localhost): forwards a free local port to `host:port` on the server
 /// (host is 127.0.0.1 or ::1, nothing else) with one more ssh, or reuses the forward already
 /// open. Resolves to the local port once it accepts connections.
 #[tauri::command]
@@ -499,7 +499,7 @@ pub async fn update_server(app: AppHandle, server: String) -> Result<String, Str
     .map_err(|e| e.to_string())?
 }
 
-/// A browser tab on that port closed: the forward goes with the last one.
+/// A browser tab that opened it closed: the forward goes with the last one.
 #[tauri::command]
 pub fn unforward_port(tunnels: State<'_, Tunnels>, server: String, host: String, port: u16) {
     let mut inner = tunnels.inner.lock().unwrap();
@@ -956,7 +956,7 @@ mod tests {
         tunnels.drop_if("claude1", 4000);
         assert!(!running(pid));
         assert!(tunnels.endpoint("claude1").is_none());
-        // Browser tabs' forwards are separate ssh children; they keep running.
+        // Port forwards are separate ssh children; they keep running.
         assert!(running(fwd_pid));
 
         tunnels.close_all();

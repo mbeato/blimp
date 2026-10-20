@@ -4,7 +4,6 @@ import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
 import { freeName, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle } from "../lib/sessions";
-import { useOverlay } from "../lib/overlay";
 import { dragHover } from "../lib/place";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
@@ -23,7 +22,8 @@ export type PaneActions = {
   release: (name: string) => void;
   dropFiles: (name: string, items: Item[]) => void;
   targets: () => { name: string; title: string }[];
-  send: (name: string, item: Item, prefix: string) => Promise<void>;
+  // Pastes text into a session's prompt (a browser tab's Send to session).
+  send: (name: string, text: string) => Promise<void>;
 };
 export const noActions: PaneActions = {
   newClaude: () => {},
@@ -121,8 +121,6 @@ export function TerminalPane(props: {
   const [drag, setDrag] = useState<Drag | null>(null);
   // Right-click menu on a session (its row or its split's header), at the pointer.
   const [ctx, setCtx] = useState<{ name: string; x: number; y: number } | null>(null);
-  // A browser tab's native view would cover these: it hides meanwhile.
-  useOverlay(menu || !!ctx || !!drag);
   const [listWidth, setListWidth] = useState(230);
   const box = useRef<HTMLDivElement>(null);
   // Moved to another window: not picked to fill an empty terminal here (the user can still
@@ -229,12 +227,10 @@ export function TerminalPane(props: {
     },
     // On one line, so a shell doesn't run it. A session not on screen is shown first (its
     // terminal takes the paste once it's up).
-    send: async (name, item, prefix) => {
-      const [path] = await uploadAll([item]);
-      if (!path) return;
+    send: async (name, text) => {
       if (!pastes.has(name)) showHere(name);
       for (let i = 0; i < 50 && !pastes.has(name); i++) await new Promise((r) => setTimeout(r, 100));
-      pastes.get(name)?.(prefix + path + " ");
+      pastes.get(name)?.(text);
     },
   };
 

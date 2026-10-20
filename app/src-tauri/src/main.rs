@@ -1,7 +1,6 @@
 // The native half of the blimp app: it opens SSH tunnels to blimpd and hosts the UI.
 // Sessions, terminals and files all live in the UI, which talks to blimpd through the tunnel.
 
-mod browser;
 mod relaunch;
 mod transfer;
 mod tunnel;
@@ -22,7 +21,6 @@ fn main() {
         .manage(tunnel::Tunnels::default())
         .manage(transfer::Transfers::default())
         .manage(windows::Windows::default())
-        .manage(browser::Browsers::default())
         .setup(|app| {
             // The last run's windows, for the first window to reopen (restore_windows).
             app.state::<windows::Windows>().load(app.handle());
@@ -51,13 +49,6 @@ fn main() {
             windows::set_window_projects,
             windows::set_viewing,
             windows::claim_notice,
-            browser::browser_open,
-            browser::browser_bounds,
-            browser::browser_show,
-            browser::browser_go,
-            browser::browser_nav,
-            browser::browser_close,
-            browser::browser_read,
             relaunch::relaunch
         ])
         .on_window_event(|window, event| match event {

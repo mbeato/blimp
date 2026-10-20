@@ -1,20 +1,24 @@
-// Browser tabs next to the file tabs (any address), and Send to session. The browser build shows
-// a page in a sandboxed iframe, which can't read the page's text or history; the Mac app's
-// native view (title, text, Back/Forward) is checked in e2e-native.
+// Browser tabs next to the file tabs: tabs of the server's Chrome, shown live. The page is drawn
+// in a canvas, so it's checked through what blimpd knows of it (the tab's title, over GET
+// /browser/tabs and the tab strip); clicks and typing go to it as a person's would. Send to
+// session pastes the tab's title and address into a session.
 
 import { createServer, type Server } from "node:http";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { cspViolations, e2e, fixtureDir, frontTab, killSession, openSessionTab, screenText, startSession } from "./helpers";
 
-const pid = process.pid;
-const sess = `blimpe2e-browser-${pid}`;
+const sess = `blimpe2e-browser-${process.pid}`;
 let server: Server;
 let port = 0;
+// A button at 10,10 (100x40) that retitles the page, and a form below it that puts what's typed in
+// the title.
+const PAGE = `<!doctype html><title>Form page</title>
+<style>body{margin:0} button{position:absolute;left:10px;top:10px;width:100px;height:40px} form{position:absolute;left:10px;top:80px} input{width:200px;height:30px}</style>
+<button onclick="document.title='clicked'">b</button>
+<form onsubmit="event.preventDefault();document.title='sent:'+this.q.value"><input name="q"></form>`;
 
 test.beforeAll(async () => {
-  server = createServer((req, res) => res.writeHead(200, { "content-type": "text/html" }).end(`<title>Test page</title><h1>page ${req.url}</h1>`));
+  server = createServer((req, res) => res.writeHead(200, { "content-type": "text/html" }).end(PAGE));
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   port = (server.address() as { port: number }).port;
 });
@@ -23,40 +27,54 @@ test.afterAll(() => {
   killSession(sess);
 });
 
-test("a new browser tab opens any address next to the files; Send to session uploads it and pastes its path", async ({ page }) => {
+test("a browser tab is the server's Chrome, live: clicks and typing reach the page; Send to session; closed on the server", async ({ page }) => {
   const dir = fixtureDir("browser");
   startSession(sess, dir, ["sh", "-c", "stty -echo; exec cat"]);
   const term = await openSessionTab(page, dir);
-  const uploads = join(e2e().fixtures, ".blimp", "uploads");
-  const before = existsSync(uploads) ? readdirSync(uploads) : [];
+  const { base, token } = e2e();
+  const tabsOnServer = async () => (await (await fetch(`${base}/browser/tabs`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { id: string; url: string; title: string; folder: string }[];
 
   await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
   const tab = frontTab(page).locator(".ftabs .tab.active");
-  await expect(tab).toHaveText(/New tab/);
-  const address = frontTab(page).getByLabel("Address");
+  await expect(tab).toBeVisible({ timeout: 10_000 });
+  const viewer = frontTab(page).locator(".viewer:not([hidden])");
+  const address = viewer.getByLabel("Address");
   await expect(address).toBeFocused();
-  await address.fill(`127.0.0.1:${port}/hello`);
+  // On the server, in this folder.
+  await expect.poll(async () => (await tabsOnServer()).filter((t) => t.folder === dir).length).toBe(1);
+
+  await address.fill(`127.0.0.1:${port}/form`);
   await address.press("Enter");
-  const frame = frontTab(page).locator(".viewer:not([hidden]) iframe.page-frame");
-  await expect(frame.contentFrame().locator("h1")).toHaveText("page /hello");
-  await expect(address).toHaveValue(`http://127.0.0.1:${port}/hello`);
-  await expect(tab).toHaveText(new RegExp(`127.0.0.1:${port}`));
+  await expect(tab).toHaveText(/Form page/, { timeout: 10_000 });
+  await expect(address).toHaveValue(`http://127.0.0.1:${port}/form`);
+  const canvas = viewer.locator(".page-live canvas");
+  await expect.poll(() => canvas.evaluate((c: HTMLCanvasElement) => c.width)).toBeGreaterThan(0);
 
-  // Send to session: the folder's sessions; the file has the address, and its path is pasted.
-  await frontTab(page).getByRole("button", { name: "Send to session" }).click();
-  await frontTab(page).locator(".send-menu").getByRole("menuitem").first().click();
-  await expect.poll(() => (existsSync(uploads) ? readdirSync(uploads).filter((f) => !before.includes(f)) : [])).toHaveLength(1);
-  const [name] = readdirSync(uploads).filter((f) => !before.includes(f));
-  expect(name).toBe("page-127.0.0.1.md");
-  expect(readFileSync(join(uploads, name), "utf8")).toContain(`http://127.0.0.1:${port}/hello`);
+  // A click on the page's button.
+  await canvas.click({ position: { x: 50, y: 30 } });
+  await expect(tab).toHaveText(/clicked/, { timeout: 10_000 });
+  // Typing into its field, then Enter.
+  await canvas.click({ position: { x: 60, y: 95 } });
+  await page.keyboard.type("héllo");
   await page.keyboard.press("Enter");
-  await expect.poll(() => screenText(term)).toContain(`Page http://127.0.0.1:${port}/hello: ${join(uploads, name)}`);
+  await expect(tab).toHaveText(/sent:héllo/, { timeout: 10_000 });
+  // Reload brings the page back as served.
+  await viewer.getByRole("button", { name: "Reload" }).click();
+  await expect(tab).toHaveText(/Form page/, { timeout: 10_000 });
 
-  // The + in the tab strip opens another; closing one brings the other forward.
+  // Send to session: the tab's title and address, pasted on one line.
+  await viewer.getByRole("button", { name: "Send to session" }).click();
+  await viewer.locator(".send-menu").getByRole("menuitem").first().click();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => screenText(term)).toContain(`Browser tab "Form page" http://127.0.0.1:${port}/form`);
+
+  // The + in the tab strip opens another; closing one closes it on the server too.
   await frontTab(page).locator(".ftabs").getByRole("button", { name: "New browser tab" }).click();
-  await expect(frontTab(page).locator(".ftabs .tab")).toHaveCount(2);
-  await frontTab(page).getByRole("button", { name: "Close New tab" }).click();
+  await expect(frontTab(page).locator(".ftabs .tab")).toHaveCount(2, { timeout: 10_000 });
+  // A tab not in front shows its × on hover.
+  await frontTab(page).locator(".ftabs .tab", { hasText: "Form page" }).hover();
+  await frontTab(page).getByRole("button", { name: "Close Form page" }).click();
   await expect(frontTab(page).locator(".ftabs .tab")).toHaveCount(1);
-  await expect(frame.contentFrame().locator("h1")).toHaveText("page /hello");
+  await expect.poll(async () => (await tabsOnServer()).some((t) => t.url.includes(`:${port}/form`))).toBe(false);
   expect(await cspViolations(page)).toEqual([]);
 });

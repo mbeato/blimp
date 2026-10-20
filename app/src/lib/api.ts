@@ -5,6 +5,9 @@ export type SessionState = "working" | "waiting" | "done" | "unknown";
 // A port a program in a session listens on (blimpd's ports.ts). host: where it is on the server.
 export type Port = { port: number; host: "127.0.0.1" | "::1"; session: string; pid: number; command: string };
 
+// A tab of the server's browser (events `browser`): its folder, and the session that opened it.
+export type BrowserTab = { id: string; folder: string; url: string; title: string; openedBy?: string };
+
 // A way to start a session (GET /kinds): claude, claude-glm, codex, shell, or one from the
 // server's ~/.blimp/kinds.json. note: why it can't start, or Codex's sign-in.
 export type Kind = { id: string; label: string; available: boolean; note?: string };
@@ -131,6 +134,19 @@ export class Api {
 
   eventsUrl() {
     return this.wsUrl("/events");
+  }
+
+  // A live view of a server browser tab (lib/serverview.ts).
+  viewUrl(id: string) {
+    return this.wsUrl(`/browser/tabs/${encodeURIComponent(id)}/view`);
+  }
+
+  openBrowserTab(dir: string, url: string) {
+    return this.json<{ id: string }>("/browser/tabs", { method: "POST", body: JSON.stringify({ dir, url }), headers: { "Content-Type": "application/json" } });
+  }
+
+  closeBrowserTab(id: string) {
+    return this.req(`/browser/tabs/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   fsList(path: string) {
