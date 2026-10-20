@@ -21,6 +21,18 @@ export type Transfer = {
   saved?: string; // a download's path on the Mac
 };
 
+// Images pasted on a terminal (⌘V after ⌃⇧⌘4 put a screenshot on the clipboard): uploaded like a drop,
+// so Claude reads them from their paths. Only when the paste has no text, so pasting rich text that
+// carries an image still pastes the text. A clipboard image has no name of its own: named like the Mac's.
+export function pastedImages(files: File[], hasText: boolean, now = new Date()): Item[] {
+  if (hasText) return [];
+  const images = files.filter((f) => f.type.startsWith("image/"));
+  const two = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}-at-${two(now.getHours())}.${two(now.getMinutes())}.${two(now.getSeconds())}`;
+  const ext = (type: string) => ({ "image/jpeg": "jpg", "image/svg+xml": "svg" })[type] ?? type.slice(6).replace(/[^a-z0-9]/g, "");
+  return images.map((file, i) => ({ name: `Screenshot-${stamp}${images.length > 1 ? `-${i + 1}` : ""}.${ext(file.type)}`, file }));
+}
+
 // "name 2.ext", "name 3.ext"… for a name in `taken` (".tar.gz" is one extension).
 export function freeName(name: string, taken: Set<string>): string {
   if (!taken.has(name)) return name;

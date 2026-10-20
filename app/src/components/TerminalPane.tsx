@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type P
 import type { Conversation, Kind, Port, Session } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
-import { freeName, plainName, upload, type Item } from "../lib/transfers";
+import { freeName, pastedImages, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle } from "../lib/sessions";
 import { dragHover } from "../lib/place";
 import { relTime } from "../lib/time";
@@ -216,10 +216,7 @@ export function TerminalPane(props: {
     },
     // Uploads them to ~/.blimp/uploads under plain names, then types their paths in, as a paste:
     // Claude reads a file (a screenshot, say) from a path in the prompt.
-    dropFiles: async (name, items) => {
-      const paths = await uploadAll(items);
-      if (paths.length) pastes.get(name)?.(paths.join(" ") + " ");
-    },
+    dropFiles: (name, items) => void uploadInto(name, items),
     targets: () => {
       const focused = p.panes[p.focus];
       const list = listed.filter((s) => !ended.has(s.name));
@@ -232,6 +229,11 @@ export function TerminalPane(props: {
       for (let i = 0; i < 50 && !pastes.has(name); i++) await new Promise((r) => setTimeout(r, 100));
       pastes.get(name)?.(text);
     },
+  };
+
+  const uploadInto = async (name: string, items: Item[]) => {
+    const paths = await uploadAll(items);
+    if (paths.length) pastes.get(name)?.(paths.join(" ") + " ");
   };
 
   const uploadAll = async (items: Item[]): Promise<string[]> => {
@@ -509,7 +511,18 @@ export function TerminalPane(props: {
                   </button>
                 </div>
               )}
-              <div className="tsplit-body">
+              <div
+                className="tsplit-body"
+                // A screenshot on the clipboard goes up like a dropped file, its path typed in. Caught
+                // before xterm's own paste, which would type nothing for an image.
+                onPasteCapture={(e) => {
+                  const items = pastedImages([...e.clipboardData.files], e.clipboardData.types.includes("text/plain"));
+                  if (!items.length) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void uploadInto(name, items);
+                }}
+              >
                 <TerminalView
                   link={link}
                   name={name}

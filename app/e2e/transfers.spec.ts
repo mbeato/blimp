@@ -3,15 +3,15 @@
 // file dropped on a terminal (uploaded to ~/.blimp/uploads, its path typed in).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { e2e, fixtureDir, frontTab, killSession, openSessionTab, screenText, startSession } from "./helpers";
 
 const pid = process.pid;
 // One session per test: each test has its own folder.
-const sessions = ["down", "up", "pick", "term"].map((t) => `blimpe2e-xfer${t}-${pid}`);
-const [sDown, sUp, sPick, sTerm] = sessions;
+const sessions = ["down", "up", "pick", "term", "paste"].map((t) => `blimpe2e-xfer${t}-${pid}`);
+const [sDown, sUp, sPick, sTerm, sPaste] = sessions;
 test.afterAll(() => sessions.forEach(killSession));
 
 // Drags files in from the computer and lets go over `target`, as the OS would (HTML drag and
@@ -128,4 +128,22 @@ test("a file dropped on a terminal goes to ~/.blimp/uploads under a plain name, 
   // Typed in as a paste; Enter so cat prints it back.
   await page.keyboard.press("Enter");
   await expect.poll(() => screenText(term)).toContain(want);
+});
+
+test("a screenshot pasted on a terminal goes to ~/.blimp/uploads, and its path is typed in", async ({ page }) => {
+  const dir = fixtureDir("xfer-paste");
+  startSession(sPaste, dir, ["sh", "-c", "stty -echo; exec cat"]);
+  const term = await openSessionTab(page, dir);
+  // What ⌘V after ⌃⇧⌘4 gives a page: an image file and no text.
+  await frontTab(page).locator(".xterm-helper-textarea").first().evaluate((el) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["png!"], "image.png", { type: "image/png" }));
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  const uploads = join(e2e().fixtures, ".blimp", "uploads");
+  await expect.poll(() => readdirSync(uploads).find((n) => /^Screenshot-.*\.png$/.test(n))).toBeTruthy();
+  const name = readdirSync(uploads).find((n) => /^Screenshot-.*\.png$/.test(n))!;
+  expect(readFileSync(join(uploads, name), "utf8")).toBe("png!");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => screenText(term)).toContain(join(uploads, name));
 });
