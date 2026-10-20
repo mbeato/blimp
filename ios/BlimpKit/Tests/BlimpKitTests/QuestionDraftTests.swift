@@ -45,8 +45,7 @@ private func json(_ c: ChatCommand?) throws -> String {
     d.back()
     #expect(d.step == 0 && d.isPicked(0))
     d.pick(1) // a new pick replaces it
-    #expect(d.answer(0) == "Dog")
-    d.next()
+    #expect(d.answer(0) == "Dog" && d.step == 1 && d.isPicked(1))
     d.type("pineapple") // multi-choice: the text goes with the ticks and waits for Next
     #expect(d.step == 1 && d.isPicked(1))
     d.next()
@@ -76,7 +75,7 @@ private func json(_ c: ChatCommand?) throws -> String {
     d.pick(1)
     d.next()
     #expect(d.done)
-    #expect(d.command(id: "x", at: 1) == .answers(id: "x", at: 1, answers: [QuestionAnswer(picks: [1], text: nil)], labels: [["Banana"]]))
+    #expect(d.command(id: "x", at: 1) == ChatCommand.answers(id: "x", at: 1, answers: [QuestionAnswer(picks: [1], text: nil)], labels: [["Banana"]]))
 }
 
 @Test func onlyOneSingleChoiceQuestionOrAPermissionIsAnsweredByASinglePick() throws {
