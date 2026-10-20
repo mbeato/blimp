@@ -120,6 +120,9 @@ final class ChatModel {
         switch await request(.input(id: id, text: text), id: id) {
         case .ack: return true
         case .ended: break
+        // blimpd types nothing while Claude asks something: Enter would confirm its highlighted choice.
+        case .failed(let error) where error == "Claude is asking something. Answer it first.":
+            lastError = "Answer Claude's question first."
         case .failed(let error): lastError = "Not sent: \(error)"
         case .notSent, .timeout: lastError = Self.notSent
         }
@@ -180,14 +183,14 @@ final class ChatModel {
         default:
             if case .history = event { loaded = true }
             // An append repeats a message when it grows (a tool's output): only a first sighting is new.
-            var replies: [ChatMessage] = []
+            var newReplies: [ChatMessage] = []
             if case .append(let messages) = event {
-                replies = messages.filter { m in
+                newReplies = messages.filter { m in
                     m.role == .assistant && !(m.text ?? "").isEmpty && !log.messages.contains { $0.id == m.id }
                 }
             }
             log.apply(event)
-            if let onReply { replies.forEach(onReply) }
+            if let onReply { newReplies.forEach(onReply) }
         }
     }
 

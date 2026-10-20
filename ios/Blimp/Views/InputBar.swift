@@ -99,7 +99,7 @@ struct InputBar: View {
                         } else if value.translation.height < -Self.keepDistance {
                             onMicUp(.keep)
                         } else if held < Self.tapTime {
-                            latched = true
+                            latched = listening  // a press the screen refused (still stopping) doesn't latch
                         } else {
                             onMicUp(.send)
                         }
@@ -133,7 +133,7 @@ struct InputBar: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.circle)
-                .disabled(!hasText)
+                .disabled(!hasText || listening)
         }
     }
 }

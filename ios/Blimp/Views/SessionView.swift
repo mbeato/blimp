@@ -54,6 +54,12 @@ private struct ChatContent: View {
     // Voice
     @State private var listener = Listener()
     @State private var micOn = false
+    /// The last press's stop() is still finishing: a new press waits for it, so nothing is sent twice.
+    @State private var micStopping = false
+    /// Bumped by each press, so a late failure of an earlier one changes nothing.
+    @State private var micRound = 0
+    /// Prompts already showing or read: one is read aloud only when it's new.
+    @State private var promptsSeen: Set<Double> = []
     /// What was in the box when the mic started; the words heard go after it.
     @State private var micBase = ""
     /// The answerable prompt showing when the mic started: the words answer it instead of being sent.
@@ -144,7 +150,8 @@ private struct ChatContent: View {
         .onChange(of: model.prompt?.at) { _, at in
             guess = nil
             voiceNote = nil
-            if at != nil, readAloud, let prompt = model.prompt { Speaker.shared.say(prompt.spoken, id: Self.promptId) }
+            guard let at, promptsSeen.insert(at).inserted, readAloud, let prompt = model.prompt else { return }
+            Speaker.shared.say(prompt.spoken, id: Self.promptId)
         }
         .onChange(of: store.sessions) { _, sessions in noticeOthers(sessions) }
         // Leaving the app or locking the phone stops the mic; the words stay in the box, unsent. Not on
@@ -236,6 +243,7 @@ private struct ChatContent: View {
     private func appeared() {
         onScreen = true
         readAloud = UserDefaults.standard.bool(forKey: readAloudKey)
+        if let at = model.prompt?.at { promptsSeen.insert(at) }
         lastStates = Dictionary(store.sessions.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
         let key = readAloudKey
         model.onReply = { message in
@@ -263,11 +271,13 @@ private struct ChatContent: View {
     }
 
     private func micDown() {
-        guard !micOn else { return }
+        guard !micOn, !micStopping else { return }
         Speaker.shared.hushed = true
         voiceNote = nil
         guess = nil
         micOn = true
+        micRound += 1
+        let round = micRound
         micBase = draft
         if let p = model.prompt, p.answerable, p.kind != .other, !p.choices.isEmpty { micPrompt = p } else { micPrompt = nil }
         let words = vocabulary
@@ -277,13 +287,14 @@ private struct ChatContent: View {
             } catch is CancellationError {
                 // let go before it was ready
             } catch {
-                guard micOn else { return }
-                micOn = false
-                Speaker.shared.hushed = false
-                draft = micBase
+                // The note shows even if the press already ended (the first denial comes after the alert).
                 voiceNote = (error as? ListenError) == .denied
                     ? "Turn on Microphone and Speech Recognition for blimp in Settings > Apps > blimp."
                     : "This iPhone can't listen right now."
+                guard micOn, round == micRound else { return }
+                micOn = false
+                Speaker.shared.hushed = false
+                draft = micBase
             }
         }
     }
@@ -294,12 +305,19 @@ private struct ChatContent: View {
         let base = micBase
         let asked = micPrompt
         micPrompt = nil
+        micStopping = true
         Task {
             let heard = await listener.stop()
+            micStopping = false
             Speaker.shared.hushed = false
             let words = Self.joined(base, heard)
             if release == .keep {
                 draft = words
+            } else if let now = model.prompt, now.at != asked?.at {
+                // Claude asked something that isn't what the words answer (it came up while listening, or
+                // the phone can't answer it): typing now would land on its prompt. Keep the words, send nothing.
+                draft = words
+                if !heard.isEmpty { voiceNote = "Claude asked something. Nothing was sent." }
             } else if let asked {
                 draft = base
                 if !heard.isEmpty { answerByVoice(heard, to: asked) }
@@ -312,7 +330,7 @@ private struct ChatContent: View {
 
     /// Only a clear match is sent. A guess is marked and waits for a tap; anything else asks again.
     private func answerByVoice(_ heard: String, to asked: Prompt) {
-        guard let now = model.prompt, now.at == asked.at else {
+        guard model.prompt?.at == asked.at else {
             voiceNote = "The question changed. Nothing was sent."
             return
         }

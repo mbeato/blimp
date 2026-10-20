@@ -74,6 +74,7 @@ final class Listener {
             let context = AnalysisContext()
             context.contextualStrings = [.general: Self.words(vocabulary)]
             try? await analyzer.setContext(context)  // a hint only: listen without it rather than not at all
+            try check(mine)  // a stop() during that await already tore down: store nothing more
 
             let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
             input = continuation
@@ -111,16 +112,16 @@ final class Listener {
         self.analyzer = nil
         self.results = nil
         let hadAudio = stopAudio()
-        if let analyzer {
-            // The last words are finalized once the input ends; give it two seconds at most.
-            let timeout = Task {
-                try? await Task.sleep(for: .seconds(2))
-                if !Task.isCancelled { await analyzer.cancelAndFinishNow() }
-            }
-            try? await analyzer.finalizeAndFinishThroughEndOfInput()
-            timeout.cancel()
+        // The last words are finalized once the input ends; two seconds at most for that and the last results.
+        let timeout = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await analyzer?.cancelAndFinishNow()
+            results?.cancel()
         }
+        if let analyzer { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
         await results?.value
+        timeout.cancel()
         let text = Self.joined(finished, volatile).trimmingCharacters(in: .whitespacesAndNewlines)
         if mine == round {
             listening = false
