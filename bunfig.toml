@@ -1,3 +1,5 @@
 [test]
 # blimpd tests only. The app has its own (cd app && bun test).
 root = "test"
+# Its own zmx socket folder, so test sessions never show in the live session list.
+preload = ["./test/setup.ts"]

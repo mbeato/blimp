@@ -122,7 +122,8 @@ beforeAll(async () => {
 // More than the default 5 s: this many zmx kills one after another take longer.
 afterAll(() => {
   server?.kill();
-  for (const name of made) zmx("kill", name);
+  // --force: a session flooding its terminal (`yes`) is too busy to answer a plain kill, and stayed on.
+  for (const name of made) zmx("kill", name, "--force");
   rmSync(tmp, { recursive: true, force: true });
   rmSync(homeDir, { recursive: true, force: true });
 }, 30000);
