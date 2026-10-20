@@ -15,6 +15,8 @@ These screenshots come from the browser build that the end-to-end tests use. The
 - Sessions run in **zmx**, a small program that keeps terminal sessions alive. When you close the app, your sessions keep running on the server. With user systemd, this needs linger (see [Requirements](#requirements)).
 - blimp is one more way to attach to those sessions. A plain terminal still works at the same time. On the server, `zmx list` shows the same sessions, and `zmx attach <name>` joins one. If you type in one place, the text shows in both places.
 
+There is also an iPhone app. It shows your sessions and their chat, and you can answer prompts and talk to Claude by voice. It is not released yet. See [ios/README.md](ios/README.md).
+
 ## Requirements
 
 **Server**

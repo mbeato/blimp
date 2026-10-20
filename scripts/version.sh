@@ -1,11 +1,12 @@
 #!/bin/sh
 # Shows or sets the one version that blimpd and the Mac app share.
-#   scripts/version.sh          prints the version, or lists all four and exits 1 if they differ
-#   scripts/version.sh 0.3.0    sets all four, then refreshes app/src-tauri/Cargo.lock
+#   scripts/version.sh          prints the version, or lists all five and exits 1 if they differ
+#   scripts/version.sh 0.3.0    sets all five, then refreshes app/src-tauri/Cargo.lock
 set -eu
 cd "$(dirname "$0")/.."
 
 json_re='^  "version": "[^"]*"'   # the top-level "version" key (two-space indent)
+yml_re='^        MARKETING_VERSION: "[^"]*"'   # the iPhone app's version in ios/project.yml
 toml_re='^version = "[^"]*"'      # the [package] version, the only line that starts this way
 
 get() { # file regex
@@ -21,7 +22,8 @@ if [ $# -eq 0 ]; then
   app=$(get app/package.json "$json_re")
   cargo=$(get app/src-tauri/Cargo.toml "$toml_re")
   tauri=$(get app/src-tauri/tauri.conf.json "$json_re")
-  if [ -n "$root" ] && [ "$root" = "$app" ] && [ "$root" = "$cargo" ] && [ "$root" = "$tauri" ]; then
+  ios=$(get ios/project.yml "$yml_re")
+  if [ -n "$root" ] && [ "$root" = "$app" ] && [ "$root" = "$cargo" ] && [ "$root" = "$tauri" ] && [ "$root" = "$ios" ]; then
     echo "$root"
     exit 0
   fi
@@ -30,7 +32,8 @@ if [ $# -eq 0 ]; then
   echo "  app/package.json               $app" >&2
   echo "  app/src-tauri/Cargo.toml       $cargo" >&2
   echo "  app/src-tauri/tauri.conf.json  $tauri" >&2
-  echo "Run scripts/version.sh X.Y.Z to set all four." >&2
+  echo "  ios/project.yml                $ios" >&2
+  echo "Run scripts/version.sh X.Y.Z to set all five." >&2
   exit 1
 fi
 
@@ -41,6 +44,7 @@ set_in package.json "$json_re" "  \"version\": \"$v\""
 set_in app/package.json "$json_re" "  \"version\": \"$v\""
 set_in app/src-tauri/tauri.conf.json "$json_re" "  \"version\": \"$v\""
 set_in app/src-tauri/Cargo.toml "$toml_re" "version = \"$v\""
+set_in ios/project.yml "$yml_re" "        MARKETING_VERSION: \"$v\""
 
 # Only the app's own entry in Cargo.lock changes; no dependency is updated.
 (cd app/src-tauri && { cargo update -p blimp --offline 2>/dev/null || cargo update -p blimp; })

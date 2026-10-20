@@ -118,6 +118,14 @@ Client → server text frames on `/chat`:
 - No server code is shared with the Mac app. The API client is small: `URLSession` for HTTP and `URLSessionWebSocketTask` for `/events` and `/sessions/<name>/chat`.
 - **Lock:** Face ID (LocalAuthentication) when the app opens and when it returns after 5 minutes away.
 
+As built (part 2, the app up to voice):
+- The app version (`MARKETING_VERSION` in `ios/project.yml`) is set by `scripts/version.sh` with the other four.
+- Assistant text is shown by a small Markdown reader in BlimpKit (blocks only; inline marks go to `AttributedString`), not a Markdown package. The app has no third-party packages.
+- `/events` is decoded one session at a time. A bad session is dropped, so one bad entry doesn't blank the list.
+- The app reconnects only when it returns from the background, not on every `.active`. This keeps healthy links up through Control Center or Face ID. A link that died in a short inactive spell is found by the 20 s ping.
+- Resume swaps the session in place. Where the screens go is decided in HomeView and ProjectView.
+- A session missing from the `/events` list does not end its chat (blimpd publishes `[]` when `zmx list` fails). Only close 4000, a 404 on the chat handshake, or "the session ended" end it. The server double-checks the chat socket's end. If this is wrong, a session killed while its chat socket is down shows "Reconnecting…" until the reconnect gets a 404.
+
 ### Screens
 
 1. **Pair** (first launch, or after a 401): scan the QR code, or paste a link.
@@ -138,6 +146,12 @@ Client → server text frames on `/chat`:
 - Look: follows system light/dark, system font, the amber accent only for "waiting", as on the Mac.
 
 ## 4. Voice
+
+As built (part 2):
+- Voice answers never send what they aren't sure of; this beats the plan's looser rule. A `.clear` match comes from a label contained in what was heard, or a yes/no, only when every heard word belongs to the matched label or a short filler list. Any negation or hedge word (not, no for a choice that isn't No, nope, dont, never, but, except, wait, neither, both) or opposite yes/no makes it at most a `.guess`. Contradictory words give `.none`. Some natural phrasings need a tap.
+- Ambiguous prefixes are checked first: two or more words that start two or more choices give `.none`, before a single choice is matched by containment. So "yes and" is unclear.
+- The mic uses `AVAudioConverter` by hand to feed the analyzer (`AnalyzerInputConverter` needs iOS 27). It sets the `.record` category without `.duckOthers`, which `.record` refuses. The read-aloud gate (speak only while the app is open and unlocked) sits in BlimpApp. One class is `@unchecked Sendable`, with the reason written beside it.
+- The voice library code (BlimpKit only) was built in a side branch at the same time as the screens, then cherry-picked onto `phone-chat`. The only overlap was `Models.swift`.
 
 - **Speech to text:** Apple's SpeechAnalyzer, on the device, no audio leaves the phone. Custom vocabulary from the session's project folder names, session titles, and a fixed list (blimp, blimpd, zmx, Claude, Codex).
 - **Mic button:** hold to talk, or tap to start and tap to stop. Words show in the input box as they're recognized. Release (or the second tap) sends. Swipe up while holding keeps the text in the box unsent, to edit.
