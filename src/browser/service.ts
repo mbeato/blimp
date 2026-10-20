@@ -1,6 +1,7 @@
 // The server browser in blimpd: one Chrome, started when something needs it (a session's MCP
-// connecting, a tab opened from the app, or tabs saved from before), restarted the next time
-// something needs it after it exits, with the saved tabs reopened. Sessions reach it through the
+// connecting, a tab opened from the app, or tabs saved from before), started again a few seconds
+// after it dies (or, if it died a minute before too, when something next needs it), with the
+// saved tabs reopened. Sessions reach it through the
 // gate's listener on 127.0.0.1: /s/<session>, for connections of blimpd's own uid only. The tabs
 // (folder, address, who opened them) are saved in <blimp dir>/browser/tabs.json.
 
@@ -25,6 +26,8 @@ let gate: Gate | null = null;
 let starting: Promise<Gate> | null = null;
 let refresher: ReturnType<typeof setInterval> | undefined;
 let listener: Server | null = null;
+let stopped = false; // stopBrowser: Chrome isn't to come back by itself
+let lastRestart = 0; // when a Chrome that died by itself was last started again
 const sockets = new Set<Ws>();
 const listeners: ((tabs: Tab[]) => void)[] = [];
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -112,6 +115,11 @@ export function ensureChrome(): Promise<Gate> {
       chrome = gate = null;
       for (const ws of sockets) ws.close(1012, "Browser restarted");
       changed();
+      // Died by itself (a crash, or killed): back with its tabs in a few seconds. Not again within
+      // a minute, so a Chrome that keeps dying waits for something to need it.
+      if (stopped || Date.now() - lastRestart < 60_000) return;
+      lastRestart = Date.now();
+      setTimeout(() => void ensureChrome().catch((e) => console.log(`browser: ${(e as Error).message}`)), 5000);
     });
     for (const t of restore) {
       if (dead) break;
@@ -159,6 +167,7 @@ export function viewTab(id: string, sock: ViewSocket) {
 // The gate's listener. It keeps the port it had last time if it's free, so sessions' MCPs from
 // before a blimpd restart still find it. Writes the port file and the MCP config. Returns the port.
 export async function startBrowserGate(): Promise<number> {
+  stopped = false;
   ensureDir();
   let last = 0;
   try {
@@ -229,6 +238,7 @@ export const browserReady = () => browserAvailable() && existsSync(mcpConfigPath
 
 // For tests: Chrome and the listener stop; tabs.json stays.
 export async function stopBrowser() {
+  stopped = true;
   const c = chrome;
   listener?.stop(true);
   listener = null;

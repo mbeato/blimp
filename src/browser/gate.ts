@@ -40,7 +40,10 @@ export class Gate {
   }
 
   ready(): Promise<void> {
-    return (this.discovering ??= this.chrome.call("Target.setDiscoverTargets", { discover: true }).then(() => {}));
+    // A Chrome that exits answers with an error ("Chrome exited"), not a reply: not ready.
+    return (this.discovering ??= this.chrome.call("Target.setDiscoverTargets", { discover: true }).then((r) => {
+      if (r.error) throw new Error(r.error.message);
+    }));
   }
 
   onChange(f: () => void) {

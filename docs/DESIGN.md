@@ -224,8 +224,8 @@ One Chrome on the server that sessions drive through Google's Chrome DevTools MC
 - Flags: `--headless=new --remote-debugging-pipe --password-store=basic --no-first-run --disable-blink-features=AutomationControlled`, `--user-agent` (normal Chrome's for its version, without "Headless"), and `--user-data-dir=~/.blimp/browser/profile` (700). There's no debugging port: only blimpd holds the pipe.
 - `--password-store=basic` is required. Without it, Chrome on a server with no desktop waits on a keyring for the cookie key, and every page load hangs.
 - Not `--enable-automation`.
-- A Chrome that exits as it starts is tried once more after 5 s. One started while the old blimpd's Chrome still holds the profile does that; it quits within seconds of losing its pipe.
-- Chrome that exits later: its gate WebSockets close (1012), and the next need starts it again with the saved tabs.
+- A Chrome that exits as it starts is tried once more after 5 s. One started while the old blimpd's Chrome still holds the profile does that (code 21, at once); the old one quits within seconds of losing its pipe. Its first call answers "Chrome exited", which isn't ready.
+- Chrome that exits later (a crash, or killed): its gate WebSockets close (1012), and it starts again with the saved tabs 5 s later. If it did that less than a minute before, the next need starts it instead, so a Chrome that keeps dying doesn't loop.
 
 **Gate** (`src/browser/gate.ts`): blimpd's one pipe connection, shared by every client.
 - Ids are rewritten per client.
