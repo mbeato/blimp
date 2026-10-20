@@ -64,9 +64,13 @@ struct StateMark: View {
 
 extension View {
     /// Swipe-to-end on a row; set `pending` to ask first.
+    /// Red, but not `role: .destructive`: with that role the List removes the row itself at the tap,
+    /// before the question is answered, and when blimpd's list then drops it too the List's counts
+    /// disagree and UIKit aborts the app ("Invalid number of items in section").
     func endSwipe(_ session: Session, pending: Binding<Session?>) -> some View {
         swipeActions(edge: .trailing) {
-            Button("End", role: .destructive) { pending.wrappedValue = session }
+            Button("End") { pending.wrappedValue = session }
+                .tint(.red)
         }
     }
 
