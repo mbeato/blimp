@@ -70,6 +70,11 @@ describe("encode and decode", () => {
     const l = decodeLayout(JSON.stringify({ tabs: [{ server: "s", dir: null, panes: ["a"], groups: [["b", "c"], ["a", "d"], ["e"], "x", ["f", 1, "g"]] }] }));
     expect(l?.tabs[0].groups).toEqual([["b", "c"], ["f", "g"]]);
   });
+  test("the session list's order loads, minus anything that isn't a name; none is none", () => {
+    const l = decodeLayout(JSON.stringify({ tabs: [{ server: "s", dir: null, panes: [], order: ["b", 2, "a"] }, { server: "s", dir: "/x" }] }));
+    expect(l?.tabs[0].order).toEqual(["b", "a"]);
+    expect(l?.tabs[1]).not.toHaveProperty("order");
+  });
   test("a folder listed twice gets one tab", () => {
     const t = { server: "s", dir: "/x", panes: [], focus: 0 };
     expect(decodeLayout(JSON.stringify({ tabs: [{ ...t, dir: null }, t, t], active: 2 }))?.tabs).toHaveLength(2);

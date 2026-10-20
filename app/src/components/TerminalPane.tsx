@@ -3,7 +3,7 @@ import type { Conversation, Kind, Port, Session } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
 import { freeName, pastedImages, plainName, upload, type Item } from "../lib/transfers";
-import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle } from "../lib/sessions";
+import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, moveItem, pickSession, sessionTitle } from "../lib/sessions";
 import { dragHover } from "../lib/place";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
@@ -58,10 +58,28 @@ const MIN_SPLIT_PX = 160;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+// A running session's row says what it's doing under its title: its state, else its kind; and
+// the kind's label (GLM, Codex, or one of the user's own) beside it.
+const doing = (s: Session) => STATE_LABEL[s.state] || (s.kind === "shell" ? "Shell" : isClaude(s) ? "Claude Code" : "");
+
 // A session being dragged from the list, and where it would land.
 // The row (or split header) being dragged is drawn at the pointer, as grabbed: (dx, dy) from
-// its corner, w wide. out: the pointer is outside the window (the window under it draws it).
-type Drag = { s: Session; label: string; x: number; y: number; dx: number; dy: number; w: number; out: boolean; target: { at: number; side: Side } | null };
+// its corner, w by h. out: the pointer is outside the window (the window under it draws it).
+// gap: over the list, the gap between its rows it would drop in (the row, with its whole group).
+type Drag = {
+  s: Session;
+  label: string;
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  w: number;
+  h: number;
+  row: boolean;
+  out: boolean;
+  target: { at: number; side: Side } | null;
+  gap: number | null;
+};
 
 // Re-render every 30 s so "2m ago" stays true.
 function useNow(ms: number) {
@@ -130,6 +148,7 @@ export function TerminalPane(props: {
   // Divider positions, for the splits they were dragged for (another set of splits: equal again).
   const [sizes, setSizes] = useState<{ names: string; shares: number[] }>({ names: "", shares: [] });
   const terms = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
   // Ended from here: still listed until the server's next update, but not to be shown again.
   const ended = useRef(new Set<string>()).current;
   // A drag ends with a pointerup on the row it started from: that click isn't a click.
@@ -337,10 +356,32 @@ export function TerminalPane(props: {
     return dropTarget(sharesRef.current, (x - r.left) / r.width);
   };
 
+  // The list's row (a session, or a split group) that has this session.
+  const itemOf = (name: string) => itemsRef.current.findIndex((it) => (Array.isArray(it) ? it.some((x) => x.name === name) : it.name === name));
+
+  // Over the list at (x, y): the gap between its rows a drag would drop in (0: above the first,
+  // the row count: below the last), as long as that moves the row. Never inside a group: a group's
+  // rows are one row here.
+  const gapAt = (name: string, x: number, y: number): number | null => {
+    const el = scroll.current;
+    const r = el?.getBoundingClientRect();
+    if (!el || !r || !r.width || x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+    const from = itemOf(name);
+    if (from < 0) return null;
+    const rows = [...el.querySelectorAll(":scope > [data-item]")];
+    const i = rows.findIndex((row) => {
+      const b = row.getBoundingClientRect();
+      return y < b.top + b.height / 2;
+    });
+    const gap = i < 0 ? rows.length : i;
+    return gap === from || gap === from + 1 ? null : gap;
+  };
+
   // Dragging a running session, from its row or its split's header (pointer events, not HTML
   // drag and drop, which WebKit and Tauri's own file drop handling make unreliable). Let go over
-  // the terminal: a split there. Let go outside the window: to the blimp window there, or a new
-  // window (the pointer stays captured, so the page sees where). Esc cancels.
+  // the terminal: a split there. Let go in the list: its row (with its whole group, if it's in
+  // one) moves to that gap, and stays there. Let go outside the window: to the blimp window there,
+  // or a new window (the pointer stays captured, so the page sees where). Esc cancels.
   const startDrag = (e: ReactPointerEvent, s: Session) => {
     if (e.button !== 0) return;
     dragged.current = false;
@@ -350,8 +391,9 @@ export function TerminalPane(props: {
     const x0 = e.clientX;
     const y0 = e.clientY;
     const label = sessionTitle(s);
-    const box = (e.currentTarget.closest(".srow, .tsplit-head") ?? e.currentTarget).getBoundingClientRect();
-    const grab = { dx: Math.min(x0 - box.left, 260 - 16), dy: y0 - box.top, w: Math.min(box.width, 260) };
+    const from = e.currentTarget.closest(".srow, .tsplit-head") ?? e.currentTarget;
+    const box = from.getBoundingClientRect();
+    const grab = { dx: Math.min(x0 - box.left, 260 - 16), dy: y0 - box.top, w: Math.min(box.width, 260), h: box.height, row: from.classList.contains("srow") };
     const place = { server: link.key, dir, session: s.name };
     let on = false;
     let out = false;
@@ -373,7 +415,7 @@ export function TerminalPane(props: {
       out = ev.clientX < 0 || ev.clientY < 0 || ev.clientX >= innerWidth || ev.clientY >= innerHeight;
       if (out) dragHover({ p: place, label, x: ev.screenX, y: ev.screenY });
       else if (was) dragHover(null);
-      setDrag({ s, label, x: ev.clientX, y: ev.clientY, ...grab, out, target: targetAt(ev.clientX, ev.clientY) });
+      setDrag({ s, label, x: ev.clientX, y: ev.clientY, ...grab, out, target: targetAt(ev.clientX, ev.clientY), gap: out ? null : gapAt(s.name, ev.clientX, ev.clientY) });
     };
     const up = (ev: PointerEvent) => {
       done();
@@ -385,6 +427,11 @@ export function TerminalPane(props: {
         away.delete(s.name);
         onPanes((q) => dropAt(q, s.name, t.at, t.side));
         props.onTake(s.name);
+      }
+      const gap = gapAt(s.name, ev.clientX, ev.clientY);
+      if (gap !== null) {
+        const order = moveItem(itemsRef.current, itemOf(s.name), gap);
+        onPanes((q) => ({ ...q, order }));
       }
     };
     const key = (ev: KeyboardEvent) => {
@@ -426,12 +473,17 @@ export function TerminalPane(props: {
   const toSessions = (g: string[]) => g.map((n) => listed.find((x) => x.name === n)).filter((x): x is Session => !!x);
   const group = split ? toSessions(p.panes) : [];
   const kept = p.groups.map(toSessions).filter((g) => g.length > 1);
-  const items = listItems(listed, group.length > 1 ? [group, ...kept] : kept);
-  const row = (s: Session, num?: number) => {
+  const items = listItems(listed, group.length > 1 ? [group, ...kept] : kept, p.order);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  // The row being dragged within the list (with its whole group).
+  const moving = drag && drag.gap !== null ? itemOf(drag.s.name) : -1;
+  const row = (s: Session, num?: number, item?: number) => {
     return (
       <div
         key={s.name}
         data-session={s.name}
+        data-item={item}
         className={
           "srow" +
           (s.name === p.panes[p.focus] ? " selected" : p.panes.includes(s.name) ? " shown" : "") +
@@ -459,11 +511,13 @@ export function TerminalPane(props: {
                 showHere(s.name);
               }}
             >
-              <Mark s={s} />
-              {num && <span className="split-num">{num}</span>}
-              <span className="srow-title">{sessionTitle(s)}</span>
-              {s.label && <span className="kind-label">{s.label}</span>}
-              <span className="srow-time">{relTime(lastActivity(s), now)}</span>
+              <span className="srow-line">
+                <Mark s={s} />
+                {num && <span className="split-num">{num}</span>}
+                <span className="srow-title">{sessionTitle(s)}</span>
+                <span className="srow-time">{relTime(lastActivity(s), now)}</span>
+              </span>
+              <Doing s={s} />
             </button>
             <button className="srow-trash" title="End session" aria-label={`End ${sessionTitle(s)}`} onClick={() => trash(s)}>
               <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
@@ -636,20 +690,25 @@ export function TerminalPane(props: {
             )}
           </div>
         </div>
-        <div className="slist-scroll">
-          {items.map((it) =>
+        <div className="slist-scroll" ref={scroll}>
+          {/* Each row (a session, or a split group) is one data-item: a drag drops between them. */}
+          {items.flatMap((it, n) => [
+            drag?.gap === n ? <div key="drop" className="slist-drop" aria-hidden /> : null,
             !Array.isArray(it) ? (
-              row(it)
-            ) : it === group ? (
-              <div key={it.map((s) => s.name).join("\n")} className="sgroup" role="group" aria-label="Side by side">
-                {it.map((s, i) => row(s, i + 1))}
-              </div>
+              row(it, undefined, n)
             ) : (
-              <div key={it.map((s) => s.name).join("\n")} className="sgroup kept" role="group" aria-label="Side by side, not on screen">
+              <div
+                key={it.map((s) => s.name).join("\n")}
+                data-item={n}
+                className={"sgroup" + (it === group ? "" : " kept") + (moving === n ? " moving" : "")}
+                role="group"
+                aria-label={it === group ? "Side by side" : "Side by side, not on screen"}
+              >
                 {it.map((s, i) => row(s, i + 1))}
               </div>
             ),
-          )}
+          ])}
+          {drag?.gap === items.length && <div className="slist-drop" aria-hidden />}
           {loaded && listed.length === 0 && <p className="slist-note">Nothing running here.</p>}
           {ports.length > 0 && <div className="slist-label">Ports</div>}
           {ports.map((x) => (
@@ -684,7 +743,7 @@ export function TerminalPane(props: {
           ))}
         </div>
       </nav>
-      {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} />}
+      {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} h={drag.h} tall={drag.row} />}
       {ctx && (
         <>
           <div
@@ -712,13 +771,29 @@ export function TerminalPane(props: {
 }
 
 // A session row lifted off the list, under the pointer while it's dragged (also in the window a
-// drag from another one is over, where `s` may not be known).
-export function DragGhost(props: { s?: Session; label: string; x: number; y: number; w: number }) {
+// drag from another one is over, where `s` may not be known). h: as tall as what was grabbed;
+// tall: a row of the list, with what the session is doing under its title.
+export function DragGhost(props: { s?: Session; label: string; x: number; y: number; w: number; h?: number; tall?: boolean }) {
   return (
-    <div className="drag-ghost" style={{ left: props.x, top: props.y, width: props.w }} aria-hidden>
-      {props.s ? <Mark s={props.s} /> : <span className="srow-mark" />}
-      <span className="srow-title">{props.label}</span>
+    <div className={"drag-ghost" + (props.tall && props.s ? " tall" : "")} style={{ left: props.x, top: props.y, width: props.w, height: props.h }} aria-hidden>
+      <span className="srow-line">
+        {props.s ? <Mark s={props.s} /> : <span className="srow-mark" />}
+        <span className="srow-title">{props.label}</span>
+      </span>
+      {props.tall && props.s && <Doing s={props.s} />}
     </div>
+  );
+}
+
+function Doing(props: { s: Session }) {
+  const { s } = props;
+  const words = doing(s);
+  return (
+    <span className={"srow-doing state-" + s.state}>
+      {words}
+      {words && s.label && <span aria-hidden> · </span>}
+      {s.label && <span className="kind-label">{s.label}</span>}
+    </span>
   );
 }
 

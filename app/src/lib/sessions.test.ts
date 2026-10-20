@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Session } from "./api";
-import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle, tildify } from "./sessions";
+import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, moveItem, pickSession, sessionTitle, tildify } from "./sessions";
 
 const s = (name: string, dir: string, created: number, extra: Partial<Session> = {}): Session => ({
   name,
@@ -37,6 +37,53 @@ test("list: newest first; a split group sits where its newest session is, in its
   // An old pair doesn't jump above newer sessions; its left-to-right order stays.
   expect(names(listItems(listed, [by("a", "c")]))).toEqual(["e", "d", ["a", "c"], "b"]);
   expect(names(listItems(listed, [by("b", "a"), by("e", "d")]))).toEqual([["e", "d"], "c", ["b", "a"]]);
+});
+
+describe("the order rows are dragged into", () => {
+  const listed = folderSessions([s("a", "/p", 1), s("b", "/p", 2), s("c", "/p", 3), s("d", "/p", 4), s("e", "/p", 5)], "/p");
+  const names = (items: ReturnType<typeof listItems>) => items.map((i) => (Array.isArray(i) ? i.map((x) => x.name) : i.name));
+  const by = (...n: string[]) => n.map((x) => listed.find((y) => y.name === x)!);
+
+  test("a row dragged up or down lands in the gap it was let go in", () => {
+    const items = listItems(listed, []);
+    // e d c b a: a (row 4) to the top, then e (row 0) to the gap before a's old place.
+    expect(moveItem(items, 4, 0)).toEqual(["a", "e", "d", "c", "b"]);
+    expect(moveItem(items, 0, 4)).toEqual(["d", "c", "b", "e", "a"]);
+    expect(moveItem(items, 1, 5)).toEqual(["e", "c", "b", "a", "d"]);
+    // Let go where it was (the gap above or below itself): nothing moves.
+    expect(moveItem(items, 2, 2)).toEqual(["e", "d", "c", "b", "a"]);
+    expect(moveItem(items, 2, 3)).toEqual(["e", "d", "c", "b", "a"]);
+  });
+
+  test("the list follows the saved order", () => {
+    expect(names(listItems(listed, [], ["a", "e", "d", "c", "b"]))).toEqual(["a", "e", "d", "c", "b"]);
+  });
+
+  test("a group moves as one, in its split order, and the order keeps it together", () => {
+    const groups = [by("b", "d")];
+    const items = listItems(listed, groups);
+    expect(names(items)).toEqual(["e", ["b", "d"], "c", "a"]);
+    const order = moveItem(items, 1, 4);
+    expect(order).toEqual(["e", "c", "a", "b", "d"]);
+    expect(names(listItems(listed, groups, order))).toEqual(["e", "c", "a", ["b", "d"]]);
+    // The pair split up: its sessions stay where the group was.
+    expect(names(listItems(listed, [], order))).toEqual(["e", "c", "a", "b", "d"]);
+    // A new group sits where its first session in the order is.
+    expect(names(listItems(listed, [by("d", "e")], order))).toEqual([["d", "e"], "c", "a", "b"]);
+  });
+
+  test("sessions the order doesn't know keep their newest-first place: a new one goes on top", () => {
+    const order = ["a", "c", "e"];
+    const withNew = folderSessions([...listed, s("f", "/p", 6)], "/p");
+    expect(names(listItems(withNew, [], order))).toEqual(["f", "a", "d", "c", "b", "e"]);
+  });
+
+  test("ended sessions drop out; the others keep their order", () => {
+    const order = ["a", "e", "x", "d", "c", "b"];
+    const left = listed.filter((x) => x.name !== "d");
+    expect(names(listItems(left, [], order))).toEqual(["a", "e", "c", "b"]);
+    expect(moveItem(listItems(left, [], order), 3, 0)).toEqual(["b", "a", "e", "c"]);
+  });
 });
 
 test("earlier leaves out conversations a running session has open", () => {
