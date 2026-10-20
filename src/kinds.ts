@@ -205,6 +205,7 @@ export async function launchFor(id: string, resume?: string, home = homedir(), f
       ANTHROPIC_DEFAULT_HAIKU_MODEL: glm.fast || "GLM-5.3-Flash",
       CLAUDE_CODE_SUBAGENT_MODEL: model,
       API_TIMEOUT_MS: "3000000",
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1048576",
     };
     const exports = Object.entries(set).map(([n, v]) => `${n}=${quote(v)}`).join(" ");
     return {

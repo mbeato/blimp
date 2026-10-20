@@ -96,7 +96,7 @@ for (const cmd of ["claude", "codex"]) {
     `#!/bin/sh
 echo "fake-${cmd} size=$(stty size)"
 echo "args:[$*]"
-echo "url=$ANTHROPIC_BASE_URL zaitoken=\${BLIMP_ZAI_TOKEN-unset}"
+echo "url=$ANTHROPIC_BASE_URL zaitoken=\${BLIMP_ZAI_TOKEN-unset} window=\${CLAUDE_CODE_MAX_CONTEXT_TOKENS-unset}"
 echo "model=$ANTHROPIC_MODEL fast=$ANTHROPIC_DEFAULT_HAIKU_MODEL apikey=\${ANTHROPIC_API_KEY-unset} custom=$CUSTOM_VAR"
 [ -n "$ANTHROPIC_AUTH_TOKEN" ] && [ "$ANTHROPIC_AUTH_TOKEN" = "$(cat "$HOME/.config/zai/key")" ] && echo "token=from-key-file"
 exec cat
@@ -1143,14 +1143,15 @@ describe("kinds and keys", () => {
     expect(glm.text).toContain(`args:[${withMcp(`--resume ${conv}`)}]`);
     // Claude Code's own key is unset, as claude-glm does, so the Z.ai one is used, at Z.ai.
     expect(glm.text).toContain("model=GLM-5.3 fast=GLM-5.3-Flash apikey=unset");
-    expect(glm.text).toContain("url=https://api.z.ai/api/anthropic zaitoken=unset");
+    // GLM-5.3's real window, so Claude Code doesn't compact at the 200k it assumes for a model it doesn't know.
+    expect(glm.text).toContain("url=https://api.z.ai/api/anthropic zaitoken=unset window=1048576");
     // Resume with no kind (the apps' Earlier lists): a conversation that ran on GLM goes on on GLM.
     const glmConv = "0123abcd-0123-0123-0123-0123456789ac";
     const convDir = join(tmp, "claude", "projects", dir.replace(/[^A-Za-z0-9]/g, "-"));
     mkdirSync(convDir, { recursive: true });
     writeFileSync(join(convDir, `${glmConv}.jsonl`), JSON.stringify({ type: "assistant", message: { role: "assistant", model: "GLM-5.3", content: [] } }) + "\n");
     const again = await startKind(undefined as any, "k-glm-again", "token=from-key-file", { resume: glmConv });
-    expect(again.text).toContain(`args:[--resume ${glmConv}]`);
+    expect(again.text).toContain(`args:[${withMcp(`--resume ${glmConv}`)}]`);
     expect(again.text).toContain("model=GLM-5.3 fast=GLM-5.3-Flash apikey=unset");
     const codex = await startKind("codex", "k-codex", "custom=");
     expect(codex.text).toContain("fake-codex size=36 120");
