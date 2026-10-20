@@ -383,8 +383,13 @@ async function start(dir: string, { name: custom, kind = "claude", run = CLAUDE 
   try {
     // Listed with this client attached. Killed any sooner, zmx 0.5 shows the first viewer an empty screen.
     const end = Date.now() + 5000;
-    while (!parseZmxList(await zmxListAsync()).some((s) => s.name === name && s.clients > 0)) {
-      if (proc.exitCode !== null || Date.now() > end) throw new Error(`zmx didn't start ${name}`);
+    let list = "";
+    while (!parseZmxList((list = await zmxListAsync())).some((s) => s.name === name && s.clients > 0)) {
+      if (proc.exitCode !== null || Date.now() > end) {
+        const why = proc.exitCode !== null ? `its zmx client exited with ${proc.exitCode}` : "not listed with a client after 5 s";
+        console.error(`starting ${name}: ${why}; zmx list said:\n${list}`);
+        throw new Error(`zmx didn't start ${name}`);
+      }
       await Bun.sleep(25);
     }
   } finally {

@@ -160,7 +160,7 @@ jobs:
           xcrun xcresulttool export attachments --path "$E2E_DIR/e2e.xcresult" --output-path "$out"
           # Name each file as the test named it.
           python3 -c '
-          import json, os, re, sys
+          import json, os, re, shutil, sys
           d = sys.argv[1]
           # upload-artifact refuses names with quotes and the like
           safe = lambda n: re.sub(r"[^A-Za-z0-9._-]+", "_", n)
@@ -169,10 +169,10 @@ jobs:
                   src, name = os.path.join(d, a["exportedFileName"]), a.get("suggestedHumanReadableName")
                   if name and os.path.exists(src): os.rename(src, os.path.join(d, safe(name)))
           for n in os.listdir(d):
-              # Xcode's own failure records (element queries, UI snapshots) stay in the .xcresult only
+              # the failure records Xcode adds by itself (element queries, UI snapshots) stay in the .xcresult only
               if n.startswith(("Debug description", "App UI hierarchy", "UI Snapshot", "Debug_description", "App_UI_hierarchy", "UI_Snapshot")):
                   p = os.path.join(d, n)
-                  if os.path.isfile(p): os.remove(p)
+                  shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
                   continue
               if safe(n) != n: os.rename(os.path.join(d, n), os.path.join(d, safe(n)))
           ' "$out" || true
@@ -183,6 +183,8 @@ jobs:
           cat "$E2E_DIR/blimpd.log" || true
           cat "$E2E_DIR/socat.log" || true
           cat "$E2E_DIR/signals.log" || true
+          mkdir -p "$E2E_DIR/zmx-logs"
+          find "$ZMX_DIR" -name "*.log" -exec cp {} "$E2E_DIR/zmx-logs/" \; || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -194,4 +196,5 @@ jobs:
             /tmp/be/blimpd.log
             /tmp/be/signals.log
             /tmp/be/claude.args
+            /tmp/be/zmx-logs
           if-no-files-found: warn
