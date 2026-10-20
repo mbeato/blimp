@@ -149,7 +149,8 @@ mcpTest("the MCP a session runs reads pages, their network and their source thro
     // The folder's other tab (made above) is there too; nothing from other folders.
     expect(pages).toContain(`${base}/via-mcp`);
     expect(pages).toContain(`${base}/made-by-session`);
-    const pageId = Number(pages.match(/(\d+): \S*via-mcp/)![1]);
+    // "3: Page /via-mcp (http://…/via-mcp)" once its title is in, else "3: http://…/via-mcp".
+    const pageId = Number(pages.match(/(\d+): [^\n]*via-mcp/)![1]);
     const net = await tool("list_network_requests", { pageId });
     expect(net).toContain(`${base}/api`);
     const src = await tool("evaluate_script", { pageId, function: "() => document.documentElement.outerHTML" });
