@@ -32,6 +32,10 @@ export default async function setup() {
   process.env.PATH = `${join(homedir(), ".local/bin")}:${join(homedir(), ".bun/bin")}:${process.env.PATH}`;
   // Inside a zmx session, `zmx attach` would switch sessions instead of creating one.
   delete process.env.ZMX_SESSION;
+  // Its own zmx socket folder (short, for zmx's socket-path limit), so test sessions never show in
+  // the live session list. The workers inherit it.
+  const zmxDir = mkdtempSync("/tmp/bz-");
+  process.env.ZMX_DIR = zmxDir;
 
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "blimpe2e-")));
   chmodSync(tmp, 0o700);
@@ -66,6 +70,7 @@ export default async function setup() {
     await killTestSessions().catch(() => {});
     for (const c of children) c.kill();
     rmSync(tmp, { recursive: true, force: true });
+    rmSync(zmxDir, { recursive: true, force: true });
   };
 
   try {
