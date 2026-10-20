@@ -32,10 +32,11 @@ export function promptFromHook(ev: any): Prompt | undefined {
   if (e === "Elicitation") return { kind: "other", answerable: false };
 }
 
-// The numbered lines after "Do you want to proceed?": "❯ 1. Yes", "  2. …".
+// The numbered lines after "Do you want to proceed?" (a permission) or "Would you like to proceed?" (plan
+// approval): "❯ 1. Yes", "  2. …".
 export function parseScreenOptions(screen: string): string[] {
   const lines = screen.split("\n");
-  const start = lines.findLastIndex((l) => l.includes("Do you want to proceed?"));
+  const start = lines.findLastIndex((l) => l.includes("Do you want to proceed?") || l.includes("Would you like to proceed?"));
   if (start < 0) return [];
   const out: string[] = [];
   for (const l of lines.slice(start + 1)) {
@@ -49,7 +50,11 @@ export function parseScreenOptions(screen: string): string[] {
 export function withScreenOptions(p: Prompt, screen: string): Prompt {
   if (p.kind !== "permission") return p;
   const options = parseScreenOptions(screen);
-  return options.length ? { ...p, options, keys: options.map((_, i) => String(i + 1)) } : p;
+  if (!options.length) return p;
+  // Plan approval's last row opens a text field the phone can't type into while Claude waits. Esc
+  // there keeps Claude planning, and what to change can be sent after as a message.
+  const field = (o: string) => /^Tell Claude what to change/.test(o);
+  return { ...p, options: options.map((o) => (field(o) ? "No, keep planning" : o)), keys: options.map((o, i) => (field(o) ? "\x1b" : String(i + 1))) };
 }
 
 // The keys come from the status file, which anything running as you can write: only a digit or Esc

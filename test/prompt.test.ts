@@ -281,3 +281,24 @@ test("a question Claude draws with a border on its left is still recognised", ()
   ] }, { question: "Second?", header: "View request", multiSelect: false, options: [{ label: "A" }, { label: "B" }] }] } as const;
   expect(screenMeets(p as any, parseDialog(BORDERED), { q: 0, cursor: 1 })).toBe(true);
 });
+
+// Plan approval (ExitPlanMode's permission), as the probe saw it: "Would you like to proceed?", and a
+// third row that opens a text field the phone can't type into while Claude waits.
+const PLAN = `Ready to code?
+
+ Here is Claude's plan:
+ Add a dark mode toggle.
+
+ Would you like to proceed?
+
+ ❯ 1. Yes, and use auto mode
+   2. Yes, manually approve edits
+   3. Tell Claude what to change
+`;
+
+test("plan approval shows Claude's own choices; its text-field row becomes No, keep planning (Esc)", () => {
+  const p = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "ExitPlanMode", tool_input: { plan: "x" }, cwd: "/p" })!;
+  const q = withScreenOptions(p, PLAN);
+  expect(q).toMatchObject({ options: ["Yes, and use auto mode", "Yes, manually approve edits", "No, keep planning"], keys: ["1", "2", "\x1b"] });
+  expect(answerKeys(q, 2)).toBe("\x1b");
+});
