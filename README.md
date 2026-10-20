@@ -122,7 +122,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 **Sessions**
 
 - The list next to the terminal shows the sessions in this folder only, as `claude --resume` shows only this folder's conversations. A session started in a subfolder shows when you open that subfolder.
-- Each running session shows its title and a mark: a spinning ring means **working**, an amber dot means **waiting for you**, an empty ring means **idle**. A plain shell shows `>_` and its session name. The title is your `/rename` title, else Claude's title, else the first prompt. Codex sessions get the same marks (from blimp's Codex hooks) and show their session name.
+- Each running session shows its title and a mark: a spinning ring means **working**, an amber dot means **waiting for you**, an empty ring means **idle**. A plain shell shows `>_` and its session name. The title is your `/rename` title, else blimp's own name for it, else Claude's title, else the first prompt. Codex sessions get the same marks (from blimp's Codex hooks) and show their session name.
 - A session of another kind has a small label after its title: **GLM** (Claude Code on GLM), **Codex**, **Codex sign-in**, or the label of one of your own kinds.
 - Click a session to show its terminal. When you open a folder, blimp shows the session that waits longest for you, else the newest.
 - **Drag a session onto the terminal** to see it side by side with the one there. Drop it on the left or right half; drag again (its row, or the name on top of its split) to move it. **×** on a split closes the split (the session keeps running). Esc cancels a drag.
@@ -132,6 +132,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Splits are groups, as in VS Code's terminal.** Click any session of a split group and the whole group shows, with that one focused. Click a session outside it and that session shows on its own; the group stays together, and a click on either of its sessions brings it back. In the list, the group on screen comes first, joined by a blue line and numbered like its splits' headers; other split groups follow, dimmer. A project tab says how many sessions it shows side by side.
 - A session another blimp window shows is listed only in that window, not in this one. ⌘K still finds it and takes you there.
 - **Shift+Enter** starts a new line in a Claude session, as in VS Code (it sends what Claude reads as Option+Enter). In a plain shell it's Enter.
+- **blimp names Claude sessions itself.** Claude's own title comes from the first message, so it says how a session started. Now and then blimp asks a small, fast Claude model (haiku) for a name in 2 to 4 words that says what the session works on now, and asks again as the work moves on (after 3 more prompts and 20 minutes at the least, and at most 30 times an hour). It runs on your own Claude sign-in, so it uses a little of your Claude usage. Your own `/rename` always wins. To turn it off, put `{ "names": false }` in `~/.blimp/config.json` on the server.
 - **+** (or **⌘N**) starts a new Claude session in this folder. The arrow next to it lists every kind of session the server can start:
   - **Claude Code**: the same as +.
   - **Claude Code on GLM**: Claude Code on Z.ai's GLM models, with your Z.ai key (set it in Settings > Models). Greyed until the server has a key.
@@ -328,7 +329,7 @@ Apps opened from Finder get a short `PATH`. blimp adds `/opt/homebrew/bin` and `
 4. Remove the files:
    - `rm ~/.config/systemd/user/blimpd.service && systemctl --user daemon-reload` (the folder is `$XDG_CONFIG_HOME/systemd/user` if you set `XDG_CONFIG_HOME`)
    - `rm ~/.local/bin/blimpd`
-   - `rm -r ~/.blimp` (the socket, the token, and the hook status files in `status/`)
+   - `rm -r ~/.blimp` (the socket, the token, the hook status files in `status/`, and blimp's session names in `names.json`)
    - `rm ~/blimpd.log`, if you started blimpd yourself with `nohup`.
    - `rm ~/blimp-install.sh`, if you downloaded the script to read it first.
    - zmx, only if the installer put it there (it printed "zmx: installing 0.8.1") and you do not use zmx for anything else. zmx keeps a log for each session, and these logs can contain terminal output. So remove its folders too:

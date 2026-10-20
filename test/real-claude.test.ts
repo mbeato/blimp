@@ -44,6 +44,7 @@ beforeAll(async () => {
   sock = join(tmp, "blimpd.sock");
   dir = realpathSync(mkdtempSync(join(homedir(), ".blimptest-real-")));
   env.BLIMPD_SOCKET = sock;
+  writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false })); // no naming calls on your account
   // Permission prompts need the default mode: Max's settings run auto mode, which asks nothing.
   // The hooks in ~/.claude/settings.json run the installed blimpd, not this code, so this session
   // gets this code's hook through --settings, and the installed one writes to a decoy folder

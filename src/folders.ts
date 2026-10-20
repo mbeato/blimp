@@ -4,6 +4,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { shownNames } from "./names";
 import { claudeDir, realDir, transcriptTitle } from "./sessions";
 
 function transcripts(folder: string): { file: string; mtime: number }[] {
@@ -91,10 +92,14 @@ export function recentFolders(dir = claudeDir()): { dir: string; lastUsed: numbe
 export const projectFolderName = (dir: string) => dir.replace(/[^A-Za-z0-9]/g, "-");
 
 // Claude names the folder after the real path, so /home/u/x (with /home/u a symlink) has to be resolved first.
-export function conversations(cwd: string, dir = claudeDir()) {
+// blimp's name for one (names.ts) comes after your /rename, as in the session list.
+export function conversations(cwd: string, dir = claudeDir(), names = shownNames()) {
   return transcripts(join(dir, "projects", projectFolderName(realDir(cwd))))
     .slice(0, 50)
-    .map(({ file, mtime }) => ({ sessionId: basename(file, ".jsonl"), title: transcriptTitle(file), updatedAt: mtime }));
+    .map(({ file, mtime }) => {
+      const sessionId = basename(file, ".jsonl");
+      return { sessionId, title: transcriptTitle(file, names[sessionId]?.name), updatedAt: mtime };
+    });
 }
 
 // The model a conversation started on: its first main-thread request or reply (side tasks run on other
