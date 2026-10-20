@@ -1,0 +1,7 @@
+#!/bin/sh
+# The login shell blimpd uses for POST /sessions in the iPhone e2e test (as in test/server.test.ts):
+# `$SHELL -l -i -c 'exec claude "$@"' claude …` runs the script with sh, so bin/claude starts, not Claude.
+[ "$1" = -l ] && shift
+[ "$1" = -i ] && shift
+[ "$1" = -c ] && shift && exec /bin/sh -c "$@"
+exec /bin/sh

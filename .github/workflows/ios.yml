@@ -46,8 +46,8 @@ jobs:
           xcodebuild -project Blimp.xcodeproj -scheme Blimp -configuration Debug \
             -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build | tail -80
 
-  # The app in the simulator, driven by ios/BlimpUITests, against this branch's blimpd with two stand-in
-  # Claude sessions (ios/e2e/setup.ts). blimpd listens on a unix socket; socat forwards 127.0.0.1:7425 to
+  # The app in the simulator, driven by ios/BlimpUITests, against this branch's blimpd with stand-in
+  # Claude sessions (ios/e2e/setup.ts) and a stand-in claude for the sessions it starts (ios/e2e/bin). blimpd listens on a unix socket; socat forwards 127.0.0.1:7425 to
   # it, as the SSH tunnel does on a Mac. Screenshots and logs go in the iphone-e2e artifact.
   app-e2e:
     runs-on: macos-latest
@@ -86,9 +86,9 @@ jobs:
         run: |
           mkdir -p "$E2E_DIR" "$ZMX_DIR"
           chmod 700 "$ZMX_DIR"
-          nohup bun src/main.ts serve > "$E2E_DIR/blimpd.log" 2>&1 &
+          # with the stand-in login shell and claude (ios/e2e/bin), for the sessions the app starts
+          ios/e2e/blimpd.sh
           token="$(dirname "$BLIMPD_SOCKET")/token"
-          for i in $(seq 100); do [ -S "$BLIMPD_SOCKET" ] && [ -s "$token" ] && break; sleep 0.1; done
           bun ios/e2e/setup.ts
           nohup socat TCP-LISTEN:7425,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:"$BLIMPD_SOCKET" > "$E2E_DIR/socat.log" 2>&1 &
           sleep 1
@@ -116,7 +116,9 @@ jobs:
         run: |
           xcodegen generate
           # xcodebuild passes TEST_RUNNER_<name> to the test as <name>.
-          export TEST_RUNNER_BLIMP_LINK="$(cat "$E2E_DIR/link")"
+          export TEST_RUNNER_BLIMP_LINK="$(cat "$E2E_DIR/link")" TEST_RUNNER_E2E_DIR="$E2E_DIR"
+          # restarts blimpd and drives Face ID when the test asks (ios/e2e/signals.sh)
+          nohup ../ios/e2e/signals.sh > "$E2E_DIR/signals.log" 2>&1 &
           log="$E2E_DIR/xcodebuild.log"
           if xcodebuild -project Blimp.xcodeproj -scheme BlimpUITests -destination "platform=iOS Simulator,id=$SIM" \
               -resultBundlePath "$E2E_DIR/e2e.xcresult" CODE_SIGN_IDENTITY=- SWIFT_TREAT_WARNINGS_AS_ERRORS=YES test > "$log" 2>&1; then
@@ -130,7 +132,20 @@ jobs:
         run: |
           grep -F "Thanks, ship it" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
           [ "$(cat "$E2E_DIR/prompt.in")" = 1 ] || { echo "demo-ask got:"; cat -v "$E2E_DIR/prompt.in"; exit 1; }
-          echo "demo-chat got the message; demo-ask got 1 (Yes)"
+          [ "$(tr '\033' '~' < "$E2E_DIR/stop.in")" = "~" ] || { echo "demo-busy got:"; cat -v "$E2E_DIR/stop.in"; exit 1; }
+          grep -F "After the restart" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
+          # The stand-in claude's record of each session the app started: "<zmx name> <pid> [<arguments>]"
+          echo "claude started:"; cat "$E2E_DIR/claude.args"
+          [ "$(wc -l < "$E2E_DIR/claude.args")" -eq 2 ] || { echo "expected 2 sessions started"; exit 1; }
+          read -r new _ newargs < "$E2E_DIR/claude.args"
+          read -r resumed _ resumedargs <<< "$(sed -n 2p "$E2E_DIR/claude.args")"
+          [ -n "$new" ] && [ -n "$resumed" ] || { echo "the stand-in claude saw no ZMX_SESSION"; exit 1; }
+          [ "$newargs" = "[]" ] || { echo "+ started claude with $newargs"; exit 1; }
+          [ "$resumedargs" = "[--resume e2e00000-0000-0000-0000-000000000004]" ] || { echo "Earlier started claude with $resumedargs"; exit 1; }
+          zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
+          ! grep -qE "name=$new([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "$new was ended but zmx still lists it"; exit 1; }
+          grep -qE "name=$resumed([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "the resumed $resumed isn't running"; exit 1; }
+          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; $new ended; $resumed resumed the past conversation"
       - name: Export screenshots
         if: always()
         run: |
@@ -153,6 +168,7 @@ jobs:
         run: |
           cat "$E2E_DIR/blimpd.log" || true
           cat "$E2E_DIR/socat.log" || true
+          cat "$E2E_DIR/signals.log" || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -162,4 +178,6 @@ jobs:
             /tmp/be/e2e.xcresult
             /tmp/be/xcodebuild.log
             /tmp/be/blimpd.log
+            /tmp/be/signals.log
+            /tmp/be/claude.args
           if-no-files-found: warn

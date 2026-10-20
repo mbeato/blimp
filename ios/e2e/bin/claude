@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stand-in for Claude Code in sessions blimpd starts during the iPhone e2e test. It records its zmx
+# session, pid and arguments in $E2E_DIR/claude.args, writes the status file Claude would (the resumed
+# conversation's id after --resume, else a new one), then appends whatever it reads to $E2E_DIR/started.in.
+echo "$ZMX_SESSION $$ [$*]" >> "$E2E_DIR/claude.args"
+sid=e2e00000-0000-0000-0001-$(printf %012d $$)
+[ "$1" = --resume ] && sid=$2
+mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
+printf '{"sessionId":"%s","cwd":"%s","status":"idle"}' "$sid" "$(pwd -P)" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
+stty -icanon -echo
+exec cat >> "$E2E_DIR/started.in"
