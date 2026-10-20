@@ -58,8 +58,8 @@ struct BlockView: View {
             Text(Inline.text(s)).font(Self.font(level)).bold()
         case .bullets(let items):
             ListView(markers: items.map { _ in "•" }, items: items)
-        case .numbered(let items):
-            ListView(markers: items.indices.map { "\($0 + 1)." }, items: items)
+        case .numbered(let start, let items):
+            ListView(markers: items.indices.map { "\(start + $0)." }, items: items)
         case .code(_, let s), .table(let s):
             CodeBox { Text(s) }
         case .quote(let s):

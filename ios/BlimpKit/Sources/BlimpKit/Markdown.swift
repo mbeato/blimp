@@ -4,7 +4,8 @@ public enum MarkdownBlock: Equatable, Sendable {
     case paragraph(String)
     case heading(level: Int, text: String)
     case bullets([String])
-    case numbered([String])
+    /// `start` is the first item's number in the source; the rest count up from it.
+    case numbered(start: Int, items: [String])
     case code(language: String, text: String)
     case quote(String)
     case table(String)
@@ -32,19 +33,9 @@ public enum MarkdownBlock: Equatable, Sendable {
             } else if ["---", "***", "___"].contains(line.trimmingCharacters(in: .whitespaces)) {
                 out.append(.rule); i += 1
             } else if bulletText(line) != nil {
-                var items: [String] = []
-                while i < lines.count {
-                    if let t = bulletText(lines[i]) { items.append(t) }
-                    else if lines[i].hasPrefix("  "), !items.isEmpty, !lines[i].trimmingCharacters(in: .whitespaces).isEmpty {
-                        items[items.count - 1] += " " + lines[i].trimmingCharacters(in: .whitespaces)
-                    } else { break }
-                    i += 1
-                }
-                out.append(.bullets(items))
-            } else if numberedText(line) != nil {
-                var items: [String] = []
-                while i < lines.count, let t = numberedText(lines[i]) { items.append(t); i += 1 }
-                out.append(.numbered(items))
+                out.append(.bullets(listItems(lines, &i) { bulletText($0) }))
+            } else if let first = numberedText(line) {
+                out.append(.numbered(start: first.number, items: listItems(lines, &i) { numberedText($0)?.text }))
             } else if line.hasPrefix(">") {
                 var q: [String] = []
                 while i < lines.count, lines[i].hasPrefix(">") {
@@ -68,6 +59,19 @@ public enum MarkdownBlock: Equatable, Sendable {
         return out
     }
 
+    // A list's items from lines[i]: an indented line (a continuation, a sub-bullet) joins the item above.
+    private static func listItems(_ lines: [String], _ i: inout Int, item: (String) -> String?) -> [String] {
+        var items: [String] = []
+        while i < lines.count {
+            if let t = item(lines[i]) { items.append(t) }
+            else if lines[i].hasPrefix("  "), !items.isEmpty, !lines[i].trimmingCharacters(in: .whitespaces).isEmpty {
+                items[items.count - 1] += " " + lines[i].trimmingCharacters(in: .whitespaces)
+            } else { break }
+            i += 1
+        }
+        return items
+    }
+
     // A paragraph ends where any other block starts, even without a blank line between.
     private static func startsBlock(_ l: String) -> Bool {
         l.hasPrefix("```") || heading(l) != nil || bulletText(l) != nil || numberedText(l) != nil
@@ -85,9 +89,9 @@ public enum MarkdownBlock: Equatable, Sendable {
         return String(l.dropFirst(2))
     }
 
-    private static func numberedText(_ l: String) -> String? {
+    private static func numberedText(_ l: String) -> (number: Int, text: String)? {
         let digits = l.prefix { $0.isASCII && $0.isNumber }
-        guard !digits.isEmpty, l.dropFirst(digits.count).hasPrefix(". ") else { return nil }
-        return String(l.dropFirst(digits.count + 2))
+        guard let n = Int(digits), l.dropFirst(digits.count).hasPrefix(". ") else { return nil }
+        return (n, String(l.dropFirst(digits.count + 2)))
     }
 }

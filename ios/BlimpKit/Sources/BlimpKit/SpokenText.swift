@@ -13,7 +13,7 @@ public enum SpokenText {
             switch block {
             case .paragraph(let t), .quote(let t): add(inline(t))
             case .heading(_, let t): add(inline(t))
-            case .bullets(let items), .numbered(let items): items.forEach { add(inline($0)) }
+            case .bullets(let items), .numbered(_, let items): items.forEach { add(inline($0)) }
             case .code, .table: sentences.append("code skipped.")
             case .rule: break
             }

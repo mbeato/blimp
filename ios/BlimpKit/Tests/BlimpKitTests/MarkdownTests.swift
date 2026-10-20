@@ -27,7 +27,7 @@ import Testing
         .heading(level: 1, text: "Done"),
         .paragraph("I fixed **two** things:"),
         .bullets(["the `parser`", "the tests, which were flaky"]),
-        .numbered(["one", "two"]),
+        .numbered(start: 1, items: ["one", "two"]),
         .code(language: "ts", text: "const x = 1;\n# not a heading"),
         .quote("quoted\nmore"),
         .table("| a | b |\n|---|---|"),
@@ -50,4 +50,13 @@ import Testing
     #expect(MarkdownBlock.parse("* a\n* b") == [.bullets(["a", "b"])])
     #expect(MarkdownBlock.parse("+ a\n+ b") == [.bullets(["a", "b"])])
     #expect(MarkdownBlock.parse("```\nx\n\ny\n```") == [.code(language: "", text: "x\n\ny")])
+}
+
+@Test func aNumberedListKeepsItsNumbersAndFoldsIndentedLinesIntoTheItem() {
+    // Claude's usual shape: an item, its indented sub-bullets, the next item. One list, numbered 1, 2.
+    #expect(MarkdownBlock.parse("1. Foo\n   - sub\n   more\n2. Bar") == [.numbered(start: 1, items: ["Foo - sub more", "Bar"])])
+    // A list that continues after a paragraph starts at its own number.
+    #expect(MarkdownBlock.parse("1. a\n\nThen:\n\n2. b\n3. c") == [
+        .numbered(start: 1, items: ["a"]), .paragraph("Then:"), .numbered(start: 2, items: ["b", "c"]),
+    ])
 }
