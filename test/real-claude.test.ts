@@ -1,11 +1,12 @@
 // test/real-claude.test.ts
-// The chat socket against a real Claude Code: a message, a permission prompt, a question, three questions
-// at once (one multi-choice, with typed answers) and a Stop, all through /chat. Opt-in
-// (BLIMP_REAL_CLAUDE=1): it uses your Claude account.
-// Its folder and Claude's saved conversation for it are removed afterwards.
+// The chat socket against a real Claude Code: the folder trust question, a message, a permission prompt, a
+// question, three questions at once (one multi-choice, with typed answers) and a Stop, all through /chat.
+// Opt-in (BLIMP_REAL_CLAUDE=1): it uses your Claude account.
+// Its folders and Claude's saved conversation for them are removed afterwards. Claude keeps its own note
+// that you trusted the temp folder (in ~/.claude.json, as for every folder it runs in).
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { parseZmxList, zmxPath } from "../src/sessions";
@@ -14,6 +15,7 @@ const on = process.env.BLIMP_REAL_CLAUDE === "1";
 let tmp = "";
 let sock = "";
 let dir = "";
+let work = ""; // where Claude runs: a new folder outside the home folder, which Claude doesn't trust yet
 // From inside a Claude session, CLAUDE_* variables would turn off the child's transcript.
 const env: Record<string, string | undefined> = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CLAUDE") && k !== "ZMX_SESSION"));
 let server: ReturnType<typeof Bun.spawn>;
@@ -43,6 +45,8 @@ beforeAll(async () => {
   tmp = mkdtempSync(join(tmpdir(), "blimp-real-"));
   sock = join(tmp, "blimpd.sock");
   dir = realpathSync(mkdtempSync(join(homedir(), ".blimptest-real-")));
+  work = join(realpathSync(tmp), "project");
+  mkdirSync(work);
   env.BLIMPD_SOCKET = sock;
   writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false })); // no naming calls on your account
   // Permission prompts need the default mode: Max's settings run auto mode, which asks nothing.
@@ -55,8 +59,10 @@ beforeAll(async () => {
   writeFileSync(settings, JSON.stringify({ hooks: {
     Notification: [ours], Stop: [ours], UserPromptSubmit: [ours], PostToolUse: [ours], PermissionRequest: [ours],
     PreToolUse: [{ matcher: "AskUserQuestion", ...ours }], Elicitation: [ours] } }));
+  // Sessions start in the home folder, which Claude trusts (and so everything in it): this one goes on in a
+  // new folder, so Claude first asks whether to trust it.
   writeFileSync(join(tmp, "kinds.json"), JSON.stringify({ kinds: [{ id: "ask", label: "Ask",
-    command: ["claude", "--permission-mode", "default", "--settings", settings],
+    command: ["sh", "-c", 'cd "$1" && shift && exec "$@"', "sh", work, "claude", "--permission-mode", "default", "--settings", settings],
     env: { BLIMPD_SOCKET: join(tmp, "decoy", "blimpd.sock") } }] }));
   server = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "serve"], { env, stdout: "ignore", stderr: "inherit" });
   await until(() => existsSync(sock) && statSync(sock).isSocket() && (token = readFileSync(join(tmp, "token"), "utf8").trim()), "blimpd", 10000);
@@ -74,36 +80,46 @@ afterAll(async () => {
   }
   server?.kill();
   if (tmp) rmSync(tmp, { recursive: true, force: true });
+  const named = (p: string) => p.replace(/[^A-Za-z0-9]/g, "-");
+  const projects = join(homedir(), ".claude", "projects");
+  if (work && existsSync(join(projects, named(work)))) rmSync(join(projects, named(work)), { recursive: true, force: true });
   // Only this test's own folder: under the home folder, with the name beforeAll gave it.
   if (dir && dirname(dir) === realpathSync(homedir()) && basename(dir).startsWith(".blimptest-real-")) {
     rmSync(dir, { recursive: true, force: true });
     // Claude names its saved-conversation folder from the path it was started in, which may be the
     // other spelling of this one (/Users/x vs /home/x). Match whole names, never a suffix.
-    const named = (p: string) => p.replace(/[^A-Za-z0-9]/g, "-");
     const base = basename(dir);
     const mine = new Set([named(dir), named(join("/Users", basename(dirname(dir)), base)), named(join("/home", basename(dirname(dir)), base))]);
-    const projects = join(homedir(), ".claude", "projects");
     if (existsSync(projects)) for (const d of readdirSync(projects)) if (mine.has(d)) rmSync(join(projects, d), { recursive: true, force: true });
   }
 }, 20000);
 
-test.if(on)("a message, a permission, a question, three questions and a Stop, all through /chat", async () => {
+test.if(on)("the trust question, a message, a permission, a question, three questions and a Stop, all through /chat", async () => {
   name = ((await (await api("/sessions", { method: "POST", body: JSON.stringify({ dir, kind: "ask" }) })).json()) as any).name;
 
-  // A new folder asks whether to trust it, and no hook says so: answer it on a raw terminal.
+  // A viewer at 120x36, as the Mac would show it (the chat's zmx client attaches at its size).
   const term = open(`ws+unix://${sock}:/sessions/${name}/attach?cols=120&rows=36&token=${token}`);
-  let screen = "";
-  term.binaryType = "arraybuffer";
-  term.onmessage = (e) => (screen += new TextDecoder().decode(e.data as ArrayBuffer));
-  await until(() => screen.includes("trust this folder") || screen.includes("❯"), "Claude's first screen", 30000);
-  if (screen.includes("trust this folder")) term.send(new TextEncoder().encode("\x1b[B\r"));
-  await until(async () => (await session())?.sessionId, "Claude's session id", 30000);
 
+  // A new folder asks whether to trust it before anything else, and no hook says so: blimpd reads it off the
+  // screen, and the chat socket answers it before Claude has a conversation.
+  const trust = await until(async () => {
+    const s = await session();
+    return s?.prompt?.kind === "trust" && s;
+  }, "the folder trust question", 30000);
+  expect(trust.state).toBe("waiting");
+  expect(trust.prompt).toMatchObject({ folder: work, options: ["Yes, I trust this folder", "No, exit"], answerable: true });
   const got: any[] = [];
   const chat = open(`ws+unix://${sock}:/sessions/${name}/chat?token=${token}`);
   chat.onmessage = (e) => got.push(JSON.parse(e.data as string));
-  await until(() => got.some((m) => m.type === "history"), "history", 10000);
+  await until(() => got.some((m) => m.type === "history"), "an empty history, before Claude has a conversation", 10000);
   const send = (m: object) => chat.send(JSON.stringify(m));
+  send({ type: "answer", id: "t1", at: trust.prompt.at, pick: 0, label: trust.prompt.options[0] });
+  await until(() => got.find((m) => m.id === "t1"), "the trust answer's reply", 15000);
+  expect(got.find((m) => m.id === "t1")).toEqual({ type: "ack", id: "t1" });
+  // Claude starts: the same chat socket then shows its conversation, empty so far.
+  await until(async () => (await session())?.sessionId, "Claude's session id", 30000);
+  await until(() => got.some((m) => m.type === "reset"), "the conversation in place of the empty one", 10000);
+  await until(() => got.findLast((m) => m.type === "history" || m.type === "reset")?.type === "history", "its history", 10000);
   const texts = () => got.flatMap((m) => m.messages ?? []);
 
   send({ type: "input", id: "m1", text: "Run this exact shell command with the Bash tool: date > real.txt" });
@@ -115,7 +131,7 @@ test.if(on)("a message, a permission, a question, three questions and a Stop, al
   }, "a permission prompt");
   expect(perm.prompt.options[0]).toBe("Yes");
   send({ type: "answer", id: "a1", at: perm.prompt.at, pick: 0, label: perm.prompt.options[0] });
-  await until(() => existsSync(join(dir, "real.txt")), "the command to run");
+  await until(() => existsSync(join(work, "real.txt")), "the command to run");
 
   await until(async () => (await session())?.state === "done", "the turn to end", 90000);
   send({ type: "input", id: "m2", text: "Use the AskUserQuestion tool to ask me which color I like, with options red, green and blue." });

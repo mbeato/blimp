@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { answerKeys, answerSteps, choiceLabel, parseDialog, parseScreenOptions, promptFromHook, screenMeets, withScreenOptions } from "../src/prompt";
+import { answerKeys, answerSteps, choiceLabel, parseDialog, parseScreenOptions, parseTrust, promptFromHook, screenMeets, trustPrompt, trustSteps, withScreenOptions } from "../src/prompt";
 
 // What Claude Code 2.1.300 drew for a Bash permission prompt (from the probe, 2026-10-19).
 const SCREEN = ` Bash command
@@ -301,4 +301,79 @@ test("plan approval shows Claude's own choices; its text-field row becomes No, k
   const q = withScreenOptions(p, PLAN);
   expect(q).toMatchObject({ options: ["Yes, and use auto mode", "Yes, manually approve edits", "No, keep planning"], keys: ["1", "2", "\x1b"] });
   expect(answerKeys(q, 2)).toBe("\x1b");
+});
+
+// Claude Code 2.1.300's folder trust question at 120 columns, from `zmx history` (the probe, 2026-10-20).
+const TRUST = `
+${"─".repeat(120)}
+ Accessing workspace:
+
+ /tmp/blimptest-trustprobe-42dF
+
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source
+ project, or work from your team). If not, take a moment to review what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel
+`;
+// The same at 44 columns: the path and the question wrap.
+const NARROW = `
+${"─".repeat(44)}
+ Accessing workspace:
+
+ /tmp/blimptest-trustprobe-narrow/a-rather-
+ long-folder-name-for-wrapping
+
+ Quick safety check: Is this a project you
+ created or one you trust? (Like your own
+ code, a well-known open source project, or
+ work from your team). If not, take a
+ moment to review what's in this folder
+ first.
+
+ Claude Code'll be able to read, edit, and
+ execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel`;
+
+test("parseTrust reads the folder and where the cursor is", () => {
+  expect(parseTrust(TRUST)).toEqual({ folder: "/tmp/blimptest-trustprobe-42dF", cursor: "no" });
+  // After ↓, as the probe saw it
+  expect(parseTrust(TRUST.replace(" ❯ No, exit\n   Yes", "   No, exit\n ❯ Yes"))).toEqual({ folder: "/tmp/blimptest-trustprobe-42dF", cursor: "yes" });
+  expect(parseTrust(NARROW)).toEqual({ folder: "/tmp/blimptest-trustprobe-narrow/a-rather-long-folder-name-for-wrapping", cursor: "no" });
+});
+
+test("parseTrust is only the question at the screen's end, as Claude draws it", () => {
+  // Answered: Claude's own screen comes after it
+  expect(parseTrust(TRUST + "\n Claude Code v2.1.300\n> \n")).toBeUndefined();
+  // The rows the other way round: not the layout the keys are for
+  expect(parseTrust(TRUST.replace(" ❯ No, exit\n   Yes, I trust this folder", " ❯ Yes, I trust this folder\n   No, exit"))).toBeUndefined();
+  expect(parseTrust(TRUST.replace("Is this a project you created or one you trust?", "Something else?"))).toBeUndefined();
+  expect(parseTrust(SCREEN)).toBeUndefined();
+  expect(parseTrust("")).toBeUndefined();
+});
+
+test("a trust prompt: Yes first, its label checked as a permission's; Yes is ↓ then Enter, No is Enter", () => {
+  const p = trustPrompt(TRUST)!;
+  expect(p).toEqual({ kind: "trust", folder: "/tmp/blimptest-trustprobe-42dF", options: ["Yes, I trust this folder", "No, exit"], answerable: true });
+  expect(trustPrompt(SCREEN)).toBeUndefined();
+  expect(choiceLabel(p, 0)).toBe("Yes, I trust this folder");
+  expect(choiceLabel(p, 1)).toBe("No, exit");
+  expect(choiceLabel(p, 2)).toBeUndefined();
+  expect(answerKeys(p, 0)).toBeUndefined(); // no digit for it
+  expect(trustSteps(0)).toEqual([{ cursor: "no", keys: "\x1b[B" }, { cursor: "yes", keys: "\r" }]);
+  expect(trustSteps(1)).toEqual([{ cursor: "no", keys: "\r" }]);
+  expect(trustSteps(2)).toBeUndefined();
+  expect(trustSteps(-1)).toBeUndefined();
 });

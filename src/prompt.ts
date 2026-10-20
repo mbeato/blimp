@@ -8,6 +8,7 @@ export type Question = { question: string; header?: string; multiSelect: boolean
 export type Prompt =
   | { kind: "permission"; tool: string; summary: string; options: string[]; keys: string[]; answerable: true }
   | { kind: "question"; questions: Question[]; answerable: boolean }
+  | { kind: "trust"; folder: string; options: string[]; answerable: true }
   | { kind: "other"; answerable: false };
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -71,7 +72,7 @@ export function answerKeys(p: Prompt, pick: number): string | undefined {
 // and the screen's options share the wait's `at`, and the same digit means another choice in each.
 export function choiceLabel(p: Prompt, pick: number): string | undefined {
   if (!Number.isInteger(pick) || pick < 0) return;
-  return p.kind === "permission" ? p.options[pick] : p.kind === "question" ? p.questions[0]?.options[pick]?.label : undefined;
+  return p.kind === "permission" || p.kind === "trust" ? p.options[pick] : p.kind === "question" ? p.questions[0]?.options[pick]?.label : undefined;
 }
 
 // Answering every question of an AskUserQuestion dialog at once (docs/DESIGN.md, Chat). Claude Code 2.1.300
@@ -210,4 +211,42 @@ export function screenMeets(p: Prompt, d: Dialog | undefined, e: Expect): boolea
     if (d.rows.slice(0, n + 1).some((r) => r.ticked === undefined) || on.join() !== [...e.ticked].sort((a, b) => a - b).join()) return false;
   }
   return true;
+}
+
+// Folder trust: in a folder not trusted yet, Claude Code 2.1.300 first asks "Accessing workspace: <folder> …
+// Is this a project you created or one you trust?" with two unnumbered rows, `❯ No, exit` and
+// `  Yes, I trust this folder`, the cursor on No; ↓ / ↑ move it and Enter takes it. No hook fires and
+// Claude writes no status file until it's answered, so only the screen says it's there.
+export const TRUST_OPTIONS = ["Yes, I trust this folder", "No, exit"];
+export type Trust = { folder: string; cursor?: "yes" | "no" };
+
+// The question as the screen's end shows it: the folder under "Accessing workspace:", the question (wrapped
+// on a narrow screen), No then Yes, and after them only the footer. Anything else is not that question.
+export function parseTrust(screen: string): Trust | undefined {
+  const lines = screen.split("\n");
+  const head = lines.findLastIndex((l) => /^\s*Accessing workspace:\s*$/.test(l));
+  if (head < 0) return;
+  const rest = lines.slice(head + 1);
+  const row = (label: string) => rest.findIndex((l) => l.replace(/^\s*❯?/, "").trim() === label);
+  const no = row("No, exit");
+  const yes = row("Yes, I trust this folder");
+  if (no < 0 || yes !== no + 1) return;
+  if (!squash(rest.slice(0, no).join("")).includes(squash("Is this a project you created or one you trust?"))) return;
+  if (rest.slice(yes + 1).some((l) => l.trim() && !/^\s*Enter to confirm/.test(l))) return;
+  // A long path wraps onto more lines.
+  const ask = rest.findIndex((l) => /^\s*Quick safety/.test(l));
+  const folder = rest.slice(0, ask < 0 ? no : ask).map((l) => l.trim()).join("");
+  const on = (i: number) => /^\s*❯/.test(rest[i]);
+  return { folder, ...(on(no) ? { cursor: "no" as const } : on(yes) ? { cursor: "yes" as const } : {}) };
+}
+
+export function trustPrompt(screen: string): Prompt | undefined {
+  const t = parseTrust(screen);
+  return t && { kind: "trust", folder: t.folder, options: [...TRUST_OPTIONS], answerable: true };
+}
+
+// Where the cursor must be before each key: Yes is ↓ from No, then Enter; No is Enter.
+export function trustSteps(pick: number): { cursor: "yes" | "no"; keys: string }[] | undefined {
+  if (pick === 0) return [{ cursor: "no", keys: DOWN }, { cursor: "yes", keys: "\r" }];
+  if (pick === 1) return [{ cursor: "no", keys: "\r" }];
 }

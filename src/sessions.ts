@@ -21,9 +21,9 @@ import {
 } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { kindLabel, readKindsFile, type Launch } from "./kinds";
+import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
-import { type Prompt, withScreenOptions } from "./prompt";
+import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
 
@@ -257,6 +257,19 @@ function promptFor(name: string, hook: any): Prompt | undefined {
   return done;
 }
 
+// Claude's folder trust question (prompt.ts) comes before its status file and any hook, so for a Claude
+// session without a sessionId yet the screen is read instead, at most once a second.
+const trustScreens = new Map<string, { read: number; prompt?: Prompt }>();
+function trustFor(name: string): Prompt | undefined {
+  let t = trustScreens.get(name);
+  if (!t || Date.now() - t.read >= 1000) {
+    const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore" });
+    if (trustScreens.size > 200) trustScreens.clear();
+    trustScreens.set(name, (t = { read: Date.now(), prompt: trustPrompt(r.stdout.toString().split("\n").slice(-60).join("\n")) }));
+  }
+  return t.prompt;
+}
+
 export function listSessions(
   dir = claudeDir(),
   zmxOut = runZmxList(),
@@ -273,11 +286,13 @@ export function listSessions(
     // A shell someone then typed `claude` in is Claude Code now.
     let kind = typeof memo[z.name] === "string" ? memo[z.name] : info.sessionId || /\bclaude\b/.test(z.cmd) ? "claude" : "shell";
     if (kind === "shell" && info.sessionId) kind = "claude";
-    const st = deriveState(info, hook, z.created);
+    // A trust question waits from the session's start: it's the first thing Claude shows.
+    const trust = !info.sessionId && z.pid > 0 && (CLAUDE_KINDS.includes(kind) || /\bclaude\b/.test(z.cmd)) ? trustFor(z.name) : undefined;
+    const st = trust ? { state: "waiting" as const, stateSince: z.created * 1000 } : deriveState(info, hook, z.created);
     // Only the hook knows what's asked. Claude's own status file may be the newer of the two, so
     // don't require the hook to be what set the state, only that both say waiting.
-    const asked = st.state === "waiting" && hook.state === "waiting" && hook.at >= z.created * 1000 ? promptFor(z.name, hook) : undefined;
-    const prompt = asked && { ...asked, at: hook.at as number };
+    const asked = !trust && st.state === "waiting" && hook.state === "waiting" && hook.at >= z.created * 1000 ? promptFor(z.name, hook) : undefined;
+    const prompt = trust ? { ...trust, at: z.created * 1000 } : asked && { ...asked, at: hook.at as number };
     return {
       ...z,
       kind,
