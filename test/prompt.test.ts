@@ -251,3 +251,33 @@ test("screenMeets checks each step's screen", () => {
   expect(screenMeets(toppingsDrink, parseDialog(DRINK_TYPED), { q: 1, cursor: 1 })).toBe(false);
   expect(screenMeets(colorSize, undefined, { q: 0, cursor: 1 })).toBe(false);
 });
+
+// A long question, as Claude Code 2.1.300 drew it on Max's phone test: a "│" down its left side, the
+// text wrapped, each option with a description, then "Chat about this" under a rule.
+const BORDERED = `● Moving on to the questions round.
+────────────────────────────────────────────
+←  ☐ Invite done?  ☐ View request  ☐ Health refresh  ☐ Password  ✔ Submit  →
+
+│ Roadmap 1 (tab never shows connected): how should the tab know an invite request is done? This
+│ decides whether we add new data or just read what's already there.
+
+❯ 1. Match by address (Recommended)
+     The tab shows the company's connection for the same website address.
+  2. Agent records it
+     The agent says which connection finished the request.
+  3. Request gets statuses
+     The request gets its own statuses.
+  4. Type something.
+────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`;
+
+test("a question Claude draws with a border on its left is still recognised", () => {
+  const q = "Roadmap 1 (tab never shows connected): how should the tab know an invite request is done? This decides whether we add new data or just read what's already there.";
+  expect(parseDialog(BORDERED)).toMatchObject({ question: q, review: false, cursor: 1 });
+  const p = { kind: "question", answerable: true, questions: [{ question: q, header: "Invite done?", multiSelect: false, options: [
+    { label: "Match by address (Recommended)" }, { label: "Agent records it" }, { label: "Request gets statuses" },
+  ] }, { question: "Second?", header: "View request", multiSelect: false, options: [{ label: "A" }, { label: "B" }] }] } as const;
+  expect(screenMeets(p as any, parseDialog(BORDERED), { q: 0, cursor: 1 })).toBe(true);
+});
