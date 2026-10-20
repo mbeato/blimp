@@ -185,3 +185,28 @@ live("tabs outlive a restart of blimpd and its Chrome", async () => {
   // And the session's tab, with who opened it.
   expect(browserTabs().find((t) => t.url === `${base}/made-by-session`)?.openedBy).toBe(session);
 }, 30_000);
+
+// As after an update: the last blimpd's Chrome still holds the profile for a moment (it quits
+// some seconds after losing its pipe), so the first Chrome this one starts quits at once (code 21).
+live("tabs come back when the last blimpd's Chrome still holds the profile as this one starts", async () => {
+  await stopBrowser();
+  const { launchChrome } = await import("../src/browser/chrome");
+  const { browserDir } = await import("../src/browser/mcp");
+  const old = launchChrome(findChrome()!, join(browserDir(), "profile"));
+  await Bun.sleep(500);
+  setTimeout(() => old.kill(), 2000);
+  port = await startBrowserGate();
+  await until(() => browserTabs().some((t) => t.url === `${base}/kept`), "the tab back", 20_000);
+}, 40_000);
+
+// A Chrome that dies by itself (a crash, or killed) comes back with its tabs without waiting for
+// something to need it.
+live("tabs come back after Chrome dies by itself", async () => {
+  await until(() => browserTabs().some((t) => t.url === `${base}/kept`), "the tab");
+  const { browserDir } = await import("../src/browser/mcp");
+  const pids = Bun.spawnSync(["pgrep", "-f", `user-data-dir=${join(browserDir(), "profile")}`]).stdout.toString().trim().split("\n").filter(Boolean);
+  expect(pids.length).toBeGreaterThan(0);
+  for (const pid of pids) Bun.spawnSync(["kill", "-9", pid]);
+  await until(() => browserTabs().length === 0, "the tabs gone with Chrome");
+  await until(() => browserTabs().some((t) => t.url === `${base}/kept`), "the tab back", 20_000);
+}, 40_000);
