@@ -26,6 +26,7 @@ export type ChatData = {
   busy?: boolean;
   opened?: Promise<void>;
   queue?: Promise<unknown>; // writes to the zmx client, one at a time
+  received?: Promise<unknown>; // every message handled so far: closeChat waits for them
 };
 
 export const chatData = (name: string): ChatData => ({ kind: "chat", name, ticks: 0 });
@@ -150,12 +151,11 @@ function client(ws: ServerWebSocket<ChatData>) {
 }
 
 // keys says what to type when its turn comes (an answer checks its question is still up); recheck
-// runs again before each part after the first (input's Enter, each step of a dialog). Once started, a
-// write finishes even if the socket closes: closeChat waits for it.
+// runs again before each part after the first (input's Enter, each step of a dialog). A write finishes
+// even if the socket closes: closeChat waits for it.
 type Recheck = (part: number) => Promise<void>;
 async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]>, recheck?: Recheck) {
   const d = ws.data;
-  if (d.closed) throw new Error("the socket is closed");
   const fresh = !d.proc || d.proc.exitCode !== null;
   if (fresh) {
     // `zmx attach` would create a session that has ended, and the text would go to a bare shell.
@@ -202,7 +202,15 @@ async function typed(ws: ServerWebSocket<ChatData>, id: string, keys: () => Prom
   await step;
 }
 
-export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
+// Whatever came in before the socket closed is typed, Stop above all: a phone killed right after a tap
+// can't send it again.
+export function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
+  const p = handle(ws, msg);
+  ws.data.received = Promise.all([ws.data.received, p]);
+  return p;
+}
+
+async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
   if (typeof msg !== "string") return;
   let m: any;
   try {
@@ -288,13 +296,13 @@ async function onScreen(name: string, p: Prompt, e: Expect) {
   }
 }
 
-// What is being typed finishes (what's queued after it doesn't start), then the client goes: killed
-// mid-write, its last keys could be lost while the id counts as typed.
+// Everything that came in is typed first, then the client goes: killed mid-write, its last keys could
+// be lost while the id counts as typed.
 export async function closeChat(ws: ServerWebSocket<ChatData>) {
   const d = ws.data;
   d.closed = true;
   clearInterval(d.timer);
-  await d.queue;
+  await d.received;
   d.unfollow?.();
   if (d.proc) await Bun.sleep(100); // for zmx to pass the last keys on
   d.proc?.kill("SIGTERM");

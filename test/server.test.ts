@@ -610,6 +610,31 @@ describe("chat", () => {
     viewer.ws.close();
   });
 
+  test("Stop sent just before the socket closes still reaches the session", async () => {
+    const { name } = await fakeClaude("chat17", "dddddddd-dddd-dddd-dddd-dddddddddddd", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "s1" }));
+    c.ws.close();
+    await enterUntil(viewer, "got:~", "Esc reached the session");
+    viewer.ws.close();
+  });
+
+  test("Stop sent behind an input that is still being typed, just before the socket closes, still reaches the session", async () => {
+    const { name } = await fakeClaude("chat18", "edededed-eded-eded-eded-edededededed", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "t1", text: "first" }));
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "s2" }));
+    c.ws.close();
+    await until(() => viewer.text.includes("got:~[200~first~[201~"), "the input reached the session");
+    await enterUntil(viewer, "got:~\r", "Esc reached the session");
+    await until(() => clients(name) === 1, "the chat client to go");
+    viewer.ws.close();
+  });
+
   test("the same input id sent on two sockets at once is typed once", async () => {
     const { name } = await fakeClaude("chat13", "cccccccc-cccc-cccc-cccc-cccccccccccc", []);
     const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
