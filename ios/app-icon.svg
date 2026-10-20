@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- iPhone app icon: the Mac icon's white blimp on a full black square (iOS rounds the corners itself). -->
+  <rect width="1024" height="1024" fill="#000"/>
+  <g transform="translate(512 512) scale(1.24) translate(-512 -512) translate(-12 -4)" fill="#fff" stroke="#fff" stroke-width="18" stroke-linejoin="round">
+    <path d="M300 512 C340 452 448 424 566 424 C676 424 748 460 748 512 C748 564 676 600 566 600 C448 600 340 572 300 512 Z"/>
+    <path d="M300 400 L338 400 L424 456 L424 568 L338 624 L300 624 Z"/>
+    <path d="M520 590 L612 590 L602 630 L530 630 Z"/>
+  </g>
+</svg>
