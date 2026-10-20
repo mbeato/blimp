@@ -190,13 +190,21 @@ One Chrome on the server that sessions drive through Google's Chrome DevTools MC
 - Flat sessions belong to the client that attached, and so do child sessions inside them.
 - Discovery and auto-attach are the gate's own. A client sees only page targets of its folder: `targetCreated` for existing ones before the `setDiscoverTargets` reply, and attached before the `setAutoAttach` reply, as Chrome does.
 - A target's folder is the creating client's, the opener's for a popup, or the one blimp opened it for. `openedBy` is the session.
-- Another folder's `targetId` is "No target with given id found".
-- `Browser.close` is answered `{}` and does nothing. `Target.attachToBrowserTarget` and `Target.exposeDevToolsProtocol` are refused.
+- Any command with another folder's `targetId` is "No target with given id found".
+- `Browser.close` is answered `{}` and does nothing. `Target.attachToBrowserTarget`, `Target.exposeDevToolsProtocol`, `Target.sendMessageToTarget`, `Browser.crash` and `Browser.crashGpuProcess` are refused.
+- Every new tab opens in a window of its own (`newWindow: true`, added to every `Target.createTarget`): headless Chrome draws only each window's front tab, so a tab behind another would stop streaming to the app and to screenshots.
+- blimpd's own attach (the live view) goes through the gate's line (`attachDirect`), so its `attachedToTarget` is never taken for a client's. A client that leaves before its attach comes back: the session is detached.
+- When Chrome exits, every call waiting for it gets an error. The gate's WebSockets close (1012); the MCP doesn't reconnect, so a session's browser tools work again after the session restarts.
 - Titles: Chrome doesn't announce a page's own title, so blimpd reads `Target.getTargets` every 2 s.
 
 **Listener** (`src/browser/service.ts`): `ws://127.0.0.1:<port>/s/<session>`.
 - The port is the last one if it's free (so MCPs from before a restart still find it), written to `~/.blimp/browser/port`.
-- Admitted only if `/proc/net/tcp(6)` says the connecting socket is blimpd's uid (`peer.ts`), the name is plain, and zmx has that session. Its folder is the session's (real path).
+- Admitted only if all of these hold:
+  - `/proc/net/tcp(6)` says the connecting socket is blimpd's uid (`peer.ts`);
+  - there's no `Origin` header (a web page's WebSocket sends one) and `Host` is `127.0.0.1:<port>` (no DNS rebinding);
+  - `?key=` is the gate key: 32 random bytes as hex in `~/.blimp/browser/key` (600), made once. A page in the server's Chrome runs as you, so it passes the uid check, but it can't read the file. The key is in the MCP's arguments (it takes no other way), which only other users could read, and they fail the uid check;
+  - the name is plain, and zmx has that session.
+- Its folder is the session's (real path).
 - Tabs are saved to `~/.blimp/browser/tabs.json` (`[{ folder, url, openedBy? }]`, 600) half a second after a change, and reopened when Chrome starts.
 
 **Sessions** (`src/browser/mcp.ts`, `src/kinds.ts`): when the login shell finds `npx`, a Chrome is found, and `~/.blimp/browser/mcp.json` exists:
