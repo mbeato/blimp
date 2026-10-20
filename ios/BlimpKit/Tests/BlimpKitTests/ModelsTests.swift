@@ -35,6 +35,26 @@ let sessionJSON = """
     #expect(p.questions?.first?.options.first?.description == "r")
 }
 
+@Test func decodesAFolderTrustPrompt() throws {
+    let json = #"{"name":"blimp-1","created":1792445000,"dir":"/home/u/blimp","kind":"claude","title":"(new session)","state":"waiting","stateSince":1792445000000,"prompt":{"kind":"trust","folder":"/home/u/blimp","options":["Yes, I trust this folder","No, exit"],"answerable":true,"at":1792445000000}}"#
+    let s = try JSONDecoder().decode(Session.self, from: Data(json.utf8))
+    #expect(s.state == .waiting)
+    #expect(!s.isClaude)
+    let p = try #require(s.prompt)
+    #expect(p.kind == .trust)
+    #expect(p.folder == "/home/u/blimp")
+    #expect(p.at == 1792445000000)
+    #expect(p.choices == ["Yes, I trust this folder", "No, exit"])
+    #expect(p.singleChoice)
+    #expect(p.spoken == "Claude Code asks if you trust the folder blimp. Yes or no?")
+    #expect(VoiceAnswer.match("yes", choices: p.choices) == .clear(0))
+    #expect(VoiceAnswer.match("no", choices: p.choices) == .clear(1))
+    // Without its folder it still decodes and reads
+    let bare = try JSONDecoder().decode(Prompt.self, from: Data(#"{"kind":"trust","options":["Yes, I trust this folder","No, exit"],"answerable":true,"at":1}"#.utf8))
+    #expect(bare.folder == nil)
+    #expect(bare.spoken == "Claude Code asks if you trust the folder. Yes or no?")
+}
+
 @Test func decodesChatEvents() {
     let h = ChatEvent.decode(Data(#"{"type":"history","messages":[{"id":"u1","at":1,"role":"user","text":"hi"},{"id":"a#0","at":2,"role":"tool","name":"Bash","summary":"Ran `ls`","input":"ls"}]}"#.utf8))
     guard case .history(let m) = h else { Issue.record("not history: \(h)"); return }

@@ -272,6 +272,36 @@ final class BlimpUITests: XCTestCase {
         shot("23-answered")
     }
 
+    // MARK: - Folder trust
+
+    /// demo-trust is Claude Code asking whether to trust its folder, before anything else (no hook, no status
+    /// file): blimpd reads it off the screen. It waits on Home; Yes in the chat, and Claude starts.
+    func test8TrustFolder() throws {
+        try launchPaired()
+        let row = element("session-demo-trust")
+        try wait(row, "the demo-trust row")
+        shot("24-home-trust")
+        row.tap()
+        let yes = app.buttons["choice-Yes, I trust this folder"]
+        try wait(yes, "Yes, I trust this folder")
+        try wait(app.buttons["choice-No, exit"], "No, exit")
+        try wait(labeled("e2e-work/api-server"), "the folder")
+        shot("25-trust")
+        yes.tap()
+        // Claude starts: the question goes, and its new conversation is ready to type into
+        try until(yes, "exists == false", "the trust question to go once answered")
+        try wait(labeled("No messages yet"), "the new conversation's empty chat")
+        try wait(element("messageField"), "the message field")
+        shot("26-trusted")
+        // The names on Home and in a project (demo-quiz's is blimpd's, a long-ish one)
+        back()
+        try wait(labeled("Configure Integration Test Pipeline"), "demo-quiz's name on Home")
+        shot("27-home-names")
+        element("project-api-server").tap()
+        try wait(labeled("Configure Integration Test Pipeline"), "demo-quiz's name in its project")
+        shot("28-project-names")
+    }
+
     // MARK: - Helpers
 
     /// Launches the app and waits for Home, pairing first if it isn't (test1 failed before pairing).

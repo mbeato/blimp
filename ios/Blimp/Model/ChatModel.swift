@@ -64,10 +64,12 @@ final class ChatModel {
     var prompt: Prompt? { session?.state == .waiting ? session?.prompt : nil }
     /// Claude waits, and blimpd doesn't know on what (no hook prompt): only the Mac can answer it.
     var waitingUnknown: Bool { session?.state == .waiting && session?.prompt == nil }
+    /// Claude Code was just started in it and asks whether to trust its folder: no conversation until it's answered.
+    var trusting: Bool { prompt?.kind == .trust }
     /// Claude Code was just started in it and hasn't said which conversation it is yet.
-    var starting: Bool { session?.kind == "claude" && session?.sessionId == nil }
+    var starting: Bool { session?.kind == "claude" && session?.sessionId == nil && !trusting }
     /// blimpd can't show or type into it (not Claude, or no transcript): only the Mac can.
-    var macOnly: Bool { !starting && (!log.readable || session?.isClaude == false) }
+    var macOnly: Bool { !starting && !trusting && (!log.readable || session?.isClaude == false) }
     var canResume: Bool { (session ?? lastSeen)?.sessionId != nil }
     var sendingText: Bool { inputId != nil }
     var answering: Bool { answerId != nil }

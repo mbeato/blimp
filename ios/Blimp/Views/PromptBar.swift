@@ -48,16 +48,33 @@ struct PromptBar: View {
         switch prompt.kind {
         case .permission:
             summary
-            ForEach(Array(prompt.choices.enumerated()), id: \.offset) { i, choice in
-                ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice), marked: highlight == i) { onPick(i, prompt) }
-            }
-            .disabled(busy)
+            buttons
+        case .trust:
+            trust
+            buttons
         case .question:
             QuestionFlow(prompt: prompt, highlight: highlight, onPick: onPick, onAnswers: onAnswers)
                 .disabled(busy)
                 .id(prompt.at)
         case .other:
             EmptyView()
+        }
+    }
+
+    private var buttons: some View {
+        ForEach(Array(prompt.choices.enumerated()), id: \.offset) { i, choice in
+            ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice), marked: highlight == i) { onPick(i, prompt) }
+        }
+        .disabled(busy)
+    }
+
+    /// Claude's own question, and the folder in small text.
+    private var trust: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Is this a project you created or one you trust?").font(.callout)
+            if let folder = prompt.folder, !folder.isEmpty {
+                Text(folder).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
         }
     }
 
@@ -77,6 +94,8 @@ struct PromptBar: View {
                     }
                 }
             }
+        case .trust:
+            trust
         case .other:
             Text("Claude is asking something.").font(.callout)
         }

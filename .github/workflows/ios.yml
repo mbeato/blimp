@@ -154,6 +154,8 @@ jobs:
           [ "$(tr '\033\r' '~R' < "$E2E_DIR/quiz.in")" = "213~[B~[B~[B~[200~smoke~[201~~[BR1" ] || {
             echo "demo-quiz got:"; od -c "$E2E_DIR/quiz.in"; zmx history demo-quiz | tail -20; exit 1; }
           grep -F '"Which checks should run first?":"Lint, E2E, smoke"' "$E2E_DIR/quiz.json" || { echo "demo-quiz answers:"; cat "$E2E_DIR/quiz.json"; exit 1; }
+          # Yes to the folder trust question: the empty paste a new zmx client sends before an ESC, then down and Enter
+          [ "$(tr '\033\r' '~R' < "$E2E_DIR/trust.in")" = "~[200~~[201~~[BR" ] || { echo "demo-trust got:"; od -c "$E2E_DIR/trust.in"; zmx history demo-trust | tail -20; exit 1; }
           # The stand-in claude's record of each session the app started: "<zmx name> <pid> [<arguments>]"
           echo "claude started:"; cat "$E2E_DIR/claude.args"
           [ "$(wc -l < "$E2E_DIR/claude.args")" -eq 2 ] || { echo "expected 2 sessions started"; exit 1; }
@@ -165,7 +167,7 @@ jobs:
           zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
           ! grep -qE "name=$new([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "$new was ended but zmx still lists it"; exit 1; }
           grep -qE "name=$resumed([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "the resumed $resumed isn't running"; exit 1; }
-          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; demo-quiz got both answers; $new ended; $resumed resumed the past conversation"
+          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; demo-quiz got both answers; demo-trust got Yes; $new ended; $resumed resumed the past conversation"
       - name: Export screenshots
         if: always()
         run: |
@@ -212,6 +214,7 @@ jobs:
             /tmp/be/signals.log
             /tmp/be/claude.args
             /tmp/be/quiz.in
+            /tmp/be/trust.in
             /tmp/be/zmx-logs
           if-no-files-found: warn
 
