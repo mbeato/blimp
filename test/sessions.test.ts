@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -205,6 +205,7 @@ describe("deriveState", () => {
 describe("transcriptTitle (incremental)", () => {
   const dir = mkdtempSync(join(tmpdir(), "blimp-title-"));
   const line = (o: object) => JSON.stringify(o) + "\n";
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
   test("reads only what was appended, and an unterminated last line counts", () => {
     const f = join(dir, "a.jsonl");
