@@ -1,9 +1,13 @@
 name: iOS
 
 # The iPhone app: its logic (BlimpKit) is tested on Linux and macOS; the app is built for the simulator,
-# and run there against a real blimpd with stand-in Claude sessions (app-e2e).
+# and run there against a real blimpd with stand-in Claude sessions (app-e2e). A release tag (v*) also
+# uploads it to TestFlight, once the App Store Connect secrets are set (testflight).
 on:
   push:
+    branches: ["**"]
+    # GitHub doesn't check paths for tag pushes: every v* tag runs this.
+    tags: ["v*"]
     paths: ["ios/**", "src/**", ".github/workflows/ios.yml"]
   workflow_dispatch:
 
@@ -204,3 +208,89 @@ jobs:
             /tmp/be/claude.args
             /tmp/be/zmx-logs
           if-no-files-found: warn
+
+  # Says whether this run uploads to TestFlight: only a v* tag, and only with all four secrets set
+  # (ios/README.md, TestFlight). Otherwise a notice says why, and the testflight job is skipped.
+  testflight-check:
+    runs-on: ubuntu-latest
+    outputs:
+      upload: ${{ steps.check.outputs.upload }}
+    steps:
+      - id: check
+        env:
+          # Whether each secret is set, not the secret itself.
+          HAS_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID != '' }}
+          HAS_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID != '' }}
+          HAS_KEY: ${{ secrets.APP_STORE_CONNECT_KEY != '' }}
+          HAS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+        run: |
+          missing=""
+          [ "$HAS_KEY_ID" = true ] || missing="$missing APP_STORE_CONNECT_KEY_ID"
+          [ "$HAS_ISSUER_ID" = true ] || missing="$missing APP_STORE_CONNECT_ISSUER_ID"
+          [ "$HAS_KEY" = true ] || missing="$missing APP_STORE_CONNECT_KEY"
+          [ "$HAS_TEAM_ID" = true ] || missing="$missing APPLE_TEAM_ID"
+          upload=false
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::notice title=TestFlight::Not uploaded: only release tags (v*) upload to TestFlight."
+          elif [ -n "$missing" ]; then
+            echo "::notice title=TestFlight::Not uploaded: these repository secrets aren't set:$missing. ios/README.md (TestFlight) says how."
+          else
+            upload=true
+          fi
+          [ -z "$missing" ] || echo "secrets not set:$missing"
+          echo "upload=$upload" >> "$GITHUB_OUTPUT"
+
+  # Archives the app, signed automatically with the App Store Connect API key, and uploads it to TestFlight.
+  # Build number: this workflow's run number, which only goes up.
+  testflight:
+    needs: [testflight-check, kit-linux, app]
+    if: needs.testflight-check.outputs.upload == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pick Xcode
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$x" ] && sudo xcode-select -s "$x"
+          xcodebuild -version
+      - run: brew install xcodegen
+      # The .p8 key, base64 in the secret, as a file only this job can read; deleted at the end, whatever happens.
+      - name: Write the API key
+        env:
+          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey_$KEY_ID.p8"
+          (umask 077 && printf '%s' "$KEY" | base64 --decode > "$key")
+          echo "KEY_PATH=$key" >> "$GITHUB_ENV"
+      - name: Archive
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodegen generate
+          xcodebuild -project Blimp.xcodeproj -scheme Blimp -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/blimp.xcarchive" \
+            -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            archive | tail -80
+      - name: Upload to TestFlight
+        run: |
+          set -o pipefail
+          opts="$RUNNER_TEMP/ExportOptions.plist"
+          cp ios/ExportOptions.plist "$opts"
+          plutil -insert teamID -string "$TEAM_ID" "$opts"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/blimp.xcarchive" \
+            -exportOptionsPlist "$opts" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" | tail -80
+          echo "::notice title=TestFlight::Uploaded build $GITHUB_RUN_NUMBER of ${GITHUB_REF_NAME}. App Store Connect shows it once it has processed it."
+      - name: Delete the API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
