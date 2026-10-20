@@ -14,13 +14,24 @@ enum Keychain {
          kSecAttrAccount as String: "server"]
     }
 
-    static func load() -> ServerLink? {
+    enum Saved { case server(ServerLink), none, unreadable }
+
+    /// `unreadable` isn't "not paired": iOS can start the app before the phone is unlocked (after an
+    /// update, or to prewarm it), and the item can only be read while it's unlocked.
+    static func load() -> Saved {
         var query = item
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
-        return try? JSONDecoder().decode(ServerLink.self, from: data)
+        switch SecItemCopyMatching(query as CFDictionary, &out) {
+        case errSecSuccess:
+            guard let data = out as? Data, let link = try? JSONDecoder().decode(ServerLink.self, from: data) else { return .none }
+            return .server(link)
+        case errSecItemNotFound:
+            return .none
+        default:
+            return .unreadable
+        }
     }
 
     /// Updates the saved item, and adds it only when there is none: never delete first, so a

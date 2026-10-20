@@ -1,4 +1,5 @@
 // The app's entry: Pair until a server is saved (or after blimpd refuses the token), else the sessions.
+// A saved server that can't be read yet (the phone still locked) shows the lock cover, never Pair.
 import BlimpKit
 import SwiftUI
 
@@ -21,7 +22,7 @@ private struct Root: View {
 
     var body: some View {
         Group {
-            if lock.locked && store.server != nil {
+            if store.waitingForKeychain || (lock.locked && store.server != nil) {
                 LockedView()
             } else if store.server == nil || store.connection == .unauthorized {
                 PairView()
@@ -33,8 +34,15 @@ private struct Root: View {
         .overlay { if scenePhase != .active && store.server != nil { LockedView() } }
         .onReturnFromBackground { store.reconnectNow() }
         .onChange(of: lock.locked) { _, locked in if !locked { store.reconnectNow() } }
-        .task { if store.server == nil { lock.startUnlocked() } else { await lock.unlock() } }
-        .onChange(of: scenePhase) { _, phase in lock.scenePhaseChanged(phase, paired: store.server != nil) }
+        // Again once a Keychain that couldn't be read at launch has been read: a saved server then asks for Face ID.
+        .task(id: store.waitingForKeychain) {
+            guard !store.waitingForKeychain else { return }
+            if store.server == nil { lock.startUnlocked() } else { await lock.unlock() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { store.loadServer() }
+            lock.scenePhaseChanged(phase, paired: store.server != nil)
+        }
         // Nothing is read aloud in the background, behind the lock cover, or while locked.
         .onChange(of: scenePhase == .active && !lock.locked, initial: true) { _, open in Speaker.shared.allowed = open }
     }

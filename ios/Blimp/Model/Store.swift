@@ -20,9 +20,26 @@ final class Store {
 
     var api: API? { server.map { API(server: $0) } }
 
+    /// The Keychain couldn't be read yet, so whether a server is saved isn't known: neither Pair nor
+    /// Home shows until it can be (`loadServer` again once the app is active).
+    private(set) var waitingForKeychain = false
+
     init() {
-        server = Keychain.load()
-        if server != nil { connect() }
+        loadServer()
+    }
+
+    func loadServer() {
+        guard server == nil else { return }
+        switch Keychain.load() {
+        case .server(let link):
+            waitingForKeychain = false
+            server = link
+            connect()
+        case .none:
+            waitingForKeychain = false
+        case .unreadable:
+            waitingForKeychain = true
+        }
     }
 
     /// Checks the link against /health first, so a wrong token or address never gets saved.
