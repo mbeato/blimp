@@ -136,6 +136,19 @@ export class Api {
     return this.wsUrl("/events");
   }
 
+  // A live view of a server browser tab (lib/serverview.ts).
+  viewUrl(id: string) {
+    return this.wsUrl(`/browser/tabs/${encodeURIComponent(id)}/view`);
+  }
+
+  openBrowserTab(dir: string, url: string) {
+    return this.json<{ id: string }>("/browser/tabs", { method: "POST", body: JSON.stringify({ dir, url }), headers: { "Content-Type": "application/json" } });
+  }
+
+  closeBrowserTab(id: string) {
+    return this.req(`/browser/tabs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
   fsList(path: string) {
     return this.json<DirListing>("/fs/list", { query: { path } });
   }
