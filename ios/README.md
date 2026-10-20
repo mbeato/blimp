@@ -124,7 +124,7 @@ A real phone cannot reach `127.0.0.1` on your Mac. It needs Tailscale. That is t
 
 ## TestFlight
 
-A release tag (`v*`) builds the app and uploads it to TestFlight, once four repository secrets are set. Without them the "iOS" workflow says "Not uploaded" in a notice and passes. You do these steps once.
+A release tag (`v*`), or a manual run of the "iOS" workflow (`gh workflow run iOS -R mbeato/blimp --ref <branch>`), builds the app and uploads it to TestFlight, once four repository secrets are set. Without them the "iOS" workflow says "Not uploaded" in a notice and passes. You do these steps once.
 
 1. Join the Apple Developer Program with your Apple Account: https://developer.apple.com/programs/
 
