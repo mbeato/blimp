@@ -182,6 +182,8 @@ private struct ChatContent: View {
                 }
                 errorLine
             }
+        } else if model.noChat {
+            Text("This server's blimpd can't show chats yet. Update it (see the README).").foregroundStyle(.secondary)
         } else if model.macOnly {
             Text("Open on Mac to use this session").foregroundStyle(.secondary)
         } else {
@@ -215,7 +217,7 @@ private struct ChatContent: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if model.log.messages.isEmpty && !model.working && !model.ended && !model.macOnly {
+        if model.log.messages.isEmpty && !model.working && !model.ended && !model.macOnly && !model.noChat {
             if !model.loaded {
                 ProgressView()
             } else {

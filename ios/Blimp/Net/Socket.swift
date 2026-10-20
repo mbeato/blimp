@@ -1,5 +1,6 @@
 // A WebSocket to blimpd that reconnects by itself (1, 2, 5, then every 10 s), except when the session
-// ended (close 4000, or a handshake refused with 404) or the token was refused (handshake 401).
+// ended (close 4000) or the token was refused (handshake 401). A handshake refused with 404 is passed
+// on as closed(404) and retried like any other failure: the chat decides whether that means ended.
 // Pings every 20 s so a dead link is noticed.
 import BlimpKit
 import Foundation
@@ -88,8 +89,7 @@ final class Socket {
             if task === t { task = nil }
             if Task.isCancelled { return }
             let status = (t.response as? HTTPURLResponse)?.statusCode
-            // 404 is blimpd's answer for a chat on a session that no longer exists: it ended too
-            let code = status == 401 ? 401 : status == 404 ? 4000 : t.closeCode.rawValue
+            let code = status == 401 || status == 404 ? status ?? 0 : t.closeCode.rawValue
             onState(.closed(code: code))
             if code == 4000 || code == 401 { loop = nil; return }
             try? await Task.sleep(for: .seconds(Backoff.delay(attempt: attempt)))

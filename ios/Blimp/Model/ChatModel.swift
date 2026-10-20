@@ -19,6 +19,8 @@ final class ChatModel {
     /// The last time the store listed this session: what it was, once it's gone.
     private(set) var lastSeen: Session?
     private var socketEnded = false
+    /// The chat handshake was refused (404) while the session is still listed: this blimpd has no chat.
+    private(set) var noChat = false
     /// The `at` of the last prompt blimpd acknowledged an answer for: its buttons stay off until a new wait.
     private var answeredAt: Double?
     private var inputId: String?
@@ -49,8 +51,9 @@ final class ChatModel {
 
     /// Live from the store; nil until /events lists it (a new session can take a second) and once it's gone.
     var session: Session? { store.sessions.first { $0.name == name } }
-    /// blimpd closed the chat (4000), refused it (404) or said "the session ended". Not "missing from
-    /// the list": blimpd publishes an empty list when zmx fails, which would end every open chat.
+    /// blimpd closed the chat (4000), said "the session ended", or refused it (404) for a session that
+    /// /events no longer lists either. Not "missing from the list" alone: blimpd publishes an empty
+    /// list when zmx fails, which would end every open chat.
     var ended: Bool { socketEnded }
     var title: String { (session ?? lastSeen)?.title ?? name }
     var folder: String { (session ?? lastSeen).map { URL(fileURLWithPath: $0.dir).lastPathComponent } ?? "" }
@@ -74,6 +77,7 @@ final class ChatModel {
             watch(watchRound)
         }
         guard socket == nil, !socketEnded, let api = store.api else { return }
+        noChat = false
         let s = Socket(
             url: api.socketURL("/sessions/\(name)/chat"),
             onMessage: { [weak self] data in self?.received(data) },
@@ -213,6 +217,16 @@ final class ChatModel {
             reconnecting = false
         case .closed(code: 4000):
             endChat()
+        case .closed(code: 404):
+            // blimpd's answer for a chat on a session it doesn't have, and an older blimpd's for every
+            // chat (it has no chat route). Ended only if /events no longer lists the session either.
+            if session == nil && !store.sessions.isEmpty {
+                endChat()
+            } else {
+                socket?.stop()
+                socket = nil
+                noChat = true
+            }
         case .closed(code: 401):
             socket = nil  // the token was refused; the events socket sends the app back to Pair
             reconnecting = true
@@ -225,7 +239,7 @@ final class ChatModel {
 
     private enum Reply: Sendable {
         case ack, failed(String), notSent, timeout
-        /// The session is gone (blimpd said so, or it left the list): not an error to show.
+        /// The session is gone (blimpd closed the chat or said it ended): not an error to show.
         case ended
     }
 
