@@ -20,11 +20,10 @@ test("a typed character goes as a key with its text; special keys without, Enter
   expect(keyMessage(key("a"), "up")).toEqual({ type: "key", event: "keyUp", key: "a", code: "KeyA", keyCode: 65, modifiers: 0 });
 });
 
-test("⌘ editing keys become Ctrl for the server's Chrome; ⌘C and ⌘V go through the clipboard; other ⌘ keys stay the app's", () => {
+test("⌘ editing keys become Ctrl for the server's Chrome; ⌘C, ⌘X and ⌘V go through the clipboard; other ⌘ keys stay the app's", () => {
   expect(keyMessage(key("a", { metaKey: true }), "down")).toEqual({ type: "key", event: "rawKeyDown", key: "a", code: "KeyA", keyCode: 65, modifiers: 2 });
   expect(keyMessage(key("z", { metaKey: true, shiftKey: true }), "down")).toMatchObject({ key: "z", modifiers: 10 });
-  expect(keyMessage(key("x", { metaKey: true }), "down")).toMatchObject({ modifiers: 2 });
-  for (const k of ["c", "v", "w", "t", "k", "l", "1"]) expect(keyMessage(key(k, { metaKey: true }), "down")).toBeNull();
+  for (const k of ["c", "x", "v", "w", "t", "k", "l", "1"]) expect(keyMessage(key(k, { metaKey: true }), "down")).toBeNull();
   // ⌘← and ⌘→: line start and end, as Home and End.
   expect(keyMessage(key("ArrowLeft", { metaKey: true, code: "ArrowLeft", keyCode: 37 }), "down")).toMatchObject({ key: "Home", code: "Home", keyCode: 36, modifiers: 0 });
   // Ctrl stays Ctrl.

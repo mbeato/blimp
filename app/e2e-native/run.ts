@@ -311,6 +311,21 @@ try {
   const fwd = await until(8000, async () => (await address()) === `http://localhost:${webPort}/two`);
   record("typed address, Back and Forward move the tab; the bar follows", !!atTwo && !!wentBack && !!fwd, { atTwo, wentBack, fwd, now: await address() });
 
+  // Copy out: a double-click on the page's heading selects it, and the hidden typing field then
+  // holds it, selected and focused, for the Mac's Copy (Edit menu or ⌘C) to copy natively.
+  const canvasAt = await js("const r = document.querySelector('.wb:not([hidden]) .viewer:not([hidden]) .page-live canvas').getBoundingClientRect(); return { x: r.x, y: r.y }");
+  const at = { type: "pointerMove", origin: "viewport", x: Math.round(canvasAt.x + 25), y: Math.round(canvasAt.y + 40), duration: 0 };
+  const press = [{ type: "pointerDown", button: 0 }, { type: "pointerUp", button: 0 }];
+  await wd("POST", "/actions", { actions: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [at, ...press, ...press] }] });
+  await wd("DELETE", "/actions").catch(() => {});
+  const field = () =>
+    js("const k = document.querySelector('.wb:not([hidden]) .viewer:not([hidden]) .page-keys'); return { value: k.value, selected: k.value.slice(k.selectionStart, k.selectionEnd), focused: document.activeElement === k }");
+  const held = await until(8000, async () => {
+    const f = await field();
+    return f.selected === "two" && f.focused ? f : undefined;
+  });
+  record("text selected in a browser tab is held selected in the focused typing field, for the Mac's Copy", !!held, await field());
+
   // Send to session: the tab's title and address, pasted into one of the folder's sessions.
   await click(".wb:not([hidden]) .viewer:not([hidden]) .page-bar button[aria-expanded]");
   await click(".wb:not([hidden]) .send-menu button[role=menuitem]");

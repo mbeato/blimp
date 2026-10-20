@@ -1,8 +1,8 @@
 // A live view of a server browser tab (components/PageView.tsx): blimpd streams the tab's
 // frames (JPEG, binary messages) and takes input, navigation and size as JSON (docs/DESIGN.md,
 // Server browser). The server's Chrome runs on Linux, so the Mac's editing keys are mapped to
-// Linux's: ⌘A/⌘X/⌘Z/⌘Y → Ctrl, ⌘←/⌘→ → Home/End, ⌥←/⌥→/⌥⌫ → Ctrl. ⌘C and ⌘V go through the Mac
-// clipboard instead (copy and paste events), and other ⌘ keys stay the app's.
+// Linux's: ⌘A/⌘Z/⌘Y → Ctrl, ⌘←/⌘→ → Home/End, ⌥←/⌥→/⌥⌫ → Ctrl. ⌘C, ⌘X and ⌘V go through the Mac
+// clipboard instead (copy, cut and paste events), and other ⌘ keys stay the app's.
 
 export type ViewInfo = { url: string; title: string; loading: boolean; canGoBack: boolean; canGoForward: boolean };
 export type ViewDialog = { kind: "alert" | "confirm" | "prompt" | "beforeunload"; message: string; defaultPrompt: string };
@@ -24,11 +24,11 @@ type Mods = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "metaKey" | "shiftKey">;
 // CDP's modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8.
 export const modifiers = (e: Mods) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 
-const EDIT_KEYS = new Set(["a", "x", "z", "y"]);
+const EDIT_KEYS = new Set(["a", "z", "y"]);
 const KEY_CODES: Record<string, number> = { Home: 36, End: 35, ArrowLeft: 37, ArrowRight: 39, Backspace: 8 };
 
 // A key as the server's Chrome should get it, or null when it isn't the page's: the app's ⌘
-// shortcuts, ⌘C and ⌘V (the clipboard events do those), and keys an input method is composing
+// shortcuts, ⌘C, ⌘X and ⌘V (the clipboard events do those), and keys an input method is composing
 // (the text comes when it's done).
 export function keyMessage(e: KeyboardEvent, dir: "down" | "up"): KeyMsg | null {
   if (e.isComposing || e.key === "Process" || e.key === "Dead") return null;
