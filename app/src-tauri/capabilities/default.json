@@ -6,6 +6,7 @@
   "permissions": [
     "allow-connect",
     "allow-disconnect",
+    "allow-drop-tunnel",
     "allow-forward-port",
     "allow-unforward-port",
     "allow-update-server",

@@ -28,21 +28,26 @@ export function shownUrl(page: Pick<Page, "port" | "base">, url: string | null):
   return url;
 }
 
-// What a typed address means: a full URL as is; the port tab's localhost:<port> as its forward;
-// another localhost or a bare host:port over http; anything else that looks like a host over
-// https. null: not an address.
+// Where a new browser tab starts (in the Mac app), and where words typed in the bar go.
+export const HOME = "https://www.google.com/";
+export const searchUrl = (q: string) => `https://www.google.com/search?q=${encodeURIComponent(q.trim())}`;
+
+// What's typed in the bar means: a full URL as is; the port tab's localhost:<port> as its
+// forward; another localhost or a bare host:port over http; anything else that looks like a host
+// over https; anything else at all a Google search. null: nothing typed.
 export function typedUrl(page: Pick<Page, "port" | "base">, text: string): string | null {
   const t = text.trim();
-  if (!t || /\s/.test(t)) return null;
+  if (!t) return null;
+  if (/\s/.test(t)) return searchUrl(t);
   if (/^https?:\/\//i.test(t)) return t;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(t) && !/^[^/]+:\d+(\/|$)/.test(t)) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t) && !/^[^/]+:\d+(\/|$)/.test(t)) return searchUrl(t);
   if (page.port && page.base) {
     const m = t.match(/^(?:localhost|127\.0\.0\.1):(\d+)(\/.*)?$/);
     if (m && Number(m[1]) === page.port.port) return page.base + (m[2] ?? "/");
   }
   if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(t) || /^[^/.]+:\d+(\/|$)/.test(t)) return "http://" + t;
   if (/^[^/]+\.[^/]+/.test(t)) return "https://" + t;
-  return null;
+  return searchUrl(t);
 }
 
 // The tab's title: the page's own, else its host, else what it's on.
@@ -59,7 +64,8 @@ export function pageTitle(page: Pick<Page, "port" | "url" | "title">): string {
 // ---- native views ----
 
 export type Rect = { x: number; y: number; w: number; h: number };
-export type ViewChange = { label: string; url?: string; title?: string; loading?: boolean };
+// `open`: a link in the view asked for a new window, so a new tab opens at that address.
+export type ViewChange = { label: string; url?: string; title?: string; loading?: boolean; open?: string };
 export type PageText = { url: string; title: string; text: string; selection: boolean };
 
 export const view = {
@@ -72,7 +78,8 @@ export const view = {
   read: (label: string) => invoke<PageText>("browser_read", { label }),
 };
 
-// What the views of this window say (address, title, loading). Returns the unlisten.
+// What the views of this window say (address, title, loading, a new tab to open). Returns the
+// unlisten.
 export async function onViewChange(fn: (c: ViewChange) => void): Promise<() => void> {
   const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
   return getCurrentWebviewWindow().listen<ViewChange>("browser", (e) => fn(e.payload));

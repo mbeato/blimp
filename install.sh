@@ -70,6 +70,8 @@ if systemctl --user show-environment >/dev/null 2>&1; then
   units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
   mkdir -p "$units"
   # KillMode=process: sessions blimpd starts must keep running when blimpd restarts.
+  # OOMPolicy=continue: sessions run in blimpd's cgroup, so when the kernel kills one of their
+  # processes for memory, systemd would otherwise stop blimpd too and drop every app connection.
   cat >"$units/blimpd.service" <<EOF
 [Unit]
 Description=blimp server
@@ -78,6 +80,7 @@ Description=blimp server
 ExecStart="$BIN/blimpd" serve
 Restart=on-failure
 KillMode=process
+OOMPolicy=continue
 
 [Install]
 WantedBy=default.target

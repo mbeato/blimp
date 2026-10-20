@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { pageFile, pageFileName, pageTitle, shownUrl, typedUrl } from "./browser";
+import { HOME, pageFile, pageFileName, pageTitle, searchUrl, shownUrl, typedUrl } from "./browser";
 
 const portTab = { port: { port: 3000, host: "127.0.0.1" as const }, base: "http://127.0.0.1:53211" };
 const plain = { base: null };
@@ -22,7 +22,16 @@ test("typed addresses", () => {
   expect(typedUrl(portTab, "localhost:3000/login")).toBe("http://127.0.0.1:53211/login");
   expect(typedUrl(portTab, "localhost:3000")).toBe("http://127.0.0.1:53211/");
   expect(typedUrl(portTab, "localhost:4000")).toBe("http://localhost:4000");
-  for (const bad of ["", "hello world", "javascript:alert(1)", "file:///etc/passwd", "tauri://localhost", "words"]) expect(typedUrl(plain, bad)).toBeNull();
+  expect(typedUrl(plain, "  ")).toBeNull();
+});
+
+test("anything that isn't an address is a Google search", () => {
+  expect(HOME).toBe("https://www.google.com/");
+  expect(searchUrl("rust lifetimes")).toBe("https://www.google.com/search?q=rust%20lifetimes");
+  expect(typedUrl(plain, " hello world ")).toBe(searchUrl("hello world"));
+  expect(typedUrl(plain, "words")).toBe(searchUrl("words"));
+  expect(typedUrl(plain, "c++ & rust?")).toBe("https://www.google.com/search?q=c%2B%2B%20%26%20rust%3F");
+  for (const odd of ["javascript:alert(1)", "file:///etc/passwd", "tauri://localhost"]) expect(typedUrl(plain, odd)).toBe(searchUrl(odd));
 });
 
 test("tab titles", () => {

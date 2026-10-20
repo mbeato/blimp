@@ -327,6 +327,18 @@ impl Tunnels {
             .is_some_and(|(_, c)| matches!(c.try_wait(), Ok(None)))
     }
 
+    /// Stops the tunnel for `id` if it still listens on `port`, and nothing else.
+    fn drop_if(&self, id: &str, port: u16) {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.map.get(id).is_some_and(|t| t.conn.port == port) {
+            return;
+        }
+        // Removed first, so its watcher stays quiet: the UI that asked reconnects by itself.
+        let t = inner.map.remove(id).unwrap();
+        drop(inner);
+        stop(t.child);
+    }
+
     /// Stops the tunnel for `id` and any connect still starting one.
     fn remove(&self, id: &str) {
         let mut inner = self.inner.lock().unwrap();
@@ -377,6 +389,15 @@ pub async fn connect(
 #[tauri::command]
 pub fn disconnect(tunnels: State<'_, Tunnels>, id: String) {
     tunnels.remove(&id);
+}
+
+/// The UI found the tunnel on `port` dead (no /health answer after the Mac woke or changed
+/// networks), while ssh would run on for up to a minute and `connect` would keep handing it
+/// back. Stops just that tunnel: if another window already replaced it, the new one stays, and
+/// browser tabs' port forwards (their own ssh children) are left alone.
+#[tauri::command]
+pub fn drop_tunnel(tunnels: State<'_, Tunnels>, id: String, port: u16) {
+    tunnels.drop_if(&id, port);
 }
 
 /// A browser tab on a server's port: forwards a free local port to `host:port` on the server
@@ -892,6 +913,54 @@ mod tests {
 
         tunnels.close_all();
         assert!(!running(other_pid));
+    }
+
+    fn live_tunnel(tunnels: &Tunnels, id: &str, port: u16) -> u32 {
+        let (child, pid) = sleeper();
+        let conn = Conn {
+            id: id.into(),
+            port,
+            token: "t".into(),
+            home: "/h".into(),
+        };
+        let target = Target::new(id.into(), None, None).unwrap();
+        let tunnel = Tunnel {
+            serial: 0,
+            child,
+            conn,
+            target,
+        };
+        tunnels.inner.lock().unwrap().map.insert(id.into(), tunnel);
+        pid
+    }
+
+    #[test]
+    fn drop_tunnel_stops_only_the_tunnel_on_that_port() {
+        let tunnels = Tunnels::default();
+        let pid = live_tunnel(&tunnels, "claude1", 4000);
+        let (fwd, fwd_pid) = sleeper();
+        tunnels.inner.lock().unwrap().forwards.insert(
+            ("claude1".into(), "127.0.0.1".into(), 3000),
+            Forward {
+                local: 5000,
+                child: fwd,
+                users: 1,
+            },
+        );
+
+        // Another window already replaced the dead tunnel: the new one (another port) stays.
+        tunnels.drop_if("claude1", 3999);
+        assert!(running(pid));
+        assert!(tunnels.endpoint("claude1").is_some());
+
+        tunnels.drop_if("claude1", 4000);
+        assert!(!running(pid));
+        assert!(tunnels.endpoint("claude1").is_none());
+        // Browser tabs' forwards are separate ssh children; they keep running.
+        assert!(running(fwd_pid));
+
+        tunnels.close_all();
+        assert!(!running(fwd_pid));
     }
 
     #[test]
