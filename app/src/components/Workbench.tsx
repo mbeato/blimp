@@ -520,7 +520,13 @@ export function Workbench(props: {
 
   const closePage = (key: string) => {
     const tab = pages.get(key);
-    if (tab) void link.api?.closeBrowserTab(tab.id).catch(() => {});
+    if (tab)
+      void link.api?.closeBrowserTab(tab.id).catch((e) => {
+        // Still open on the server: back in the strip.
+        gone.delete(key);
+        props.onNotice(`Couldn't close the tab: ${errorText(e)}`);
+        rerender();
+      });
     gone.add(key);
     opening.delete(key);
     const order = [...docs.keys(), ...pages.keys()];
@@ -533,10 +539,12 @@ export function Workbench(props: {
   const closeTab = (key: string) => (key.startsWith("tab:") ? closePage(key) : void closeDoc(key));
   // A tab closed elsewhere (another Mac, a session) takes this one off it, if it was in front.
   const pageKeys = [...pages.keys()].join(",");
+  const listed = link.browserTabs.map((t) => t.id).join(",");
   useEffect(() => {
     for (const k of opening) if (pages.has(k)) opening.delete(k);
+    for (const k of gone) if (!link.browserTabs.some((t) => `tab:${t.id}` === k)) gone.delete(k);
     if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...pages.keys()].at(-1) ?? null);
-  }, [pageKeys]);
+  }, [pageKeys, listed]);
 
   // ---- live updates ----
 

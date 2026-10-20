@@ -29,6 +29,7 @@ export function PageView(props: {
   const [state, setState] = useState<"connecting" | "open" | "lost">("connecting");
   const [drawn, setDrawn] = useState(false);
   const [retry, setRetry] = useState(0);
+  const failures = useRef(0); // in a row, for the wait before the next try
   const url = info?.url || tab.url;
   const [draft, setDraft] = useState(url);
   const [editing, setEditing] = useState(false);
@@ -93,13 +94,20 @@ export function PageView(props: {
         setState("open");
         setDrawn(true);
       },
-      info: (i) => (setInfo(i), setState("open")),
+      info: (i) => {
+        failures.current = 0;
+        setInfo(i);
+        setState("open");
+      },
       dialog: (d) => (setDialog(d), setAnswer(d?.defaultPrompt ?? "")),
       copied: (text) => copied.current?.(text),
+      // Tried again after 1 s, then longer each time in a row it fails, up to 10 s. A tab that's
+      // gone leaves the strip (the server stops listing it), and this view with it.
       closed: (reason) => {
         setState("lost");
         if (reason === "Tab closed") return;
-        timer = setTimeout(() => setRetry((n) => n + 1), 1000);
+        const wait = Math.min(10_000, 1000 * 2 ** failures.current++);
+        timer = setTimeout(() => setRetry((n) => n + 1), wait);
       },
     });
     view.current = v;
@@ -136,10 +144,11 @@ export function PageView(props: {
 
   // ⌘C (and ⌘X): the server says what's selected; the Mac clipboard gets it. Safari takes a
   // ClipboardItem whose text comes later, as long as it's made in the key press itself.
+  // No answer in 3 s (a slow or lost connection): the clipboard keeps what it had.
   const copyOut = () => {
-    const text = new Promise<string>((done) => {
+    const text = new Promise<string>((done, fail) => {
       copied.current = done;
-      setTimeout(() => done(""), 3000);
+      setTimeout(() => fail(new Error("no answer")), 3000);
     });
     send({ type: "copy" });
     const plain = () => text.then((t) => navigator.clipboard.writeText(t)).catch(() => {});
@@ -224,7 +233,9 @@ export function PageView(props: {
                     role="menuitem"
                     onClick={() => {
                       setMenu(null);
-                      void props.onSend(t.name, `Browser tab "${info?.title || tab.title || url}" ${url} `);
+                      // The page sets its title: no control characters into a terminal.
+                      const plain = (x: string) => x.replace(/[\x00-\x1f\x7f]/g, " ");
+                      void props.onSend(t.name, `Browser tab "${plain(info?.title || tab.title || url)}" ${plain(url)} `);
                     }}
                   >
                     <span className="menu-label">{t.title}</span>
@@ -261,13 +272,22 @@ export function PageView(props: {
         <canvas
           ref={canvas}
           aria-label={info?.title || tab.title || "Web page"}
+          // While a button is down, moves and the release go to the page wherever the pointer is,
+          // so a drag that ends outside doesn't leave the page's button held.
           onMouseDown={(e) => {
             e.preventDefault();
             keys.current?.focus();
             send(mouseMessage(e.nativeEvent, "mousePressed", canvasRect()));
+            const move = (ev: MouseEvent) => send(mouseMessage(ev, "mouseMoved", canvasRect()));
+            const up = (ev: MouseEvent) => {
+              send(mouseMessage(ev, "mouseReleased", canvasRect()));
+              window.removeEventListener("mousemove", move);
+              window.removeEventListener("mouseup", up);
+            };
+            window.addEventListener("mousemove", move);
+            window.addEventListener("mouseup", up);
           }}
-          onMouseUp={(e) => send(mouseMessage(e.nativeEvent, "mouseReleased", canvasRect()))}
-          onMouseMove={(e) => send(mouseMessage(e.nativeEvent, "mouseMoved", canvasRect()))}
+          onMouseMove={(e) => e.buttons === 0 && send(mouseMessage(e.nativeEvent, "mouseMoved", canvasRect()))}
           onWheel={(e) => send(wheelMessage(e.nativeEvent, canvasRect()))}
           onContextMenu={(e) => e.preventDefault()}
         />
