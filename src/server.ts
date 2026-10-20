@@ -7,7 +7,8 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } f
 import { dirname, join, resolve } from "node:path";
 import type { Server } from "bun";
 import pkg from "../package.json";
-import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
+import { browserTabs, closeTab, onBrowserChange, openTab, startBrowserGate } from "./browser/service";
+import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
@@ -127,6 +128,26 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
     throw new HttpError(400, "expected a WebSocket");
   }
 
+  // The server browser's tabs (browser/service.ts): all of them, or one folder's.
+  if (path === "/browser/tabs" && get) {
+    const dir = q.get("dir");
+    const real = dir === null ? null : guard(dir);
+    return Response.json(browserTabs().filter((t) => real === null || t.folder === real));
+  }
+  if (path === "/browser/tabs" && req.method === "POST") {
+    const { dir, url } = (await req.json()) as Record<string, unknown>;
+    if (typeof dir !== "string") throw new HttpError(400, "dir is required");
+    if (typeof url !== "string" || !/^https?:\/\/[^/\s]+/i.test(url)) throw new HttpError(400, "url must be an http or https address");
+    const real = guard(dir);
+    if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
+    return Response.json({ id: await openTab(real, url) }, { status: 201 });
+  }
+  const tab = path.match(/^\/browser\/tabs\/([^/]+)$/);
+  if (tab && req.method === "DELETE") {
+    await closeTab(decodeURIComponent(tab[1]));
+    return new Response(null, { status: 204 });
+  }
+
   if (path === "/ports" && get) return Response.json(await sessionPorts(parseZmxList(await zmxListAsync())));
   if (path === "/folders/recent" && get) return Response.json(recentFolders());
   if (path === "/conversations" && get) {
@@ -213,6 +234,9 @@ export function serve(): Server {
     },
   });
   chmodSync(sock, 0o600);
+  onBrowserChange(() => server.publish("sessions", browserMessage()));
+  // Without it, sessions just don't get the browser.
+  startBrowserGate().catch((e) => console.log(`browser: ${(e as Error).message}`));
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

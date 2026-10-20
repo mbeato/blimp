@@ -6,6 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../package.json";
+import { findChrome } from "../src/browser/chrome";
 import { parseZmxList, zmxPath } from "../src/sessions";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-server-"));
@@ -399,6 +400,39 @@ describe("events", () => {
   });
 });
 
+describe("server browser", () => {
+  // Chrome is started by the first tab; without one on this server, opening a tab says how to get one.
+  const chrome = findChrome();
+  const site = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("<title>Served</title>hi", { headers: { "content-type": "text/html" } }) });
+  afterAll(() => site.stop());
+
+  test("tabs: bad addresses and folders refused, an unknown tab is 404", async () => {
+    const post = (body: object) => api("/browser/tabs", { method: "POST", body: JSON.stringify(body) });
+    expect((await post({ dir: homeDir, url: "file:///etc/passwd" })).status).toBe(400);
+    expect((await post({ dir: homeDir, url: "javascript:alert(1)" })).status).toBe(400);
+    expect((await post({ url: "https://example.com/" })).status).toBe(400);
+    expect((await post({ dir: "/etc", url: "https://example.com/" })).status).toBe(403);
+    expect((await api("/browser/tabs/nope", { method: "DELETE" })).status).toBe(404);
+    expect((await api("/browser/tabs", {}, false)).status).toBe(401);
+  });
+
+  (chrome ? test : test.skip)("a tab opened for a folder: listed for it and not for others, over GET and the events socket, then closed", async () => {
+    const e = await socket("/events");
+    await until(() => e.messages.some((m) => m.type === "browser"), "the first browser message");
+    const url = `http://127.0.0.1:${site.port}/a`;
+    const r = await api("/browser/tabs", { method: "POST", body: JSON.stringify({ dir: homeDir, url }) });
+    expect(r.status).toBe(201);
+    const { id } = await r.json();
+    const mine = await until(async () => ((await (await api(`/browser/tabs?dir=${encodeURIComponent(homeDir)}`)).json()) as any[]).find((t) => t.id === id), "the tab");
+    expect(mine).toMatchObject({ folder: homeDir, url });
+    expect(await (await api(`/browser/tabs?dir=${encodeURIComponent(homedir())}`)).json()).toEqual([]);
+    await until(() => e.messages.some((m) => m.type === "browser" && m.tabs.some((t: any) => t.id === id && t.title === "Served")), "the tab with its title on the events socket", 8000);
+    expect((await api(`/browser/tabs/${id}`, { method: "DELETE" })).status).toBe(204);
+    await until(async () => !((await (await api("/browser/tabs")).json()) as any[]).some((t) => t.id === id), "the tab to close");
+    e.ws.close();
+  }, 30_000);
+});
+
 describe("files over HTTP", () => {
   test("read, conflict, overwrite, list, 403 outside home", async () => {
     const file = join(homeDir, "a.txt");
@@ -541,6 +575,13 @@ describe("kinds and keys", () => {
   const kinds = async () => (await (await kApi("/kinds")).json()) as { id: string; label: string; available: boolean; note?: string }[];
   const dir = join(kHome, tag);
   const blimpdLog = join(kTmp, "blimpd.log");
+  // Claude and Codex get the browser MCP when this blimpd finds a Chrome (in kHome or on PATH) and
+  // npx (browser/mcp.ts): what's added to their arguments then.
+  const kPath = `${fakeBin}:${env.PATH}`;
+  const browserOn = !!findChrome(kHome, (n) => Bun.which(n, { PATH: kPath })) && !!Bun.which("npx", { PATH: kPath });
+  const claudeMcp = browserOn ? `--mcp-config ${join(kTmp, "browser", "mcp.json")}` : "";
+  const codexMcp = browserOn ? /-c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]/ : /^$/;
+  const withMcp = (rest: string) => [claudeMcp, rest].filter(Boolean).join(" ");
 
   // Starts a session of this kind and returns its name and what it printed first.
   async function startKind(kind: string, name: string, waitFor: string, extra = {}) {
@@ -637,18 +678,18 @@ describe("kinds and keys", () => {
     );
     const claude = await startKind("claude", "k-claude", "custom=");
     expect(claude.text).toContain("fake-claude size=36 120");
-    expect(claude.text).toContain("args:[]");
+    expect(claude.text).toContain(`args:[${claudeMcp}]`);
     expect(claude.text).not.toContain("token=from-key-file");
     const conv = "0123abcd-0123-0123-0123-0123456789ab";
     const glm = await startKind("claude-glm", "k-glm", "token=from-key-file", { resume: conv });
     expect(glm.text).toContain("fake-claude size=36 120");
-    expect(glm.text).toContain(`args:[--resume ${conv}]`);
+    expect(glm.text).toContain(`args:[${withMcp(`--resume ${conv}`)}]`);
     // Claude Code's own key is unset, as claude-glm does, so the Z.ai one is used, at Z.ai.
     expect(glm.text).toContain("model=GLM-5.3 fast=GLM-5.3-Flash apikey=unset");
     expect(glm.text).toContain("url=https://api.z.ai/api/anthropic zaitoken=unset");
     const codex = await startKind("codex", "k-codex", "custom=");
     expect(codex.text).toContain("fake-codex size=36 120");
-    expect(codex.text).toContain("args:[]");
+    expect(codex.text.match(/args:\[(.*)\]/)?.[1]).toMatch(codexMcp);
     expect(codex.text).not.toContain("token=from-key-file");
     const login = await startKind("codex-login", "k-login", "custom=");
     expect(login.text).toContain("args:[login --device-auth]");

@@ -67,6 +67,25 @@ export const browserAvailable = () => chromePath() !== null;
 
 const NO_CHROME = "No Chrome or Chromium on the server. Install one: npx playwright install chromium";
 
+// Chrome, and the gate on it. One that can't start (a missing library, say) exits at once; so
+// does one started while the Chrome of a blimpd that just quit still holds the profile (it quits
+// within seconds of losing its pipe), so that gets a second try.
+async function launch(path: string, tries = 2): Promise<{ c: Chrome; g: Gate }> {
+  const c = launchChrome(path, join(browserDir(), "profile"));
+  const g = new Gate(c);
+  const died = c.exited.then((code) => Promise.reject(new Error(`Chrome exited as it started (code ${code}). Run it by hand to see why: ${path} --headless=new`)));
+  try {
+    await Promise.race([g.ready(), died]);
+  } catch (e) {
+    c.kill();
+    if (tries <= 1) throw e;
+    await Bun.sleep(5000);
+    return launch(path, tries - 1);
+  }
+  died.catch(() => {});
+  return { c, g };
+}
+
 // The running gate, starting Chrome first if it isn't running.
 export function ensureChrome(): Promise<Gate> {
   if (gate) return Promise.resolve(gate);
@@ -75,17 +94,7 @@ export function ensureChrome(): Promise<Gate> {
     if (!path) throw new Error(NO_CHROME);
     ensureDir();
     const restore = loadSaved();
-    const c = launchChrome(path, join(browserDir(), "profile"));
-    const g = new Gate(c);
-    // A Chrome that can't start (a missing library, say) exits at once.
-    const died = c.exited.then((code) => Promise.reject(new Error(`Chrome exited as it started (code ${code}). Run it by hand to see why: ${path} --headless=new`)));
-    try {
-      await Promise.race([g.ready(), died]);
-    } catch (e) {
-      c.kill();
-      throw e;
-    }
-    died.catch(() => {});
+    const { c, g } = await launch(path);
     for (const t of restore) await g.createTab(t.folder, t.url, t.openedBy).catch(() => {});
     g.onChange(changed);
     chrome = c;

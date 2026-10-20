@@ -1,8 +1,10 @@
 // The events socket: the session list whenever it changes, the ports programs in sessions listen
-// on (ports.ts), and changes to the paths the app watches.
+// on (ports.ts), the server browser's tabs (browser/service.ts), and changes to the paths the app
+// watches.
 
 import { type FSWatcher, statSync, watch } from "node:fs";
 import type { Server, ServerWebSocket } from "bun";
+import { browserTabs } from "./browser/service";
 import { guard } from "./files";
 import { sessionPorts } from "./ports";
 import { claudeDir, listSessions, parseZmxList, zmxListAsync } from "./sessions";
@@ -26,6 +28,7 @@ let ticks = 0;
 let checking = false;
 
 const sessionsMessage = (zmx: string) => JSON.stringify({ type: "sessions", sessions: listSessions(claudeDir(), zmx) });
+export const browserMessage = () => JSON.stringify({ type: "browser", tabs: browserTabs() });
 const portsMessage = async (zmx: string) => JSON.stringify({ type: "ports", ports: await sessionPorts(parseZmxList(zmx)) });
 
 async function tick(server: Server) {
@@ -55,6 +58,7 @@ export async function openEvents(ws: ServerWebSocket<EventsData>, server: Server
     ws.send(sessionsMessage(zmx));
     ws.send(await portsMessage(zmx));
   } catch {}
+  ws.send(browserMessage());
 }
 
 const MAX_WATCHES = 2000;
