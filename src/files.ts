@@ -64,6 +64,48 @@ function lstatExists(p: string): boolean {
   }
 }
 
+// The socket folder, the same formula as sessions.ts's blimpDir(). Duplicated only to keep this
+// module out of the import cycle (sessions → kinds → files); a test pins the two together.
+export function socketDir(): string {
+  return dirname(process.env.BLIMPD_SOCKET || join(homedir(), ".blimp", "blimpd.sock"));
+}
+
+// A path resolved the way guard() resolves its result: the real path, or — for a file that
+// doesn't exist yet — its folder's real path with the name on.
+function realPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {}
+  try {
+    return join(realpathSync(dirname(p)), basename(p));
+  } catch {
+    return resolve(p);
+  }
+}
+
+// blimp's own key files: the daemon's token, the phone's token, the browser gate's key (all
+// beside the socket) and the model key. No fs route may serve, replace, or archive them: a
+// client holding one token — the phone's — must not read or plant another (the Mac's), so
+// `blimpd pair --revoke` stays final.
+export function secretPaths(home = realHome(), dir = socketDir()): string[] {
+  return [
+    join(dir, "token"),
+    join(dir, "phone-token"),
+    join(dir, "browser", "key"),
+    join(home, ".config", "zai", "key"),
+  ].map(realPath);
+}
+
+// guard() for the routes that read or write one file: inside home, and never one of those key
+// files nor a folder that holds one (a folder download would archive it).
+export function guardFile(path: string | null, home = realHome(), dir = socketDir()): string {
+  const real = guard(path, home);
+  const slash = real === "/" ? "" : "/";
+  if (secretPaths(home, dir).some((s) => s === real || s.startsWith(real + slash)))
+    throw new HttpError(403, "that's one of blimp's own files");
+  return real;
+}
+
 const ms = (t: number) => Math.floor(t);
 
 export type Entry = { name: string; kind: "file" | "dir"; size: number; mtime: number };
