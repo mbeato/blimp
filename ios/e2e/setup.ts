@@ -9,7 +9,7 @@
 //   demo-quiz  in api-server: Claude's question dialog with two questions, the second multi-choice
 //              (ios/e2e/fake-ask.ts draws it as Claude does); every key is appended to $E2E_DIR/quiz.in,
 //              the answers go to $E2E_DIR/quiz.json. blimpd names it (the stand-in claude in ios/e2e/bin
-//              answers its naming call): "Configure Integration Test Pipeline"
+//              answers its naming call): "Configure Integration Test Pipeline Runs" (40 characters, the most blimpd keeps)
 //   demo-trust in api-server: Claude Code just started there and asks whether to trust the folder, with no
 //              status file yet (ios/e2e/fake-trust.ts); every key is appended to $E2E_DIR/trust.in
 //   a conversation in blimp-demo with no session running, for the project screen's Earlier list

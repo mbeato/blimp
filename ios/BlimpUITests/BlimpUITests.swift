@@ -295,11 +295,15 @@ final class BlimpUITests: XCTestCase {
         shot("26-trusted")
         // The names on Home and in a project (demo-quiz's is blimpd's, a long-ish one)
         back()
-        try wait(labeled("Configure Integration Test Pipeline"), "demo-quiz's name on Home")
+        try wait(labeled("Configure Integration Test Pipeline Runs"), "demo-quiz's name on Home")
         shot("27-home-names")
         element("project-api-server").tap()
-        try wait(labeled("Configure Integration Test Pipeline"), "demo-quiz's name in its project")
+        try wait(labeled("Configure Integration Test Pipeline Runs"), "demo-quiz's name in its project")
         shot("28-project-names")
+        // and as its chat's title
+        labeled("Configure Integration Test Pipeline Runs").tap()
+        try wait(message("message.user", "Set up the test pipeline"), "demo-quiz's chat")
+        shot("29-chat-name")
     }
 
     // MARK: - Helpers
