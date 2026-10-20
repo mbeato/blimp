@@ -51,6 +51,9 @@ export function chromeArgs(profileDir: string, ua: string): string[] {
     `--user-data-dir=${profileDir}`,
     "--password-store=basic",
     "--no-first-run",
+    // Drawn at 2x, so a Retina Mac's view is sharp (the screencast ignores the emulated scale); a
+    // view at 1x gets frames scaled down to its size (view.ts), and screenshots come at 2x.
+    "--force-device-scale-factor=2",
     "--no-default-browser-check",
     "--disable-blink-features=AutomationControlled",
     `--user-agent=${ua}`,
