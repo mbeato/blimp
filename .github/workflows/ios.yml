@@ -111,6 +111,10 @@ jobs:
           xcrun simctl bootstatus "$sim"
           # The keyboard's swipe-typing introduction would cover the keys the test types with.
           xcrun simctl spawn "$sim" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
+          # Face ID enrolled: the simulator counts as having a passcode, so a paired launch is locked, and
+          # the test unlocks it with a matching face (ios/e2e/signals.sh) rather than a passcode it can't type.
+          xcrun simctl spawn "$sim" notifyutil -s com.apple.BiometricKit.enrollmentChanged 1
+          xcrun simctl spawn "$sim" notifyutil -p com.apple.BiometricKit.enrollmentChanged
       - name: UI test
         working-directory: ios
         run: |
@@ -165,6 +169,11 @@ jobs:
                   src, name = os.path.join(d, a["exportedFileName"]), a.get("suggestedHumanReadableName")
                   if name and os.path.exists(src): os.rename(src, os.path.join(d, safe(name)))
           for n in os.listdir(d):
+              # Xcode's own failure records (element queries, UI snapshots) stay in the .xcresult only
+              if n.startswith(("Debug description", "App UI hierarchy", "UI Snapshot", "Debug_description", "App_UI_hierarchy", "UI_Snapshot")):
+                  p = os.path.join(d, n)
+                  if os.path.isfile(p): os.remove(p)
+                  continue
               if safe(n) != n: os.rename(os.path.join(d, n), os.path.join(d, safe(n)))
           ' "$out" || true
           ls "$out"

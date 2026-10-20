@@ -2,7 +2,7 @@
 # Runs in the background during the UI test and does what the test can't from inside the simulator.
 # The test writes $E2E_DIR/sig/<name>; this does it, removes the file and writes <name>.done.
 #   restart       stop blimpd, wait a few seconds, start it again
-#   faceid-enrol  enrol Face ID in the simulator
+#   faceid-enrol  enrol Face ID in the simulator (the job also does it before the test)
 #   faceid-match  a matching face
 sig="$E2E_DIR/sig"
 mkdir -p "$sig"

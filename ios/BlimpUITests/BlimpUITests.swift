@@ -5,8 +5,9 @@
 // checked by the job afterwards. Screenshots stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
-// Keychain keeps the server), and test6 enrols Face ID, so it goes last. What the test can't do from
-// inside the simulator (restart blimpd, Face ID) it asks ios/e2e/signals.sh for, with a file.
+// Keychain keeps the server) and so locked: the job enrols Face ID first, and each unlocks with a
+// matching face. What the test can't do from inside the simulator (restart blimpd, a face) it asks
+// ios/e2e/signals.sh for, with a file.
 import XCTest
 
 @MainActor
@@ -74,9 +75,27 @@ final class BlimpUITests: XCTestCase {
         shot("5-answered")
     }
 
+    // MARK: - Face ID
+
+    /// The first launch with a server saved: locked until Face ID (enrolled by the job before the tests)
+    /// sees a matching face. The simulator counts as having a passcode, so without Face ID it would ask for that.
+    func test2FaceIDLock() throws {
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launch()
+        let unlock = app.buttons["Unlock"].firstMatch
+        let home = element("project-blimp-demo")
+        try wait(unlock, "the lock screen")
+        if home.exists { throw failed("Home showing behind the lock") }
+        allowFaceID()
+        screen("6-locked")
+        try unlockWithFace()
+        shot("7-unlocked")
+    }
+
     // MARK: - Stop
 
-    func test2Stop() throws {
+    func test3Stop() throws {
         try launchPaired()
         let row = element("session-demo-busy")
         try wait(row, "the demo-busy row")
@@ -86,35 +105,35 @@ final class BlimpUITests: XCTestCase {
         let stop = app.buttons["Stop"]
         try wait(stop, "the Stop button")
         if app.buttons["sendButton"].exists { throw failed("no Send while working with an empty box") }
-        shot("6-stop")
+        shot("8-stop")
         stop.tap()
         // The press is acknowledged (Stop turns back on) and nothing says it failed
         try until(stop, "isEnabled == true", "Stop to be acknowledged")
         if labeled("Not sent").exists { throw failed("Stop was not sent") }
-        shot("7-stopped")
+        shot("9-stopped")
     }
 
     // MARK: - Start and end a session
 
-    func test3StartAndEnd() throws {
+    func test4StartAndEnd() throws {
         try launchPaired()
         let before = Set(newRows().map(\.identifier))
         element("project-blimp-demo").tap()
         let plus = app.buttons["New session"]
         try wait(plus, "the + button")
-        shot("8-project")
+        shot("10-project")
         plus.tap()
         // The app opens the new session: a chat with nothing in it yet, ready to type into
         try wait(labeled("No messages yet"), "the new session's empty chat", timeout: 40)
         try wait(element("messageField"), "the new session's message field")
-        shot("9-started")
+        shot("11-started")
         back()
         back()
         // Home lists it in its project
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'session-blimp-demo-' AND NOT (identifier IN %@)", Array(before) as NSArray)).firstMatch
         try wait(row, "the new session on Home")
         let id = row.identifier
-        shot("10-home-started")
+        shot("12-home-started")
 
         // End it: swipe, End, confirm
         row.swipeLeft()
@@ -122,31 +141,31 @@ final class BlimpUITests: XCTestCase {
         try wait(end, "the swipe's End")
         end.tap()
         try wait(labeled("End this session?"), "the end question")
-        shot("11-end-confirm")
+        shot("13-end-confirm")
         try confirmEnd()
         let gone = element(id)
         try until(gone, "exists == false", "the ended session to leave Home")
-        shot("12-ended")
+        shot("14-ended")
     }
 
     // MARK: - Resume
 
-    func test4Resume() throws {
+    func test5Resume() throws {
         try launchPaired()
         element("project-blimp-demo").tap()
         let earlier = labeled("Fix the login redirect")
         try wait(earlier, "the past conversation under Earlier")
-        shot("13-earlier")
+        shot("15-earlier")
         earlier.tap()
         // The new session runs `claude --resume <id>` (checked by the job); its chat is that conversation
         try wait(message("message.assistant", "the page you came from"), "the resumed conversation's chat", timeout: 40)
         try wait(element("messageField"), "the resumed session's message field")
-        shot("14-resumed")
+        shot("16-resumed")
     }
 
     // MARK: - blimpd restarts
 
-    func test5Reconnect() throws {
+    func test6Reconnect() throws {
         try launchPaired()
         let row = element("session-demo-chat")
         try wait(row, "the demo-chat row")
@@ -155,7 +174,7 @@ final class BlimpUITests: XCTestCase {
         try signal("restart", wait: false)
         let bar = labeled("Reconnecting…")
         try wait(bar, "Reconnecting… in the chat", timeout: 20)
-        shot("15-reconnecting")
+        shot("17-reconnecting")
         try waitDone("restart")
         try until(bar, "exists == false", "the chat to reconnect", timeout: 40)
         try wait(message("message.user", "Add a dark mode toggle to settings"), "the chat's history again")
@@ -166,38 +185,13 @@ final class BlimpUITests: XCTestCase {
         try until(send, "isEnabled == true", "Send to be enabled")
         send.tap()
         try wait(message("message.assistant", "Shipped: After the restart"), "the reply after the restart")
-        shot("16-reconnected")
+        shot("18-reconnected")
         back()
         // Home: the list is back and online
         try wait(element("session-demo-ask"), "the session list after the restart")
         try until(labeled("Can't reach the server"), "exists == false", "Home to be online")
         try until(labeled("Reconnecting…"), "exists == false", "Home to be online")
-        shot("17-home-after-restart")
-    }
-
-    // MARK: - Face ID
-
-    func test6FaceIDLock() throws {
-        try launchPaired()
-        try signal("faceid-enrol")
-        app.terminate()
-        app.launch()
-        allowFaceID()
-        // Locked: no sessions, only Unlock
-        let unlock = app.buttons["Unlock"].firstMatch
-        try wait(unlock, "the lock screen")
-        if element("project-blimp-demo").exists { throw failed("Home showing behind the lock") }
-        screen("18-locked")
-        try signal("faceid-match")
-        if !element("project-blimp-demo").waitForExistence(timeout: 10) {
-            // The ask may have ended before the face came: Unlock asks again
-            screen("18b-still-locked")
-            if unlock.exists && unlock.isHittable { unlock.tap() }
-            allowFaceID()
-            try signal("faceid-match")
-        }
-        try wait(element("project-blimp-demo"), "Home after Face ID")
-        shot("19-unlocked")
+        shot("19-home-after-restart")
     }
 
     // MARK: - Helpers
@@ -209,14 +203,32 @@ final class BlimpUITests: XCTestCase {
         app.launch()
         let home = element("project-blimp-demo")
         let field = element("pairField")
+        let unlock = app.buttons["Unlock"].firstMatch
         let end = Date().addingTimeInterval(30)
-        while Date() < end, !home.exists, !field.exists { _ = home.waitForExistence(timeout: 1) }
+        while Date() < end, !home.exists, !field.exists, !unlock.exists { _ = home.waitForExistence(timeout: 1) }
         if field.exists {
             field.tap()
             field.typeText(try pairLink())
             app.buttons["connectButton"].tap()
+        } else if !home.exists {
+            try unlockWithFace()
         }
         try wait(home, "Home")
+    }
+
+    /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking.
+    private func unlockWithFace() throws {
+        let home = element("project-blimp-demo")
+        let unlock = app.buttons["Unlock"].firstMatch
+        for _ in 0..<3 {
+            allowFaceID()
+            try signal("faceid-match")
+            if home.waitForExistence(timeout: 10) { return }
+            screen("still-locked")
+            // the ask ended (or never started): Unlock asks again
+            if unlock.exists && unlock.isHittable { unlock.tap() }
+        }
+        try wait(home, "Home after Face ID")
     }
 
     /// Rows of sessions the app started in blimp-demo (named blimp-demo-<time>).
