@@ -218,7 +218,11 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
       // No control characters from the phone: ESC would end the paste early and turn the rest into key
       // presses, ctrl+\ detaches zmx's client, ctrl+C interrupts. Newlines and tabs stay; \r is a newline.
       const text = m.text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
-      await typed(ws, id, async () => ["\x1b[200~" + text + "\x1b[201~", "\r"]);
+      // Not while Claude asks something: the Enter after the paste would confirm its highlighted choice.
+      await typed(ws, id, async () => {
+        if ((await find(d.name))?.state === "waiting") throw new Error("Claude is asking something. Answer it first.");
+        return ["\x1b[200~" + text + "\x1b[201~", "\r"];
+      });
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer") {

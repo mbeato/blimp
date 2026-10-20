@@ -361,6 +361,34 @@ describe("chat", () => {
     viewer.ws.close();
   });
 
+  test("input is refused while Claude is asking something, and typed once it isn't", async () => {
+    const sid = "abababab-abab-abab-abab-abababababab";
+    const { name } = await fakeClaude("chat14", sid, []);
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${name}.json`);
+    writeFileSync(
+      status,
+      JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest",
+        prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }),
+    );
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "w1", text: "typed while waiting" }));
+    await until(() => c.messages.find((m) => m.id === "w1"), "reply");
+    expect(c.messages.find((m) => m.id === "w1")).toEqual({ type: "error", id: "w1", error: "Claude is asking something. Answer it first." });
+    type(viewer.ws, "\r");
+    await Bun.sleep(500);
+    expect(viewer.text).not.toContain("typed while waiting");
+    // The refused id wasn't counted as typed: once the wait is over, the same id goes through.
+    rmSync(status);
+    c.ws.send(JSON.stringify({ type: "input", id: "w1", text: "typed while waiting" }));
+    await until(() => c.messages.find((m) => m.type === "ack" && m.id === "w1"), "ack", 4000);
+    await enterUntil(viewer, "typed while waiting", "the text reached the session");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
   test("interrupt sends Esc", async () => {
     const { name } = await fakeClaude("chat4", "55555555-5555-5555-5555-555555555555", []);
     const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
