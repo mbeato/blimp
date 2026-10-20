@@ -157,3 +157,22 @@ live("two viewers of one tab both get frames; a closed tab ends its views", asyn
 live("a tab that isn't there can't be viewed", async () => {
   await expect(openView(chrome, (t) => gate.attachDirect(t), "F00D", { send() {}, close() {} })).rejects.toThrow();
 });
+
+live("a tab keeps streaming and taking input when another tab is brought to the front", async () => {
+  const id = await gate.createTab("/f", base + "/");
+  await until(async () => (await title(id)) === "start", "the page");
+  const w = await viewer(id);
+  w.send({ type: "size", width: 400, height: 300, scale: 1 });
+  await until(() => w.frames.length > 0, "a frame");
+  // Another tab comes to the front, as a session's select_page would make it.
+  const other = await gate.createTab("/f", "about:blank");
+  const s = (await chrome.call("Target.attachToTarget", { targetId: other, flatten: true })).result.sessionId;
+  await chrome.call("Page.bringToFront", {}, s);
+  await Bun.sleep(300);
+  const before = w.frames.length;
+  await evalIn(id, "document.body.style.background='blue'");
+  await until(() => w.frames.length > before, "a frame from the tab behind", 5000);
+  for (const event of ["mousePressed", "mouseReleased"]) w.send({ type: "mouse", event, x: 50, y: 30, button: "left", buttons: event === "mousePressed" ? 1 : 0, clickCount: 1, modifiers: 0 });
+  await until(async () => (await title(id)) === "clicked", "the click on the tab behind");
+  w.v.close();
+}, 30_000);

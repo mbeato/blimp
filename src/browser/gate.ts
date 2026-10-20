@@ -54,7 +54,7 @@ export class Gate {
   }
 
   async createTab(folder: string, url: string, openedBy?: string): Promise<string> {
-    const r = await this.chrome.call("Target.createTarget", { url });
+    const r = await this.chrome.call("Target.createTarget", { url, newWindow: true });
     if (!r.result?.targetId) throw new Error(r.error?.message ?? "Chrome didn't open the tab");
     this.claim(r.result.targetId, folder, openedBy);
     return r.result.targetId;
@@ -268,8 +268,10 @@ export class Gate {
       }
       case "Target.getTargets":
         return this.reply(c, m, { targetInfos: [...this.targets.values()].filter((t) => this.visible(c, t)).map((t) => t.info) });
+      // Each tab in a window of its own: headless Chrome draws only each window's front tab, so a
+      // tab behind another would stop streaming to the app (and to screenshots).
       case "Target.createTarget":
-        return this.forward(c, m, (r) => r.result?.targetId && this.claim(r.result.targetId, c.folder, c.session));
+        return this.forward(c, { ...m, params: { ...p, newWindow: true } }, (r) => r.result?.targetId && this.claim(r.result.targetId, c.folder, c.session));
       case "Target.attachToTarget":
         return this.forward(c, m, this.queueAttach(c, p.targetId));
       case "Target.detachFromTarget":
