@@ -5,12 +5,15 @@
 //   blimpd install-hooks       add blimp's status hooks to Claude Code's settings.json (and Codex's hooks.json)
 //   blimpd uninstall-hooks     take them out again
 //   blimpd hook [codex]        what those hooks run (reads Claude's or Codex's hook JSON on stdin)
+//   blimpd pair [--url <url>]  make the phone's token and show the link for the iPhone app as a QR code
+//   blimpd pair --revoke       delete the phone's token (the Mac keeps working)
 //   blimpd --version
 
 import pkg from "../package.json";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
+import { runPair } from "./pair";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
 
@@ -59,9 +62,11 @@ if (cmd === "sessions") {
   });
 } else if (cmd === "hook") {
   await runHook(args[0] === "codex");
+} else if (cmd === "pair") {
+  process.exit(runPair(args));
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | --version");
   process.exit(cmd ? 1 : 0);
 }
