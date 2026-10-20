@@ -75,6 +75,7 @@ type Session = {
   state: "working" | "waiting" | "done" | "unknown";
   stateSince?: number;   // ms
   prompt?: Prompt & { at: number };  // while waiting: what Claude asks, and when the wait started (see Chat)
+  unread: boolean;       // Claude replied since either app last had it on screen (see Unread)
 };
 ```
 
@@ -83,7 +84,8 @@ type Session = {
 - blimp's hook file `<socket dir>/status/<zmx name>.json` (`at`), so `~/.blimp/status/` by default and next to the temp socket for a test blimpd: see Hooks.
 - Neither → `unknown`.
 
-`POST /sessions` body `{ "dir": string, "name"?: string, "resume"?: string, "kind"?: string, "shell"?: boolean }` → 201 `{ "name": string }`.
+`POST /sessions` body `{ "dir": string, "name"?: string, "resume"?: string, "kind"?: string, "shell"?: boolean, "prompt"?: string }` → 201 `{ "name": string }`.
+`prompt` is Claude's first message (the phone's blank chat, or a message that resumes a past conversation): cleaned as chat `input` is, at most 100 000 characters, not empty, only for `claude` and `claude-glm`; it's passed as Claude's last arguments, `-- <prompt>`, so text starting with `-` isn't read as an option.
 `kind` is a kind's id (default `claude`; 400 for an unknown one or one that isn't available), or `codex-login` (Settings' Codex sign-in: `codex login --device-auth`, not listed in `/kinds`). `shell: true` means `kind: "shell"` (what older apps send). `resume` is a Claude conversation id (must match `/^[0-9a-f-]{36}$/`); the session runs `claude --resume <id>`; only `claude` and `claude-glm` take it. `dir` must be inside the home folder (see Files). The kind is remembered in `<socket dir>/session-kinds.json` (zmx name → kind; entries for sessions no longer listed are dropped at the next start) and reported as `Session.kind`.
 
 ### Kinds
@@ -110,7 +112,16 @@ Custom kinds: `<socket dir>/kinds.json` = `{ "kinds": [{ "id", "label", "command
 
 `GET /folders/recent` → `[{ "dir": string, "lastUsed": number /* ms */ }]`, newest first, max 30, only folders that still exist. Source: each `<claude dir>/projects/*/` folder, its newest `*.jsonl`, the first `"cwd"` found in its first 50 lines.
 
-`GET /conversations?dir=<dir>` → `[{ "sessionId": string, "title": string, "updatedAt": number /* ms, file mtime */ }]`, newest first, max 50. The same list `/resume` shows in that folder: transcripts in `<claude dir>/projects/<dir with every non-alphanumeric char replaced by "-">/*.jsonl`.
+`GET /conversations?dir=<dir>` → `[{ "sessionId": string, "title": string, "updatedAt": number /* ms, file mtime */, "unread": boolean }]`, newest first, max 50. The same list `/resume` shows in that folder: transcripts in `<claude dir>/projects/<dir with every non-alphanumeric char replaced by "-">/*.jsonl`.
+
+`GET /conversations/<sessionId>/messages?dir=<dir>` → the last 200 chat messages of that past conversation (the chat's `history`, see Chat), read without starting Claude. 404 if `dir`'s transcript folder has no such conversation; `dir` must be inside the home folder.
+
+### Unread
+
+A conversation is unread when Claude wrote text (not only a tool call; not a side task's, not Claude Code's own `<synthetic>` note) after the newest reply that was on screen in either app. Read while the title is scanned (Sessions), as `replied`, the newest such entry's `timestamp`.
+- `POST /seen` body `{ "sessionId": string }` → 204: the app has that conversation on screen; its replies up to now are seen. The apps send it while a session that shows `unread` is on screen (the phone: its chat open, the app in front; the Mac: the visible tab of a visible window). 400 for an id not matching `/^[0-9a-f-]{36}$/`; an id with no transcript changes nothing.
+- **Where:** `<socket dir>/seen.json`, `{ "since": ms, "seen": { [sessionId]: ms } }`, mode 600, written through a temp file and a rename. blimpd makes it when it starts, if it's missing: `since` is then, so nothing from before counts as unread. Before it exists, nothing is unread.
+- `unread` shows in `GET /sessions` (and so `/events`, within a second) and `GET /conversations`.
 
 ### Terminal
 

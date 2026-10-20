@@ -3,18 +3,21 @@
 // web pages included, so every request also needs the token.
 
 import { timingSafeEqual, randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
+import { newScan, readLast } from "./chat";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, download, guard, guardFile, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
-import { conversations, recentFolders, resumedKind } from "./folders";
+import { conversations, projectFolderName, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { startNaming } from "./names";
 import { sessionPorts } from "./ports";
+import { cleanText } from "./prompt";
+import { markSeen, startSeen } from "./seen";
 import {
   checkZmxDir,
   claudeDir,
@@ -22,9 +25,12 @@ import {
   killSession,
   listSessions,
   parseZmxList,
+  realDir,
   sessionExists,
   socketPath,
   startSession,
+  transcriptPath,
+  transcriptTitles,
   zmxListAsync,
 } from "./sessions";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
@@ -100,7 +106,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
 
   if (path === "/sessions" && get) return Response.json(listSessions(claudeDir(), await zmxListAsync()));
   if (path === "/sessions" && req.method === "POST") {
-    const { dir, name, resume, shell, kind } = (await req.json()) as Record<string, unknown>;
+    const { dir, name, resume, shell, kind, prompt } = (await req.json()) as Record<string, unknown>;
     if (typeof dir !== "string") throw new HttpError(400, "dir is required");
     if (name !== undefined && typeof name !== "string") throw new HttpError(400, "name must be a string");
     if (resume !== undefined && (typeof resume !== "string" || !/^[0-9a-f-]{36}$/.test(resume)))
@@ -108,12 +114,17 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (shell !== undefined && typeof shell !== "boolean") throw new HttpError(400, "shell must be true or false");
     if (kind !== undefined && typeof kind !== "string") throw new HttpError(400, "kind must be a string");
     if (shell && kind !== undefined && kind !== "shell") throw new HttpError(400, "shell: true and a kind other than shell");
+    if (prompt !== undefined && (typeof prompt !== "string" || prompt.length > 100_000 || !cleanText(prompt).trim()))
+      throw new HttpError(400, "prompt must be text of at most 100 000 characters");
     const real = guard(dir);
     if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
     // shell: true is what the app sent before kinds. A resume without a kind goes on in the one it ran in.
     const k = shell ? "shell" : (kind ?? (resume ? resumedKind(real, resume, claudeDir(), readKindsFile().glm) : "claude"));
     if (resume && !CLAUDE_KINDS.includes(k)) throw new HttpError(400, "only Claude Code can resume a conversation");
+    if (prompt !== undefined && !CLAUDE_KINDS.includes(k)) throw new HttpError(400, "only Claude Code takes a first message");
     const run = await launchFor(k, resume);
+    // Claude's first message, as an argument after "--", so one that starts with "-" isn't taken for an option.
+    if (typeof prompt === "string") run.args.push("--", cleanText(prompt));
     return Response.json({ name: await startSession(real, { name: name || undefined, kind: k, run }) }, { status: 201 });
   }
 
@@ -195,6 +206,25 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (!dir) throw new HttpError(400, "dir is required");
     return Response.json(conversations(dir));
   }
+  // A past conversation's messages, as the chat's history, without starting Claude.
+  const past = path.match(/^\/conversations\/([0-9a-f-]{36})\/messages$/);
+  if (past && get) {
+    const dir = q.get("dir");
+    if (!dir) throw new HttpError(400, "dir is required");
+    const real = realDir(guard(dir));
+    const file = join(claudeDir(), "projects", projectFolderName(real), `${past[1]}.jsonl`);
+    if (!existsSync(file)) throw new HttpError(404, "no such conversation in that folder");
+    return Response.json(await readLast(file, newScan(real), 200));
+  }
+  // The conversation was on screen in an app: its replies so far are seen, in both apps.
+  if (path === "/seen" && req.method === "POST") {
+    const { sessionId } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (typeof sessionId !== "string" || !/^[0-9a-f-]{36}$/.test(sessionId)) throw new HttpError(400, "sessionId must be a conversation id");
+    const file = transcriptPath(claudeDir(), sessionId);
+    const replied = file ? transcriptTitles(file)?.replied : undefined;
+    if (replied) markSeen(sessionId, replied);
+    return new Response(null, { status: 204 });
+  }
 
   if (path === "/fs/list" && get) {
     const p = q.get("path");
@@ -245,6 +275,7 @@ export function serve(): Server {
   rmSync(sock, { force: true });
   const dir = dirname(sock);
   const token = loadToken(dir);
+  startSeen();
   // Sockets opened with the phone token close within a second of `blimpd pair --revoke` (or a new pair).
   const phoneSockets = new Set<ServerWebSocket<WsData>>();
   setInterval(() => {

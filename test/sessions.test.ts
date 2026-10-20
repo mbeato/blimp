@@ -11,6 +11,7 @@ import {
   rememberKind,
   titleFromTranscript,
   transcriptTitle,
+  transcriptTitles,
   zmxDir,
 } from "../src/sessions";
 
@@ -147,10 +148,16 @@ test("listSessions joins zmx with Claude's session file, transcript and blimp's 
   writeFileSync(join(home, "status", "sh-2.json"), JSON.stringify({ state: "waiting", at: 7000, event: "Notification" }));
   const { listSessions } = await import("../src/sessions");
   const zmxOut = "  name=web-1\tpid=42\tclients=1\tcreated=5\tcwd=/home/u/web\tcmd=claude\n  name=sh-2\tpid=43\tclients=0\tcreated=6\tcwd=/tmp\tcmd=";
-  expect(listSessions(home, zmxOut, join(home, "status"))).toEqual([
-    { name: "web-1", pid: 42, clients: 1, created: 5, kind: "claude", dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123 },
-    { name: "sh-2", pid: 43, clients: 0, created: 6, kind: "shell", dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000 },
+  expect(listSessions(home, zmxOut, join(home, "status"), undefined, {}, { since: 0, seen: {} })).toEqual([
+    { name: "web-1", pid: 42, clients: 1, created: 5, kind: "claude", dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123, unread: false },
+    { name: "sh-2", pid: 43, clients: 0, created: 6, kind: "shell", dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000, unread: false },
   ]);
+  // Claude's reply after what was seen: unread
+  writeFileSync(join(home, "projects", "-home-u-web", "s1.jsonl"),
+    JSON.stringify({ type: "assistant", timestamp: new Date(9000).toISOString(), message: { content: [{ type: "text", text: "done" }] } }) + "\n");
+  const unread = (seen: Record<string, number>) => listSessions(home, zmxOut, join(home, "status"), undefined, {}, { since: 0, seen })[0].unread;
+  expect(unread({})).toBe(true);
+  expect(unread({ s1: 9000 })).toBe(false);
 });
 
 test("a session remembered as a shell that Claude now runs in is Claude Code", async () => {
@@ -221,6 +228,21 @@ describe("transcriptTitle (incremental)", () => {
     // while a later ai-title still loses to the custom title.
     appendFileSync(f, line({ type: "ai-title", aiTitle: "later ai" }));
     expect(transcriptTitle(f)).toBe("mine");
+  });
+
+  test("replied: when Claude last wrote text, not a tool call, a side task's or Claude Code's own note", () => {
+    const f = join(dir, "r.jsonl");
+    const at = (ms: number) => new Date(ms).toISOString();
+    const text = (t: string) => [{ type: "text", text: t }];
+    writeFileSync(f, line({ type: "assistant", timestamp: at(1000), message: { content: text("hi") } }));
+    expect(transcriptTitles(f)?.replied).toBe(1000);
+    appendFileSync(f, line({ type: "assistant", timestamp: at(2000), message: { content: [{ type: "tool_use", name: "Bash" }] } }));
+    appendFileSync(f, line({ type: "assistant", timestamp: at(3000), isSidechain: true, message: { content: text("side") } }));
+    appendFileSync(f, line({ type: "assistant", timestamp: at(4000), message: { model: "<synthetic>", content: text("No response requested.") } }));
+    appendFileSync(f, line({ type: "assistant", timestamp: at(5000), message: { content: text("  ") } }));
+    expect(transcriptTitles(f)?.replied).toBe(1000);
+    appendFileSync(f, line({ type: "assistant", timestamp: at(6000), message: { content: [{ type: "tool_use" }, ...text("done")] } }));
+    expect(transcriptTitles(f)?.replied).toBe(6000);
   });
 
   test("a file rewritten shorter is read again from the start", () => {

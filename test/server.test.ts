@@ -377,6 +377,38 @@ describe("chat", () => {
     c.ws.close();
   });
 
+  test("a reply after blimpd started is unread until an app says it was on screen", async () => {
+    const sid = "5eee5eee-5eee-4eee-8eee-5eee5eee5eee";
+    // after blimpd's start, unlike T
+    const late = (uuid: string, text: string) =>
+      JSON.stringify({ timestamp: new Date(Date.now() + 1000).toISOString(), type: "assistant", uuid, message: { role: "assistant", content: [{ type: "text", text }] } }) + "\n";
+    const { name, transcript } = await fakeClaude("unread", sid, [user("u1", "hi"), said("a1", "an old reply")]);
+    const listed = async () => (await (await api("/sessions")).json()).find((s: any) => s.name === name);
+    expect((await listed()).unread).toBe(false);
+    appendFileSync(transcript, late("a2", "a new reply"));
+    await until(async () => (await listed()).unread === true, "the new reply to be unread");
+    const seen = (sessionId: string) => api("/seen", { method: "POST", body: JSON.stringify({ sessionId }) });
+    expect((await seen(sid)).status).toBe(204);
+    expect((await listed()).unread).toBe(false);
+    expect((await seen("not-an-id")).status).toBe(400);
+  });
+
+  test("GET /conversations/<id>/messages: a past conversation's messages, without starting Claude", async () => {
+    const sid = "6eee6eee-6eee-4eee-8eee-6eee6eee6eee";
+    const dir = join(homeDir, "past");
+    mkdirSync(dir, { recursive: true });
+    const folder = join(claudeDir, "projects", dir.replace(/[^A-Za-z0-9]/g, "-"));
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, `${sid}.jsonl`), user("u1", "fix the login") + said("a1", "fixed"));
+    const get = (id: string, d: string) => api(`/conversations/${id}/messages?dir=${encodeURIComponent(d)}`);
+    const r = await get(sid, dir);
+    expect(r.status).toBe(200);
+    expect((await r.json()).map((m: any) => [m.role, m.text])).toEqual([["user", "fix the login"], ["assistant", "fixed"]]);
+    expect((await get("7eee7eee-7eee-4eee-8eee-7eee7eee7eee", dir)).status).toBe(404);
+    expect((await get(sid, tmp)).status).toBe(403);
+    expect((await api(`/conversations/${sid}/messages`)).status).toBe(400);
+  });
+
   test("history of a long transcript is its last 200 messages", async () => {
     const lines = Array.from({ length: 3000 }, (_, i) => (i % 2 ? said(`a${i}`, `answer ${i}`) : user(`u${i}`, `prompt ${i}`)));
     const { name } = await fakeClaude("chat10", "99999999-9999-9999-9999-999999999999", lines);
@@ -827,6 +859,22 @@ describe("starting sessions", () => {
     type(s.ws, "ping\r");
     await until(() => /ping\r?\n[^]*ping/.test(s.text), "input echoed back by the session");
     s.ws.close();
+  }, 15000);
+
+  test("a first message goes to Claude as its prompt, cleaned, after --", async () => {
+    const dir = join(homeDir, tag);
+    mkdirSync(dir, { recursive: true });
+    const post = (body: object) => api("/sessions", { method: "POST", body: JSON.stringify(body) });
+    const r = await post({ dir, name: "first", prompt: "-fix\x1b the tests" });
+    expect(r.status).toBe(201);
+    const { name } = await r.json();
+    made.push(name);
+    const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    await until(() => s.text.includes("-- -fix the tests]"), "the first message in Claude's arguments");
+    s.ws.close();
+    expect((await post({ dir, prompt: " \x1b " })).status).toBe(400);
+    expect((await post({ dir, prompt: 5 })).status).toBe(400);
+    expect((await post({ dir, shell: true, prompt: "hi" })).status).toBe(400);
   }, 15000);
 
   test("two starts at once get two sessions", async () => {
