@@ -282,6 +282,8 @@ async function onScreen(name: string, p: Prompt, e: Expect) {
     if (screenMeets(p, parseDialog(screen), e)) return;
     if (Date.now() > end) {
       const where = "review" in e ? "the review screen" : `question ${e.q + 1}`;
+      // What it saw, so a stopped answer can be told apart from a new dialog layout.
+      console.error(`answer for ${name} stopped before ${where} (${JSON.stringify(e)}); the dialog read as ${JSON.stringify(parseDialog(screen))}; the screen's end:\n${screen.split("\n").slice(-30).join("\n")}`);
       throw new Error(`stopped: Claude's screen didn't show ${where} as expected. Finish it on the Mac.`);
     }
     await Bun.sleep(100);
