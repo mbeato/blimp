@@ -6,7 +6,7 @@ It talks to `blimpd`, the small program that runs on your server. The chat featu
 
 ## Put this branch's blimpd on your server
 
-Do this once, on the server. Released blimpd (0.2.6 and older) has no chat. Its hooks also don't record what Claude is asking. So every chat would fail.
+Do this once, on the server, and again after each pull that changes the server code. Released blimpd (0.2.6 and older) has no chat. Its hooks also don't record what Claude is asking. So every chat would fail.
 
 1. Go to where the phone-chat branch is checked out, and get the latest. For Max, that is `~/blimp-phone`.
 
@@ -77,7 +77,7 @@ Max: `ssh claude1 cat .blimp/token`
 4. In your blimp folder on the Mac, switch to the phone-chat branch. Then build the project and open it.
 
 ```
-git checkout phone-chat
+git fetch origin && git checkout phone-chat && git pull
 ```
 
 ```
