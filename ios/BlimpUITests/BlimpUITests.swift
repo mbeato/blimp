@@ -2,7 +2,7 @@
 // app-e2e job in .github/workflows/ios.yml; ios/e2e/setup.ts makes the sessions and the texts looked
 // for here). Pair, see the session list, read a chat, hide the keyboard, send a message, answer a permission
 // prompt; Stop and a folded long reply; start, end and resume sessions; blimpd restarting; the Face ID
-// lock; two questions at once. What reached the sessions is checked by the job afterwards. Screenshots
+// lock; two questions at once; a swipe to the next session in a project. What reached the sessions is checked by the job afterwards. Screenshots
 // stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
@@ -42,8 +42,9 @@ final class BlimpUITests: XCTestCase {
         chatRow.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "the user message")
         try wait(message("message.assistant", "under Appearance"), "the assistant reply")
-        // The tool call as one line, its command without the summary's backticks
-        try wait(labeled("Ran swift test"), "the tool line")
+        // Tool steps aren't shown: the reply before the tool call is, the tool call isn't
+        try wait(message("message.assistant", "then run the tests"), "the reply before the tool call")
+        if labeled("Ran swift test").exists { throw failed("no tool line in the chat") }
         // The empty box: the mic inside it, no Send
         let mic = app.buttons["Talk"]
         try wait(mic, "the mic in the empty box")
@@ -56,6 +57,7 @@ final class BlimpUITests: XCTestCase {
         let keyboard = app.keyboards.firstMatch
         try focus(input)
         try wait(keyboard, "the keyboard after tapping the message field")
+        try above(input, keyboard)
         shot("2a-keyboard")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
             .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
@@ -130,6 +132,8 @@ final class BlimpUITests: XCTestCase {
         let working = labeled("working…")
         try wait(stop, "the Stop button")
         try wait(working, "the working row")
+        // with Claude's latest step, its command without the summary's backticks
+        try wait(labeled("Ran npm run lint"), "the latest step on the working row")
         try wait(app.buttons["Talk"], "the mic in the empty box")
         if app.buttons["sendButton"].exists { throw failed("no Send while working with an empty box") }
         // The long reply above the newest is folded
@@ -313,7 +317,50 @@ final class BlimpUITests: XCTestCase {
         shot("29-chat-name")
     }
 
+    // MARK: - Swipe between sessions
+
+    /// A swipe sideways goes to the next session in the same project, and back; the title says which of how many.
+    func test9SwipeBetweenSessions() throws {
+        try launchPaired()
+        let row = element("session-demo-ask")
+        try wait(row, "the demo-ask row")
+        row.tap()
+        let askReply = message("message.assistant", "I'll run the tests.")
+        try until(askReply, "isHittable == true", "demo-ask's chat")
+        let (at, count) = try place()
+        if count < 2 { throw failed("demo-ask's project to have more than one session") }
+        shot("30-swipe-before")
+        // toward the end of the list, or back from the last one
+        if at < count { app.swipeLeft() } else { app.swipeRight() }
+        try until(askReply, "exists == false OR isHittable == false", "the swipe to leave demo-ask")
+        let (next, _) = try place()
+        if next != (at < count ? at + 1 : at - 1) { throw failed("the next session's place in the title") }
+        shot("31-swipe-after")
+        if at < count { app.swipeRight() } else { app.swipeLeft() }
+        try until(askReply, "isHittable == true", "a swipe back to demo-ask")
+        let (back, _) = try place()
+        if back != at { throw failed("demo-ask's place in the title after the swipe back") }
+    }
+
     // MARK: - Helpers
+
+    /// The chat title's "api-server · 2 of 4", as (2, 4).
+    private func place() throws -> (Int, Int) {
+        let e = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'api-server · '")).firstMatch
+        try wait(e, "the session's place in the title")
+        let n = e.label.split(separator: "·").last!.split(separator: " ").compactMap { Int($0) }
+        guard n.count == 2 else { throw failed("the place in the title, not \(e.label)") }
+        return (n[0], n[1])
+    }
+
+    /// The field stays in sight above the keyboard (once the keyboard has slid in).
+    private func above(_ field: XCUIElement, _ keyboard: XCUIElement) throws {
+        let end = Date().addingTimeInterval(5)
+        while field.frame.maxY > keyboard.frame.minY + 1 {
+            if Date() > end { throw failed("the message field above the keyboard") }
+            _ = field.waitForExistence(timeout: 0.2)
+        }
+    }
 
     /// Launches the app and waits for Home, pairing first if it isn't (test1 failed before pairing).
     private func launchPaired() throws {

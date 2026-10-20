@@ -1,53 +1,121 @@
 // A session as a chat: the messages, what Claude is waiting on as buttons, and a box to type into.
 // Voice: the mic types (or answers the prompt), the speaker toggle reads new replies and prompts aloud,
 // and a banner says when another session starts waiting or finishes.
+// A swipe sideways goes to the next or previous session in the same project, in Home's order.
 import AudioToolbox
 import BlimpKit
 import SwiftUI
 
 struct SessionView: View {
     let name: String
-    /// After Resume, the new session takes this screen's place.
-    @State private var resumed: String?
-
-    var body: some View {
-        let current = resumed ?? name
-        ChatScreen(name: current) { resumed = $0 }
-            .id(current)
-    }
-}
-
-/// Owns the ChatModel: made when the screen first appears, its socket closed when the screen goes.
-private struct ChatScreen: View {
-    let name: String
-    let onResumed: (String) -> Void
     @Environment(Store.self) private var store
-    @State private var model: ChatModel?
+    /// The session on screen: a swipe or Resume changes it.
+    @State private var shown: String
+    /// What the pages scroll to; it can be nil for a moment during a swipe, `shown` never is.
+    @State private var position: String?
+    @State private var pages: [String] = []
+    /// The project folder, once the store has listed the session: the pages are that folder's sessions.
+    @State private var dir: String?
+    /// Each page's chat. Its socket is open while the page is laid out (on screen, or next to it during a swipe).
+    @State private var models: [String: ChatModel] = [:]
+
+    init(name: String) {
+        self.name = name
+        _shown = State(initialValue: name)
+        _position = State(initialValue: name)
+    }
 
     var body: some View {
-        Group {
-            if let model {
-                ChatContent(model: model, onResumed: onResumed)
-            } else {
-                Color.clear
+        // The pages come with the first refresh: a scroll view made empty wouldn't start at this session's.
+        Group { if !pages.isEmpty { scroller } }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbar }
+            .onChange(of: store.home, initial: true) { refresh() }
+            .onChange(of: position) { _, page in
+                guard let page, page != shown else { return }
+                shown = page
+                refresh()
+            }
+    }
+
+    private var scroller: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
+                ForEach(pages, id: \.self) { page in
+                    Group {
+                        if let model = models[page] {
+                            ChatContent(model: model, active: page == shown, onResumed: resumed)
+                                .onAppear { model.open() }
+                                .onDisappear { model.close() }
+                        }
+                    }
+                    .containerRelativeFrame([.horizontal, .vertical])
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $position)
+        .scrollIndicators(.hidden)
+        // one page: no sideways bounce
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+    }
+
+    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: 0) {
+                Text(title).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .onAppear {
-            let m = model ?? ChatModel(name: name, store: store)
-            model = m
-            m.open()
+        if let model = models[shown] {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(model.readAloud ? "Stop reading aloud" : "Read aloud",
+                       systemImage: model.readAloud ? "speaker.wave.2" : "speaker.slash") {
+                    model.readAloud.toggle()
+                    if !model.readAloud { Speaker.shared.stop() }
+                }
+            }
         }
-        .onDisappear { model?.close() }
+    }
+
+    private var title: String { models[shown]?.title ?? shown }
+
+    /// The folder, and where this session is among its project's when there's more than one ("2 of 3").
+    private var subtitle: String {
+        let folder = models[shown]?.folder ?? ""
+        guard pages.count > 1, let i = pages.firstIndex(of: shown) else { return folder }
+        return folder.isEmpty ? "\(i + 1) of \(pages.count)" : "\(folder) · \(i + 1) of \(pages.count)"
+    }
+
+    /// The new session takes the ended one's place on screen.
+    private func resumed(_ name: String) {
+        shown = name
+        refresh()
+        position = name
+    }
+
+    private func refresh() {
+        if let s = store.sessions.first(where: { $0.name == shown }) { dir = s.dir }
+        pages = store.home.pages(dir: dir, current: shown, previous: pages)
+        for page in pages where models[page] == nil { models[page] = ChatModel(name: page, store: store) }
+        for page in Array(models.keys) where !pages.contains(page) {
+            models[page]?.close()
+            models[page] = nil
+        }
     }
 }
 
 private struct ChatContent: View {
     let model: ChatModel
+    /// This page is the one on screen: only it reads aloud, listens, and shows banners.
+    let active: Bool
     let onResumed: (String) -> Void
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
-    @State private var expanded: Set<String> = []
     @State private var atBottom = true
     @State private var unseen = false
     @State private var resuming = false
@@ -66,7 +134,6 @@ private struct ChatContent: View {
     @State private var micPrompt: Prompt?
     @State private var guess: Guess?
     @State private var voiceNote: String?
-    @State private var readAloud = false
     @State private var lastStates: [String: SessionState] = [:]
     @State private var banner: Banner?
     @State private var onScreen = false
@@ -79,8 +146,8 @@ private struct ChatContent: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(model.log.messages) { message in
-                        MessageRow(message: message, expanded: expanded.contains(message.id)) { toggle(message.id) }
+                    ForEach(model.log.shown) { message in
+                        MessageRow(message: message)
                             .modifier(BeingRead(reading: Speaker.shared.speakingId == message.id))
                     }
                     workingRow
@@ -110,7 +177,7 @@ private struct ChatContent: View {
                 Task { @MainActor in proxy.scrollTo(Self.bottom, anchor: .bottom) }
             }
             // a new or longer last message: follow it if you're at the bottom, else say so
-            .onChange(of: model.log.messages.last) { _, last in
+            .onChange(of: model.log.shown.last) { _, last in
                 guard last != nil else { return }
                 if atBottom { proxy.scrollTo(Self.bottom, anchor: .bottom) } else { unseen = true }
             }
@@ -147,24 +214,12 @@ private struct ChatContent: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
-        .navigationTitle(model.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
-                    Text(model.title).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
-                    Text(model.folder).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(readAloud ? "Stop reading aloud" : "Read aloud",
-                       systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
-            }
-        }
         .onReturnFromBackground { model.reconnectNow() }
-        .onAppear(perform: appeared)
-        .onDisappear(perform: disappeared)
+        .onAppear { if active { appeared() } }
+        .onDisappear { if onScreen { disappeared() } }
+        .onChange(of: active) { _, on in
+            if on { appeared() } else if onScreen { disappeared() }
+        }
         .onChange(of: listener.partial) { _, heard in
             if micOn { draft = Self.joined(micBase, heard) }
         }
@@ -175,7 +230,7 @@ private struct ChatContent: View {
             voiceNote = nil
             guard let prompt, !promptsSeen.contains(prompt) else { return }
             promptsSeen.append(prompt)
-            if readAloud { Speaker.shared.say(prompt.spoken, id: Self.promptId) }
+            if onScreen, model.readAloud { Speaker.shared.say(prompt.spoken, id: Self.promptId) }
         }
         .onChange(of: store.sessions) { _, sessions in noticeOthers(sessions) }
         // Leaving the app or locking the phone stops the mic; the words stay in the box, unsent. Not on
@@ -247,7 +302,7 @@ private struct ChatContent: View {
     @ViewBuilder private var workingRow: some View {
         if showsWorking {
             let onStop: (() -> Void)? = typable ? { Task { await model.stop() } } : nil
-            WorkingRow(waiting: !model.working, stopping: model.stopping, onStop: onStop)
+            WorkingRow(waiting: !model.working, step: model.log.latestStep, stopping: model.stopping, onStop: onStop)
         }
     }
 
@@ -262,17 +317,13 @@ private struct ChatContent: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if model.log.messages.isEmpty && !showsWorking && !model.ended && !model.macOnly && !model.noChat && !model.starting {
+        if model.log.shown.isEmpty && !showsWorking && !model.ended && !model.macOnly && !model.noChat && !model.starting {
             if !model.loaded {
                 ProgressView()
             } else {
                 Text("No messages yet.").foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func toggle(_ id: String) {
-        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
     }
 
     /// The box clears only once blimpd has the text; anything typed meanwhile stays.
@@ -288,16 +339,13 @@ private struct ChatContent: View {
     // MARK: - Voice
 
     private static let promptId = "prompt"
-    private var readAloudKey: String { "readAloud.\(model.name)" }
 
     private func appeared() {
         onScreen = true
-        readAloud = UserDefaults.standard.bool(forKey: readAloudKey)
         if let prompt = model.prompt { promptsSeen.append(prompt) }
         lastStates = Dictionary(store.sessions.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
-        let key = readAloudKey
-        model.onReply = { message in
-            guard UserDefaults.standard.bool(forKey: key) else { return }
+        model.onReply = { [weak model] message in
+            guard model?.readAloud == true else { return }
             Speaker.shared.say(SpokenText.from(markdown: message.text ?? ""), id: message.id)
         }
     }
@@ -308,12 +356,6 @@ private struct ChatContent: View {
         model.onReply = nil
         Speaker.shared.stop()
         if micOn { micUp(.keep) }
-    }
-
-    private func setReadAloud(_ on: Bool) {
-        readAloud = on
-        UserDefaults.standard.set(on, forKey: readAloudKey)
-        if !on { Speaker.shared.stop() }
     }
 
     private var vocabulary: [String] {

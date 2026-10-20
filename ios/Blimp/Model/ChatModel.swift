@@ -36,6 +36,10 @@ final class ChatModel {
     @ObservationIgnored private var watching = false
     @ObservationIgnored private var replies: [String: CheckedContinuation<Reply, Never>] = [:]
     @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
+    /// New replies and prompts are read aloud while this session is on screen; kept per session.
+    var readAloud: Bool {
+        didSet { UserDefaults.standard.set(readAloud, forKey: "readAloud.\(name)") }
+    }
     /// Called with each new reply from Claude as it arrives (by `append`, never from a history), to read it aloud.
     @ObservationIgnored var onReply: ((ChatMessage) -> Void)?
 
@@ -45,6 +49,7 @@ final class ChatModel {
     init(name: String, store: Store) {
         self.name = name
         self.store = store
+        readAloud = UserDefaults.standard.bool(forKey: "readAloud.\(name)")
     }
 
     isolated deinit {

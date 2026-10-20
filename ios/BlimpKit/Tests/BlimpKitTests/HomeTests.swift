@@ -25,3 +25,27 @@ func session(_ name: String, dir: String, created: Double, state: SessionState =
         #expect(HomeList.make(input).projects.map(\.dir) == ["/a/app", "/b/app"])
     }
 }
+
+@Test func pagesAreTheProjectsSessionsInHomeOrder() {
+    let home = HomeList.make([
+        session("a1", dir: "/h/alpha", created: 100),
+        session("a2", dir: "/h/alpha", created: 200),
+        session("b1", dir: "/h/beta", created: 300),
+    ])
+    #expect(home.pages(dir: "/h/alpha", current: "a1", previous: []) == ["a2", "a1"])
+    // not known yet where it runs: only itself
+    #expect(home.pages(dir: nil, current: "a1", previous: []) == ["a1"])
+}
+
+@Test func aSessionNotListedKeepsItsPlace() {
+    let home = HomeList.make([
+        session("a1", dir: "/h/alpha", created: 100),
+        session("a3", dir: "/h/alpha", created: 300),
+    ])
+    // a2 ended while on screen: it stays between the two it was between
+    #expect(home.pages(dir: "/h/alpha", current: "a2", previous: ["a3", "a2", "a1"]) == ["a3", "a2", "a1"])
+    // one that ended and isn't on screen goes
+    #expect(home.pages(dir: "/h/alpha", current: "a1", previous: ["a3", "a2", "a1"]) == ["a3", "a1"])
+    // just started and not listed yet: first, where Home will put it
+    #expect(home.pages(dir: "/h/alpha", current: "a4", previous: []) == ["a4", "a3", "a1"])
+}

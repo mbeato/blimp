@@ -43,3 +43,16 @@ public struct HomeList: Equatable, Sendable {
         return HomeList(waiting: waiting, projects: projects)
     }
 }
+
+extension HomeList {
+    /// The sessions a chat swipes through: those in its project (`dir`, nil while unknown), in Home's order.
+    /// The one on screen stays even when it isn't listed: it keeps its place in `previous` if it ended, or
+    /// comes first, where Home will put it, if it just started.
+    public func pages(dir: String?, current: String, previous: [String]) -> [String] {
+        var names = projects.first { $0.dir == dir }?.sessions.map(\.name) ?? []
+        guard !names.contains(current) else { return names }
+        let at = previous.firstIndex(of: current).map { i in previous[..<i].filter(names.contains).count } ?? 0
+        names.insert(current, at: at)
+        return names
+    }
+}

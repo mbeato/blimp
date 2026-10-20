@@ -40,7 +40,8 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] Stop. While Claude works, Stop shows. Type something: Stop stays, with Send beside it. Tap Stop. Claude stops.
 - [ ] Answered once. Tap a permission button. The buttons stay greyed until the prompt goes away. A second tap does nothing.
 - [ ] Changed options. A permission can first show Yes and No, then a moment later all of Claude's options. If you tap just as they change, nothing is pressed and "The question changed. Check it and answer again." shows.
-- [ ] Tap a tool line. It opens and closes. Long output scrolls sideways.
+- [ ] No tool steps. The chat shows only your messages and Claude's replies. While Claude works, the working row says its latest step after "working…" (for example "Ran npm test").
+- [ ] Swipe between sessions. In a project with two or more sessions, swipe left or right on a chat. The next session's chat follows your finger, and the title says which one it is ("api-server · 2 of 3"). A code block scrolls sideways first. A swipe from the left edge still goes back. Only the session on screen reads aloud, listens, and shows banners.
 - [ ] Links. A link to a web page opens in Safari when tapped. A link with another kind of address (for example `file:` or `tel:`) is not tappable.
 - [ ] Scrolling. A long chat opens at the bottom. A new message follows only when you are already at the bottom. If you scrolled up, a "New" pill shows. Tapping it scrolls down.
 - [ ] The prompt bar does not jump. When a permission appears, the bar slides in without flicker on its first frame.

@@ -4,8 +4,8 @@
 //   demo-chat  in blimp-demo: a conversation; every line typed into it is appended to $E2E_DIR/chat.in
 //              and, with a reply, to its transcript
 //   demo-ask   in api-server: waiting on a permission prompt; every key pressed is appended to $E2E_DIR/prompt.in
-//   demo-busy  in api-server: working (Claude's status "busy"); every key pressed is appended to $E2E_DIR/stop.in,
-//              and an Esc makes it idle
+//   demo-busy  in api-server: working (Claude's status "busy"), its latest step "npm run lint"; every key pressed
+//              is appended to $E2E_DIR/stop.in, and an Esc makes it idle
 //   demo-quiz  in api-server: Claude's question dialog with two questions, the second multi-choice
 //              (ios/e2e/fake-ask.ts draws it as Claude does); every key is appended to $E2E_DIR/quiz.in,
 //              the answers go to $E2E_DIR/quiz.json. blimpd names it (the stand-in claude in ios/e2e/bin
@@ -98,7 +98,9 @@ await standIn("demo-busy", busyDir, stopped, busySid,
      "I'll run the whole test suite after each route, not just at the end, so a break shows up next to the change that caused it.",
    ].join("\n\n")),
    user("q20", "Sounds good, go"),
-   said("a1", "Working through the routes now.")], "busy");
+   said("a1", "Working through the routes now."),
+   // the latest step, which the working row says
+   line({ type: "assistant", uuid: "a2", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "npm run lint" } }] } })], "busy");
 
 // A conversation in blimp-demo with nothing running it: the project screen lists it under Earlier.
 // Claude keeps it in a folder named after the real path of where it ran.
