@@ -137,7 +137,13 @@ jobs:
         run: |
           grep -F "Thanks, ship it" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
           [ "$(cat "$E2E_DIR/prompt.in")" = 1 ] || { echo "demo-ask got:"; cat -v "$E2E_DIR/prompt.in"; exit 1; }
-          [ "$(tr '\033' '~' < "$E2E_DIR/stop.in")" = "~" ] || { echo "demo-busy got:"; cat -v "$E2E_DIR/stop.in"; exit 1; }
+          # Esc, after the empty paste blimpd sends first on a new zmx client (zmx 0.5 drops a first Esc)
+          [ "$(tr '\033' '~' < "$E2E_DIR/stop.in")" = "~[200~~[201~~" ] || {
+            echo "demo-busy got:"; od -c "$E2E_DIR/stop.in"
+            ps -axo pid,stat,command | grep -F stop.in | grep -v grep
+            echo "Stop sent from here:"; bun ios/e2e/interrupt.ts demo-busy; sleep 2; od -c "$E2E_DIR/stop.in"
+            zmx history demo-busy | tail -5 | cat -v
+            exit 1; }
           grep -F "After the restart" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
           # The stand-in claude's record of each session the app started: "<zmx name> <pid> [<arguments>]"
           echo "claude started:"; cat "$E2E_DIR/claude.args"
