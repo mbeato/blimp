@@ -22,8 +22,9 @@ export async function checkForUpdate(): Promise<AppUpdate | null> {
         if (e.event === "Started") total = e.data.contentLength ?? 0;
         else if (e.event === "Progress") progress((done += e.data.chunkLength), total);
       });
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
+      // Quits, then opens again once this copy is gone (src-tauri/src/relaunch.rs), so the Dock
+      // keeps one icon.
+      await invoke("relaunch");
     },
   };
 }

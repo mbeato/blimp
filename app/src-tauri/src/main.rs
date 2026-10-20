@@ -2,6 +2,7 @@
 // Sessions, terminals and files all live in the UI, which talks to blimpd through the tunnel.
 
 mod browser;
+mod relaunch;
 mod transfer;
 mod tunnel;
 mod windows;
@@ -18,7 +19,6 @@ fn main() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .manage(tunnel::Tunnels::default())
         .manage(transfer::Transfers::default())
         .manage(windows::Windows::default())
@@ -56,7 +56,8 @@ fn main() {
             browser::browser_go,
             browser::browser_nav,
             browser::browser_close,
-            browser::browser_read
+            browser::browser_read,
+            relaunch::relaunch
         ])
         .on_window_event(|window, event| match event {
             WindowEvent::Destroyed => window.state::<windows::Windows>().forget(window.app_handle(), window.label()),

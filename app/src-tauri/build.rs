@@ -32,6 +32,7 @@ fn main() {
                 "browser_nav",
                 "browser_close",
                 "browser_read",
+                "relaunch",
             ])),
     )
     .expect("failed to run tauri-build")
