@@ -106,7 +106,7 @@ test.if(on)("a message, a permission, a question and a Stop, all through /chat",
     return s?.prompt?.kind === "permission" && s;
   }, "a permission prompt");
   expect(perm.prompt.options[0]).toBe("Yes");
-  send({ type: "answer", id: "a1", at: perm.prompt.at, pick: 0 });
+  send({ type: "answer", id: "a1", at: perm.prompt.at, pick: 0, label: perm.prompt.options[0] });
   await until(() => existsSync(join(dir, "real.txt")), "the command to run");
 
   await until(async () => (await session())?.state === "done", "the turn to end", 90000);
@@ -117,7 +117,7 @@ test.if(on)("a message, a permission, a question and a Stop, all through /chat",
   }, "a question");
   expect(q.prompt.answerable).toBe(true);
   const green = q.prompt.questions[0].options.findIndex((o: any) => /green/i.test(o.label));
-  send({ type: "answer", id: "a2", at: q.prompt.at, pick: green });
+  send({ type: "answer", id: "a2", at: q.prompt.at, pick: green, label: q.prompt.questions[0].options[green].label });
   await until(() => texts().some((m) => m.role === "tool" && m.name === "AskUserQuestion" && /green/i.test(m.output ?? "")), "the answer in the transcript", 90000);
 
   chat.close();
