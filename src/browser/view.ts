@@ -60,8 +60,11 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
     if (m.sessionId !== s || closed) return;
     const p = m.params ?? {};
     switch (m.method) {
+      // Each frame's page size (CSS pixels) comes just before it: headless Chrome's frames are at
+      // that size whatever the device scale, so the app can't tell it from the frame's pixels.
       case "Page.screencastFrame":
         frame = p.sessionId;
+        text({ type: "frame", width: p.metadata?.deviceWidth, height: p.metadata?.deviceHeight });
         return sock.send(Buffer.from(p.data, "base64"));
       case "Page.frameNavigated":
         if (!p.frame?.parentId) void info();

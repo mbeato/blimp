@@ -1921,7 +1921,7 @@ body.dragging-session * {
   background: #fff;
 }
 
-/* The server browser's picture: frames drawn at the screen's pixel ratio, from the top left. */
+/* The server browser's picture: frames drawn at the page's size, from the top left. */
 .page-live {
   position: relative;
   overflow: hidden;
