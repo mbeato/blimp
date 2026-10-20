@@ -125,6 +125,7 @@ jobs:
             grep -E "Test Case|Executed|\*\* TEST" "$log"
           else
             grep -E " error: | warning: |Test Case|timed out|failed|\*\* TEST" "$log" | head -120
+            grep -A80 "^SCREEN at" "$log" | head -400
             tail -40 "$log"
             exit 1
           fi
@@ -155,12 +156,16 @@ jobs:
           xcrun xcresulttool export attachments --path "$E2E_DIR/e2e.xcresult" --output-path "$out"
           # Name each file as the test named it.
           python3 -c '
-          import json, os, sys
+          import json, os, re, sys
           d = sys.argv[1]
+          # upload-artifact refuses names with quotes and the like
+          safe = lambda n: re.sub(r"[^A-Za-z0-9._-]+", "_", n)
           for t in json.load(open(os.path.join(d, "manifest.json"))):
               for a in t.get("attachments", []):
                   src, name = os.path.join(d, a["exportedFileName"]), a.get("suggestedHumanReadableName")
-                  if name and os.path.exists(src): os.rename(src, os.path.join(d, name))
+                  if name and os.path.exists(src): os.rename(src, os.path.join(d, safe(name)))
+          for n in os.listdir(d):
+              if safe(n) != n: os.rename(os.path.join(d, n), os.path.join(d, safe(n)))
           ' "$out" || true
           ls "$out"
       - name: blimpd's log

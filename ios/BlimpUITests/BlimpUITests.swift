@@ -47,8 +47,7 @@ final class BlimpUITests: XCTestCase {
         // Send a message; the box clears once blimpd has it
         let input = element("messageField")
         try wait(input, "the message field")
-        input.tap()
-        input.typeText("Thanks, ship it")
+        try type("Thanks, ship it", into: input)
         let send = app.buttons["sendButton"]
         try wait(send, "Send")
         try until(send, "isEnabled == true", "Send to be enabled")
@@ -162,8 +161,7 @@ final class BlimpUITests: XCTestCase {
         try wait(message("message.user", "Add a dark mode toggle to settings"), "the chat's history again")
         // A message sent now reaches the session
         let input = element("messageField")
-        input.tap()
-        input.typeText("After the restart")
+        try type("After the restart", into: input)
         let send = app.buttons["sendButton"]
         try until(send, "isEnabled == true", "Send to be enabled")
         send.tap()
@@ -316,7 +314,24 @@ final class BlimpUITests: XCTestCase {
         tree.name = "tree"
         tree.lifetime = .keepAlways
         add(tree)
+        // and the texts on screen in the log, for when the artifact doesn't say
+        let texts = app.debugDescription.split(separator: "\n").filter { $0.contains("label:") || $0.contains("identifier:") }
+        print("SCREEN at \(what):\n" + texts.prefix(80).joined(separator: "\n"))
         return Timeout(what: what)
+    }
+
+    /// Taps the field until it has the keyboard (the chat's input bar can be redrawn as the session's
+    /// state comes in, and a tap on the old one gives nothing focus), then types.
+    private func type(_ text: String, into field: XCUIElement) throws {
+        for _ in 0..<5 {
+            field.tap()
+            let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
+            if XCTWaiter().wait(for: [focused], timeout: 3) == .completed {
+                field.typeText(text)
+                return
+            }
+        }
+        throw failed("the keyboard in the message field")
     }
 
     private func wait(_ e: XCUIElement, _ what: String, timeout: TimeInterval = 30) throws {
