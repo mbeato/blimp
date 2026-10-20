@@ -134,7 +134,7 @@ A release tag (`v*`) builds the app and uploads it to TestFlight, once four repo
 
 4. Make the app record. In App Store Connect (https://appstoreconnect.apple.com), open Apps, press +, then New App. Platform: iOS. Name: blimp. (The name has to be free on the App Store. If it is taken, use another, like "blimp for Claude". The name under the icon on the phone stays "blimp".) Language: English. Bundle ID: `dev.blimp.phone`. SKU: `blimp-phone`. User Access: Full Access. Press Create.
 
-5. Make an API key. In App Store Connect, open Users and Access, then Integrations, then App Store Connect API, then Team Keys. The first time, press Request Access and accept. Press + (Generate API Key). Name: blimp CI. Access: App Manager. Press Generate.
+5. Make an API key. In App Store Connect, open Users and Access, then Integrations, then App Store Connect API, then Team Keys. The first time, press Request Access and accept. Press + (Generate API Key). Name: blimp CI. Access: Admin. (App Manager can't make the distribution certificate that cloud signing needs, so the first upload would fail.) Press Generate.
 
 6. Download the key. It is a file named `AuthKey_<key id>.p8`. You can download it only once. Copy the Key ID from the key's row and the Issuer ID from above the list.
 
@@ -161,8 +161,6 @@ gh secret set APPLE_TEAM_ID -R mbeato/blimp --body "<team id>"
 9. Give the app an icon. Apple refuses an upload without one, and the app has none yet. Put a 1024 by 1024 PNG, with no transparency, in `ios/Blimp/Assets.xcassets/AppIcon.appiconset`, and name it in that folder's `Contents.json` (`"filename": "<name>.png"`).
 
 After that, each release tag uploads a build. The build number is the workflow's run number. The build shows in App Store Connect under TestFlight once Apple has processed it (often 10 to 30 minutes). Add yourself as an internal tester there, and install it on the iPhone with the TestFlight app.
-
-If the upload fails with "Cloud signing permission error", the key can't make the distribution certificate. In Users and Access, make a new key with Admin access, and set the three key secrets again.
 
 ## Check list
 
