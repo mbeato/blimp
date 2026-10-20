@@ -99,10 +99,55 @@ test.describe("Retina", () => {
     const area = viewer.locator(".page-live");
     const canvas = area.locator("canvas");
     await expect.poll(async () => Math.round((await canvas.boundingBox())?.width ?? 0)).toBe(Math.round((await area.boundingBox())!.width));
+    // Down to the window's bottom: the terminal covers the rest (see below).
     const box = (await canvas.boundingBox())!;
-    expect(Math.round(box.height)).toBe(Math.round((await area.boundingBox())!.height));
+    const right = (await frontTab(page).locator(".wb-right").boundingBox())!;
+    expect(Math.round(box.height)).toBe(Math.round(right.y + right.height - (await area.boundingBox())!.y));
     await canvas.click({ position: { x: 50, y: 30 } });
     await expect(tab).toHaveText(/clicked/, { timeout: 10_000 });
     killSession(`${sess}-r`);
   });
+});
+
+// The page is laid out at the window's height, whatever the terminal below takes of it: the
+// terminal covers the page's bottom instead of resizing it, and can be dragged up to cover it all.
+test("the terminal covers a browser tab rather than resizing its page, all the way up", async ({ page }) => {
+  const dir = fixtureDir("browser-term");
+  startSession(`${sess}-t`, dir, ["sh", "-c", "exec cat"]);
+  await openSessionTab(page, dir);
+  await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
+  const tab = frontTab(page).locator(".ftabs .tab.active");
+  const viewer = frontTab(page).locator(".viewer:not([hidden])");
+  const address = viewer.getByLabel("Address");
+  await expect(address).toBeFocused({ timeout: 10_000 });
+  await address.fill(`127.0.0.1:${port}/form`);
+  await address.press("Enter");
+  await expect(tab).toHaveText(/Form page/, { timeout: 10_000 });
+  const canvas = viewer.locator(".page-live canvas");
+  const height = async () => Math.round((await canvas.boundingBox())?.height ?? 0);
+  const right = (await frontTab(page).locator(".wb-right").boundingBox())!;
+  const top = (await viewer.locator(".page-live").boundingBox())!.y;
+  // Down to the window's bottom, under the terminal.
+  await expect.poll(height).toBe(Math.round(right.y + right.height - top));
+  const full = await height();
+  // The divider dragged to the top: the terminal covers the tab; the page keeps its size.
+  const sash = frontTab(page).getByRole("separator", { name: "Resize terminal" });
+  const s = (await sash.boundingBox())!;
+  await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(s.x + s.width / 2, right.y - 50, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => Math.round((await frontTab(page).locator(".wb-editor").boundingBox())?.height ?? 0)).toBe(0);
+  await page.waitForTimeout(500);
+  expect(await height()).toBe(full);
+  // And back down part way.
+  const s2 = (await sash.boundingBox())!;
+  await page.mouse.move(s2.x + s2.width / 2, s2.y + s2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(s2.x + s2.width / 2, right.y + right.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect(canvas).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await height()).toBe(full);
+  killSession(`${sess}-t`);
 });

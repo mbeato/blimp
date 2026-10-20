@@ -60,12 +60,14 @@ export function PageView(props: {
     [],
   );
 
-  // The page is laid out at the area's size, at this screen's pixel ratio.
+  // The page is laid out at the area's width and down to the window's bottom, at this screen's
+  // pixel ratio: the terminal below covers the page's bottom rather than resizing it.
   const lastSize = useRef("");
   const sendSize = () => {
     const r = area.current?.getBoundingClientRect();
-    if (!r || !r.width || !r.height || !view.current) return;
-    const m = { type: "size", width: Math.round(r.width), height: Math.round(r.height), scale: window.devicePixelRatio || 1 };
+    const bottom = area.current?.closest(".wb-right")?.getBoundingClientRect().bottom ?? r?.bottom ?? 0;
+    if (!r || !r.width || bottom <= r.top || !view.current) return;
+    const m = { type: "size", width: Math.round(r.width), height: Math.round(bottom - r.top), scale: window.devicePixelRatio || 1 };
     const k = JSON.stringify(m);
     if (k === lastSize.current) return;
     lastSize.current = k;
@@ -130,6 +132,8 @@ export function PageView(props: {
       frame = requestAnimationFrame(sendSize);
     });
     ro.observe(el);
+    const right = el.closest(".wb-right");
+    if (right) ro.observe(right);
     return () => (ro.disconnect(), cancelAnimationFrame(frame));
   }, []);
 
