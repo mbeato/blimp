@@ -1,7 +1,7 @@
 // For "New session in…": the folders Claude was used in, and the conversations /resume would offer there.
 // Both read Claude's transcript folders, <claude dir>/projects/<folder name>/<sessionId>.jsonl.
 
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { claudeDir, realDir, transcriptTitle } from "./sessions";
@@ -85,4 +85,41 @@ export function conversations(cwd: string, dir = claudeDir()) {
   return transcripts(join(dir, "projects", projectFolderName(realDir(cwd))))
     .slice(0, 50)
     .map(({ file, mtime }) => ({ sessionId: basename(file, ".jsonl"), title: transcriptTitle(file), updatedAt: mtime }));
+}
+
+// The model of a conversation's last main reply (side tasks run on other models), from the last 4 MB of
+// its transcript. undefined when there's no transcript or no reply in that part.
+export function lastModel(file: string): string | undefined {
+  let text: string;
+  try {
+    const fd = openSync(file, "r");
+    try {
+      const size = fstatSync(fd).size;
+      const start = Math.max(0, size - (4 << 20));
+      const buf = Buffer.alloc(size - start);
+      readSync(fd, buf, 0, buf.length, start);
+      text = buf.toString("utf8");
+      if (start) text = text.slice(text.indexOf("\n") + 1); // the first line may be cut
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return;
+  }
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"assistant"')) continue;
+    try {
+      const o = JSON.parse(lines[i]);
+      if (o.type === "assistant" && !o.isSidechain && typeof o.message?.model === "string") return o.message.model;
+    } catch {}
+  }
+}
+
+// Which kind resumes a conversation: Claude Code on GLM if it last ran on a GLM model (or the model blimp's
+// GLM kind is set to), else Claude Code. Without this, Resume on a GLM conversation went on in Claude's models.
+export function resumedKind(cwd: string, sessionId: string, dir = claudeDir(), glm: { model?: string; fast?: string } = {}): string {
+  const model = lastModel(join(dir, "projects", projectFolderName(realDir(cwd)), `${sessionId}.jsonl`));
+  if (!model) return "claude";
+  return /^glm/i.test(model) || model === glm.model || model === glm.fast ? "claude-glm" : "claude";
 }

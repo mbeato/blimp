@@ -10,8 +10,8 @@ import pkg from "../package.json";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
-import { conversations, recentFolders } from "./folders";
-import { CLAUDE_KINDS, installed, launchFor, listKinds, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
+import { conversations, recentFolders, resumedKind } from "./folders";
+import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { sessionPorts } from "./ports";
 import {
   checkZmxDir,
@@ -104,11 +104,11 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (shell !== undefined && typeof shell !== "boolean") throw new HttpError(400, "shell must be true or false");
     if (kind !== undefined && typeof kind !== "string") throw new HttpError(400, "kind must be a string");
     if (shell && kind !== undefined && kind !== "shell") throw new HttpError(400, "shell: true and a kind other than shell");
-    // shell: true is what the app sent before kinds.
-    const k = shell ? "shell" : (kind ?? "claude");
-    if (resume && !CLAUDE_KINDS.includes(k)) throw new HttpError(400, "only Claude Code can resume a conversation");
     const real = guard(dir);
     if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
+    // shell: true is what the app sent before kinds. A resume without a kind goes on in the one it ran in.
+    const k = shell ? "shell" : (kind ?? (resume ? resumedKind(real, resume, claudeDir(), readKindsFile().glm) : "claude"));
+    if (resume && !CLAUDE_KINDS.includes(k)) throw new HttpError(400, "only Claude Code can resume a conversation");
     const run = await launchFor(k, resume);
     return Response.json({ name: await startSession(real, { name: name || undefined, kind: k, run }) }, { status: 201 });
   }
