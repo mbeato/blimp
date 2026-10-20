@@ -136,9 +136,11 @@ final class BlimpUITests: XCTestCase {
         let more = app.buttons["Show more"]
         try wait(more, "Show more on the long reply")
         shot("8-stop")
-        stop.tap()
-        // The stand-in stops working on Esc, as Claude does: the working row and its Stop go
-        try until(stop, "exists == false", "the session to stop working")
+        // The stand-in stops working on Esc, as Claude does: the working row and its Stop go. Again only
+        // if the session read nothing (stop.in), so the job still sees exactly one Esc.
+        try tap(stop, until: "exists == false", "the session to stop working") {
+            stop.exists && stop.isEnabled && self.hostFile("stop.in").isEmpty && !self.labeled("Not sent").exists
+        }
         try until(working, "exists == false", "the working row to go")
         try wait(app.buttons["Talk"], "the mic after stopping")
         if labeled("Not sent").exists { throw failed("Stop was not sent") }
@@ -191,9 +193,13 @@ final class BlimpUITests: XCTestCase {
         let earlier = labeled("Fix the login redirect")
         try wait(earlier, "the past conversation under Earlier")
         shot("15-earlier")
-        earlier.tap()
-        // The new session runs `claude --resume <id>` (checked by the job); its chat is that conversation
-        try wait(message("message.assistant", "the page you came from"), "the resumed conversation's chat", timeout: 40)
+        // The new session runs `claude --resume <id>` (checked by the job); its chat is that conversation.
+        // Again only while nothing started: the row is still there and enabled (not starting) and the
+        // stand-in claude never ran with --resume.
+        let resumed = message("message.assistant", "the page you came from")
+        try tap(earlier, until: "exists == true", on: resumed, "the resumed conversation's chat", timeout: 40) {
+            earlier.exists && earlier.isEnabled && !self.hostFile("claude.args").contains("--resume")
+        }
         try wait(element("messageField"), "the resumed session's message field")
         shot("16-resumed")
     }
@@ -248,9 +254,10 @@ final class BlimpUITests: XCTestCase {
         try wait(labeled("2 of 2"), "the second question")
         let lint = app.buttons["choice-Lint"]
         try wait(lint, "the Lint option")
-        lint.tap()
-        app.buttons["choice-E2E"].tap()
-        try until(lint, "isSelected == true", "Lint to be ticked")
+        // A tick is the phone's own state: again only while it isn't ticked
+        try tap(lint, until: "isSelected == true", "Lint to be ticked", first: 3) { !lint.isSelected }
+        let e2e = app.buttons["choice-E2E"]
+        try tap(e2e, until: "isSelected == true", "E2E to be ticked", first: 3) { !e2e.isSelected }
         app.buttons["typeAnswer"].tap()
         let field = element("answerField")
         try wait(field, "the answer field")
@@ -407,6 +414,7 @@ final class BlimpUITests: XCTestCase {
         // and the texts on screen in the log, for when the artifact doesn't say
         let texts = app.debugDescription.split(separator: "\n").filter { $0.contains("label:") || $0.contains("identifier:") }
         print("SCREEN at \(what):\n" + texts.prefix(80).joined(separator: "\n"))
+        print("BLIMPD LOG at \(what):\n" + hostFile("blimpd.log").split(separator: "\n").suffix(30).joined(separator: "\n"))
         return Timeout(what: what)
     }
 
@@ -433,6 +441,30 @@ final class BlimpUITests: XCTestCase {
     private func until(_ e: XCUIElement, _ predicate: String, _ what: String, timeout: TimeInterval = 30) throws {
         let x = XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: e)
         if XCTWaiter().wait(for: [x], timeout: timeout) != .completed { throw failed(what) }
+    }
+
+    /// Taps `e` until `predicate` holds on `target` (`e` itself by default). In the simulator a tap now
+    /// and then shows the press but the button's action never runs: the recordings of runs 39438229858
+    /// (Earlier's row), 39465937373 (Lint) and 39491150251 (Stop) show the press, then nothing, and
+    /// blimpd got nothing. A person taps again; so does this, at most twice more, only when `again` says
+    /// the first did nothing, with a screenshot and a line in the log each time.
+    private func tap(_ e: XCUIElement, until predicate: String, on target: XCUIElement? = nil, _ what: String,
+                     first: TimeInterval = 10, timeout: TimeInterval = 30, again: () -> Bool) throws {
+        let x = { XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: target ?? e) }
+        for n in 1...3 {
+            e.tap()
+            if XCTWaiter().wait(for: [x()], timeout: first) == .completed { return }
+            guard n < 3, again() else { break }
+            shot("tap-\(n)-didnt-take-" + what.replacingOccurrences(of: " ", with: "-"))
+            print("TAP \(n) on \(e.identifier.isEmpty ? e.label : e.identifier) didn't take (waiting for \(what)); tapping again")
+        }
+        if XCTWaiter().wait(for: [x()], timeout: max(timeout - first, 0)) != .completed { throw failed(what) }
+    }
+
+    /// A file the job keeps in $E2E_DIR on the Mac (the simulator's test runner reads host paths), or "".
+    private func hostFile(_ name: String) -> String {
+        let dir = ProcessInfo.processInfo.environment["E2E_DIR"] ?? "/tmp/be"
+        return (try? String(contentsOfFile: dir + "/" + name, encoding: .utf8)) ?? ""
     }
 }
 
