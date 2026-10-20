@@ -5,7 +5,7 @@
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { Server } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
@@ -27,7 +27,8 @@ import {
 } from "./sessions";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
-type WsData = AttachData | EventsData | ChatData;
+// `phone`: the phone token a socket came in with. It is closed once that token is gone (see serve).
+type WsData = (AttachData | EventsData | ChatData) & { phone?: string };
 
 // <socket dir>/token, made once: 32 random bytes as hex, readable only by you.
 export function loadToken(dir: string): string {
@@ -41,12 +42,30 @@ export function loadToken(dir: string): string {
   return token;
 }
 
-function authorized(req: Request, url: URL, token: string): boolean {
+// <socket dir>/phone-token, made by `blimpd pair` and deleted by `blimpd pair --revoke`. Read on every
+// request, so a revoke takes effect at once. Missing or empty: "", which matches nothing.
+export function readPhoneToken(dir: string): string {
+  try {
+    return readFileSync(join(dir, "phone-token"), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+const same = (given: Buffer, token: string) => {
+  const want = Buffer.from(token);
+  return token !== "" && given.length === want.length && timingSafeEqual(given, want);
+};
+
+// Which token the request carries: the Mac's, the phone's (its value), or neither (undefined).
+function authorized(req: Request, url: URL, token: string, dir: string): "mac" | { phone: string } | undefined {
   // HTTP sends a Bearer header; WebSockets can't, so they send ?token=.
   const h = req.headers.get("authorization");
   const given = Buffer.from(h?.startsWith("Bearer ") ? h.slice(7) : (url.searchParams.get("token") ?? ""));
-  const want = Buffer.from(token);
-  return given.length === want.length && timingSafeEqual(given, want);
+  const phone = readPhoneToken(dir);
+  // Both compared every time, so the answer takes as long whichever matched.
+  const [mac, ph] = [same(given, token), same(given, phone)];
+  return mac ? "mac" : ph ? { phone } : undefined;
 }
 
 const error = (status: number, message: string, extra = {}) => Response.json({ error: message, ...extra }, { status });
@@ -68,9 +87,10 @@ async function bodyPath(req: Request): Promise<string> {
   return path;
 }
 
-async function route(req: Request, url: URL, server: Server): Promise<Response | undefined> {
+async function route(req: Request, url: URL, server: Server, phone?: string): Promise<Response | undefined> {
   const { pathname: path, searchParams: q } = url;
   const get = req.method === "GET";
+  const upgrade = (data: WsData) => server.upgrade(req, { data: Object.assign(data, { phone }) });
 
   if (path === "/health" && get) return Response.json({ version: pkg.version, home: realHome() });
 
@@ -119,7 +139,7 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
     // `zmx attach` would create a missing session, so check first.
     if (!(await sessionExists(name))) throw new HttpError(404, `no session named ${name}`);
     const data: AttachData = { kind: "attach", name, ...termSize(q.get("cols"), q.get("rows")) };
-    if (server.upgrade(req, { data })) return;
+    if (upgrade(data)) return;
     throw new HttpError(400, "expected a WebSocket");
   }
 
@@ -127,12 +147,12 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
   if (chat && get) {
     const name = decodeURIComponent(chat[1]);
     if (!isSafeName(name) || !(await sessionExists(name))) throw new HttpError(404, `no session named ${name}`);
-    if (server.upgrade(req, { data: chatData(name) })) return;
+    if (upgrade(chatData(name))) return;
     throw new HttpError(400, "expected a WebSocket");
   }
 
   if (path === "/events" && get) {
-    if (server.upgrade(req, { data: eventsData() })) return;
+    if (upgrade(eventsData())) return;
     throw new HttpError(400, "expected a WebSocket");
   }
 
@@ -178,7 +198,15 @@ export function serve(): Server {
   mkdirSync(dirname(sock), { recursive: true });
   chmodSync(dirname(sock), 0o700);
   rmSync(sock, { force: true });
-  const token = loadToken(dirname(sock));
+  const dir = dirname(sock);
+  const token = loadToken(dir);
+  // Sockets opened with the phone token close within a second of `blimpd pair --revoke` (or a new pair).
+  const phoneSockets = new Set<ServerWebSocket<WsData>>();
+  setInterval(() => {
+    if (!phoneSockets.size) return;
+    const now = readPhoneToken(dir);
+    for (const ws of phoneSockets) if (ws.data.phone !== now) ws.close(4001, "token revoked");
+  }, 1000);
   const server = Bun.serve<WsData>({
     unix: sock,
     // Uploads stream to disk; the cap itself is checked as they go (files.ts).
@@ -196,10 +224,11 @@ export function serve(): Server {
         });
       const url = new URL(req.url);
       // No CORS header on a 401: any web page could read it and learn that this port is blimp.
-      if (!authorized(req, url, token)) return error(401, "wrong or missing token");
+      const who = authorized(req, url, token, dir);
+      if (!who) return error(401, "wrong or missing token");
       let res: Response | undefined;
       try {
-        res = await route(req, url, server);
+        res = await route(req, url, server, who === "mac" ? undefined : who.phone);
       } catch (e) {
         res = errorResponse(e);
       }
@@ -208,6 +237,7 @@ export function serve(): Server {
     },
     websocket: {
       open(ws) {
+        if (ws.data.phone) phoneSockets.add(ws);
         if (ws.data.kind === "attach") openAttach(ws as any);
         else if (ws.data.kind === "chat") openChat(ws as any);
         else openEvents(ws as any, server);
@@ -218,6 +248,7 @@ export function serve(): Server {
         else eventsMessage(ws as any, msg);
       },
       close(ws) {
+        phoneSockets.delete(ws);
         if (ws.data.kind === "attach") closeAttach(ws as any);
         else if (ws.data.kind === "chat") closeChat(ws as any);
         else closeEvents(ws as any);

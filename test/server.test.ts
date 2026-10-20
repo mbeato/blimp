@@ -156,6 +156,68 @@ describe("token", () => {
   });
 });
 
+describe("phone token", () => {
+  const phoneFile = join(tmp, "phone-token");
+  const phone = "c0ffee".repeat(10) + "abcd";
+  const asPhone = (path: string) => api(path, { headers: { Authorization: `Bearer ${phone}` } }, false);
+  const ws = (path: string, t: string) => {
+    const w = new WebSocket(`ws+unix://${sock}:${path}?token=${t}`);
+    const s = { w, messages: [] as any[], closed: undefined as undefined | { code: number; reason: string } };
+    w.onmessage = (e) => s.messages.push(JSON.parse(e.data as string));
+    w.onclose = (e) => (s.closed = { code: e.code, reason: e.reason });
+    return s;
+  };
+
+  test("works for HTTP and a WebSocket; deleted, it's refused at once, open sockets close, the Mac's goes on", async () => {
+    writeFileSync(phoneFile, phone + "\n", { mode: 0o600 });
+    const ok = await asPhone("/health");
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBe("*");
+    const events = ws("/events", phone);
+    await until(() => events.messages.some((m) => m.type === "sessions"), "the phone's events socket");
+
+    rmSync(phoneFile);
+    // No restart and no wait: the next request already fails.
+    const no = await asPhone("/health");
+    expect(no.status).toBe(401);
+    expect(no.headers.get("access-control-allow-origin")).toBeNull();
+    const refused = ws("/events", phone);
+    await until(() => refused.closed, "the refused socket to close");
+    expect(refused.messages).toEqual([]);
+    // The socket opened before the revoke is closed too.
+    await until(() => events.closed, "the open phone socket to close", 3000);
+    expect(events.closed!.code).toBe(4001);
+
+    expect((await api("/health")).status).toBe(200);
+    const mac = await socket("/events");
+    await Bun.sleep(1500); // past the check that closed the phone's socket
+    expect(mac.closed).toBeUndefined();
+    mac.ws.close();
+  });
+
+  test("a Mac socket stays open while a phone token comes and goes", async () => {
+    const mac = await socket("/events");
+    writeFileSync(phoneFile, phone, { mode: 0o600 });
+    await Bun.sleep(1200);
+    rmSync(phoneFile);
+    await Bun.sleep(1200);
+    expect(mac.closed).toBeUndefined();
+    mac.ws.close();
+  });
+
+  test("an empty or missing phone-token file lets no empty token in", async () => {
+    for (const write of [true, false]) {
+      if (write) writeFileSync(phoneFile, "\n", { mode: 0o600 });
+      expect((await api("/health?token=", {}, false)).status).toBe(401);
+      expect((await api("/health", { headers: { Authorization: "Bearer " } }, false)).status).toBe(401);
+      const s = ws("/events", "");
+      await until(() => s.closed, "the empty-token socket to close");
+      expect(s.messages).toEqual([]);
+    }
+    rmSync(phoneFile, { force: true });
+  });
+});
+
 test("refuses to start when zmx's socket folder is writable by others", async () => {
   // Whoever can write that folder can swap a session's socket for their own and get what you type.
   const dir = mkdtempSync(join(tmpdir(), "bz"));
