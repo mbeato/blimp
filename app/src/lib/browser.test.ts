@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { HOME, pageFile, pageFileName, pageTitle, searchUrl, shownUrl, typedUrl } from "./browser";
+import { HOME, pageFile, pageFileName, pageTitle, searchUrl, serverTabTarget, shownUrl, typedUrl } from "./browser";
 
 const portTab = { port: { port: 3000, host: "127.0.0.1" as const }, base: "http://127.0.0.1:53211" };
 const plain = { base: null };
@@ -47,4 +47,12 @@ test("the file Send to session uploads", () => {
   expect(pageFileName("https://docs.x.dev/a/b")).toBe("page-docs.x.dev.md");
   expect(pageFileName("http://[::1]:3000/")).toBe("page-1.md");
   expect(pageFileName("nonsense")).toBe("page.md");
+});
+
+test("a server tab opens here as a port tab for the server's localhost, else at its address", () => {
+  expect(serverTabTarget("http://localhost:3000/login?x=1")).toEqual({ port: 3000 });
+  expect(serverTabTarget("http://127.0.0.1:5173/")).toEqual({ port: 5173 });
+  expect(serverTabTarget("https://example.com/a")).toEqual({ url: "https://example.com/a" });
+  expect(serverTabTarget("http://localhost/")).toEqual({ url: "http://localhost/" });
+  expect(serverTabTarget("not a url")).toEqual({ url: "not a url" });
 });

@@ -31,9 +31,11 @@ test("which Chrome: one on PATH first, else Playwright's newest, else none", () 
     mkdirSync(d, { recursive: true });
     writeFileSync(join(d, "chrome"), "");
   }
-  expect(findChrome(home, (n) => (n === "chromium" ? "/usr/bin/chromium" : null))).toBe("/usr/bin/chromium");
-  expect(findChrome(home, () => null)).toBe(join(home, ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome"));
-  expect(findChrome(join(tmp, "empty"), () => null)).toBeNull();
+  expect(findChrome(home, (n) => (n === "chromium" ? "/usr/bin/chromium" : null), "")).toBe("/usr/bin/chromium");
+  expect(findChrome(home, () => null, "")).toBe(join(home, ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome"));
+  expect(findChrome(join(tmp, "empty"), () => null, "")).toBeNull();
+  // Where PLAYWRIGHT_BROWSERS_PATH says.
+  expect(findChrome(join(tmp, "empty"), () => null, join(home, ".cache", "ms-playwright"))).toBe(join(home, ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome"));
 });
 
 const path = findChrome();

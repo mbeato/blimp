@@ -7,6 +7,7 @@ import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, p
 import { useOverlay } from "../lib/overlay";
 import { dragHover } from "../lib/place";
 import { relTime } from "../lib/time";
+import { hostOf } from "../lib/browser";
 import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
 
@@ -99,6 +100,8 @@ export function TerminalPane(props: {
   hoverAt?: { x: number; y: number } | null;
   // A port a session here listens on: open it in a browser tab.
   onOpenPort: (p: Port) => void;
+  // A server browser tab of this folder, opened here (step 1 of the server browser: listed only).
+  onOpenTab: (url: string) => void;
   // The chevron's "Models and keys…": Settings, at Models.
   onModels: () => void;
   actions: { current: PaneActions };
@@ -304,6 +307,7 @@ export function TerminalPane(props: {
   // Ports the folder's sessions listen on. One that opens while the pane is up is announced
   // (not the ones already open when it first loads), until opened, closed or 20 s pass.
   const ports = link.ports.filter((x) => running.some((s) => s.name === x.session));
+  const tabs = link.browserTabs.filter((t) => t.folder === dir);
   const seenPorts = useRef<Set<number> | null>(null);
   const [fresh, setFresh] = useState<Port | null>(null);
   const portsKey = ports.map((x) => x.port).join(",");
@@ -658,6 +662,21 @@ export function TerminalPane(props: {
               </span>
               <span className="srow-title">localhost:{x.port}</span>
               <span className="srow-time">{x.command}</span>
+            </button>
+          ))}
+          {tabs.length > 0 && <div className="slist-label">Browser</div>}
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              className="srow-main port-row"
+              title={`${t.title || t.url}\n${t.url}${t.openedBy ? `\nOpened by ${titleOf(t.openedBy)}` : ""}`}
+              onClick={() => props.onOpenTab(t.url)}
+            >
+              <span className="srow-mark port-mark" aria-label={t.openedBy ? "Opened by a session" : undefined}>
+                {t.openedBy ? "●" : ""}
+              </span>
+              <span className="srow-title">{t.title || hostOf(t.url)}</span>
+              <span className="srow-time">{hostOf(t.url)}</span>
             </button>
           ))}
           {past.length > 0 && (

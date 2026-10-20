@@ -127,6 +127,7 @@ Custom kinds: `<socket dir>/kinds.json` = `{ "kinds": [{ "id", "label", "command
 
 - `{ "type": "sessions", "sessions": Session[] }`: sent on connect, then whenever the list changes. blimpd checks every 1 s. (A session that starts waiting must show in the app within 5 s.)
 - `{ "type": "ports", "ports": Port[] }`: sent on connect, then when it changes (checked every 2 s). `Port` = `{ port, host: "127.0.0.1" | "::1", session, pid, command }`: a TCP port on loopback or any address that a program inside a blimp session listens on (Linux `/proc`: the listening sockets, the process holding each, and whether it descends from a session's zmx daemon). `GET /ports` returns the same list.
+- `{ "type": "browser", "tabs": BrowserTab[] }`: the server browser's tabs (see Server browser), sent on connect and when they change.
 - `{ "type": "fs", "paths": string[] }`: watched paths that changed (debounced 150 ms).
 
 Client → server: `{ "type": "watch", "paths": string[] }` replaces this socket's watch set. Each path is watched non-recursively (a folder: its direct entries; a file: its content). The app sends the expanded folders of the tree plus the open files. Paths outside home are ignored.
@@ -170,6 +171,46 @@ zmx keeps session sockets in `ZMX_DIR`, else `$XDG_RUNTIME_DIR/zmx`, else `${TMP
 ### Starting sessions
 
 `POST /sessions` creates the zmx session from inside a PTY of 120×36 (not with stdin at /dev/null), waits until the session is listed with that client attached (`clients>0`; on zmx 0.5 killing it earlier loses the size), then kills that zmx client. Starts run one at a time, so two starts in the same second get different names. The session gets `TERM=xterm-256color` and `COLORTERM=truecolor`. The session then has a real size from the start: Claude renders its first screen properly, and output written before anyone attaches is shown to the first viewer.
+
+### Server browser
+
+One Chrome on the server that sessions drive through Google's Chrome DevTools MCP. Its tabs belong to folders. Spec: `docs/superpowers/specs/2026-10-20-server-browser-design.md`. Step 1 (this): sessions browse, and the app lists a folder's tabs.
+
+**Chrome** (`src/browser/chrome.ts`):
+- Which one: `google-chrome`, `google-chrome-stable`, `chromium` or `chromium-browser` on PATH, else the newest Playwright Chromium in `$PLAYWRIGHT_BROWSERS_PATH` or `~/.cache/ms-playwright`. `blimpd browser` prints which.
+- Started when first needed: a session's MCP connecting, `POST /browser/tabs`, or saved tabs at blimpd start.
+- Flags: `--headless=new --remote-debugging-pipe --password-store=basic --no-first-run --disable-blink-features=AutomationControlled`, `--user-agent` (normal Chrome's for its version, without "Headless"), and `--user-data-dir=~/.blimp/browser/profile` (700). There's no debugging port: only blimpd holds the pipe.
+- `--password-store=basic` is required. Without it, Chrome on a server with no desktop waits on a keyring for the cookie key, and every page load hangs.
+- Not `--enable-automation`.
+- A Chrome that exits as it starts is tried once more after 5 s. One started while the old blimpd's Chrome still holds the profile does that; it quits within seconds of losing its pipe.
+- Chrome that exits later: its gate WebSockets close (1012), and the next need starts it again with the saved tabs.
+
+**Gate** (`src/browser/gate.ts`): blimpd's one pipe connection, shared by every client.
+- Ids are rewritten per client.
+- Flat sessions belong to the client that attached, and so do child sessions inside them.
+- Discovery and auto-attach are the gate's own. A client sees only page targets of its folder: `targetCreated` for existing ones before the `setDiscoverTargets` reply, and attached before the `setAutoAttach` reply, as Chrome does.
+- A target's folder is the creating client's, the opener's for a popup, or the one blimp opened it for. `openedBy` is the session.
+- Another folder's `targetId` is "No target with given id found".
+- `Browser.close` is answered `{}` and does nothing. `Target.attachToBrowserTarget` and `Target.exposeDevToolsProtocol` are refused.
+- Titles: Chrome doesn't announce a page's own title, so blimpd reads `Target.getTargets` every 2 s.
+
+**Listener** (`src/browser/service.ts`): `ws://127.0.0.1:<port>/s/<session>`.
+- The port is the last one if it's free (so MCPs from before a restart still find it), written to `~/.blimp/browser/port`.
+- Admitted only if `/proc/net/tcp(6)` says the connecting socket is blimpd's uid (`peer.ts`), the name is plain, and zmx has that session. Its folder is the session's (real path).
+- Tabs are saved to `~/.blimp/browser/tabs.json` (`[{ folder, url, openedBy? }]`, 600) half a second after a change, and reopened when Chrome starts.
+
+**Sessions** (`src/browser/mcp.ts`, `src/kinds.ts`): when the login shell finds `npx`, a Chrome is found, and `~/.blimp/browser/mcp.json` exists:
+- Claude Code and Claude Code on GLM start with `--mcp-config ~/.blimp/browser/mcp.json`.
+- Codex starts with `-c mcp_servers.blimp-browser.command=… -c mcp_servers.blimp-browser.args=[…]`.
+
+`mcp.json` runs `blimpd browser-mcp` (server `blimp-browser`). That reads `ZMX_SESSION` and the port file, then runs `npx -y chrome-devtools-mcp@1.11.0 --wsEndpoint ws://127.0.0.1:<port>/s/<session> --no-usage-statistics --no-performance-crux`. Your own MCP servers still load. Sessions already running get it when they're next started.
+
+**API**:
+- `GET /browser/tabs?dir=` → `BrowserTab[]` = `[{ id, folder, url, title, openedBy? }]` (all of them without `dir`).
+- `POST /browser/tabs { dir, url }` → 201 `{ id }`: http or https only, a folder inside home. 503 if there's no Chrome, with how to install one.
+- `DELETE /browser/tabs/<id>` → 204, or 404.
+
+**App (step 1):** under Ports in the session list, "Browser": the folder's tabs (title, host, ● if a session opened it). A click opens it here. The server's `localhost:<port>` opens as a port tab; anything else opens as a browser tab at its address.
 
 ## The app
 

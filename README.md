@@ -24,6 +24,7 @@ These screenshots come from the browser build that the end-to-end tests use. The
 - A Claude Code login on the server. Run `claude` on the server once and log in. If you do not, each new session in blimp shows Claude's login steps instead of a prompt.
 - An SSH server that allows forwarding to a unix socket. The app needs this to reach blimpd. It is on by default. A hardened `/etc/ssh/sshd_config` can turn it off with `AllowStreamLocalForwarding no` (or `remote`), or with `DisableForwarding yes`. To check, run `sudo sshd -T | grep -i forwarding` on the server. It must show `disableforwarding no`, and `allowstreamlocalforwarding` must be `yes`, `all` or `local`.
 - `curl`, `tar` and `sha256sum`. Most Linux systems have them.
+- Optional, for the browser sessions can use: Chrome or Chromium, and `npx` (Node.js) on the `PATH` of your login shell. If you have neither Chrome nor Chromium, `npx playwright install chromium` installs one. Run `blimpd browser` to see which one blimp found.
 - User systemd (`systemctl --user`). This is recommended. If you have it, the installer runs blimpd as a user service. If you do not have it, you must start blimpd yourself, and start it again after each reboot.
 - Linger, if you use systemd. This is strongly recommended.
   - Without linger, systemd stops blimpd when your last SSH connection to the server ends. That also ends every session that blimpd started. The app's own connection counts. So if you quit blimp and no other SSH connection is open, your sessions end.
@@ -168,6 +169,13 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - When a program in one of the folder's sessions starts listening on a port (a dev server on `localhost:3000`, say), blimp says "Port 3000 is open" with **Open**. The session list shows every such port under **Ports**.
 - **Open** shows the page in a tab next to your files, as if it ran on your Mac (blimp forwards the port over your SSH connection while the tab is open). The bar above it takes a path, and has **Reload** and **Open in Browser**.
 
+**A browser for your sessions**
+
+- Claude Code and Codex sessions that blimp starts can use a Chrome that runs on the server. Ask Claude to open a page, and it can read the page's source, its network requests (headers and bodies) and its console. This uses Google's [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp). It needs Chrome or Chromium and `npx` on the server (see Requirements).
+- Its tabs belong to the folder: a session sees only the tabs of its own folder, and the session list shows them under **Browser** (● for a tab a session opened). Click one to open it in a tab here.
+- The tabs and the logins stay on the server, so any Mac you connect from sees the same tabs.
+- Sessions that were already running get the browser the next time they start.
+
 **When a file changes on the server**
 
 - If you have no edits waiting to be saved, the file reloads by itself. This is what you see when Claude edits a file you have open.
@@ -238,6 +246,7 @@ blimpd can start sessions, type into them, and read and write every file in your
 - Files from the server cannot run script in the app. Markdown goes through DOMPurify, SVG shows only as an image, and pdf.js runs with scripting off. A strict content security policy blocks remote and inline script.
 - The installer checks zmx against a pinned SHA-256 sum, and blimpd against the release's `SHA256SUMS`.
 - **Accepted trade-off, keystroke timing:** plain `ssh` (OpenSSH 9.5 and later) sends keystrokes in fixed 20 ms ticks, so that a network observer cannot see your typing rhythm. blimp's tunnel is a port forward, which does not do this. So a network observer can see when you type, but not what you type. VS Code Remote and Tailscale have the same trade-off.
+- The server browser has no network port that other users on the server can use. It listens on `127.0.0.1` only, and it lets in only connections from your own user.
 - The files on the left can show anything in your home folder, dotfiles too, and blimp can make files and folders there. Your SSH access already allows that.
 
 ## Latency in brief

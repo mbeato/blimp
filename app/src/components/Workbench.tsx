@@ -18,7 +18,7 @@ import {
   type SyncEvent,
   type Viewer,
 } from "../lib/files";
-import { HOME, onViewChange, pageTitle, view } from "../lib/browser";
+import { HOME, onViewChange, pageTitle, serverTabTarget, view } from "../lib/browser";
 import { useOverlay, useOverlayOpen } from "../lib/overlay";
 import { closePort, openPort } from "../lib/ports";
 import { tildify } from "../lib/sessions";
@@ -52,8 +52,9 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 // terminal's ⌘-click.
 export type Opener = (path: string, line?: number, col?: number) => void;
 
-// Opens a server port in a browser tab (or brings its tab forward); with none, a new browser tab.
-export type PageOpener = (p?: Pick<Port, "port" | "host">) => void;
+// Opens a server port in a browser tab (or brings its tab forward); with none, a new browser tab;
+// with a server browser tab's address, that address (lib/browser.ts serverTabTarget).
+export type PageOpener = (p?: Pick<Port, "port" | "host"> | string) => void;
 
 // Files dropped on the window (from Finder): into this folder, or null for the folder new files
 // go in (the one last clicked in the tree).
@@ -491,6 +492,10 @@ export function Workbench(props: {
   const blank = (key: string): Page => ({ key, base: null, url: null, title: "", loading: false, error: "", nonce: 0 });
   const openPage: PageOpener = (p) => {
     if (!p) return newPage();
+    if (typeof p === "string") {
+      const to = serverTabTarget(p);
+      return "port" in to ? openPage({ port: to.port, host: "127.0.0.1" }) : newPage(to.url);
+    }
     const key = `port:${p.port}`;
     if (!pages.has(key)) {
       const page: Page = { ...blank(key), port: { port: p.port, host: p.host } };

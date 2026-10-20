@@ -56,7 +56,8 @@ export default async function setup() {
   const blimpd = spawn("bun", [join(repo, "src/main.ts"), "serve"], {
     // SHELL: New shell starts a login shell in the empty home, where zsh would open its
     // first-run menu (and take the test's typing) for want of a .zshrc.
-    env: { ...process.env, HOME: fixtures, SHELL: "/bin/bash", BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude"), PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: "" },
+    // The server browser's Chromium is Playwright's, in the real home (blimpd's is the fixtures).
+    env: { ...process.env, HOME: fixtures, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), ".cache", "ms-playwright"), SHELL: "/bin/bash", BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude"), PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: "" },
     stdio: ["ignore", log, log],
   });
   children.push(blimpd);

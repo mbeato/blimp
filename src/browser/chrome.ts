@@ -12,13 +12,14 @@ import type { Readable, Writable } from "node:stream";
 export type CdpMessage = { id?: number; method?: string; params?: any; result?: any; error?: any; sessionId?: string };
 
 // Chrome or Chromium on PATH, else the newest Playwright Chromium (Playwright builds for arm64
-// servers too; Chrome for Testing doesn't). null: none.
-export function findChrome(home = homedir(), which: (n: string) => string | null = (n) => Bun.which(n)): string | null {
+// servers too; Chrome for Testing doesn't), where Playwright keeps them: PLAYWRIGHT_BROWSERS_PATH,
+// else ~/.cache/ms-playwright. null: none.
+export function findChrome(home = homedir(), which: (n: string) => string | null = (n) => Bun.which(n), browsers = process.env.PLAYWRIGHT_BROWSERS_PATH): string | null {
   for (const n of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
     const p = which(n);
     if (p) return p;
   }
-  const root = join(home, ".cache", "ms-playwright");
+  const root = browsers || join(home, ".cache", "ms-playwright");
   let dirs: string[] = [];
   try {
     dirs = readdirSync(root).filter((d) => /^chromium-\d+$/.test(d));

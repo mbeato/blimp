@@ -5,7 +5,7 @@
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Api, type Conn, type Port, type Session } from "./api";
+import { Api, type BrowserTab, type Conn, type Port, type Session } from "./api";
 import { EventsSocket } from "./events";
 
 export type Server = { host: string; user?: string; port?: number };
@@ -122,6 +122,7 @@ export class ServerLink {
   sessions: Session[] | null = null; // null until the first list arrives
   ports: Port[] = [];
   portsKnown = false; // the first port list has arrived
+  browserTabs: BrowserTab[] = [];
   conn: Conn | null = null;
   api: Api | null = null;
   private events: EventsSocket | null = null;
@@ -179,6 +180,10 @@ export class ServerLink {
         onPorts: (p) => {
           this.ports = p;
           this.portsKnown = true;
+          this.onChange(this);
+        },
+        onBrowser: (tabs) => {
+          this.browserTabs = tabs;
           this.onChange(this);
         },
         onFs: (paths) => this.fsListeners.forEach((f) => f(paths)),

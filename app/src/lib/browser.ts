@@ -99,3 +99,22 @@ export function pageFileName(url: string): string {
   } catch {}
   return host ? `page-${host}.md` : "page.md";
 }
+
+// A tab of the server's browser (step 1: listed, opened here): the server's own localhost:<port>
+// only reaches this Mac through a port tab's forward; any other address opens as it is.
+export function serverTabTarget(url: string): { port: number } | { url: string } {
+  try {
+    const u = new URL(url);
+    if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1") && u.port) return { port: Number(u.port) };
+  } catch {}
+  return { url };
+}
+
+// An address's host, for a short label; the address itself if it isn't one.
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
