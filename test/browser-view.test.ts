@@ -87,6 +87,7 @@ live("frames at the asked size; a click, typing and Enter reach the page", async
   w.send({ type: "size", width: 400, height: 300, scale: 1 });
   await until(() => w.frames.length > 0, "a frame");
   expect([w.frames[0][0], w.frames[0][1]]).toEqual([0xff, 0xd8]); // a JPEG
+  expect(w.msgs.find((m) => m.type === "frame")).toEqual({ type: "frame", width: 400, height: 300 });
   expect(await evalIn(id, "innerWidth")).toBe(400);
   // Frames keep coming while each is acked.
   const before = w.frames.length;

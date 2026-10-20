@@ -11,8 +11,8 @@ export type Target = { name: string; title: string };
 
 // A browser tab: a tab of the server's Chrome, shown live (lib/serverview.ts). The bar has Back,
 // Forward, Reload, the address, Open in Browser and Send to session. While the tab is on screen
-// (`shown`) the view socket is open: frames come in and are drawn to a canvas at the screen's
-// pixel ratio; clicks, scrolling and typing go out. Typing goes through a hidden text field, so
+// (`shown`) the view socket is open: frames come in and are drawn to a canvas at the page's size;
+// clicks, scrolling and typing go out. Typing goes through a hidden text field, so
 // input methods, accents and emoji work. ⌘C and ⌘V use the Mac clipboard.
 export function PageView(props: {
   tab: BrowserTab;
@@ -79,16 +79,17 @@ export function PageView(props: {
     setState("connecting");
     let timer: ReturnType<typeof setTimeout> | undefined;
     const v = new ServerView(api.viewUrl(tab.id), {
-      frame(b) {
+      frame(b, size) {
         const c = canvas.current;
         if (!c) return b.close();
         if (c.width !== b.width || c.height !== b.height) {
           c.width = b.width;
           c.height = b.height;
         }
+        // At the page's size: the canvas's CSS pixels are then the page's, for the mouse.
         const dpr = window.devicePixelRatio || 1;
-        c.style.width = `${b.width / dpr}px`;
-        c.style.height = `${b.height / dpr}px`;
+        c.style.width = `${size?.width ?? b.width / dpr}px`;
+        c.style.height = `${size?.height ?? b.height / dpr}px`;
         c.getContext("2d")?.drawImage(b, 0, 0);
         b.close();
         setState("open");

@@ -78,3 +78,31 @@ test("a browser tab is the server's Chrome, live: clicks and typing reach the pa
   await expect.poll(async () => (await tabsOnServer()).some((t) => t.url.includes(`:${port}/form`))).toBe(false);
   expect(await cspViolations(page)).toEqual([]);
 });
+
+// On a Retina screen the server's Chrome still sends pictures at the page's own size (headless
+// Chrome's screencast ignores the device scale), so the picture is drawn at the page's size, not
+// the frame's pixels halved, and fills the tab.
+test.describe("Retina", () => {
+  test.use({ deviceScaleFactor: 2 });
+  test("the picture fills the tab, and a click lands where the page shows it", async ({ page }) => {
+    const dir = fixtureDir("browser-retina");
+    startSession(`${sess}-r`, dir, ["sh", "-c", "exec cat"]);
+    await openSessionTab(page, dir);
+    await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
+    const tab = frontTab(page).locator(".ftabs .tab.active");
+    const viewer = frontTab(page).locator(".viewer:not([hidden])");
+    const address = viewer.getByLabel("Address");
+    await expect(address).toBeFocused({ timeout: 10_000 });
+    await address.fill(`127.0.0.1:${port}/form`);
+    await address.press("Enter");
+    await expect(tab).toHaveText(/Form page/, { timeout: 10_000 });
+    const area = viewer.locator(".page-live");
+    const canvas = area.locator("canvas");
+    await expect.poll(async () => Math.round((await canvas.boundingBox())?.width ?? 0)).toBe(Math.round((await area.boundingBox())!.width));
+    const box = (await canvas.boundingBox())!;
+    expect(Math.round(box.height)).toBe(Math.round((await area.boundingBox())!.height));
+    await canvas.click({ position: { x: 50, y: 30 } });
+    await expect(tab).toHaveText(/clicked/, { timeout: 10_000 });
+    killSession(`${sess}-r`);
+  });
+});

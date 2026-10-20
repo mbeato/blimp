@@ -77,7 +77,8 @@ export function wheelMessage(e: WheelEvent, rect: DOMRect): MouseMsg {
 }
 
 export type ViewHandlers = {
-  frame(image: ImageBitmap): void;
+  // size: the page's, in CSS pixels, to draw the frame at (null: not said).
+  frame(image: ImageBitmap, size: { width: number; height: number } | null): void;
   info(i: ViewInfo): void;
   dialog(d: ViewDialog | null): void;
   copied(text: string): void;
@@ -88,15 +89,18 @@ export type ViewHandlers = {
 export class ServerView {
   private ws: WebSocket;
   private done = false;
+  private size: { width: number; height: number } | null = null; // the next frame's
 
   constructor(url: string, private h: ViewHandlers) {
     this.ws = new WebSocket(url);
     this.ws.binaryType = "arraybuffer";
     this.ws.onmessage = (e) => {
       if (typeof e.data !== "string") {
+        const size = this.size;
+        this.size = null;
         createImageBitmap(new Blob([e.data], { type: "image/jpeg" })).then(
           (b) => {
-            if (!this.done) this.h.frame(b);
+            if (!this.done) this.h.frame(b, size);
             this.send({ type: "ack" });
           },
           () => this.send({ type: "ack" }),
@@ -109,7 +113,8 @@ export class ServerView {
       } catch {
         return;
       }
-      if (m.type === "info") this.h.info(m);
+      if (m.type === "frame") this.size = m.width > 0 && m.height > 0 ? { width: m.width, height: m.height } : null;
+      else if (m.type === "info") this.h.info(m);
       else if (m.type === "dialog") this.h.dialog(m);
       else if (m.type === "dialog-closed") this.h.dialog(null);
       else if (m.type === "copied") this.h.copied(String(m.text ?? ""));
