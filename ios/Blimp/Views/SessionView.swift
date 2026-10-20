@@ -72,6 +72,8 @@ private struct ChatContent: View {
     @State private var onScreen = false
 
     private static let bottom = "bottom"
+    /// The screen's height (less the keyboard), so Claude's questions can take most of it.
+    @State private var screenHeight: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -144,6 +146,7 @@ private struct ChatContent: View {
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
         .navigationTitle(model.title)
         .navigationSubtitle(model.folder)
         .navigationBarTitleDisplayMode(.inline)
@@ -205,7 +208,8 @@ private struct ChatContent: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let prompt = model.prompt {
                     PromptBar(prompt: prompt, busy: model.answering || model.answered,
-                              highlight: guess?.prompt == prompt ? guess?.pick : nil) { pick, shown in
+                              highlight: guess?.prompt == prompt ? guess?.pick : nil,
+                              maxHeight: max(320, screenHeight * 0.6)) { pick, shown in
                         guess = nil
                         Task { await model.answer(pick, to: shown) }
                     } onAnswers: { draft, shown in

@@ -10,6 +10,8 @@ struct PromptBar: View {
     let busy: Bool
     /// A spoken answer's guess: this button is marked and waits for a tap; nothing was sent.
     var highlight: Int? = nil
+    /// The tallest it gets before it scrolls: the chat screen passes most of its height.
+    var maxHeight: CGFloat = 320
     /// The choice's index, and the prompt it was shown in: a permission, or one single-choice question.
     let onPick: (Int, Prompt) -> Void
     /// Every question's answer, for any other question dialog (or a typed answer to one question).
@@ -24,7 +26,7 @@ struct PromptBar: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(height: min(height, 320))
+        .frame(height: min(height, maxHeight))
     }
 
     private var content: some View {
