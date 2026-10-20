@@ -967,7 +967,8 @@ export function Workbench(props: {
             label="Resize terminal"
             onDrag={(y) => {
               const r = right.current!.getBoundingClientRect();
-              setEditorShare(clamp((y - r.top) / r.height, 0.15, 0.85));
+              // Up to the top: the terminal may cover the editor entirely.
+              setEditorShare(clamp((y - r.top) / r.height, 0, 0.85));
             }}
           />
         )}

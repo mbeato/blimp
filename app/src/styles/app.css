@@ -216,9 +216,11 @@ h2 {
   flex-direction: column;
 }
 
+/* Clipped: the terminal can be dragged up over it, to nothing. */
 .wb-editor {
   flex: none;
   min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--bg);

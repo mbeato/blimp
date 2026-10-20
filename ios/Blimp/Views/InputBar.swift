@@ -1,7 +1,8 @@
 // The box you type into, the full width of the bar, with one round button inside its end: the mic
 // while the box is empty, Send once there's text (a spinner while sending). Return adds a line. The
 // mic: hold to talk and let go to send, slide up first to keep the words unsent; or tap to start and
-// tap again to send. Stop is on the chat's working row, not here.
+// tap again to stop, the words kept in the box to read before Send. Stop is on the chat's working
+// row, not here.
 import SwiftUI
 
 /// How a press on the mic ended.
@@ -76,7 +77,7 @@ struct InputBar: View {
     private var hint: String? {
         guard listening else { return nil }
         if inKeepZone { return "Release to keep" }
-        if latched { return "Tap the mic to send" }
+        if latched { return "Tap the mic to stop" }
         return pressedAt != nil ? "Slide up to keep" : nil
     }
 
@@ -103,7 +104,7 @@ struct InputBar: View {
                         inKeepZone = false
                         if latched {
                             latched = false
-                            onMicUp(.send)
+                            onMicUp(.keep)
                         } else if value.translation.height < -Self.keepDistance {
                             onMicUp(.keep)
                         } else if held < Self.tapTime {
@@ -113,12 +114,12 @@ struct InputBar: View {
                         }
                     }
             )
-            .accessibilityLabel(listening ? "Stop listening and send" : "Talk")
+            .accessibilityLabel(listening ? "Stop listening" : "Talk")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction {
                 if listening {
                     latched = false
-                    onMicUp(.send)
+                    onMicUp(.keep)
                 } else {
                     latched = true
                     onMicDown()

@@ -13,7 +13,7 @@ export type Target = { name: string; title: string };
 // Forward, Reload, the address, Open in Browser and Send to session. While the tab is on screen
 // (`shown`) the view socket is open: frames come in and are drawn to a canvas at the page's size;
 // clicks, scrolling and typing go out. Typing goes through a hidden text field, so
-// input methods, accents and emoji work. ⌘C and ⌘V use the Mac clipboard.
+// input methods, accents and emoji work. Copy, Cut and Paste use the Mac clipboard.
 export function PageView(props: {
   tab: BrowserTab;
   link: ServerLink;
@@ -39,7 +39,6 @@ export function PageView(props: {
   const keys = useRef<HTMLTextAreaElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const view = useRef<ServerView | null>(null);
-  const copied = useRef<((text: string) => void) | null>(null);
   const forwarded = useRef(new Set<number>());
 
   useEffect(() => {
@@ -60,12 +59,14 @@ export function PageView(props: {
     [],
   );
 
-  // The page is laid out at the area's size, at this screen's pixel ratio.
+  // The page is laid out at the area's width and down to the window's bottom, at this screen's
+  // pixel ratio: the terminal below covers the page's bottom rather than resizing it.
   const lastSize = useRef("");
   const sendSize = () => {
     const r = area.current?.getBoundingClientRect();
-    if (!r || !r.width || !r.height || !view.current) return;
-    const m = { type: "size", width: Math.round(r.width), height: Math.round(r.height), scale: window.devicePixelRatio || 1 };
+    const bottom = area.current?.closest(".wb-right")?.getBoundingClientRect().bottom ?? r?.bottom ?? 0;
+    if (!r || !r.width || bottom <= r.top || !view.current) return;
+    const m = { type: "size", width: Math.round(r.width), height: Math.round(bottom - r.top), scale: window.devicePixelRatio || 1 };
     const k = JSON.stringify(m);
     if (k === lastSize.current) return;
     lastSize.current = k;
@@ -99,9 +100,18 @@ export function PageView(props: {
         failures.current = 0;
         setInfo(i);
         setState("open");
+        askSelection();
       },
       dialog: (d) => (setDialog(d), setAnswer(d?.defaultPrompt ?? "")),
-      copied: (text) => copied.current?.(text),
+      // The page's selection, kept selected in the typing field: the Mac's Copy and Cut (the Edit
+      // menu, and ⌘C and ⌘X, which the menu takes) then copy it there and then. A copy that waited
+      // for the server's answer would be too late for the Mac to let it write the clipboard.
+      copied: (text) => {
+        const k = keys.current;
+        if (!k || k.value === text) return;
+        k.value = text;
+        k.setSelectionRange(0, text.length);
+      },
       // Tried again after 1 s, then longer each time in a row it fails, up to 10 s. A tab that's
       // gone leaves the strip (the server stops listing it), and this view with it.
       closed: (reason) => {
@@ -130,6 +140,8 @@ export function PageView(props: {
       frame = requestAnimationFrame(sendSize);
     });
     ro.observe(el);
+    const right = el.closest(".wb-right");
+    if (right) ro.observe(right);
     return () => (ro.disconnect(), cancelAnimationFrame(frame));
   }, []);
 
@@ -143,21 +155,11 @@ export function PageView(props: {
     keys.current?.focus();
   };
 
-  // ⌘C (and ⌘X): the server says what's selected; the Mac clipboard gets it. Safari takes a
-  // ClipboardItem whose text comes later, as long as it's made in the key press itself.
-  // No answer in 3 s (a slow or lost connection): the clipboard keeps what it had.
-  const copyOut = () => {
-    const text = new Promise<string>((done, fail) => {
-      copied.current = done;
-      setTimeout(() => fail(new Error("no answer")), 3000);
-    });
+  // After anything that may change what's selected, the server says what is (see copied above).
+  // Until it does, there's nothing to copy, rather than what was selected before.
+  const askSelection = () => {
+    if (keys.current) keys.current.value = "";
     send({ type: "copy" });
-    const plain = () => text.then((t) => navigator.clipboard.writeText(t)).catch(() => {});
-    try {
-      navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })]).catch(plain);
-    } catch {
-      void plain();
-    }
   };
 
   const openOutside = () => {
@@ -282,6 +284,7 @@ export function PageView(props: {
             const move = (ev: MouseEvent) => send(mouseMessage(ev, "mouseMoved", canvasRect()));
             const up = (ev: MouseEvent) => {
               send(mouseMessage(ev, "mouseReleased", canvasRect()));
+              askSelection();
               window.removeEventListener("mousemove", move);
               window.removeEventListener("mouseup", up);
             };
@@ -299,32 +302,44 @@ export function PageView(props: {
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
+          onFocus={(e) => e.currentTarget.setSelectionRange(0, e.currentTarget.value.length)}
           onKeyDown={(e) => {
-            const n = e.nativeEvent;
-            if (n.metaKey && !n.ctrlKey && (n.key === "c" || n.key === "x")) copyOut();
-            const m = keyMessage(n, "down");
+            const m = keyMessage(e.nativeEvent, "down");
             if (!m) return;
             e.preventDefault();
             send(m);
           }}
           onKeyUp={(e) => {
             const m = keyMessage(e.nativeEvent, "up");
-            if (m) send(m);
+            if (m) (send(m), askSelection());
+          }}
+          // The Mac's Cut: the selection onto the clipboard here (the field is cleared below, before
+          // the Cut itself would copy it), then the page cuts it as Linux does, with Ctrl+X.
+          onCut={(e) => {
+            const k = e.currentTarget;
+            e.preventDefault();
+            if (k.selectionStart === k.selectionEnd) return;
+            e.clipboardData.setData("text/plain", k.value.slice(k.selectionStart, k.selectionEnd));
+            for (const event of ["rawKeyDown", "keyUp"]) send({ type: "key", event, key: "x", code: "KeyX", keyCode: 88, modifiers: 2 });
+            askSelection();
           }}
           onCompositionEnd={(e) => {
-            if (e.data) send({ type: "text", text: e.data });
+            if (e.data) (send({ type: "text", text: e.data }), askSelection());
             e.currentTarget.value = "";
           }}
           onInput={(e) => {
             const t = e.currentTarget;
-            if ((e.nativeEvent as InputEvent).isComposing || !t.value) return;
-            send({ type: "text", text: t.value });
+            const n = e.nativeEvent as InputEvent;
+            if (n.isComposing || !t.value) return;
+            // What was typed, not the selection the field holds around it.
+            send({ type: "text", text: n.data ?? t.value });
             t.value = "";
+            askSelection();
           }}
           onPaste={(e) => {
             e.preventDefault();
             const text = e.clipboardData.getData("text/plain");
-            if (text) send({ type: "text", text });
+            if (text) (send({ type: "text", text }), askSelection());
           }}
         />
         {state !== "open" && (drawn || state === "lost") && (

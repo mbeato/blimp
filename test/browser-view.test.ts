@@ -177,3 +177,27 @@ live("a tab keeps streaming and taking input when another tab is brought to the 
   await until(async () => (await title(id)) === "clicked", "the click on the tab behind");
   w.v.close();
 }, 30_000);
+
+// A JPEG's width and height, from its start-of-frame marker.
+function jpegSize(b: Uint8Array): [number, number] | undefined {
+  for (let i = 2; i + 9 < b.length; ) {
+    const m = b[i + 1];
+    if (m >= 0xc0 && m <= 0xc2) return [(b[i + 7] << 8) | b[i + 8], (b[i + 5] << 8) | b[i + 6]];
+    i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+  }
+}
+
+// Sharp on a Retina Mac: frames at the screen's pixels (headless Chrome's screencast ignores the
+// emulated scale, so Chrome draws at 2x), and at the page's own size for a screen at 1x.
+live("frames come at the screen's pixel ratio: twice the page's size at 2x, its size at 1x", async () => {
+  const id = await gate.createTab("/f", base + "/");
+  await until(async () => (await title(id)) === "start", "the page");
+  const w = await viewer(id);
+  const last = () => JSON.stringify(jpegSize(w.frames.at(-1) ?? new Uint8Array()));
+  w.send({ type: "size", width: 400, height: 300, scale: 2 });
+  await until(() => last() === "[800,600]", "a frame at 2x");
+  w.send({ type: "size", width: 400, height: 300, scale: 1 });
+  await until(() => last() === "[400,300]", "a frame at 1x");
+  expect(await evalIn(id, "innerWidth")).toBe(400);
+  w.v.close();
+}, 30_000);

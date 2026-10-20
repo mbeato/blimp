@@ -29,6 +29,9 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
   let closed = false;
   let frame: number | null = null; // the frame Chrome waits to have acked
   let loading = false;
+  // The last input sent: Chrome answers it once the page has handled it. Runtime.evaluate reaches
+  // the page another way and can overtake it, so the selection is read only after.
+  let input: Promise<unknown> = Promise.resolve();
 
   const text = (m: object) => !closed && sock.send(JSON.stringify(m));
   const info = async () => {
@@ -116,7 +119,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
         }
         case "mouse":
           if (!MOUSE.has(m.event)) return;
-          return void call("Input.dispatchMouseEvent", {
+          return void (input = call("Input.dispatchMouseEvent", {
             type: m.event,
             x: clamp(m.x, -1e5, 1e5, 0),
             y: clamp(m.y, -1e5, 1e5, 0),
@@ -126,10 +129,10 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
             modifiers: clamp(m.modifiers, 0, 15, 0),
             deltaX: clamp(m.deltaX, -1e5, 1e5, 0),
             deltaY: clamp(m.deltaY, -1e5, 1e5, 0),
-          });
+          }));
         case "key":
           if (!KEY.has(m.event)) return;
-          return void call("Input.dispatchKeyEvent", {
+          return void (input = call("Input.dispatchKeyEvent", {
             type: m.event,
             key: str(m.key),
             code: str(m.code),
@@ -138,9 +141,9 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
             text: str(m.text),
             unmodifiedText: str(m.text),
             modifiers: clamp(m.modifiers, 0, 15, 0),
-          });
+          }));
         case "text":
-          if (typeof m.text === "string" && m.text) void call("Input.insertText", { text: m.text });
+          if (typeof m.text === "string" && m.text) input = call("Input.insertText", { text: m.text });
           return;
         case "go":
           if (typeof m.url === "string" && /^https?:\/\/[^/\s]/i.test(m.url)) void call("Page.navigate", { url: m.url });
@@ -151,7 +154,9 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
           else if (m.action === "reload") void call("Page.reload");
           return;
         case "copy":
-          return void call("Runtime.evaluate", { expression: SELECTION, returnByValue: true }).then((r) => text({ type: "copied", text: String(r.result?.result?.value ?? "") }));
+          return void input
+            .then(() => call("Runtime.evaluate", { expression: SELECTION, returnByValue: true }))
+            .then((r) => text({ type: "copied", text: String(r.result?.result?.value ?? "") }));
         case "dialog":
           return void call("Page.handleJavaScriptDialog", { accept: !!m.accept, ...(typeof m.text === "string" && { promptText: m.text }) });
       }
