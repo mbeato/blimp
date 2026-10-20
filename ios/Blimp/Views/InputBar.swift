@@ -38,6 +38,7 @@ struct InputBar: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 20))
+                .accessibilityIdentifier("messageField")
             mic
                 .frame(width: 36, height: 36)
             if canStop {
@@ -143,6 +144,7 @@ struct InputBar: View {
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.circle)
                 .disabled(!hasText || listening)
+                .accessibilityIdentifier("sendButton")
         }
     }
 }

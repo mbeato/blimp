@@ -1,9 +1,10 @@
 name: iOS
 
-# The iPhone app: its logic (BlimpKit) is tested on Linux and macOS; the app is built for the simulator.
+# The iPhone app: its logic (BlimpKit) is tested on Linux and macOS; the app is built for the simulator,
+# and run there against a real blimpd with stand-in Claude sessions (app-e2e).
 on:
   push:
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths: ["ios/**", "src/**", ".github/workflows/ios.yml"]
   workflow_dispatch:
 
 permissions:
@@ -44,3 +45,121 @@ jobs:
           xcodegen generate
           xcodebuild -project Blimp.xcodeproj -scheme Blimp -configuration Debug \
             -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build | tail -80
+
+  # The app in the simulator, driven by ios/BlimpUITests, against this branch's blimpd with two stand-in
+  # Claude sessions (ios/e2e/setup.ts). blimpd listens on a unix socket; socat forwards 127.0.0.1:7425 to
+  # it, as the SSH tunnel does on a Mac. Screenshots and logs go in the iphone-e2e artifact.
+  app-e2e:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    env:
+      E2E_DIR: /tmp/be
+      # zmx 0.8 limits session names by the length of its socket folder's path: keep it short.
+      ZMX_DIR: /tmp/zx
+      BLIMPD_SOCKET: /tmp/be/b/blimpd.sock
+      CLAUDE_CONFIG_DIR: /tmp/be/claude
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pick Xcode
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$x" ] && sudo xcode-select -s "$x"
+          xcodebuild -version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - run: bun install
+      - name: Install zmx
+        run: |
+          f=zmx-0.8.1-macos-aarch64.tar.gz
+          curl -fsSL -o "$RUNNER_TEMP/$f" "https://github.com/neurosnap/zmx/releases/download/v0.8.1/$f"
+          echo "1d86b1c9fba47fa707a6f0e976b20510b07c1c26d0ed010b9414b2a2c5e6beef  $RUNNER_TEMP/$f" | shasum -a 256 -c -
+          tar xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP" zmx
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 "$RUNNER_TEMP/zmx" "$HOME/.local/bin/zmx"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: brew install xcodegen socat
+      - name: Start blimpd, the stand-in sessions and the forward
+        run: |
+          mkdir -p "$E2E_DIR" "$ZMX_DIR"
+          chmod 700 "$ZMX_DIR"
+          nohup bun src/main.ts serve > "$E2E_DIR/blimpd.log" 2>&1 &
+          token="$(dirname "$BLIMPD_SOCKET")/token"
+          for i in $(seq 100); do [ -S "$BLIMPD_SOCKET" ] && [ -s "$token" ] && break; sleep 0.1; done
+          bun ios/e2e/setup.ts
+          nohup socat TCP-LISTEN:7425,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:"$BLIMPD_SOCKET" > "$E2E_DIR/socat.log" 2>&1 &
+          sleep 1
+          curl -fsS -H "Authorization: Bearer $(cat "$token")" http://127.0.0.1:7425/sessions
+          echo
+      - name: Boot an iPhone simulator
+        run: |
+          sim=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          devs = json.load(sys.stdin)["devices"]
+          ver = lambda r: [int(x) for x in re.findall(r"\d+", r.split("iOS-")[1])]
+          for r in sorted((r for r in devs if "SimRuntime.iOS-" in r), key=ver, reverse=True):
+              phones = [d for d in devs[r] if d["name"].startswith("iPhone")]
+              if phones:
+                  print(phones[0]["udid"]); print(phones[0]["name"], r, file=sys.stderr); break
+          ')
+          [ -n "$sim" ]
+          echo "SIM=$sim" >> "$GITHUB_ENV"
+          xcrun simctl boot "$sim"
+          xcrun simctl bootstatus "$sim"
+          # The keyboard's swipe-typing introduction would cover the keys the test types with.
+          xcrun simctl spawn "$sim" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
+      - name: UI test
+        working-directory: ios
+        run: |
+          xcodegen generate
+          # xcodebuild passes TEST_RUNNER_<name> to the test as <name>.
+          export TEST_RUNNER_BLIMP_LINK="$(cat "$E2E_DIR/link")"
+          log="$E2E_DIR/xcodebuild.log"
+          if xcodebuild -project Blimp.xcodeproj -scheme BlimpUITests -destination "platform=iOS Simulator,id=$SIM" \
+              -resultBundlePath "$E2E_DIR/e2e.xcresult" CODE_SIGN_IDENTITY=- SWIFT_TREAT_WARNINGS_AS_ERRORS=YES test > "$log" 2>&1; then
+            grep -E "Test Case|Executed|\*\* TEST" "$log"
+          else
+            grep -E " error: | warning: |Test Case|timed out|failed|\*\* TEST" "$log" | head -120
+            tail -40 "$log"
+            exit 1
+          fi
+      - name: Check what reached the stand-in sessions
+        run: |
+          grep -F "Thanks, ship it" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
+          [ "$(cat "$E2E_DIR/prompt.in")" = 1 ] || { echo "demo-ask got:"; cat -v "$E2E_DIR/prompt.in"; exit 1; }
+          echo "demo-chat got the message; demo-ask got 1 (Yes)"
+      - name: Export screenshots
+        if: always()
+        run: |
+          [ -d "$E2E_DIR/e2e.xcresult" ] || exit 0
+          out="$E2E_DIR/screenshots"
+          mkdir -p "$out"
+          xcrun xcresulttool export attachments --path "$E2E_DIR/e2e.xcresult" --output-path "$out"
+          # Name each file as the test named it.
+          python3 -c '
+          import json, os, sys
+          d = sys.argv[1]
+          for t in json.load(open(os.path.join(d, "manifest.json"))):
+              for a in t.get("attachments", []):
+                  src, name = os.path.join(d, a["exportedFileName"]), a.get("suggestedHumanReadableName")
+                  if name and os.path.exists(src): os.rename(src, os.path.join(d, name))
+          ' "$out" || true
+          ls "$out"
+      - name: blimpd's log
+        if: failure()
+        run: |
+          cat "$E2E_DIR/blimpd.log" || true
+          cat "$E2E_DIR/socat.log" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: iphone-e2e
+          path: |
+            /tmp/be/screenshots
+            /tmp/be/e2e.xcresult
+            /tmp/be/xcodebuild.log
+            /tmp/be/blimpd.log
+          if-no-files-found: warn

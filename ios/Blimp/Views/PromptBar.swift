@@ -111,6 +111,7 @@ private struct ChoiceButton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             button
+                .accessibilityIdentifier("choice-\(label)")
                 .overlay {
                     if marked { RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor, lineWidth: 2).padding(-3) }
                 }

@@ -16,12 +16,14 @@ struct PairView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .accessibilityIdentifier("pairField")
                     Button {
                         Task { await connect() }
                     } label: {
                         if busy { ProgressView() } else { Text("Connect") }
                     }
                     .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("connectButton")
                 } footer: {
                     Text("Paste the blimp:// link from ios/README.md, with your server's token in it.")
                 }

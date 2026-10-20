@@ -36,7 +36,26 @@ targets:
           NSExceptionDomains:
             localhost: { NSExceptionAllowsInsecureHTTPLoads: true }
             127.0.0.1: { NSExceptionAllowsInsecureHTTPLoads: true }
+  # Drives the app in the simulator against a real blimpd: the app-e2e job in .github/workflows/ios.yml.
+  BlimpUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [BlimpUITests]
+    dependencies:
+      - target: Blimp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.blimp.phone.uitests
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Blimp
 schemes:
   Blimp:
     build:
       targets: { Blimp: all }
+  BlimpUITests:
+    build:
+      targets: { Blimp: all, BlimpUITests: [test] }
+    test:
+      targets: [BlimpUITests]

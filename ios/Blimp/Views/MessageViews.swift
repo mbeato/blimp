@@ -24,6 +24,7 @@ struct UserBubble: View {
         HStack {
             Spacer(minLength: 48)
             Text(text)
+                .accessibilityIdentifier("message.user")
                 .textSelection(.enabled)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
@@ -53,7 +54,7 @@ struct BlockView: View {
     var body: some View {
         switch block {
         case .paragraph(let s):
-            Text(Inline.text(s))
+            Text(Inline.text(s)).accessibilityIdentifier("message.assistant")
         case .heading(let level, let s):
             Text(Inline.text(s)).font(Self.font(level)).bold()
         case .bullets(let items):

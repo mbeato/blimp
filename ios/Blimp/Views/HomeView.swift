@@ -30,6 +30,7 @@ struct HomeView: View {
                             }
                             .textCase(nil)
                         }
+                        .accessibilityIdentifier("project-\(group.name)")
                     }
                 }
                 if store.home.projects.isEmpty {
@@ -75,6 +76,7 @@ struct HomeView: View {
 
     private func row(_ session: Session) -> some View {
         NavigationLink(value: SessionRoute(name: session.name)) { SessionRow(session: session) }
+            .accessibilityIdentifier("session-\(session.name)")
             .endSwipe(session, pending: $pendingEnd)
     }
 
