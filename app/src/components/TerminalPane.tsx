@@ -4,7 +4,6 @@ import { errorText, type ServerLink } from "../lib/connection";
 import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
 import { freeName, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, pickSession, sessionTitle } from "../lib/sessions";
-import { useOverlay } from "../lib/overlay";
 import { dragHover } from "../lib/place";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
@@ -122,8 +121,6 @@ export function TerminalPane(props: {
   const [drag, setDrag] = useState<Drag | null>(null);
   // Right-click menu on a session (its row or its split's header), at the pointer.
   const [ctx, setCtx] = useState<{ name: string; x: number; y: number } | null>(null);
-  // A browser tab's native view would cover these: it hides meanwhile.
-  useOverlay(menu || !!ctx || !!drag);
   const [listWidth, setListWidth] = useState(230);
   const box = useRef<HTMLDivElement>(null);
   // Moved to another window: not picked to fill an empty terminal here (the user can still

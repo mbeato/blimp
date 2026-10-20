@@ -26,13 +26,6 @@ fn main() {
                 "set_window_projects",
                 "set_viewing",
                 "claim_notice",
-                "browser_open",
-                "browser_bounds",
-                "browser_show",
-                "browser_go",
-                "browser_nav",
-                "browser_close",
-                "browser_read",
                 "relaunch",
             ])),
     )

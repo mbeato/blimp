@@ -2,7 +2,6 @@ import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { AddServerDialog } from "./components/AddServerDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
-import { useOverlay } from "./lib/overlay";
 import { DragGhost, noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TransferList } from "./components/TransferList";
@@ -271,7 +270,6 @@ export function App() {
   }, []);
   // A session dragged in another window, over this one: drawn here, and where it would land.
   const [hover, setHover] = useState<Hover | null>(null);
-  useOverlay(!!hover);
   useEffect(() => {
     let off = () => {};
     void onDragHover(setHover).then((f) => (off = f));

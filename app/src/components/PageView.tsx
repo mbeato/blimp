@@ -126,7 +126,7 @@ export function PageView(props: {
 
   const send = (m: object) => view.current?.send(m);
   const go = (text: string) => {
-    const to = typedUrl({ base: null }, text);
+    const to = typedUrl(text);
     if (!to) return;
     setEditing(false);
     input.current?.blur();

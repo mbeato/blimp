@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the blimp UI may call in its own web views (main, and w-1, w-2... opened later; never the browser tabs' views, b-1, b-2...): only what it uses (docs/DESIGN.md, Content security policy).",
+  "description": "What the blimp UI may call in its own web views (main, and w-1, w-2... opened later): only what it uses (docs/DESIGN.md, Content security policy).",
   "webviews": ["main", "w-*"],
   "permissions": [
     "allow-connect",
@@ -30,13 +30,6 @@
     "allow-set-window-projects",
     "allow-set-viewing",
     "allow-claim-notice",
-    "allow-browser-open",
-    "allow-browser-bounds",
-    "allow-browser-show",
-    "allow-browser-go",
-    "allow-browser-nav",
-    "allow-browser-close",
-    "allow-browser-read",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:event:allow-emit",

@@ -19,7 +19,6 @@ import {
   type Viewer,
 } from "../lib/files";
 import { HOME, hostOf, serverTabTarget } from "../lib/browser";
-import { useOverlay } from "../lib/overlay";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
 import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
@@ -159,7 +158,6 @@ export function Workbench(props: {
   const [target, setTarget] = useState(root);
   const [creating, setCreating] = useState<Creating | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
-  useOverlay(!!menu);
   const [ask, setAsk] = useState<Ask | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);

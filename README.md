@@ -24,7 +24,7 @@ These screenshots come from the browser build that the end-to-end tests use. The
 - A Claude Code login on the server. Run `claude` on the server once and log in. If you do not, each new session in blimp shows Claude's login steps instead of a prompt.
 - An SSH server that allows forwarding to a unix socket. The app needs this to reach blimpd. It is on by default. A hardened `/etc/ssh/sshd_config` can turn it off with `AllowStreamLocalForwarding no` (or `remote`), or with `DisableForwarding yes`. To check, run `sudo sshd -T | grep -i forwarding` on the server. It must show `disableforwarding no`, and `allowstreamlocalforwarding` must be `yes`, `all` or `local`.
 - `curl`, `tar` and `sha256sum`. Most Linux systems have them.
-- Optional, for the browser sessions can use: Chrome or Chromium, and `npx` (Node.js) on the `PATH` of your login shell. If you have neither Chrome nor Chromium, `npx playwright install chromium` installs one. Run `blimpd browser` to see which one blimp found.
+- Optional, for browser tabs: Chrome or Chromium; and for the browser sessions can use, also `npx` (Node.js) on the `PATH` of your login shell. If you have neither Chrome nor Chromium, `npx playwright install chromium` installs one. Run `blimpd browser` to see which one blimp found.
 - User systemd (`systemctl --user`). This is recommended. If you have it, the installer runs blimpd as a user service. If you do not have it, you must start blimpd yourself, and start it again after each reboot.
 - Linger, if you use systemd. This is strongly recommended.
   - Without linger, systemd stops blimpd when your last SSH connection to the server ends. That also ends every session that blimpd started. The app's own connection counts. So if you quit blimp and no other SSH connection is open, your sessions end.
@@ -164,16 +164,20 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Drop a file on a Claude session** (a screenshot, say): it goes to `~/.blimp/uploads` on the server, and its path is typed into the prompt, so Claude can read it.
 - Transfers show at the bottom left, with their progress and **Cancel**. A finished download has **Show in Finder**.
 
-**Web pages from the server**
+**Browser tabs**
 
-- When a program in one of the folder's sessions starts listening on a port (a dev server on `localhost:3000`, say), blimp says "Port 3000 is open" with **Open**. The session list shows every such port under **Ports**.
-- **Open** shows the page in a tab next to your files, as if it ran on your Mac (blimp forwards the port over your SSH connection while the tab is open). The bar above it takes a path, and has **Reload** and **Open in Browser**.
+- Browser tabs run in a Chrome on the server, and blimp shows them live next to your files. Click, scroll and type in them as in any browser. ⌘C and ⌘V use your Mac's clipboard. The page's own pop-up questions (alert, confirm) show in a bar over it.
+- ⌘T, the **+** after the tabs, or the globe at the top right opens one at Google. The address bar takes an address, or words to search Google for. **Open in Browser** opens the address on your Mac.
+- The tabs belong to the folder, and they stay on the server: any Mac you connect from shows the same tabs, and closing one closes it everywhere.
+- When a program in one of the folder's sessions starts listening on a port (a dev server on `localhost:3000`, say), blimp says "Port 3000 is open" with **Open**. The session list shows every such port under **Ports**. **Open** shows `localhost:3000` in a browser tab: it's the server's own `localhost`, since the browser runs there.
+- The picture comes over your SSH connection, so it's a little behind a local browser, and video isn't smooth. For everyday browsing, your own browser is better.
+- Not yet: file downloads, and pages' file upload buttons.
 
 **A browser for your sessions**
 
-- Claude Code and Codex sessions that blimp starts can use a Chrome that runs on the server. Ask Claude to open a page, and it can read the page's source, its network requests (headers and bodies) and its console. This uses Google's [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp). It needs Chrome or Chromium and `npx` on the server (see Requirements).
-- Its tabs belong to the folder: a session sees only the tabs of its own folder, and the session list shows them under **Browser** (● for a tab a session opened). Click one to open it in a tab here.
-- The tabs and the logins stay on the server, so any Mac you connect from sees the same tabs.
+- Claude Code and Codex sessions that blimp starts can use the same browser. Ask Claude to open a page, and it can read the page's source, its network requests (headers and bodies) and its console. This uses Google's [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp). It needs Chrome or Chromium and `npx` on the server (see Requirements).
+- A session sees only the tabs of its own folder: yours there, and the ones it opens (marked ● in the tab strip). Tabs it opens don't come to the front.
+- **Send to session** on a tab pastes its title and address into a session, so you can ask about the page you're looking at.
 - Sessions that were already running get the browser the next time they start.
 
 **When a file changes on the server**
