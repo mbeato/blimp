@@ -6,6 +6,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirS
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../package.json";
+import { promptFromHook } from "../src/prompt";
 import { parseZmxList, zmxPath } from "../src/sessions";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-server-"));
@@ -643,6 +644,66 @@ describe("chat", () => {
     expect(await options()).toEqual(["Yes", "Yes, and always", "No"]);
     viewer.ws.close();
   });
+
+  // A stand-in for Claude's question dialog (ios/e2e/fake-ask.ts), waiting on it as the hook would say.
+  async function fakeAsk(suffix: string, sessionId: string, questions: object[]) {
+    const dir = join(tmp, `ask-${suffix}`);
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${tag}-${suffix}.json`);
+    const cfg = { questions, keys: join(dir, "keys"), answers: join(dir, "answers.json"), status, sessionId };
+    writeFileSync(join(dir, "cfg.json"), JSON.stringify(cfg));
+    writeFileSync(cfg.keys, "");
+    const name = await shSession(suffix, [process.execPath, join(import.meta.dir, "..", "ios", "e2e", "fake-ask.ts"), join(dir, "cfg.json")]);
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
+    mkdirSync(join(claudeDir, "sessions"), { recursive: true });
+    mkdirSync(join(claudeDir, "projects", "p"), { recursive: true });
+    writeFileSync(join(claudeDir, "projects", "p", `${sessionId}.jsonl`), "");
+    writeFileSync(join(claudeDir, "sessions", `${pid}.json`), JSON.stringify({ sessionId, cwd: tmp, status: "idle" }));
+    const at = Date.now();
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions } });
+    writeFileSync(status, JSON.stringify({ state: "waiting", at, sessionId, event: "PermissionRequest", prompt }));
+    await until(() => zmx("history", name).stdout.toString().includes("Chat about this"), "the dialog on screen");
+    return { name, at, cfg };
+  }
+  const QS = [
+    { question: "Which database?", header: "Database", multiSelect: false, options: [{ label: "Postgres", description: "a server" }, { label: "SQLite", description: "a file" }] },
+    { question: "Which checks should run?", header: "Checks", multiSelect: true, options: [{ label: "Lint" }, { label: "Unit tests" }, { label: "E2E" }] },
+  ];
+
+  test("answer with answers types every question's keys, each after the screen shows its place", async () => {
+    const { name, at, cfg } = await fakeAsk("ask1", "a5a5a5a5-a5a5-a5a5-a5a5-a5a5a5a5a5a5", QS);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    const answers = [{ picks: [1] }, { picks: [0, 2], text: "smoke\x1b[A test" }];
+    c.ws.send(JSON.stringify({ type: "answer", id: "x0", at, answers, labels: [["Postgres"], ["Lint", "E2E"]] }));
+    await until(() => c.messages.find((m) => m.id === "x0"), "reply");
+    expect(c.messages.find((m) => m.id === "x0")).toEqual({ type: "error", id: "x0", error: "the question changed" });
+    c.ws.send(JSON.stringify({ type: "answer", id: "x1", at, answers, labels: [["SQLite"], ["Lint", "E2E"]] }));
+    await until(() => c.messages.find((m) => m.id === "x1"), "reply", 15000);
+    expect(c.messages.find((m) => m.id === "x1")).toEqual({ type: "ack", id: "x1" });
+    await until(() => existsSync(cfg.answers), "the answers");
+    expect(JSON.parse(readFileSync(cfg.answers, "utf8"))).toEqual({ "Which database?": "SQLite", "Which checks should run?": "Lint, E2E, smoke[A test" });
+    // What real Claude needs (the probe): a digit picks and moves on; digits tick, ↓ to the text row, the
+    // paste, ↓ to Submit, Enter; 1 on the review screen.
+    expect(readFileSync(cfg.keys, "utf8")).toBe("2" + "1" + "3" + "\x1b[B".repeat(3) + "\x1b[200~smoke[A test\x1b[201~" + "\x1b[B" + "\r" + "1");
+    c.ws.close();
+  }, 20000);
+
+  test("an answer stops, typing nothing more, when the screen isn't where it expects", async () => {
+    const { name, at, cfg } = await fakeAsk("ask2", "a6a6a6a6-a6a6-a6a6-a6a6-a6a6a6a6a6a6", [QS[1], QS[0]]);
+    const viewer = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    type(viewer.ws, "1"); // someone on the Mac ticked Lint
+    await until(() => zmx("history", name).stdout.toString().includes("[✔] Lint"), "the tick on screen");
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "answer", id: "y1", at, answers: [{ picks: [1] }, { picks: [0] }], labels: [["Unit tests"], ["Postgres"]] }));
+    await until(() => c.messages.find((m) => m.id === "y1"), "reply", 10000);
+    expect(c.messages.find((m) => m.id === "y1")).toEqual({ type: "error", id: "y1", error: "stopped: Claude's screen didn't show question 1 as expected. Finish it on the Mac." });
+    expect(readFileSync(cfg.keys, "utf8")).toBe("1"); // only the viewer's
+    c.ws.close();
+    viewer.ws.close();
+  }, 20000);
 
   test("404 for an unknown session", async () => {
     expect((await api(`/sessions/${tag}-none/chat?token=${token}`)).status).toBe(404);

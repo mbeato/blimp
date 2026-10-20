@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { answerKeys, choiceLabel, parseScreenOptions, promptFromHook, withScreenOptions } from "../src/prompt";
+import { answerKeys, answerSteps, choiceLabel, parseDialog, parseScreenOptions, promptFromHook, screenMeets, withScreenOptions } from "../src/prompt";
 
 // What Claude Code 2.1.300 drew for a Bash permission prompt (from the probe, 2026-10-19).
 const SCREEN = ` Bash command
@@ -33,8 +33,8 @@ test("promptFromHook", () => {
     answerable: true,
   });
   const multi = { ...one, multiSelect: true };
-  expect(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [multi] } })?.answerable).toBe(false);
-  expect(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [one, one] } })?.answerable).toBe(false);
+  expect(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [multi] } })?.answerable).toBe(true);
+  expect(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [one, { ...one, question: "Size?" }] } })?.answerable).toBe(true);
   // In default mode real Claude also sends PermissionRequest for the question tool: still a question.
   expect(promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions: [one] } })).toEqual(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [one] } }));
   expect(promptFromHook({ hook_event_name: "Elicitation" })).toEqual({ kind: "other", answerable: false });
@@ -71,4 +71,183 @@ test("choiceLabel is the text of the choice at pick", () => {
   expect(choiceLabel(q, 1)).toBe("b");
   expect(choiceLabel(q, -1)).toBeUndefined();
   expect(choiceLabel({ kind: "other", answerable: false }, 0)).toBeUndefined();
+});
+
+// What Claude Code 2.1.300 drew for AskUserQuestion dialogs (the probe, 2026-10-20: .superpowers/ask-probe.md).
+const COLOR = `❯ Call the AskUserQuestion tool once, with exactly these 2 questions and nothing else.
+────────────────────────────────────────────────────────────────────────
+←  ☐ Color  ☐ Size  ✔ Submit  →
+
+Which color?
+
+❯ 1. Red
+     Red
+  2. Green
+     Green
+  3. Blue
+     Blue
+  4. Type something.
+────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`;
+const SIZE = `←  ☒ Color  ☐ Size  ✔ Submit  →
+
+Which size?
+
+❯ 1. Small
+     Small
+  2. Large
+     Large
+  3. Type something.
+────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`;
+const REVIEW = `←  ☒ Color  ☒ Size  ✔ Submit  →
+
+Review your answers
+
+ ● Which color?
+   → Green
+ ● Which size?
+   → Small
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel`;
+const TOPPINGS = (cursor: number, ticks: string, text = "Type something") => {
+  const row = (n: number, label: string) => `${cursor === n ? "❯" : " "} ${n}. [${ticks[n - 1] === "x" ? "✔" : " "}] ${label}`;
+  return `←  ☐ Toppings  ☐ Drink  ✔ Submit  →
+
+Which toppings?
+
+${row(1, "Cheese")}
+         Cheese
+${row(2, "Ham")}
+         Ham
+${row(3, "Olives")}
+         Olives
+${row(4, text)}
+${cursor === 5 ? "❯" : " "}    Next
+────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel`;
+};
+const DRINK_TYPED = `←  ☒ Toppings  ☐ Drink  ✔ Submit  →
+
+Which drink?
+
+  1. Tea
+     Tea
+  2. Coffee
+     Coffee
+❯ 3. milk
+────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in Vim · Esc to cancel`;
+
+const q = (question: string, labels: string[], multiSelect = false) => ({ question, header: question, multiSelect, options: labels.map((label) => ({ label, description: label })) });
+const ask = (...questions: ReturnType<typeof q>[]) => promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions } })!;
+const colorSize = ask(q("Which color?", ["Red", "Green", "Blue"]), q("Which size?", ["Small", "Large"]));
+const toppingsDrink = ask(q("Which toppings?", ["Cheese", "Ham", "Olives"], true), q("Which drink?", ["Tea", "Coffee"]));
+
+test("every AskUserQuestion is answerable now, unless its steps couldn't be told apart or typed as one key", () => {
+  expect(colorSize.answerable).toBe(true);
+  expect(toppingsDrink.answerable).toBe(true);
+  expect(ask(q("Which fruits?", ["Apple", "Banana"], true)).answerable).toBe(true);
+  expect(ask(q("Same?", ["a"]), q("Same?", ["b"])).answerable).toBe(false); // the screen can't tell the two apart
+  expect(ask(q("Many?", ["1", "2", "3", "4", "5", "6", "7", "8", "9"])).answerable).toBe(false); // "Type something" would be 10
+  expect(ask().answerable).toBe(false);
+});
+
+test("pick alone still answers only one single-choice question", () => {
+  expect(answerKeys(colorSize, 0)).toBeUndefined();
+  expect(answerKeys(ask(q("Which fruits?", ["Apple", "Banana"], true)), 0)).toBeUndefined();
+  expect(answerKeys(ask(q("Which drink?", ["Tea", "Coffee"])), 1)).toBe("2");
+});
+
+test("answerSteps: two single-choice questions are a digit each, then 1 on the review screen", () => {
+  expect(answerSteps(colorSize, [{ picks: [1] }, { picks: [0] }], [["Green"], ["Small"]])).toEqual({ steps: [
+    { expect: { q: 0, cursor: 1 }, keys: "2" },
+    { expect: { q: 1, cursor: 1 }, keys: "1" },
+    { expect: { review: true }, keys: "1" },
+  ] });
+});
+
+test("answerSteps: ticks, a typed answer in a multi-choice question, and a typed answer in a single-choice one", () => {
+  const r = answerSteps(toppingsDrink, [{ picks: [0, 2], text: " pine\napple " }, { text: "milk\x1b[A\x03" }], [["Cheese", "Olives"], []]);
+  expect(r).toEqual({ steps: [
+    { expect: { q: 0, cursor: 1, ticked: [] }, keys: "1" },
+    { expect: { q: 0, cursor: 1, ticked: [1] }, keys: "3" },
+    { expect: { q: 0, cursor: 1, ticked: [1, 3] }, keys: "\x1b[B\x1b[B\x1b[B" },
+    { expect: { q: 0, cursor: 4, ticked: [1, 3] }, keys: "\x1b[200~pine apple\x1b[201~" },
+    { expect: { q: 0, cursor: 4, ticked: [1, 3, 4], typed: true }, keys: "\x1b[B" },
+    { expect: { q: 0, cursor: "next", ticked: [1, 3, 4] }, keys: "\r" },
+    { expect: { q: 1, cursor: 1 }, keys: "3" },
+    { expect: { q: 1, cursor: 3 }, keys: "\x1b[200~milk[A\x1b[201~" }, // no Esc or ctrl+C from the phone
+    { expect: { q: 1, cursor: 3, typed: true }, keys: "\r" },
+    { expect: { review: true }, keys: "1" },
+  ] });
+  // Ticks only, no text: ↓ past the text row to Next.
+  const ticks = answerSteps(toppingsDrink, [{ picks: [1] }, { picks: [0] }], [["Ham"], ["Tea"]]);
+  expect("steps" in ticks && ticks.steps.slice(1, 3)).toEqual([
+    { expect: { q: 0, cursor: 1, ticked: [2] }, keys: "\x1b[B\x1b[B\x1b[B\x1b[B" },
+    { expect: { q: 0, cursor: "next", ticked: [2] }, keys: "\r" },
+  ]);
+  // One single-choice question: its digit (or Enter after the text) submits; there's no review screen.
+  expect(answerSteps(ask(q("Which drink?", ["Tea", "Coffee"])), [{ text: "water" }], [[]])).toEqual({ steps: [
+    { expect: { q: 0, cursor: 1 }, keys: "3" },
+    { expect: { q: 0, cursor: 3 }, keys: "\x1b[200~water\x1b[201~" },
+    { expect: { q: 0, cursor: 3, typed: true }, keys: "\r" },
+  ] });
+});
+
+test("answerSteps refuses answers that don't fit, and options that changed", () => {
+  const err = (answers: unknown, labels: unknown = [["Green"], ["Small"]]) => (answerSteps(colorSize, answers, labels) as any).error;
+  expect(err([{ picks: [1] }, { picks: [0] }], [["Red"], ["Small"]])).toBe("the question changed");
+  expect(err([{ picks: [1] }])).toBe("the question changed");
+  expect(err([{ picks: [1] }, { picks: [0] }], null)).toBe("the question changed");
+  expect(err([{ picks: [3] }, { picks: [0] }])).toBe("that answer doesn't fit the question");
+  expect(err([{ picks: [1.5] }, { picks: [0] }])).toBe("that answer doesn't fit the question");
+  expect(err([{ picks: [1, 0] }, { picks: [0] }], [["Green", "Red"], ["Small"]])).toBe("pick one option or type an answer");
+  expect(err([{ picks: [1], text: "x" }, { picks: [0] }])).toBe("pick one option or type an answer");
+  expect(err([{ text: "\x1b\x03 " }, { picks: [0] }], [[], ["Small"]])).toBe("a typed answer must be some text, at most 2000 characters");
+  expect(err([{ text: "x".repeat(2001) }, { picks: [0] }], [[], ["Small"]])).toBe("a typed answer must be some text, at most 2000 characters");
+  expect((answerSteps(toppingsDrink, [{ picks: [] }, { picks: [0] }], [[], ["Tea"]]) as any).error).toBe("pick at least one option or type an answer");
+  expect((answerSteps(toppingsDrink, [{ picks: [1, 1] }, { picks: [0] }], [["Ham", "Ham"], ["Tea"]]) as any).error).toBe("that answer doesn't fit the question");
+  const perm = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "x" } })!;
+  expect((answerSteps(perm, [{ picks: [0] }], [["Yes"]]) as any).error).toBe("the question changed");
+});
+
+test("parseDialog reads the question, its rows, the ticks and the cursor", () => {
+  expect(parseDialog(COLOR)).toEqual({ question: "Which color?", review: false, cursor: 1, rows: [
+    { n: 1, label: "Red" }, { n: 2, label: "Green" }, { n: 3, label: "Blue" }, { n: 4, label: "Type something." }] });
+  expect(parseDialog(REVIEW)).toMatchObject({ review: true, cursor: 1, rows: [{ n: 1, label: "Submit answers" }, { n: 2, label: "Cancel" }] });
+  expect(parseDialog(TOPPINGS(5, "x-x-"))).toMatchObject({ question: "Which toppings?", cursor: "next", rows: [
+    { n: 1, label: "Cheese", ticked: true }, { n: 2, label: "Ham", ticked: false }, { n: 3, label: "Olives", ticked: true }, { n: 4, label: "Type something", ticked: false }] });
+  expect(parseDialog("no dialog\n❯ 1. Yes")).toBeUndefined();
+});
+
+test("screenMeets checks each step's screen", () => {
+  expect(screenMeets(colorSize, parseDialog(COLOR), { q: 0, cursor: 1 })).toBe(true);
+  expect(screenMeets(colorSize, parseDialog(COLOR), { q: 1, cursor: 1 })).toBe(false); // still on the first question
+  expect(screenMeets(colorSize, parseDialog(SIZE), { q: 1, cursor: 1 })).toBe(true);
+  expect(screenMeets(colorSize, parseDialog(SIZE), { review: true })).toBe(false);
+  expect(screenMeets(colorSize, parseDialog(REVIEW), { review: true })).toBe(true);
+  expect(screenMeets(colorSize, parseDialog(REVIEW), { q: 1, cursor: 1 })).toBe(false);
+  const t = (cursor: number, ticks: string, text?: string) => parseDialog(TOPPINGS(cursor, ticks, text));
+  expect(screenMeets(toppingsDrink, t(1, "----"), { q: 0, cursor: 1, ticked: [] })).toBe(true);
+  expect(screenMeets(toppingsDrink, t(1, "x---"), { q: 0, cursor: 1, ticked: [] })).toBe(false); // a box already ticked
+  expect(screenMeets(toppingsDrink, t(1, "x-x-"), { q: 0, cursor: 1, ticked: [3, 1] })).toBe(true);
+  expect(screenMeets(toppingsDrink, t(4, "x-x-"), { q: 0, cursor: 4, ticked: [1, 3] })).toBe(true);
+  expect(screenMeets(toppingsDrink, t(4, "x-xx"), { q: 0, cursor: 4, ticked: [1, 3, 4], typed: true })).toBe(false); // the paste didn't land
+  expect(screenMeets(toppingsDrink, t(4, "x-xx", "pineapple"), { q: 0, cursor: 4, ticked: [1, 3, 4], typed: true })).toBe(true);
+  expect(screenMeets(toppingsDrink, t(5, "x-xx", "pineapple"), { q: 0, cursor: "next", ticked: [1, 3, 4] })).toBe(true);
+  expect(screenMeets(toppingsDrink, parseDialog(DRINK_TYPED), { q: 1, cursor: 3, typed: true })).toBe(true);
+  expect(screenMeets(toppingsDrink, parseDialog(DRINK_TYPED), { q: 1, cursor: 1 })).toBe(false);
+  expect(screenMeets(colorSize, undefined, { q: 0, cursor: 1 })).toBe(false);
 });

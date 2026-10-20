@@ -149,6 +149,11 @@ jobs:
             zmx history demo-busy | tail -5 | cat -v
             exit 1; }
           grep -F "After the restart" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
+          # What real Claude needs for these answers (the probe, docs/DESIGN.md): 2 picks SQLite and moves on;
+          # 1 and 3 tick Lint and E2E; down 3 to the text row, the paste, down to Submit, Enter; 1 on the review.
+          [ "$(tr '\033\r' '~R' < "$E2E_DIR/quiz.in")" = "213~[B~[B~[B~[200~smoke~[201~~[BR1" ] || {
+            echo "demo-quiz got:"; od -c "$E2E_DIR/quiz.in"; zmx history demo-quiz | tail -20; exit 1; }
+          grep -F '"Which checks should run first?":"Lint, E2E, smoke"' "$E2E_DIR/quiz.json" || { echo "demo-quiz answers:"; cat "$E2E_DIR/quiz.json"; exit 1; }
           # The stand-in claude's record of each session the app started: "<zmx name> <pid> [<arguments>]"
           echo "claude started:"; cat "$E2E_DIR/claude.args"
           [ "$(wc -l < "$E2E_DIR/claude.args")" -eq 2 ] || { echo "expected 2 sessions started"; exit 1; }
@@ -160,7 +165,7 @@ jobs:
           zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
           ! grep -qE "name=$new([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "$new was ended but zmx still lists it"; exit 1; }
           grep -qE "name=$resumed([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "the resumed $resumed isn't running"; exit 1; }
-          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; $new ended; $resumed resumed the past conversation"
+          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; demo-quiz got both answers; $new ended; $resumed resumed the past conversation"
       - name: Export screenshots
         if: always()
         run: |
@@ -206,6 +211,7 @@ jobs:
             /tmp/be/blimpd.log
             /tmp/be/signals.log
             /tmp/be/claude.args
+            /tmp/be/quiz.in
             /tmp/be/zmx-logs
           if-no-files-found: warn
 

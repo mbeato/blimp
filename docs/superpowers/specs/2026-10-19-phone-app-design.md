@@ -84,7 +84,7 @@ prompt?:
   | { kind: "permission"; tool: string; summary: string; options: string[]; answerable: true }  // e.g. ["Yes", "Yes, and don't ask again …", "No"]
   | { kind: "question"; questions: { question: string; header?: string; multiSelect: boolean;
                                      options: { label: string; description?: string }[] }[];
-      answerable: boolean }                                                    // true only for one single-choice question
+      answerable: boolean }                                                    // true when blimpd can drive the dialog (part 3)
   | { kind: "other"; answerable: false };                                     // Elicitation, anything unknown: "Open on Mac"
 ```
 
@@ -109,10 +109,28 @@ Client → server text frames on `/chat`:
 - Bracketed paste then `\r` sends a multi-line message intact.
 - A permission prompt: `1` picks "Yes" and runs the command at once.
 - A single-choice AskUserQuestion: `2` picks the second option and submits at once.
-- Multi-question and multi-select AskUserQuestion: digits toggle and arrows move between tabs, but separate attach/detach clients sending them got the wrong boxes ticked, and Esc didn't cancel. Not in v1.
+- Multi-question and multi-select AskUserQuestion: digits toggle and arrows move between tabs, but separate attach/detach clients sending them got the wrong boxes ticked, and Esc didn't cancel. Not in v1. (Answered since: see the next probe.)
 - A new folder shows a "Do you trust this folder?" screen, and no hook fires for it. A session started from the phone in a folder Claude hasn't seen would be stuck there. v1 starts sessions only in recent folders (already trusted). Anything else shows as `unknown` and "Open on Mac".
 - Starting `zmx attach` for a name right after `zmx kill` of the same name can attach to the dying session. Tests use fresh names.
 - Claude started from inside another Claude session inherits `CLAUDE_CODE_*` variables and turns off transcript saving. blimpd runs outside Claude, so this only matters for tests run from a Claude session: they strip `CLAUDE*` from the environment.
+
+### What the second probe found (AskUserQuestion, Claude Code 2.1.300, zmx 0.5.0, 2026-10-20)
+
+With one zmx client kept attached for the whole run, as the chat socket does:
+- Several questions (or one multi-choice) show one at a time under a tab bar, `←  ☐ Color  ☐ Size  ✔ Submit  →`; one single-choice question shows ` ☐ Drink`. Under it the question, then `❯ 1. Red` with its description indented below, …, `4. Type something.`, a line, `5. Chat about this`. Multi-choice rows are `1. [ ] Cheese` … `4. [ ] Type something`, then a `Next` row (`Submit` on the last question).
+- The cursor starts on row 1 of each question. A single-choice digit picks and moves to the next tab at once. A multi-choice digit ticks or unticks its box and leaves the cursor where it is; Tab or → moves on, from the text row Tab only moves down; Enter on an option row ticks it, on `Next`/`Submit` moves on.
+- "Type something": in a single-choice question its digit moves the cursor there and it becomes a text field; a bracketed paste lands in it (newlines too) and Enter takes it and moves on. In a multi-choice question its digit only ticks the box; ↓ to the row, then the paste lands and ticks it; ↓ again reaches `Next`. Digits typed while on the text row are typed as text.
+- After the last question (more than one, or multi-choice): "Review your answers", each `● question` / `→ answer`, then `❯ 1. Submit answers`, `2. Cancel`. `1` submits; `2` declines.
+- Esc cancels the dialog from anywhere, the review too: "User declined to answer questions" (the first probe's "Esc didn't cancel" was zmx dropping an Esc that is a new client's first input).
+- The tool result: `Your questions have been answered: "Which color?"="Green", "Which size?"="Small". …`; with a typed answer `The user answered: "Which pet?"="a parrot\nnamed 7", "Which toppings?"="Cheese, Olives", …`. Multi-choice answers are labels joined with ", ", the typed text among them.
+- The folder-trust screen is not numbered (`❯ No, exit` / `Yes, I trust this folder`, arrows and Enter, the cursor on "No"), fires no hook and comes before Claude has a session id: it stays "Open on Mac". Plan approval fires PermissionRequest (ExitPlanMode), so it is a permission, not a wait without a prompt; its screen says "Would you like to proceed?" (`1. Yes, and use auto mode`, `2. Yes, manually approve edits`, `3. Tell Claude what to change`), which the screen reading doesn't look for, so the phone shows the fallback Yes (1) / No (Esc). Left as is.
+
+As built (part 3, every question from the phone):
+- `answer` with `answers` and `labels` answers every question of a dialog at once (DESIGN.md, Chat, "Answering a question dialog"). blimpd types it step by step and checks Claude's screen before each step; a screen that isn't where it expects stops the answer with "stopped: …", typing nothing more. `pick` stays for a permission and one single-choice question (voice answers).
+- A typed answer is one line: whitespace runs become one space, as in Claude's single-line text row.
+- `answerable` for questions: 1–9 questions, 1–8 options each, distinct question texts. Anything else stays read-only.
+- The phone shows a dialog a question at a time ("1 of 3", the header, options as compact rows; single-choice taps pick and move on; multi-choice rows tick, then Next; "Type an answer" opens a field; Back; with more than one question a review, where a tap on an answer goes back to it, and Submit). One single-choice question still answers with a tap (and by voice) as before.
+- Tests: `test/prompt.test.ts` (key steps, validation, the screen reading on screens from the probe), `test/server.test.ts` (an answer to the stand-in dialog `ios/e2e/fake-ask.ts`, which draws and takes keys as Claude does; a screen out of place stops it), `test/real-claude.test.ts` (three questions, one multi-choice, with typed answers), BlimpKit `QuestionDraftTests`, and the e2e `test7AnswerQuestions` against the stand-in, whose keys the job compares with what real Claude needs.
 
 ## 3. The iPhone app (`ios/`)
 

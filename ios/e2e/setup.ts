@@ -6,6 +6,9 @@
 //   demo-ask   in api-server: waiting on a permission prompt; every key pressed is appended to $E2E_DIR/prompt.in
 //   demo-busy  in api-server: working (Claude's status "busy"); every key pressed is appended to $E2E_DIR/stop.in,
 //              and an Esc makes it idle
+//   demo-quiz  in api-server: Claude's question dialog with two questions, the second multi-choice
+//              (ios/e2e/fake-ask.ts draws it as Claude does); every key is appended to $E2E_DIR/quiz.in,
+//              the answers go to $E2E_DIR/quiz.json
 //   a conversation in blimp-demo with no session running, for the project screen's Earlier list
 // The folders are under the home folder: blimpd starts sessions only there. Sessions the app starts
 // run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for.
@@ -13,6 +16,7 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { projectFolderName } from "../../src/folders";
+import { promptFromHook } from "../../src/prompt";
 import { parseZmxList, zmxPath } from "../../src/sessions";
 
 const root = process.env.E2E_DIR!;
@@ -111,6 +115,24 @@ writeFileSync(
   JSON.stringify({ state: "waiting", at: Date.now(), sessionId: "e2e00000-0000-0000-0000-000000000002", event: "PermissionRequest",
     prompt: { kind: "permission", tool: "Bash", summary: "Ran `npm test`", options: ["Yes", "No"], keys: ["1", "\u001b"], answerable: true } }),
 );
+
+// Two questions at once, as Claude asks them: a pick, then ticks and a typed answer. The stand-in sets its
+// status file to done once they're submitted, as Claude's Stop hook would.
+const quizSid = "e2e00000-0000-0000-0000-000000000005";
+const quizStatus = join(status, "demo-quiz.json");
+const questions = [
+  { question: "Which database should the tests use?", header: "Database", multiSelect: false,
+    options: [{ label: "Postgres", description: "The real server, in Docker" }, { label: "SQLite", description: "A file, fastest" }] },
+  { question: "Which checks should run first?", header: "Checks", multiSelect: true,
+    options: [{ label: "Lint" }, { label: "Unit tests" }, { label: "E2E" }] },
+];
+const quizCfg = join(root, "quiz-cfg.json");
+writeFileSync(join(root, "quiz.in"), "");
+writeFileSync(quizCfg, JSON.stringify({ questions, keys: join(root, "quiz.in"), answers: join(root, "quiz.json"), status: quizStatus, sessionId: quizSid }));
+await standIn("demo-quiz", join(work, "api-server"), `exec '${process.execPath}' '${join(import.meta.dir, "fake-ask.ts")}' '${quizCfg}'`,
+  quizSid, [user("u1", "Set up the test pipeline"), said("a1", "A couple of questions first.")]);
+writeFileSync(quizStatus, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: quizSid, event: "PermissionRequest",
+  prompt: promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions } }) }));
 
 const token = readFileSync(join(dirname(sock), "token"), "utf8").trim();
 writeFileSync(join(root, "link"), `blimp://pair?url=${encodeURIComponent("http://127.0.0.1:7425")}&token=${token}`);

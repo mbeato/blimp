@@ -5,7 +5,7 @@
 
 import type { ServerWebSocket, Subprocess } from "bun";
 import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from "./chat";
-import { answerKeys, choiceLabel } from "./prompt";
+import { answerKeys, answerSteps, choiceLabel, cleanText, type Expect, type Prompt, parseDialog, screenMeets } from "./prompt";
 import { existsSync } from "node:fs";
 import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
 import { followSize, lastSize } from "./terminal";
@@ -150,9 +150,10 @@ function client(ws: ServerWebSocket<ChatData>) {
 }
 
 // keys says what to type when its turn comes (an answer checks its question is still up); recheck
-// runs again before each part after the first (input's Enter). Once started, a write finishes even
-// if the socket closes: closeChat waits for it.
-async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]>, recheck?: () => Promise<void>) {
+// runs again before each part after the first (input's Enter, each step of a dialog). Once started, a
+// write finishes even if the socket closes: closeChat waits for it.
+type Recheck = (part: number) => Promise<void>;
+async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]>, recheck?: Recheck) {
   const d = ws.data;
   if (d.closed) throw new Error("the socket is closed");
   const fresh = !d.proc || d.proc.exitCode !== null;
@@ -173,7 +174,7 @@ async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]
   for (const [i, p] of parts.entries()) {
     if (i) {
       await Bun.sleep(50); // Enter apart from the paste, as a person would press it
-      await recheck?.();
+      await recheck?.(i);
     }
     term.write(p);
   }
@@ -182,7 +183,7 @@ async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]
 // One typed thing at a time, so two inputs close together don't interleave. A repeated id is typed
 // once: the phone resends what it didn't see acknowledged, maybe on a new socket while the old one
 // is still typing it (then it waits for that one).
-async function typed(ws: ServerWebSocket<ChatData>, id: string, keys: () => Promise<string[]>, recheck?: () => Promise<void>) {
+async function typed(ws: ServerWebSocket<ChatData>, id: string, keys: () => Promise<string[]>, recheck?: Recheck) {
   const d = ws.data;
   const key = `${d.name}\0${id}`;
   const step = (d.queue ?? Promise.resolve()).then(async () => {
@@ -221,7 +222,7 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
       if (typeof m.text !== "string" || m.text.length > 100_000) return fail("text must be a string of at most 100 000 characters");
       // No control characters from the phone: ESC would end the paste early and turn the rest into key
       // presses, ctrl+\ detaches zmx's client, ctrl+C interrupts. Newlines and tabs stay; \r is a newline.
-      const text = m.text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+      const text = cleanText(m.text);
       // Not while Claude asks something: the Enter after the paste would confirm its highlighted choice.
       // Checked before the paste and again before Enter. A question that starts in between leaves the
       // paste in Claude's input box without Enter: it isn't sent, and the id doesn't count as typed.
@@ -233,6 +234,21 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
         return ["\x1b[200~" + text + "\x1b[201~", "\r"];
       };
       await typed(ws, id, keys, notWaiting);
+      return send(ws, { type: "ack", id });
+    }
+    if (m.type === "answer" && m.answers !== undefined) {
+      // Every question of a dialog: blimpd types it step by step, each after the screen shows its place.
+      let steps: { expect: Expect }[] = [];
+      let p: Prompt | undefined;
+      await typed(ws, id, async () => {
+        const s = await find(d.name);
+        p = s?.state === "waiting" && s.prompt?.at === m.at ? s.prompt : undefined;
+        const r = p ? answerSteps(p, m.answers, m.labels) : { error: "the question changed" };
+        if ("error" in r) throw new Error(r.error);
+        steps = r.steps;
+        await onScreen(d.name, p!, steps[0].expect);
+        return r.steps.map((s) => s.keys);
+      }, (i) => onScreen(d.name, p!, steps[i].expect));
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer") {
@@ -253,6 +269,22 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
     fail("unknown message");
   } catch (e) {
     fail((e as Error).message);
+  }
+}
+
+// Waits (up to 3 s) for Claude's screen to show the dialog where the next keys belong. Otherwise the
+// answer stops there: the rest would land in the wrong place.
+async function onScreen(name: string, p: Prompt, e: Expect) {
+  const end = Date.now() + 3000;
+  for (;;) {
+    const r = Bun.spawn([zmxPath(), "history", name], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const screen = (await new Response(r.stdout).text()).split("\n").slice(-120).join("\n");
+    if (screenMeets(p, parseDialog(screen), e)) return;
+    if (Date.now() > end) {
+      const where = "review" in e ? "the review screen" : `question ${e.q + 1}`;
+      throw new Error(`stopped: Claude's screen didn't show ${where} as expected. Finish it on the Mac.`);
+    }
+    await Bun.sleep(100);
   }
 }
 

@@ -208,6 +208,8 @@ private struct ChatContent: View {
                               highlight: guess?.prompt == prompt ? guess?.pick : nil) { pick, shown in
                         guess = nil
                         Task { await model.answer(pick, to: shown) }
+                    } onAnswers: { draft, shown in
+                        Task { await model.answer(draft, to: shown) }
                     }
                     Divider()
                 } else if model.waitingUnknown {
@@ -317,7 +319,7 @@ private struct ChatContent: View {
         micRound += 1
         let round = micRound
         micBase = draft
-        if let p = model.prompt, p.answerable, p.kind != .other, !p.choices.isEmpty { micPrompt = p } else { micPrompt = nil }
+        if let p = model.prompt, p.singleChoice { micPrompt = p } else { micPrompt = nil }
         let words = vocabulary
         Task {
             do {

@@ -46,6 +46,17 @@ public struct Prompt: Codable, Sendable, Equatable {
         }
     }
 
+    /// One set of choices a single pick answers, by a tap or by voice: a permission, or one single-choice
+    /// question. Anything more is answered a question at a time (QuestionDraft), by tap only.
+    public var singleChoice: Bool {
+        guard answerable, !choices.isEmpty else { return false }
+        switch kind {
+        case .permission: return true
+        case .question: return questions?.count == 1 && questions?.first?.multiSelect == false
+        case .other: return false
+        }
+    }
+
     /// What the phone reads aloud.
     public var spoken: String {
         switch kind {
@@ -186,8 +197,17 @@ public enum ChatCommand: Encodable, Sendable, Equatable {
     /// `label` is the choice's text as shown at `pick`: blimpd refuses the answer if that's changed.
     case answer(id: String, at: Double, pick: Int, label: String)
     case interrupt(id: String)
+    /// Every question of a dialog at once; `labels` are each question's picked options as shown.
+    case answers(id: String, at: Double, answers: [QuestionAnswer], labels: [[String]])
 
-    private enum Key: String, CodingKey { case type, id, text, at, pick, label }
+    /// What blimpd's ack or error names.
+    public var id: String {
+        switch self {
+        case let .input(id, _), let .answer(id, _, _, _), let .interrupt(id), let .answers(id, _, _, _): id
+        }
+    }
+
+    private enum Key: String, CodingKey { case type, id, text, at, pick, label, answers, labels }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -199,6 +219,9 @@ public enum ChatCommand: Encodable, Sendable, Equatable {
             try c.encode(label, forKey: .label)
         case let .interrupt(id):
             try c.encode("interrupt", forKey: .type); try c.encode(id, forKey: .id)
+        case let .answers(id, at, answers, labels):
+            try c.encode("answer", forKey: .type); try c.encode(id, forKey: .id); try c.encode(at, forKey: .at)
+            try c.encode(answers, forKey: .answers); try c.encode(labels, forKey: .labels)
         }
     }
 }
