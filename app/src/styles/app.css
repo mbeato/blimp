@@ -612,6 +612,13 @@ h2 {
   white-space: nowrap;
 }
 
+.drag-ghost.tall {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1px;
+}
+
 /* A drag from another window over this one, landing in a tab that isn't in front: the whole
    window is where it goes. */
 .app.drop-window::after {
@@ -684,6 +691,51 @@ body.dragging-session * {
   height: 26px;
   padding: 0 10px;
   text-align: left;
+}
+
+/* A running session's row is two lines: its mark, title and time; under them, smaller, what it's
+   doing. Earlier conversations and ports stay one line. */
+.srow > .srow-main {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1px;
+  height: 40px;
+}
+
+.srow-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Under the title (past the 14 px mark and its gap). */
+.srow-doing {
+  padding-left: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--fg-faint);
+}
+
+.srow-doing.state-working {
+  color: var(--fg-dim);
+}
+
+.srow-doing.state-waiting {
+  color: var(--waiting);
+}
+
+/* The kind's label, as words in the line rather than a tag. */
+.srow-doing .kind-label {
+  padding: 0;
+  border: none;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
 }
 
 .srow:hover,
@@ -866,7 +918,7 @@ body.dragging-session * {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
+  height: 40px;
   padding: 0 6px 0 10px;
   font-size: 12px;
 }

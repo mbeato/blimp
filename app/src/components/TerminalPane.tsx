@@ -58,6 +58,10 @@ const MIN_SPLIT_PX = 160;
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+// A running session's row says what it's doing under its title: its state, else its kind; and
+// the kind's label (GLM, Codex, or one of the user's own) beside it.
+const doing = (s: Session) => STATE_LABEL[s.state] || (s.kind === "shell" ? "Shell" : isClaude(s) ? "Claude Code" : "");
+
 // A session being dragged from the list, and where it would land.
 // The row (or split header) being dragged is drawn at the pointer, as grabbed: (dx, dy) from
 // its corner, w by h. out: the pointer is outside the window (the window under it draws it).
@@ -71,6 +75,7 @@ type Drag = {
   dy: number;
   w: number;
   h: number;
+  row: boolean;
   out: boolean;
   target: { at: number; side: Side } | null;
   gap: number | null;
@@ -388,7 +393,7 @@ export function TerminalPane(props: {
     const label = sessionTitle(s);
     const from = e.currentTarget.closest(".srow, .tsplit-head") ?? e.currentTarget;
     const box = from.getBoundingClientRect();
-    const grab = { dx: Math.min(x0 - box.left, 260 - 16), dy: y0 - box.top, w: Math.min(box.width, 260), h: box.height };
+    const grab = { dx: Math.min(x0 - box.left, 260 - 16), dy: y0 - box.top, w: Math.min(box.width, 260), h: box.height, row: from.classList.contains("srow") };
     const place = { server: link.key, dir, session: s.name };
     let on = false;
     let out = false;
@@ -506,11 +511,13 @@ export function TerminalPane(props: {
                 showHere(s.name);
               }}
             >
-              <Mark s={s} />
-              {num && <span className="split-num">{num}</span>}
-              <span className="srow-title">{sessionTitle(s)}</span>
-              {s.label && <span className="kind-label">{s.label}</span>}
-              <span className="srow-time">{relTime(lastActivity(s), now)}</span>
+              <span className="srow-line">
+                <Mark s={s} />
+                {num && <span className="split-num">{num}</span>}
+                <span className="srow-title">{sessionTitle(s)}</span>
+                <span className="srow-time">{relTime(lastActivity(s), now)}</span>
+              </span>
+              <Doing s={s} />
             </button>
             <button className="srow-trash" title="End session" aria-label={`End ${sessionTitle(s)}`} onClick={() => trash(s)}>
               <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
@@ -736,7 +743,7 @@ export function TerminalPane(props: {
           ))}
         </div>
       </nav>
-      {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} h={drag.h} />}
+      {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} h={drag.h} tall={drag.row} />}
       {ctx && (
         <>
           <div
@@ -764,13 +771,29 @@ export function TerminalPane(props: {
 }
 
 // A session row lifted off the list, under the pointer while it's dragged (also in the window a
-// drag from another one is over, where `s` may not be known). h: as tall as what was grabbed.
-export function DragGhost(props: { s?: Session; label: string; x: number; y: number; w: number; h?: number }) {
+// drag from another one is over, where `s` may not be known). h: as tall as what was grabbed;
+// tall: a row of the list, with what the session is doing under its title.
+export function DragGhost(props: { s?: Session; label: string; x: number; y: number; w: number; h?: number; tall?: boolean }) {
   return (
-    <div className="drag-ghost" style={{ left: props.x, top: props.y, width: props.w, height: props.h }} aria-hidden>
-      {props.s ? <Mark s={props.s} /> : <span className="srow-mark" />}
-      <span className="srow-title">{props.label}</span>
+    <div className={"drag-ghost" + (props.tall && props.s ? " tall" : "")} style={{ left: props.x, top: props.y, width: props.w, height: props.h }} aria-hidden>
+      <span className="srow-line">
+        {props.s ? <Mark s={props.s} /> : <span className="srow-mark" />}
+        <span className="srow-title">{props.label}</span>
+      </span>
+      {props.tall && props.s && <Doing s={props.s} />}
     </div>
+  );
+}
+
+function Doing(props: { s: Session }) {
+  const { s } = props;
+  const words = doing(s);
+  return (
+    <span className={"srow-doing state-" + s.state}>
+      {words}
+      {words && s.label && <span aria-hidden> · </span>}
+      {s.label && <span className="kind-label">{s.label}</span>}
+    </span>
   );
 }
 
