@@ -106,6 +106,8 @@ exec cat
 }
 
 beforeAll(async () => {
+  // No naming here: the stand-in claude above isn't one that answers with a name (see "names").
+  writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false }));
   server = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "serve"], {
     env: { ...env, SHELL: fakeShell, PATH: `${fakeBin}:${env.PATH}` },
     stdout: "pipe",
@@ -1073,6 +1075,7 @@ describe("kinds and keys", () => {
       BLIMP_TEST_PROFILE: join(kHome, "profile"),
     };
     delete kEnv.CODEX_HOME;
+    writeFileSync(join(kTmp, "config.json"), JSON.stringify({ names: false }));
     kServer = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "serve"], { env: kEnv, stdout: out, stderr: out });
     await until(() => {
       try {
@@ -1234,4 +1237,103 @@ describe("kinds and keys", () => {
     expect((await post({ dir, kind: "kinds.json" })).status).toBe(400);
     rmSync(file);
   }, 30000);
+});
+
+// blimp names Claude sessions itself (names.ts), with a stand-in claude first on this blimpd's PATH:
+// it records its arguments and what it got on stdin, one pair of files per call, and answers with
+// whatever the answer file says.
+describe("names", () => {
+  const nTmp = mkdtempSync(join(tmpdir(), "blimp-names-"));
+  const nSock = join(nTmp, "blimpd.sock");
+  const nClaude = join(nTmp, "claude");
+  const nBin = join(nTmp, "bin");
+  const calls = join(nTmp, "calls");
+  const answer = join(nTmp, "answer");
+  let nServer: ReturnType<typeof Bun.spawn>;
+  let nToken = "";
+  const list = async () => (await (await fetch("http://blimpd/sessions", { unix: nSock, headers: { Authorization: `Bearer ${nToken}` } } as any)).json()) as any[];
+  const titleOf = async (name: string) => (await list()).find((s) => s.name === name)?.title;
+  const stdins = () => readdirSync(calls).filter((f) => f.endsWith(".stdin")).map((f) => readFileSync(join(calls, f), "utf8"));
+  const T = new Date().toISOString();
+  const tline = (o: object) => JSON.stringify({ timestamp: T, ...o }) + "\n";
+  const user = (uuid: string, text: string) => tline({ type: "user", uuid, message: { role: "user", content: text } });
+  const said = (uuid: string, text: string) => tline({ type: "assistant", uuid, message: { role: "assistant", content: [{ type: "text", text }] } });
+
+  // A session that looks like Claude to this blimpd: its pid has a status file naming a transcript.
+  async function fakeClaude(suffix: string, sessionId: string, lines: string[]) {
+    const name = await shSession(suffix, ["sh", "-c", "exec cat"]);
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
+    writeFileSync(join(nClaude, "projects", "p", `${sessionId}.jsonl`), lines.join(""));
+    writeFileSync(join(nClaude, "sessions", `${pid}.json`), JSON.stringify({ sessionId, cwd: tmp, status: "idle" }));
+    return name;
+  }
+
+  beforeAll(async () => {
+    for (const d of [nBin, calls, join(nClaude, "sessions"), join(nClaude, "projects", "p")]) mkdirSync(d, { recursive: true });
+    writeFileSync(
+      join(nBin, "claude"),
+      `#!/bin/sh
+n="$(date +%s%N)-$$"
+printf '%s\\n' "$@" > "${calls}/$n.argv"
+cat > "${calls}/$n.stdin"
+cat "${answer}"
+`,
+    );
+    chmodSync(join(nBin, "claude"), 0o755);
+    writeFileSync(answer, "Mobile App Fixes\n");
+    nServer = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "serve"], {
+      env: { ...env, BLIMPD_SOCKET: nSock, CLAUDE_CONFIG_DIR: nClaude, SHELL: fakeShell, PATH: `${nBin}:${env.PATH}` },
+      stdout: "ignore",
+      stderr: "inherit",
+    });
+    await until(() => {
+      try {
+        return statSync(nSock).isSocket() && (nToken = readFileSync(join(nTmp, "token"), "utf8").trim());
+      } catch {
+        return false;
+      }
+    }, "the names blimpd to start");
+  });
+
+  afterAll(() => {
+    nServer?.kill();
+    rmSync(nTmp, { recursive: true, force: true });
+  });
+
+  test("a session gets the model's name; the conversation goes on stdin, never in the arguments", async () => {
+    const sid = "55555555-5555-5555-5555-555555555555";
+    const name = await fakeClaude("n1", sid, [user("u1", "make the mobile app login work again"), said("a1", "Fixed the token refresh.")]);
+    expect(await titleOf(name)).toBe("make the mobile app login work again");
+    await until(async () => (await titleOf(name)) === "Mobile App Fixes", "the name in the session list", 15000);
+    const [argv] = readdirSync(calls).filter((f) => f.endsWith(".argv")).map((f) => readFileSync(join(calls, f), "utf8"));
+    expect(argv.split("\n").slice(0, -1)).toEqual(["-p", "--model", "haiku", "--no-session-persistence", "--strict-mcp-config", "--tools", "", "--max-turns", "1", "--settings", '{"disableAllHooks":true}']);
+    expect(argv).not.toContain("mobile app");
+    expect(stdins()[0]).toContain("make the mobile app login work again");
+    expect(stdins()[0]).toContain("Fixed the token refresh.");
+    const file = join(nTmp, "names.json");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(file, "utf8"))[sid]).toMatchObject({ name: "Mobile App Fixes", prompts: 1 });
+  }, 20000);
+
+  test("an answer that isn't a name leaves the old title", async () => {
+    writeFileSync(answer, "Here is a name: Fixing The Mobile App Login Flow Today\n");
+    const sid = "66666666-6666-6666-6666-666666666666";
+    const name = await fakeClaude("n2", sid, [user("u1", "look at the billing page"), tline({ type: "ai-title", aiTitle: "Billing page review" }), said("a1", "ok")]);
+    await until(() => stdins().some((t) => t.includes("look at the billing page")), "the call for the second session", 15000);
+    await Bun.sleep(500);
+    expect(await titleOf(name)).toBe("Billing page review");
+    expect(JSON.parse(readFileSync(join(nTmp, "names.json"), "utf8"))[sid]).toBeUndefined();
+  }, 20000);
+
+  test('nothing is called with "names": false, and Claude\'s titles show again', async () => {
+    writeFileSync(join(nTmp, "config.json"), JSON.stringify({ names: false }));
+    writeFileSync(answer, "Should Not Show\n");
+    const before = stdins().length;
+    const name = await fakeClaude("n3", "77777777-7777-7777-7777-777777777777", [user("u1", "tidy the readme"), said("a1", "done")]);
+    await Bun.sleep(6000); // past the next naming check
+    expect(stdins().length).toBe(before);
+    const sessions = await list();
+    expect(sessions.find((s) => s.name === name)?.title).toBe("tidy the readme");
+    expect(sessions.find((s) => s.sessionId === "55555555-5555-5555-5555-555555555555")?.title).toBe("make the mobile app login work again");
+  }, 20000);
 });

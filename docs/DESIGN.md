@@ -68,7 +68,7 @@ type Session = {
   kind: string;          // the kind it was started with (see Kinds); else claude if Claude's status file was found or cmd mentions claude, else shell
   label?: string;        // short label for kinds other than claude and shell: GLM, Codex, Codex sign-in, a custom kind's label
   sessionId?: string;    // Claude's conversation id
-  title: string;         // /rename title, else AI title, else first prompt, else "(new session)"
+  title: string;         // /rename title, else blimp's name (see Names), else AI title, else first prompt, else "(new session)"
   status: string;        // raw Claude status: busy | idle | waiting | shell | ""
   waitingFor?: string;   // raw Claude field
   updatedAt?: number;    // ms, last activity
@@ -182,6 +182,17 @@ Every path must resolve, after following symlinks, to the home folder or somethi
 `PUT /fs/upload?path=<file>&mode=new|replace` body = raw bytes, streamed → 201 `{ "size", "mtime" }`. Written to a hidden temp file beside the target, then put in place: `new` with a hard link, which fails (409) if the name was taken meanwhile; `replace` with a rename over a file of that name. Never over a folder (409). At most 2 GB (413); 507 if `Content-Length` is more than the free disk space.
 
 `GET /fs/files?root=<dir>` → `{ "files": string[] /* relative to root */, "truncated": boolean }` for ⌘P. Inside a git repo: `git ls-files --cached --others --exclude-standard`. Otherwise walk, skipping `.git`, `node_modules` and dot-folders. Max 20 000.
+
+### Names
+
+Claude writes its AI title once, from the first message, so it says how a session started, not what it does now. blimpd names Claude sessions itself (`src/names.ts`): every 5 s it looks at the running `claude` and `claude-glm` sessions and asks a small model for a name in 2 to 4 words.
+
+- **When:** a session with at least one prompt and one reply, whose state is `done` or `waiting` (never mid-turn), and without a `/rename` title. A first name at once; a new one once 3 more prompts have come and the last name is 20 minutes old. One call at a time across blimpd, at most 30 an hour; a session whose call failed (or whose answer wasn't a name) waits 10 minutes.
+- **The call:** `$SHELL -l -i -c 'echo blimp-name:; exec claude "$@"' claude -p --model haiku --no-session-persistence --strict-mcp-config --tools "" --max-turns 1 --settings '{"disableAllHooks":true}'`, so the login shell finds `claude` as it does for sessions; only what follows the `blimp-name:` line counts (a profile may print things). The conversation goes on stdin, which is then closed, never in the arguments (`ps` shows those). It runs in an empty private temp folder (no CLAUDE.md, removed after), without blimpd's `CLAUDE*` and `ZMX_SESSION` variables, and is killed after 60 s. No tools, MCPs or hooks, and nothing saved. It uses your own Claude sign-in (`--bare` would skip it), so a little of your Claude usage.
+- **What the model reads:** the /rename or AI title if any, the first prompt, the last 3 prompts, and Claude's last reply, each cut to ~300 characters; no tool calls, tool output or system lines (read with `src/chat.ts`, only the lines added since the last check).
+- **The answer:** one line, 1 to 6 words, at most 40 characters once quotes and trailing punctuation are off; anything else is ignored and the old title stays. It's shown as plain text.
+- **Where:** `<socket dir>/names.json`, `{ [sessionId]: { name, at, prompts } }` (`at` in ms, `prompts` the prompt count then), written through a temp file and a rename, mode 600, the 500 newest kept. `GET /sessions` and `GET /conversations` show it after a /rename title and before the AI title.
+- **Off:** `<socket dir>/config.json` = `{ "names": false }`. Read at every check, so it needs no restart. While it's off nothing is called, and titles are Claude's own again.
 
 ### Hooks (status backup)
 

@@ -22,6 +22,7 @@ import {
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { kindLabel, readKindsFile, type Launch } from "./kinds";
+import { type Names, shownNames } from "./names";
 import { type Prompt, withScreenOptions } from "./prompt";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
@@ -83,9 +84,10 @@ export function parseZmxList(out: string): ZmxSession[] {
   return rows.sort((a, b) => a.created - b.created);
 }
 
-// Title order matches Claude's own: last /rename, else last AI title, else the first thing typed.
+// Title order matches Claude's own: last /rename, else last AI title, else the first thing typed,
+// with blimp's own name (names.ts) after your /rename and before Claude's AI title.
 // skipping: offset is inside a line longer than a chunk, which is read past without parsing.
-type TitleScan = { offset: number; skipping?: boolean; custom?: string; ai?: string; prompt?: string };
+export type TitleScan = { offset: number; skipping?: boolean; custom?: string; ai?: string; prompt?: string };
 
 function scanTitle(s: TitleScan, text: string) {
   for (const line of text.split("\n")) {
@@ -107,12 +109,12 @@ function scanTitle(s: TitleScan, text: string) {
   }
 }
 
-const pickTitle = (s: TitleScan) => s.custom ?? s.ai ?? s.prompt ?? "(new session)";
+const pickTitle = (s: TitleScan, name?: string) => s.custom ?? name ?? s.ai ?? s.prompt ?? "(new session)";
 
-export function titleFromTranscript(text: string): string {
+export function titleFromTranscript(text: string, name?: string): string {
   const s: TitleScan = { offset: 0 };
   scanTitle(s, text);
-  return pickTitle(s);
+  return pickTitle(s, name);
 }
 
 // Transcripts only grow and can be tens of MB, and the session list is rebuilt every second.
@@ -121,12 +123,18 @@ export function titleFromTranscript(text: string): string {
 const titles = new Map<string, TitleScan>();
 const TITLE_CHUNK = 16 << 20;
 
-export function transcriptTitle(file: string): string {
+export function transcriptTitle(file: string, name?: string): string {
+  const s = transcriptTitles(file);
+  return s ? pickTitle(s, name) : "(new session)";
+}
+
+// The titles a transcript has (custom, ai, first prompt), or undefined if it can't be read.
+export function transcriptTitles(file: string): TitleScan | undefined {
   let fd: number;
   try {
     fd = openSync(file, "r");
   } catch {
-    return "(new session)";
+    return;
   }
   try {
     const size = statSync(file).size;
@@ -165,11 +173,11 @@ export function transcriptTitle(file: string): string {
       scanTitle(s, buf.toString("utf8", start, end + 1));
       s.offset += end + 1;
     }
-    if (!tail) return pickTitle(s);
+    if (!tail) return { ...s };
     // Count an unterminated last line now, but read it again next time in case it grows.
     const t = { ...s };
     scanTitle(t, tail);
-    return pickTitle(t);
+    return t;
   } finally {
     closeSync(fd);
   }
@@ -254,6 +262,7 @@ export function listSessions(
   zmxOut = runZmxList(),
   statusDir = join(blimpDir(), "status"),
   memoFile = kindsMemoFile(),
+  names: Names = shownNames(),
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
@@ -275,7 +284,7 @@ export function listSessions(
       label: kindLabel(kind, custom),
       dir: realDir(info.cwd || z.dir || "/"),
       sessionId: info.sessionId,
-      title: file ? transcriptTitle(file) : "(new session)",
+      title: file ? transcriptTitle(file, names[info.sessionId]?.name) : "(new session)",
       status: info.status ?? "",
       waitingFor: info.waitingFor,
       updatedAt: info.updatedAt,

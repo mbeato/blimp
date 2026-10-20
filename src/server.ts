@@ -13,6 +13,7 @@ import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage
 import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
+import { startNaming } from "./names";
 import { sessionPorts } from "./ports";
 import {
   checkZmxDir,
@@ -311,6 +312,7 @@ export function serve(): Server {
   onBrowserChange(() => server.publish("sessions", browserMessage()));
   // Without it, sessions just don't get the browser.
   startBrowserGate().catch((e) => console.log(`browser: ${(e as Error).message}`));
+  startNaming(); // off with {"names": false} in <socket dir>/config.json
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }
