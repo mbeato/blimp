@@ -128,10 +128,23 @@ export class Gate {
     return !!t && t.seen && t.folder === c.folder && t.info.type === "page";
   }
 
-  // The gate attaches client c to a target; Chrome's attachedToTarget comes before its answer.
-  private attach(c: Conn, targetId: string) {
+  // Client c waits for its attachedToTarget, which Chrome sends before its answer. An attach
+  // Chrome refuses (the tab just closed) takes c out of the line again, so the next attach to that
+  // target isn't handed to it.
+  private queueAttach(c: Conn, targetId: string) {
     this.attachFor.set(targetId, [...(this.attachFor.get(targetId) ?? []), c]);
-    return this.chrome.call("Target.attachToTarget", { targetId, flatten: true });
+    return (r: CdpMessage) => {
+      if (!r.error) return;
+      const rest = (this.attachFor.get(targetId) ?? []).filter((x) => x !== c);
+      if (rest.length) this.attachFor.set(targetId, rest);
+      else this.attachFor.delete(targetId);
+    };
+  }
+
+  // The gate attaches client c to a target.
+  private attach(c: Conn, targetId: string) {
+    const done = this.queueAttach(c, targetId);
+    return this.chrome.call("Target.attachToTarget", { targetId, flatten: true }).then(done);
   }
 
   // A target is now in `folder`: Chrome's targetCreated may have come before or after this.
@@ -244,8 +257,7 @@ export class Gate {
       case "Target.createTarget":
         return this.forward(c, m, (r) => r.result?.targetId && this.claim(r.result.targetId, c.folder, c.session));
       case "Target.attachToTarget":
-        this.attachFor.set(p.targetId, [...(this.attachFor.get(p.targetId) ?? []), c]);
-        return this.forward(c, m);
+        return this.forward(c, m, this.queueAttach(c, p.targetId));
       case "Target.detachFromTarget":
         if (!c.sessions.has(p.sessionId)) return this.fail(c, m, "No session with given id");
         return this.forward(c, m);
