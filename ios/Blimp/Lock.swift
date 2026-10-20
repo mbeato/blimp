@@ -42,15 +42,16 @@ final class Lock {
         }
     }
 
-    /// Locks when the app comes back after more than five minutes away, and asks once then.
-    /// It never asks again by itself: the sheet makes the scene inactive, and a cancel returns to
-    /// .active, so asking there would loop. After a cancel, the Unlock button is the way.
-    func scenePhaseChanged(_ phase: ScenePhase) {
+    /// Locks when the app comes back after more than five minutes away, and asks once then; not
+    /// while nothing is paired (there's nothing to protect). It never asks again by itself: the sheet
+    /// makes the scene inactive, and a cancel returns to .active, so asking there would loop. After a
+    /// cancel, the Unlock button is the way.
+    func scenePhaseChanged(_ phase: ScenePhase, paired: Bool) {
         switch phase {
         case .background:
             if backgroundedAt == nil { backgroundedAt = .now }
         case .active:
-            if let at = backgroundedAt, ContinuousClock.now - at > Self.grace {
+            if paired, let at = backgroundedAt, ContinuousClock.now - at > Self.grace {
                 locked = true
                 Task { await unlock() }
             }

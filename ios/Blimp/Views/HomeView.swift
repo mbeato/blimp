@@ -36,14 +36,15 @@ struct HomeView: View {
                     Section {
                         Text("No sessions running. Open a project to start one.").foregroundStyle(.secondary)
                     }
-                    if !folders.isEmpty {
-                        Section("Recent folders") {
-                            ForEach(folders, id: \.dir) { folder in
-                                NavigationLink(value: ProjectRoute(dir: folder.dir)) {
-                                    VStack(alignment: .leading) {
-                                        Text(name(of: folder.dir))
-                                        Text(folder.dir).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
+                }
+                // Recent folders with nothing running, to start a session in.
+                if !idleFolders.isEmpty {
+                    Section(store.home.projects.isEmpty ? "Recent folders" : "Start somewhere else") {
+                        ForEach(idleFolders, id: \.dir) { folder in
+                            NavigationLink(value: ProjectRoute(dir: folder.dir)) {
+                                VStack(alignment: .leading) {
+                                    Text(name(of: folder.dir))
+                                    Text(folder.dir).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
                         }
@@ -51,8 +52,8 @@ struct HomeView: View {
                 }
             }
             .refreshable { store.connect() }
-            .task(id: FolderKey(empty: store.home.projects.isEmpty, online: store.connection == .online)) {
-                guard store.home.projects.isEmpty, let api = store.api else { return }
+            .task(id: FolderKey(running: Set(store.home.projects.map(\.dir)), online: store.connection == .online)) {
+                guard let api = store.api else { return }
                 folders = (try? await api.folders()) ?? []
             }
             .safeAreaInset(edge: .top, spacing: 0) { StatusBar(connection: store.connection) }
@@ -65,6 +66,11 @@ struct HomeView: View {
             .sheet(isPresented: $showSettings) { SettingsView() }
             .endConfirmation($pendingEnd, store: store)
         }
+    }
+
+    private var idleFolders: [RecentFolder] {
+        let running = Set(store.home.projects.map(\.dir))
+        return folders.filter { !running.contains($0.dir) }
     }
 
     private func row(_ session: Session) -> some View {
@@ -83,7 +89,7 @@ struct HomeView: View {
 }
 
 private struct FolderKey: Equatable {
-    let empty: Bool
+    let running: Set<String>
     let online: Bool
 }
 

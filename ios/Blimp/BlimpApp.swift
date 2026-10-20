@@ -34,7 +34,7 @@ private struct Root: View {
         .onReturnFromBackground { store.reconnectNow() }
         .onChange(of: lock.locked) { _, locked in if !locked { store.reconnectNow() } }
         .task { if store.server == nil { lock.startUnlocked() } else { await lock.unlock() } }
-        .onChange(of: scenePhase) { _, phase in lock.scenePhaseChanged(phase) }
+        .onChange(of: scenePhase) { _, phase in lock.scenePhaseChanged(phase, paired: store.server != nil) }
         // Nothing is read aloud in the background, behind the lock cover, or while locked.
         .onChange(of: scenePhase == .active && !lock.locked, initial: true) { _, open in Speaker.shared.allowed = open }
     }

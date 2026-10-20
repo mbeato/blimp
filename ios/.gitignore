@@ -2,3 +2,4 @@ Blimp.xcodeproj/
 .build/
 .swiftpm/
 DerivedData/
+Blimp/Info.plist

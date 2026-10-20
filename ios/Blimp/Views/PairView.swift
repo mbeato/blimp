@@ -1,4 +1,4 @@
-// First launch, or after blimpd refuses the token: paste the blimp:// link that `blimpd pair` prints.
+// First launch, or after blimpd refuses the token: paste the blimp:// link (ios/README.md says how to make it).
 import BlimpKit
 import SwiftUI
 
@@ -23,7 +23,7 @@ struct PairView: View {
                     }
                     .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 } footer: {
-                    Text("On your server, run blimpd pair.\nCopy the blimp:// link it prints and paste it here.")
+                    Text("Paste the blimp:// link from ios/README.md, with your server's token in it.")
                 }
                 if let message = error ?? (store.connection == .unauthorized ? "blimpd didn't accept the token" : nil) {
                     Section {
@@ -52,7 +52,7 @@ struct PairView: View {
         } catch is KeychainError {
             error = "Couldn't save the link on this iPhone"
         } catch {
-            self.error = "Can't reach the server"
+            self.error = Store.words(for: error)
         }
     }
 }
