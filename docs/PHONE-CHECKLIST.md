@@ -6,7 +6,8 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 
 ## Pairing and lock
 
-- [ ] Pairing by link. Paste the `blimp://pair?...` link on the Pair screen. You land on Home. (Scanning a QR code comes with Tailscale.)
+- [ ] Pairing by link. Paste the `blimp://pair?...` link on the Pair screen. You land on Home.
+- [ ] Pairing by QR code (a real iPhone; the simulator has no camera, so it shows no Scan button). Run `blimpd pair` on the server, tap Scan QR code, allow the camera, point it at the terminal. You land on Home. Try it from a dark terminal and a light one.
 - [ ] A wrong token. Pair with a made-up token. The app says the server did not accept it and stays on Pair. (This checks that a refused token, HTTP 401, is recognised.)
 - [ ] Plain http to 127.0.0.1. The pairing above worked over `http://127.0.0.1:7425`. Now paste a link with a non-local address, for example `blimp://pair?url=http%3A%2F%2F192.168.1.5%3A7425&token=x`. The app says "That isn't a blimp link".
 - [ ] Keychain in a normal Xcode run. Press Run, pair, stop the app, press Run again. It opens on Home without asking to pair. Sign out in Settings. The next run asks to pair.

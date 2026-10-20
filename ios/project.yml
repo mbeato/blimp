@@ -32,6 +32,9 @@ targets:
         NSFaceIDUsageDescription: blimp locks with Face ID because it can run anything on your server.
         NSMicrophoneUsageDescription: blimp listens while you hold the mic button, to type what you say.
         NSSpeechRecognitionUsageDescription: blimp turns what you say into text on this iPhone.
+        NSCameraUsageDescription: blimp uses the camera to scan the pairing code from your server.
+        # Only HTTPS and the system's own encryption, so TestFlight needn't ask about export rules for each build.
+        ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSExceptionDomains:
             localhost: { NSExceptionAllowsInsecureHTTPLoads: true }
