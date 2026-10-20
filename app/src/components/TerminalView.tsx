@@ -6,6 +6,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { backoff, type ServerLink } from "../lib/connection";
+import { joinRows, type Row } from "../lib/copy";
 import { mapKey } from "../lib/keys";
 import { followsLink, openWebLink } from "../lib/links";
 import { ExistsCache, findPaths, resolveAgainst } from "../lib/pathlinks";
@@ -180,7 +181,7 @@ export function TerminalView(props: {
         send(enc.encode(a.data));
       } else if (a.kind === "copy") {
         e.preventDefault();
-        void navigator.clipboard.writeText(t.getSelection()).catch(() => {});
+        void navigator.clipboard.writeText(copied(t)).catch(() => {});
       }
       return false;
     });
@@ -289,4 +290,28 @@ export function TerminalView(props: {
       {phase === "reconnecting" && <div className="term-banner quiet">Reconnecting…</div>}
     </div>
   );
+}
+
+// The selection as text, wrapped lines joined back (lib/copy.ts). getSelectionPosition's x is 0-based and
+// its end column exclusive, whatever its doc comment says; y is the buffer row.
+function copied(t: Terminal): string {
+  const p = t.getSelectionPosition();
+  if (!p || p.start.y === p.end.y) return t.getSelection();
+  const buf = t.buffer.active;
+  const rows: Row[] = [];
+  for (let y = p.start.y; y <= p.end.y; y++) {
+    const line = buf.getLine(y);
+    if (!line) return t.getSelection();
+    let width = 0;
+    for (let x = t.cols - 1; x >= 0; x--) {
+      const cell = line.getCell(x);
+      if (cell && cell.getChars() && cell.getChars() !== " ") {
+        width = x + Math.max(1, cell.getWidth());
+        break;
+      }
+    }
+    const [from, to] = [y === p.start.y ? p.start.x : 0, y === p.end.y ? p.end.x : t.cols];
+    rows.push({ full: line.translateToString(true), width, wrapped: y > p.start.y && line.isWrapped, text: line.translateToString(true, from, to) });
+  }
+  return joinRows(rows, t.cols);
 }
