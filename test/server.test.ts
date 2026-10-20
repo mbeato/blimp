@@ -1131,6 +1131,16 @@ describe("kinds and keys", () => {
     expect((await kinds()).find((k) => k.id === "claude-glm")?.available).toBe(false);
   });
 
+  test("the fs api never serves blimp's own key files, nor a folder that holds one", async () => {
+    expect((await kApi("/keys/zai", { method: "PUT", body: JSON.stringify({ key: KEY }) })).status).toBe(204);
+    const q = (p: string) => encodeURIComponent(p);
+    const r = await kApi(`/fs/file?path=${q(keyFile)}`);
+    expect(r.status).toBe(403); // plain home containment would have served the key here
+    expect(await r.text()).not.toContain(KEY);
+    expect((await kApi(`/fs/download?path=${q(join(kHome, ".config"))}`)).status).toBe(403);
+    expect((await kApi(`/fs/download?path=${q(kHome)}`)).status).toBe(403); // its tar would archive the key
+  });
+
   test("POST /sessions starts each kind's command; the GLM key goes in the environment only", async () => {
     expect((await kApi("/keys/zai", { method: "PUT", body: JSON.stringify({ key: KEY }) })).status).toBe(204);
     // A login profile with its own Anthropic settings: they must not win over GLM's.

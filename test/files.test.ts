@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { guard, HttpError, listDir, listFiles, writeFile } from "../src/files";
+import { dirname, join } from "node:path";
+import { guard, guardFile, HttpError, listDir, listFiles, secretPaths, socketDir, writeFile } from "../src/files";
+import { socketPath } from "../src/sessions";
 
 // A fake home with a sibling folder outside it.
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-files-")));
@@ -57,6 +58,67 @@ describe("guard", () => {
 
   test("a missing parent folder is refused", () => {
     expect(status(() => guard(join(home, "no", "such", "file"), home))).toBe(403);
+  });
+});
+
+describe("guardFile", () => {
+  // A second fake home, with blimp's own files as on a real box plus ordinary files beside them
+  // that must stay reachable. (Separate from the one above, whose listing other tests pin.)
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-secrets-")));
+  const home = join(root, "home");
+  const blimp = join(home, ".blimp");
+  mkdirSync(join(blimp, "browser"), { recursive: true });
+  mkdirSync(join(home, ".config", "zai"), { recursive: true });
+  mkdirSync(join(blimp, "uploads"), { recursive: true });
+  mkdirSync(join(blimp, "status"));
+  writeFileSync(join(blimp, "token"), "mac-token");
+  writeFileSync(join(blimp, "phone-token"), "phone-token");
+  writeFileSync(join(blimp, "browser", "key"), "gate-key");
+  writeFileSync(join(home, ".config", "zai", "key"), "zai-key");
+  writeFileSync(join(blimp, "uploads", "page.txt"), "page");
+  writeFileSync(join(home, "a.txt"), "a");
+  symlinkSync(join(blimp, "token"), join(home, "token-link"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  test("blimp's own key files are refused", () => {
+    for (const s of secretPaths(home, blimp)) expect(status(() => guardFile(s, home, blimp))).toBe(403);
+  });
+
+  test("a symlink to one is refused", () => {
+    expect(status(() => guardFile(join(home, "token-link"), home, blimp))).toBe(403);
+  });
+
+  test("a folder that holds one is refused (its download would archive it)", () => {
+    for (const d of [home, blimp, join(blimp, "browser"), join(home, ".config"), join(home, ".config", "zai")])
+      expect(status(() => guardFile(d, home, blimp))).toBe(403);
+  });
+
+  test("everything else in those folders still passes", () => {
+    expect(guardFile(join(blimp, "uploads", "page.txt"), home, blimp)).toBe(join(blimp, "uploads", "page.txt"));
+    expect(guardFile(join(blimp, "status", "s.json"), home, blimp)).toBe(join(blimp, "status", "s.json"));
+    expect(guardFile(join(home, "a.txt"), home, blimp)).toBe(join(home, "a.txt"));
+  });
+
+  test("a missing key file is refused too, so it can't be planted for the daemon to adopt", () => {
+    const phone = join(blimp, "phone-token");
+    rmSync(phone);
+    try {
+      expect(status(() => guardFile(phone, home, blimp))).toBe(403);
+    } finally {
+      writeFileSync(phone, "phone-token");
+    }
+  });
+
+  test("the secret list follows the socket path, like sessions.ts's blimpDir", () => {
+    expect(socketDir()).toBe(dirname(socketPath()));
+    const old = process.env.BLIMPD_SOCKET;
+    process.env.BLIMPD_SOCKET = "/tmp/elsewhere/y.sock";
+    try {
+      expect(socketDir()).toBe(dirname(socketPath()));
+    } finally {
+      if (old === undefined) delete process.env.BLIMPD_SOCKET;
+      else process.env.BLIMPD_SOCKET = old;
+    }
   });
 });
 

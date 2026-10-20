@@ -10,7 +10,7 @@ import pkg from "../package.json";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
-import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
+import { createFile, download, guard, guardFile, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { startNaming } from "./names";
@@ -200,21 +200,21 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const p = q.get("path");
     return Response.json({ ...listDir(guard(p)), path: resolve(p!) });
   }
-  if (path === "/fs/file" && get) return readFile(guard(q.get("path")));
+  if (path === "/fs/file" && get) return readFile(guardFile(q.get("path")));
   if (path === "/fs/file" && req.method === "PUT") {
-    const real = guard(q.get("path"));
+    const real = guardFile(q.get("path"));
     const base = q.get("baseMtime");
     if (base !== null && !Number.isFinite(Number(base))) throw new HttpError(400, "baseMtime must be a number");
     const body = new Uint8Array(await req.arrayBuffer());
     return Response.json(writeFile(real, body, base === null ? undefined : Number(base)));
   }
-  if (path === "/fs/download" && get) return download(guard(q.get("path")), req.signal);
+  if (path === "/fs/download" && get) return download(guardFile(q.get("path")), req.signal);
   if (path === "/fs/upload" && req.method === "PUT") {
-    const r = await upload(guard(q.get("path")), req.body, q.get("mode") ?? "new", Number(req.headers.get("content-length") ?? 0));
+    const r = await upload(guardFile(q.get("path")), req.body, q.get("mode") ?? "new", Number(req.headers.get("content-length") ?? 0));
     return Response.json(r, { status: 201 });
   }
   if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guard(await bodyPath(req))), { status: 201 });
-  if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guard(await bodyPath(req))), { status: 201 });
+  if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/files" && get) {
     const root = guard(q.get("root"));
     if (!isDir(root)) throw new HttpError(400, "root must be a folder");
