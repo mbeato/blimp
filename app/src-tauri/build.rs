@@ -6,6 +6,7 @@ fn main() {
             .app_manifest(tauri_build::AppManifest::new().commands(&[
                 "connect",
                 "disconnect",
+                "drop_tunnel",
                 "forward_port",
                 "unforward_port",
                 "update_server",

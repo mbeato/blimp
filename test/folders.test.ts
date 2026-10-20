@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { conversations, firstCwd, projectFolderName, recentFolders } from "../src/folders";
+import { conversations, firstCwd, projectFolderName, recentFolders, resumedKind } from "../src/folders";
 
 // A temp CLAUDE_CONFIG_DIR with three project folders, plus the work folders they point at.
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-folders-")));
@@ -59,4 +59,29 @@ test("firstCwd looks only at the first lines, and copes with huge ones", () => {
   expect(firstCwd(f)).toBe("/a/b");
   writeFileSync(f, line({ type: "x" }).repeat(50) + line({ cwd: "/late" }));
   expect(firstCwd(f)).toBeUndefined();
+});
+
+test("resumedKind: a conversation resumes in the kind it started on", () => {
+  const said = (model: string, extra = {}) => line({ type: "assistant", ...extra, message: { role: "assistant", model, content: [{ type: "text", text: "hi" }] } });
+  const glm = "55555555-5555-5555-5555-555555555555";
+  transcript(api, glm, 5000, line({ type: "user", cwd: api, message: { content: "on glm" } }) + said("GLM-5.3-Flash", { isSidechain: true }) + said("GLM-5.3") + line({ type: "system" }));
+  expect(resumedKind(api, glm, claude)).toBe("claude-glm");
+  // A model blimp's GLM kind was set to (kinds.json glm.model) counts too
+  const custom = "66666666-6666-6666-6666-666666666666";
+  transcript(api, custom, 5000, said("my-zai-model"));
+  expect(resumedKind(api, custom, claude, { model: "my-zai-model" })).toBe("claude-glm");
+  // Started on GLM, then resumed in Claude Code by mistake: still GLM
+  const mixed = "99999999-9999-9999-9999-999999999999";
+  transcript(api, mixed, 5000, said("GLM-5.3") + said("claude-opus-5-5"));
+  expect(resumedKind(api, mixed, claude)).toBe("claude-glm");
+  // No reply yet: the first main-thread request says which model
+  const asked = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  transcript(api, asked, 5000, line({ type: "api-request", querySource: "sdk", params: { model: "claude-haiku-4-5" } }) + line({ type: "api-request", querySource: "repl_main_thread", params: { model: "GLM-5.3" } }));
+  expect(resumedKind(api, asked, claude)).toBe("claude-glm");
+  // Claude's own models (a side task on GLM-Flash doesn't count), and anything unknown: Claude Code, as before
+  const opus = "77777777-7777-7777-7777-777777777777";
+  transcript(api, opus, 5000, said("GLM-5.3-Flash", { isSidechain: true }) + said("claude-opus-5-5") + said("GLM-5.3"));
+  expect(resumedKind(api, opus, claude)).toBe("claude");
+  expect(resumedKind(api, "33333333-3333-3333-3333-333333333333", claude)).toBe("claude");
+  expect(resumedKind(api, "88888888-8888-8888-8888-888888888888", claude)).toBe("claude");
 });

@@ -18,7 +18,7 @@ import {
   type SyncEvent,
   type Viewer,
 } from "../lib/files";
-import { onViewChange, pageTitle, view } from "../lib/browser";
+import { HOME, onViewChange, pageTitle, view } from "../lib/browser";
 import { useOverlay, useOverlayOpen } from "../lib/overlay";
 import { closePort, openPort } from "../lib/ports";
 import { tildify } from "../lib/sessions";
@@ -505,14 +505,18 @@ export function Workbench(props: {
   };
   props.pages.current = openPage;
 
-  // + in the tab strip: a browser tab with no address yet.
+  // + in the tab strip: a browser tab at Google in the Mac app (a browser's iframe can show only
+  // local pages, so there no address yet); a link that asked for a new window: one at its address.
   const nextWeb = useRef(0);
-  const newPage = () => {
+  const newPage = (url?: string) => {
     const key = `web:${++nextWeb.current}`;
-    pages.set(key, blank(key));
+    pages.set(key, { ...blank(key), url: url ?? (inTauri() ? HOME : null) });
     setActive(key);
     rerender();
   };
+  // The current one, for the views' listener below (set up once).
+  const latestNewPage = useRef(newPage);
+  latestNewPage.current = newPage;
 
   const goPage = (page: Page, url: string) => {
     page.error = "";
@@ -523,14 +527,16 @@ export function Workbench(props: {
   };
   const reloadPage = (page: Page) => (page.label ? void view.nav(page.label, "reload").catch(() => {}) : (page.nonce++, rerender()));
 
-  // What the native views say: address, title, loading.
+  // What the native views say: address, title, loading, a new tab to open.
   useEffect(() => {
     let off: (() => void) | undefined;
     let gone = false;
     if (inTauri())
       void onViewChange((c) => {
+        // Every project tab hears every view of the window; only the one with this view acts.
         const page = [...pages.values()].find((p) => p.label === c.label);
         if (!page) return;
+        if (c.open) return latestNewPage.current(c.open);
         if (c.url !== undefined) page.url = c.url;
         if (c.title !== undefined) page.title = c.title;
         if (c.loading !== undefined) page.loading = c.loading;
@@ -867,7 +873,7 @@ export function Workbench(props: {
                     </button>
                   </div>
                 ))}
-                <button className="icon-button small ftabs-new" title="New browser tab" aria-label="New browser tab" onClick={newPage}>
+                <button className="icon-button small ftabs-new" title="New browser tab" aria-label="New browser tab" onClick={() => newPage()}>
                   <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
                     <path d="M6 1.5v9M1.5 6h9" stroke="currentColor" />
                   </svg>
@@ -893,7 +899,7 @@ export function Workbench(props: {
             <div className="empty">
               No file open
               <div className="empty-sub">⌘P to open one, or pick it in the files on the left</div>
-              <button className="link-button" onClick={newPage}>
+              <button className="link-button" onClick={() => newPage()}>
                 New browser tab
               </button>
             </div>

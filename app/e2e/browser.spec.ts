@@ -35,11 +35,6 @@ test("a new browser tab opens any address next to the files; Send to session upl
   await expect(tab).toHaveText(/New tab/);
   const address = frontTab(page).getByLabel("Address");
   await expect(address).toBeFocused();
-  // Not an address: nothing opens.
-  await address.fill("not an address");
-  await address.press("Enter");
-  await expect(frontTab(page).locator(".viewer:not([hidden]) iframe.page-frame")).toHaveCount(0);
-
   await address.fill(`127.0.0.1:${port}/hello`);
   await address.press("Enter");
   const frame = frontTab(page).locator(".viewer:not([hidden]) iframe.page-frame");

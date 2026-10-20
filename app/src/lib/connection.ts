@@ -91,6 +91,28 @@ function listenForTunnels() {
   });
 }
 
+// After the Mac sleeps or changes networks, ssh can run on for up to a minute on a connection
+// that is gone (ServerAlive in tunnel.rs), and connect reuses it while it runs. So on wake or a
+// network change, every link checks its tunnel at once (ServerLink.check).
+// Timers stop during sleep, so a long gap between ticks means the Mac just woke.
+const TICK_MS = 2000;
+// Long enough for a tunnel that survived to answer once Wi-Fi has rejoined, still far under
+// ssh's own minute.
+const PROBE_MS = 8000;
+let wakeWatch = false;
+
+function watchForWake() {
+  if (wakeWatch || typeof window === "undefined") return;
+  wakeWatch = true;
+  const checkAll = () => links.forEach((l) => void l.check());
+  let last = Date.now();
+  setInterval(() => {
+    if (Date.now() - last > TICK_MS + 5000) checkAll();
+    last = Date.now();
+  }, TICK_MS);
+  window.addEventListener("online", checkAll);
+}
+
 // One server: its tunnel, its events socket and its session list, kept alive with retries.
 export class ServerLink {
   // A server removed and added again gets a new link with the same key; this tells them apart.
@@ -106,6 +128,7 @@ export class ServerLink {
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
+  private checking = false;
   private watching = new Map<number, string[]>();
   private fsListeners = new Set<(paths: string[]) => void>();
 
@@ -115,6 +138,7 @@ export class ServerLink {
   ) {
     links.add(this);
     listenForTunnels();
+    watchForWake();
   }
 
   get key() {
@@ -143,6 +167,8 @@ export class ServerLink {
       if (this.stopped) return this.disconnect();
       this.conn = conn;
       this.api = new Api(conn);
+      // A retry can start another open while one is still connecting; keep one socket.
+      this.events?.close();
       this.events = new EventsSocket(this.api, {
         onSessions: (s) => {
           this.sessions = s;
@@ -180,6 +206,41 @@ export class ServerLink {
     this.events?.close();
     this.events = null;
     void this.open();
+  }
+
+  // The Mac woke or its network changed. A link whose tunnel blimpd doesn't answer through in
+  // time gets a new tunnel; an offline one also stops waiting out its backoff. One still
+  // connecting, or already checking (a wake and an "online" can come together), is left alone.
+  async check() {
+    if (this.stopped || this.checking || this.status === "connecting") return;
+    // Offline now: the "online" event checks again once the network is back.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    const { api, conn } = this;
+    if (!api || !conn) {
+      if (this.status === "offline") this.retryNow();
+      return;
+    }
+    this.checking = true;
+    try {
+      const alive = await Promise.race([
+        api.health().then(() => true, () => false),
+        new Promise<boolean>((r) => setTimeout(() => r(false), PROBE_MS)),
+      ]);
+      // Something else reconnected the link meanwhile.
+      const moved = () => this.stopped || this.api !== api || (this.status as LinkStatus) === "connecting";
+      if (moved()) return;
+      if (alive) {
+        if (this.status === "offline") this.retryNow();
+        return;
+      }
+      // Stop the dead ssh first, or connect would hand back the same tunnel. Only the one this
+      // link used: another window may already have replaced it, and that one stays.
+      if (inTauri()) await invoke("drop_tunnel", { id: conn.id, port: Number(new URL(conn.base).port) }).catch(() => {});
+      if (moved()) return;
+      this.retryNow();
+    } finally {
+      this.checking = false;
+    }
   }
 
   // Also during a connect: disconnect cancels a tunnel that is still starting.

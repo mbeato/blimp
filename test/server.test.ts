@@ -122,7 +122,8 @@ beforeAll(async () => {
 // More than the default 5 s: this many zmx kills one after another take longer.
 afterAll(() => {
   server?.kill();
-  for (const name of made) zmx("kill", name);
+  // --force: a session flooding its terminal (`yes`) is too busy to answer a plain kill, and stayed on.
+  for (const name of made) zmx("kill", name, "--force");
   rmSync(tmp, { recursive: true, force: true });
   rmSync(homeDir, { recursive: true, force: true });
 }, 30000);
@@ -1116,6 +1117,14 @@ describe("kinds and keys", () => {
     // Claude Code's own key is unset, as claude-glm does, so the Z.ai one is used, at Z.ai.
     expect(glm.text).toContain("model=GLM-5.3 fast=GLM-5.3-Flash apikey=unset");
     expect(glm.text).toContain("url=https://api.z.ai/api/anthropic zaitoken=unset");
+    // Resume with no kind (the apps' Earlier lists): a conversation that ran on GLM goes on on GLM.
+    const glmConv = "0123abcd-0123-0123-0123-0123456789ac";
+    const convDir = join(tmp, "claude", "projects", dir.replace(/[^A-Za-z0-9]/g, "-"));
+    mkdirSync(convDir, { recursive: true });
+    writeFileSync(join(convDir, `${glmConv}.jsonl`), JSON.stringify({ type: "assistant", message: { role: "assistant", model: "GLM-5.3", content: [] } }) + "\n");
+    const again = await startKind(undefined as any, "k-glm-again", "token=from-key-file", { resume: glmConv });
+    expect(again.text).toContain(`args:[--resume ${glmConv}]`);
+    expect(again.text).toContain("model=GLM-5.3 fast=GLM-5.3-Flash apikey=unset");
     const codex = await startKind("codex", "k-codex", "custom=");
     expect(codex.text).toContain("fake-codex size=36 120");
     expect(codex.text).toContain("args:[]");

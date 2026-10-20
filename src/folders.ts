@@ -22,12 +22,12 @@ function transcripts(folder: string): { file: string; mtime: number }[] {
   return out.sort((a, b) => b.mtime - a.mtime);
 }
 
-// The first "cwd" in a transcript's first lines. Lines can be huge (pasted images), so read in chunks, 8 MB at most.
-export function firstCwd(file: string, maxLines = 50): string | undefined {
+// Calls pick on each of a transcript's lines from the start until it returns something. Lines can be huge
+// (pasted images), so it reads in chunks, 8 MB at most.
+function scanLines<T>(file: string, pick: (line: string) => T | undefined | "stop"): T | undefined {
   const fd = openSync(file, "r");
   try {
     let pending = "";
-    let lines = 0;
     let pos = 0;
     const buf = Buffer.alloc(64 * 1024);
     const utf8 = new StringDecoder("utf8"); // a chunk can end inside a character
@@ -38,18 +38,28 @@ export function firstCwd(file: string, maxLines = 50): string | undefined {
       const parts = pending.split("\n");
       pending = n ? parts.pop()! : "";
       for (const line of parts) {
-        if (++lines > maxLines) return;
-        if (!line.includes('"cwd"')) continue;
-        try {
-          const cwd = JSON.parse(line).cwd;
-          if (typeof cwd === "string" && cwd) return cwd;
-        } catch {}
+        const v = pick(line);
+        if (v === "stop") return;
+        if (v !== undefined) return v;
       }
       if (!n) return;
     }
   } finally {
     closeSync(fd);
   }
+}
+
+// The first "cwd" in a transcript's first lines.
+export function firstCwd(file: string, maxLines = 50): string | undefined {
+  let lines = 0;
+  return scanLines(file, (line) => {
+    if (++lines > maxLines) return "stop";
+    if (!line.includes('"cwd"')) return;
+    try {
+      const cwd = JSON.parse(line).cwd;
+      if (typeof cwd === "string" && cwd) return cwd;
+    } catch {}
+  });
 }
 
 export function recentFolders(dir = claudeDir()): { dir: string; lastUsed: number }[] {
@@ -85,4 +95,29 @@ export function conversations(cwd: string, dir = claudeDir()) {
   return transcripts(join(dir, "projects", projectFolderName(realDir(cwd))))
     .slice(0, 50)
     .map(({ file, mtime }) => ({ sessionId: basename(file, ".jsonl"), title: transcriptTitle(file), updatedAt: mtime }));
+}
+
+// The model a conversation started on: its first main-thread request or reply (side tasks run on other
+// models). The first, not the last: a GLM conversation resumed in Claude Code by mistake goes on in Claude's
+// models after that. undefined when there's no transcript or no model in its first 8 MB.
+export function firstModel(file: string): string | undefined {
+  try {
+    return scanLines(file, (line) => {
+      if (!line.includes('"model"')) return;
+      try {
+        const o = JSON.parse(line);
+        const model =
+          o.type === "assistant" && !o.isSidechain ? o.message?.model : o.type === "api-request" && o.querySource === "repl_main_thread" ? o.params?.model : undefined;
+        if (typeof model === "string" && model && model !== "<synthetic>") return model;
+      } catch {}
+    });
+  } catch {}
+}
+
+// Which kind resumes a conversation: Claude Code on GLM if it started on a GLM model (or the model blimp's
+// GLM kind is set to), else Claude Code. Without this, Resume on a GLM conversation went on in Claude's models.
+export function resumedKind(cwd: string, sessionId: string, dir = claudeDir(), glm: { model?: string; fast?: string } = {}): string {
+  const model = firstModel(join(dir, "projects", projectFolderName(realDir(cwd)), `${sessionId}.jsonl`));
+  if (!model) return "claude";
+  return /^glm/i.test(model) || model === glm.model || model === glm.fast ? "claude-glm" : "claude";
 }
