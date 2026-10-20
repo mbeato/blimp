@@ -196,7 +196,7 @@ export function App() {
     let off = () => {};
     let offRelease = () => {};
     void onShown((s, label) => ((me.current = label), setElsewhere(others(s)))).then((f) => (off = f));
-    // Another window took one of this window's sessions into a split.
+    // Another window took one of this window's sessions, or has one this window filled in on its own.
     void onReleaseSession((key) => releaseRef.current(key)).then((f) => (offRelease = f));
     return () => (off(), offRelease());
   }, []);
@@ -215,6 +215,7 @@ export function App() {
 
   const open = (server: string, dir: string | null, session?: string) => {
     setDialog(null);
+    if (session) takeSession(`${server}/${session}`);
     setLayout((l) => l && openTab(l, server, dir, session));
     if (dir) void rememberProject(server, dir);
   };
@@ -592,7 +593,7 @@ export function App() {
                 onMoveOut={(names, at) => moveOut(t, names, at)}
                 elsewhere={(n) => elsewhere.has(`${t.server}/${n}`)}
                 hoverAt={hover && hoverHere(t) ? hover : null}
-                onTake={(n) => elsewhere.has(`${t.server}/${n}`) && takeSession(`${t.server}/${n}`)}
+                onTake={(n) => takeSession(`${t.server}/${n}`)}
                 onOpenPort={(p) => pageOpeners.get(key)?.current(p)}
                 onModels={() => {
                   setSettingsAt("models");
