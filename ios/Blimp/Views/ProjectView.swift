@@ -43,7 +43,7 @@ struct ProjectView: View {
                             Task { await start(resume: conversation.sessionId) }
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(conversation.title).lineLimit(1).foregroundStyle(.primary)
+                                Text(conversation.title).lineLimit(2).foregroundStyle(.primary)
                                 Text(ago(ms: conversation.updatedAt)).font(.caption).foregroundStyle(.secondary)
                             }
                         }

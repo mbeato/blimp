@@ -148,9 +148,15 @@ private struct ChatContent: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
         .navigationTitle(model.title)
-        .navigationSubtitle(model.folder)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(model.title).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
+                    Text(model.folder).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(readAloud ? "Stop reading aloud" : "Read aloud",
                        systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }

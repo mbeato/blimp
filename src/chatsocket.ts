@@ -5,7 +5,7 @@
 
 import type { ServerWebSocket, Subprocess } from "bun";
 import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from "./chat";
-import { answerKeys, answerSteps, choiceLabel, cleanText, type Expect, type Prompt, parseDialog, screenMeets } from "./prompt";
+import { answerKeys, answerSteps, choiceLabel, cleanText, type Expect, type Prompt, parseDialog, parseTrust, screenMeets, trustSteps } from "./prompt";
 import { existsSync } from "node:fs";
 import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
 import { followSize, lastSize } from "./terminal";
@@ -116,7 +116,8 @@ async function start(ws: ServerWebSocket<ChatData>) {
       return ws.close(4000, "ended");
     }
     if (d.session.sessionId) await loadHistory(ws);
-    else send(ws, { type: "unreadable" });
+    // Claude asks whether to trust its folder before it has a conversation: an empty one, like a new session's.
+    else send(ws, d.session.prompt?.kind === "trust" ? { type: "history", messages: [] } : { type: "unreadable" });
     if (d.closed) return; // closed while the history was read
     d.timer = setInterval(() => tick(ws), 250);
   } catch {
@@ -224,7 +225,12 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
   const d = ws.data;
   try {
     await d.opened;
-    if (!d.session?.sessionId) return fail("open this session on the Mac");
+    if (!d.session?.sessionId) {
+      // Before Claude has a conversation, the one thing to answer is its folder trust question.
+      const trust = m.type !== "interrupt" && (await find(d.name))?.prompt?.kind === "trust";
+      if (trust && m.type === "input") return fail("Claude is asking something. Answer it first.");
+      if (!trust || m.type !== "answer") return fail("open this session on the Mac");
+    }
     if (m.type !== "input" && (seen.get(d.name) ?? []).includes(id)) return send(ws, { type: "ack", id });
     if (m.type === "input") {
       if (typeof m.text !== "string" || m.text.length > 100_000) return fail("text must be a string of at most 100 000 characters");
@@ -260,14 +266,21 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer") {
+      let steps: ReturnType<typeof trustSteps>;
       await typed(ws, id, async () => {
         const s = await find(d.name);
         // The same wait and the same choice under pick: the options can change within one wait.
         const p = s?.state === "waiting" ? s.prompt : undefined;
-        const keys = p && p.at === m.at && typeof m.label === "string" && choiceLabel(p, m.pick) === m.label ? answerKeys(p, m.pick) : undefined;
+        const same = p && p.at === m.at && typeof m.label === "string" && choiceLabel(p, m.pick) === m.label;
+        // Folder trust has no digits: the cursor is moved and Enter pressed, each after the screen shows it.
+        if (same && p.kind === "trust" && (steps = trustSteps(m.pick))) {
+          await onTrust(d.name, steps[0].cursor);
+          return steps.map((t) => t.keys);
+        }
+        const keys = same ? answerKeys(p, m.pick) : undefined;
         if (!keys) throw new Error("the question changed");
         return [keys];
-      });
+      }, (i) => onTrust(d.name, steps![i].cursor));
       return send(ws, { type: "ack", id });
     }
     if (m.type === "interrupt") {
@@ -280,23 +293,28 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
   }
 }
 
-// Waits (up to 3 s) for Claude's screen to show the dialog where the next keys belong. Otherwise the
-// answer stops there: the rest would land in the wrong place.
-async function onScreen(name: string, p: Prompt, e: Expect) {
+// Waits (up to 3 s) for Claude's screen to show where the next keys belong. Otherwise the answer stops
+// there: the rest would land in the wrong place.
+async function untilScreen(name: string, where: string, want: string, meets: (screen: string) => boolean, read: (screen: string) => unknown) {
   const end = Date.now() + 3000;
   for (;;) {
     const r = Bun.spawn([zmxPath(), "history", name], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const screen = (await new Response(r.stdout).text()).split("\n").slice(-120).join("\n");
-    if (screenMeets(p, parseDialog(screen), e)) return;
+    if (meets(screen)) return;
     if (Date.now() > end) {
-      const where = "review" in e ? "the review screen" : `question ${e.q + 1}`;
       // What it saw, so a stopped answer can be told apart from a new dialog layout.
-      console.error(`answer for ${name} stopped before ${where} (${JSON.stringify(e)}); the dialog read as ${JSON.stringify(parseDialog(screen))}; the screen's end:\n${screen.split("\n").slice(-30).join("\n")}`);
+      console.error(`answer for ${name} stopped before ${where} (${want}); the screen read as ${JSON.stringify(read(screen))}; the screen's end:\n${screen.split("\n").slice(-30).join("\n")}`);
       throw new Error(`stopped: Claude's screen didn't show ${where} as expected. Finish it on the Mac.`);
     }
     await Bun.sleep(100);
   }
 }
+
+const onScreen = (name: string, p: Prompt, e: Expect) =>
+  untilScreen(name, "review" in e ? "the review screen" : `question ${e.q + 1}`, JSON.stringify(e), (s) => screenMeets(p, parseDialog(s), e), parseDialog);
+
+const onTrust = (name: string, cursor: "yes" | "no") =>
+  untilScreen(name, "the folder trust question", `cursor on ${cursor}`, (s) => parseTrust(s)?.cursor === cursor, parseTrust);
 
 // Everything the phone sent is typed first (a message still waiting for the history, or queued behind
 // another), then the client goes: killed mid-write, its last keys could be lost while the id counts as typed.

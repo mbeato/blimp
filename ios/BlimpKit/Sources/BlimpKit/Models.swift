@@ -11,6 +11,8 @@ public enum SessionState: String, Codable, Sendable, Equatable {
 
 public enum PromptKind: String, Codable, Sendable, Equatable {
     case permission, question, other
+    /// Claude Code asks whether to trust the session's folder, before anything else (blimpd reads it off the screen).
+    case trust
     public init(from decoder: Decoder) throws {
         self = PromptKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
     }
@@ -36,11 +38,13 @@ public struct Prompt: Codable, Sendable, Equatable {
     public let summary: String?
     public let options: [String]?
     public let questions: [Question]?
+    /// The folder a trust prompt asks about.
+    public var folder: String?
 
     /// What the buttons say, in order; the index is what `answer` sends as `pick`.
     public var choices: [String] {
         switch kind {
-        case .permission: options ?? []
+        case .permission, .trust: options ?? []
         case .question: questions?.first?.options.map(\.label) ?? []
         case .other: []
         }
@@ -51,7 +55,7 @@ public struct Prompt: Codable, Sendable, Equatable {
     public var singleChoice: Bool {
         guard answerable, !choices.isEmpty else { return false }
         switch kind {
-        case .permission: return true
+        case .permission, .trust: return true
         case .question: return questions?.count == 1 && questions?.first?.multiSelect == false
         case .other: return false
         }
@@ -69,6 +73,9 @@ public struct Prompt: Codable, Sendable, Equatable {
                 // SpokenText adds a full stop to a question that has none, which is the break before the options.
                 (Prompt.say(q.question) + " " + Prompt.askAloud(q.options.map(\.label))).trimmingCharacters(in: .whitespaces)
             }.joined(separator: " ")
+        case .trust:
+            let name = folder.map { " " + URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+            return "Claude Code asks if you trust the folder\(name). Yes or no?"
         case .other:
             return "Claude is asking something. Open it on the Mac."
         }

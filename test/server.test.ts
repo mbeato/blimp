@@ -725,6 +725,86 @@ describe("chat", () => {
     viewer.ws.close();
   }, 20000);
 
+  // A stand-in for Claude's folder trust question (ios/e2e/fake-trust.ts): Claude Code just started in a new
+  // folder, with no status file yet. Yes makes it write one, as Claude does; No ends it.
+  async function fakeTrust(suffix: string, sessionId: string) {
+    const dir = join(tmp, `trust-${suffix}`);
+    mkdirSync(dir, { recursive: true });
+    const cfg = { folder: dir, keys: join(dir, "keys"), claudeDir, sessionId };
+    writeFileSync(join(dir, "cfg.json"), JSON.stringify(cfg));
+    writeFileSync(cfg.keys, "");
+    // Started as Claude Code (blimpd's record of kinds), so its screen is read until it has a conversation.
+    const memo = join(tmp, "session-kinds.json");
+    writeFileSync(memo, JSON.stringify({ ...(existsSync(memo) ? JSON.parse(readFileSync(memo, "utf8")) : {}), [`${tag}-${suffix}`]: "claude" }));
+    const name = await shSession(suffix, [process.execPath, join(import.meta.dir, "..", "ios", "e2e", "fake-trust.ts"), join(dir, "cfg.json")]);
+    await until(() => zmx("history", name).stdout.toString().includes("Enter to confirm"), "the question on screen");
+    return { name, cfg };
+  }
+  const listed = async (name: string) => ((await (await api("/sessions")).json()) as any[]).find((s) => s.name === name);
+
+  test("Claude's folder trust question is a prompt; Yes through the chat is ↓ then Enter, each once the screen shows its place", async () => {
+    const sid = "c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1";
+    const { name, cfg } = await fakeTrust("trust1", sid);
+    const s = await until(async () => ((await listed(name))?.prompt ? listed(name) : undefined), "the trust prompt", 3000);
+    expect(s.state).toBe("waiting");
+    expect(s.sessionId).toBeUndefined();
+    expect(s.prompt).toEqual({ kind: "trust", folder: cfg.folder, options: ["Yes, I trust this folder", "No, exit"], answerable: true, at: s.created * 1000 });
+    expect(s.stateSince).toBe(s.created * 1000);
+
+    const c = await socket(`/sessions/${name}/chat`);
+    // No conversation yet: an empty one, as for a new session
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    expect(c.messages.find((m) => m.type === "history").messages).toEqual([]);
+    c.ws.send(JSON.stringify({ type: "input", id: "t0", text: "hello" }));
+    await until(() => c.messages.find((m) => m.id === "t0"), "reply");
+    expect(c.messages.find((m) => m.id === "t0")).toEqual({ type: "error", id: "t0", error: "Claude is asking something. Answer it first." });
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "t00" })); // Esc would end Claude here
+    await until(() => c.messages.find((m) => m.id === "t00"), "reply");
+    expect(c.messages.find((m) => m.id === "t00")).toEqual({ type: "error", id: "t00", error: "open this session on the Mac" });
+    c.ws.send(JSON.stringify({ type: "answer", id: "t1", at: s.prompt.at, pick: 0, label: "No, exit" }));
+    await until(() => c.messages.find((m) => m.id === "t1"), "reply");
+    expect(c.messages.find((m) => m.id === "t1")).toEqual({ type: "error", id: "t1", error: "the question changed" });
+    c.ws.send(JSON.stringify({ type: "answer", id: "t2", at: s.prompt.at, pick: 0, label: "Yes, I trust this folder" }));
+    await until(() => c.messages.find((m) => m.id === "t2"), "reply", 10000);
+    expect(c.messages.find((m) => m.id === "t2")).toEqual({ type: "ack", id: "t2" });
+    // The empty paste a new zmx client sends before an ESC (chatsocket.ts), then ↓ and Enter
+    expect(readFileSync(cfg.keys, "utf8")).toBe("\x1b[200~\x1b[201~" + "\x1b[B" + "\r");
+
+    // Claude starts: its status file names the conversation, and the chat goes on as for any new session.
+    const after = await until(async () => ((await listed(name))?.sessionId ? listed(name) : undefined), "the session id", 3000);
+    expect(after.prompt).toBeUndefined();
+    expect(after.state).toBe("done");
+    await until(() => c.messages.some((m) => m.type === "reset"), "reset", 4000);
+    await until(() => c.messages.filter((m) => m.type === "history").length === 2, "the conversation's history");
+    expect(c.messages.at(-1)).toEqual({ type: "history", messages: [] });
+    c.ws.close();
+  }, 20000);
+
+  test("a trust answer stops, typing nothing, when the cursor isn't where it expects; No is Enter", async () => {
+    const { name, cfg } = await fakeTrust("trust2", "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2");
+    const s = await until(async () => ((await listed(name))?.prompt ? listed(name) : undefined), "the trust prompt", 3000);
+    // Someone on the Mac moved the cursor to Yes (again until it shows: zmx can drop a new client's first ESC)
+    const viewer = await socket(`/sessions/${name}/attach?cols=120&rows=36`);
+    await until(() => (type(viewer.ws, "\x1b[B"), zmx("history", name).stdout.toString().includes("❯ Yes")), "the cursor on Yes");
+    const typed = readFileSync(cfg.keys, "utf8");
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "answer", id: "u1", at: s.prompt.at, pick: 1, label: "No, exit" }));
+    await until(() => c.messages.find((m) => m.id === "u1"), "reply", 10000);
+    expect(c.messages.find((m) => m.id === "u1")).toEqual({ type: "error", id: "u1", error: "stopped: Claude's screen didn't show the folder trust question as expected. Finish it on the Mac." });
+    expect(readFileSync(cfg.keys, "utf8")).toBe(typed);
+
+    await until(() => (type(viewer.ws, "\x1b[A"), zmx("history", name).stdout.toString().includes("❯ No")), "the cursor back on No");
+    const before = readFileSync(cfg.keys, "utf8").length;
+    c.ws.send(JSON.stringify({ type: "answer", id: "u2", at: s.prompt.at, pick: 1, label: "No, exit" }));
+    await until(() => c.messages.find((m) => m.id === "u2"), "reply", 10000);
+    expect(c.messages.find((m) => m.id === "u2")).toEqual({ type: "ack", id: "u2" });
+    expect(readFileSync(cfg.keys, "utf8").slice(before)).toBe("\r");
+    // No ends Claude, and the session with it
+    await until(() => c.closed?.code === 4000, "the chat to close as ended", 5000);
+    viewer.ws.close();
+  }, 20000);
+
   test("404 for an unknown session", async () => {
     expect((await api(`/sessions/${tag}-none/chat?token=${token}`)).status).toBe(404);
   });

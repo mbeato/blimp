@@ -1,6 +1,6 @@
 # blimp for iPhone
 
-This is the iPhone app for blimp. It shows the Claude sessions running on your server. You can read them, type to them, answer their questions and permission prompts, start new ones and end them.
+This is the iPhone app for blimp. It shows the Claude sessions running on your server. You can read them, type to them, answer their questions and permission prompts (and, in a new folder, whether Claude may trust it), start new ones and end them.
 
 It talks to `blimpd`, the small program that runs on your server. The chat features need a blimpd from the phone-chat branch, or the next release. An older blimpd will show the session list but not the chat. The chat then says "This server's blimpd can't show chats yet."
 

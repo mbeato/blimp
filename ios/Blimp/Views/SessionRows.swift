@@ -17,7 +17,8 @@ struct SessionRow: View {
         HStack(spacing: 12) {
             StateMark(state: session.state)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.title).lineLimit(1)
+                // A long name wraps onto a second line rather than being cut off.
+                Text(session.title).lineLimit(2)
                 HStack(spacing: 6) {
                     if let label = session.label, !label.isEmpty {
                         Text(label)
