@@ -94,9 +94,75 @@ blimp://pair?url=http%3A%2F%2F127.0.0.1%3A7425&token=<token>
 
 The app opens the home screen. The first launch, with nothing paired yet, doesn't ask for Face ID. The next launch does. In the simulator, use Features, Face ID, Enrolled, then Matching Face. Or use the passcode.
 
+Or give the phone its own token instead of the Mac's. On the server, run:
+
+```
+blimpd pair --url http://127.0.0.1:7425
+```
+
+It prints a QR code and a link. Paste the link. `blimpd pair --revoke` takes that token away again; the Mac keeps working.
+
+## Pair by QR code
+
+On a real iPhone, the Pair screen has a Scan QR code button. The simulator has no camera, so it doesn't show the button there.
+
+1. On the server, run `blimpd pair`. It makes the phone's own token, the first time, and prints a QR code and the same link as text.
+
+```
+blimpd pair
+```
+
+2. On the iPhone, open blimp, tap Scan QR code and allow the camera. Point it at the code in the terminal. The app checks the link with the server and saves it in the iPhone's Keychain, the same as a pasted link.
+
+`blimpd pair` takes the server's address from Tailscale. Until Tailscale is set up on the server it stops with "Install Tailscale … or pass --url". Then give the address yourself with `--url`.
+
+Run `blimpd pair` again to show the same code again. Run `blimpd pair --revoke` to cut the phone off. The Mac keeps working.
+
 ## The real phone
 
 A real phone cannot reach `127.0.0.1` on your Mac. It needs Tailscale. That is the next step (step 4 in `docs/superpowers/specs/2026-10-19-phone-app-design.md`).
+
+## TestFlight
+
+A release tag (`v*`) builds the app and uploads it to TestFlight, once four repository secrets are set. Without them the "iOS" workflow says "Not uploaded" in a notice and passes. You do these steps once.
+
+1. Join the Apple Developer Program with your Apple Account: https://developer.apple.com/programs/
+
+2. Find your Team ID. On https://developer.apple.com/account, open Membership details. The Team ID is 10 letters and digits.
+
+3. Register the app's bundle id. On https://developer.apple.com/account/resources/identifiers, press +, pick App IDs, then App. Description: blimp. Bundle ID: Explicit, `dev.blimp.phone`. Press Continue, then Register.
+
+4. Make the app record. In App Store Connect (https://appstoreconnect.apple.com), open Apps, press +, then New App. Platform: iOS. Name: blimp. (The name has to be free on the App Store. If it is taken, use another, like "blimp for Claude". The name under the icon on the phone stays "blimp".) Language: English. Bundle ID: `dev.blimp.phone`. SKU: `blimp-phone`. User Access: Full Access. Press Create.
+
+5. Make an API key. In App Store Connect, open Users and Access, then Integrations, then App Store Connect API, then Team Keys. The first time, press Request Access and accept. Press + (Generate API Key). Name: blimp CI. Access: App Manager. Press Generate.
+
+6. Download the key. It is a file named `AuthKey_<key id>.p8`. You can download it only once. Copy the Key ID from the key's row and the Issuer ID from above the list.
+
+7. Add the four secrets to the repository. Run these in Terminal on your Mac, with your values in place of the `<…>` parts.
+
+```
+gh secret set APP_STORE_CONNECT_KEY_ID -R mbeato/blimp --body "<key id>"
+```
+
+```
+gh secret set APP_STORE_CONNECT_ISSUER_ID -R mbeato/blimp --body "<issuer id>"
+```
+
+```
+base64 -i ~/Downloads/AuthKey_<key id>.p8 | gh secret set APP_STORE_CONNECT_KEY -R mbeato/blimp
+```
+
+```
+gh secret set APPLE_TEAM_ID -R mbeato/blimp --body "<team id>"
+```
+
+8. Keep the `.p8` file somewhere safe, or delete it. The secret has it now.
+
+9. Give the app an icon. Apple refuses an upload without one, and the app has none yet. Put a 1024 by 1024 PNG, with no transparency, in `ios/Blimp/Assets.xcassets/AppIcon.appiconset`, and name it in that folder's `Contents.json` (`"filename": "<name>.png"`).
+
+After that, each release tag uploads a build. The build number is the workflow's run number. The build shows in App Store Connect under TestFlight once Apple has processed it (often 10 to 30 minutes). Add yourself as an internal tester there, and install it on the iPhone with the TestFlight app.
+
+If the upload fails with "Cloud signing permission error", the key can't make the distribution certificate. In Users and Access, make a new key with Admin access, and set the three key secrets again.
 
 ## Check list
 
