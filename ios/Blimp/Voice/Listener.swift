@@ -57,7 +57,7 @@ final class Listener {
         try check(mine)
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+        try session.setCategory(.record, mode: .measurement)  // .duckOthers is refused with .record; it silences others anyway
         try session.setActive(true)
         let engine = AVAudioEngine()
         self.engine = engine
