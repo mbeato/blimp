@@ -35,6 +35,8 @@ final class BlimpUITests: XCTestCase {
         chatRow.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "the user message")
         try wait(message("message.assistant", "under Appearance"), "the assistant reply")
+        // The tool call as one line, its command without the summary's backticks
+        try wait(labeled("Ran swift test"), "the tool line")
         shot("2-chat")
 
         // Send a message; the box clears once blimpd has it
@@ -47,6 +49,9 @@ final class BlimpUITests: XCTestCase {
         try until(send, "isEnabled == true", "Send to be enabled")
         send.tap()
         try until(send, "exists == true AND isEnabled == false", "the message to be sent")
+        // The stand-in writes what it read and a reply to the transcript: both arrive in the open chat
+        try wait(message("message.user", "Thanks, ship it"), "the sent message in the chat")
+        try wait(message("message.assistant", "Shipped: Thanks, ship it"), "the reply to it")
         shot("3-sent")
 
         // The waiting session: its permission prompt as buttons
@@ -57,6 +62,7 @@ final class BlimpUITests: XCTestCase {
         let yes = app.buttons["choice-Yes"]
         try wait(yes, "the Yes button")
         try wait(app.buttons["choice-No"], "the No button")
+        try wait(labeled("Ran npm test"), "the prompt's summary")
         shot("4-prompt")
         yes.tap()
         // Acknowledged: the buttons stay off while the session still shows this prompt
@@ -79,6 +85,10 @@ final class BlimpUITests: XCTestCase {
 
     private func message(_ id: String, _ text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", id, text)).firstMatch
+    }
+
+    private func labeled(_ text: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
     private func shot(_ name: String) {

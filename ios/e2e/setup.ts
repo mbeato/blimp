@@ -2,6 +2,7 @@
 // driven by ios/BlimpUITests). Run after blimpd has started: it makes two zmx sessions that look like
 // Claude to blimpd (the same way test/server.test.ts does), then writes the pairing link.
 //   demo-chat  in blimp-demo: a conversation; every line typed into it is appended to $E2E_DIR/chat.in
+//              and, with a reply, to its transcript
 //   demo-ask   in api-server: waiting on a permission prompt; every key pressed is appended to $E2E_DIR/prompt.in
 // The texts here are what BlimpUITests looks for.
 
@@ -47,11 +48,19 @@ const promptIn = join(root, "prompt.in");
 writeFileSync(chatIn, "");
 writeFileSync(promptIn, "");
 
-await standIn("demo-chat", join(root, "work", "blimp-demo"), `while IFS= read -r l; do printf '%s\\n' "$l" >> '${chatIn}'; done`,
-  "e2e00000-0000-0000-0000-000000000001", [
-    user("u1", "Add a dark mode toggle to settings"),
-    said("a1", "Done. The toggle is in **Settings**, under Appearance.\n\n- `SettingsView.swift`: the new toggle\n- `Theme.swift`: reads it at launch"),
-  ]);
+// Like Claude, it writes what it read (paste markers off) and a reply to its transcript, so the phone sees both arrive.
+const chatSid = "e2e00000-0000-0000-0000-000000000001";
+const chatLog = join(claude, "projects", "e2e", `${chatSid}.jsonl`);
+const echo = String.raw`n=0; while IFS= read -r l; do printf '%s\n' "$l" >> '${chatIn}'; n=$((n+1)); t=$(printf %s "$l" | tr -d '\033' | sed 's/\[20[01]~//g'); ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); printf '{"type":"user","uuid":"in%s","timestamp":"%s","message":{"role":"user","content":"%s"}}\n{"type":"assistant","uuid":"out%s","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Shipped: %s"}]}}\n' "$n" "$ts" "$t" "$n" "$ts" "$t" >> '${chatLog}'; done`;
+await standIn("demo-chat", join(root, "work", "blimp-demo"), echo, chatSid, [
+  user("u1", "Add a dark mode toggle to settings"),
+  line({ type: "assistant", uuid: "a1", message: { role: "assistant", content: [
+    { type: "text", text: "I'll add the toggle, then run the tests." },
+    { type: "tool_use", id: "t1", name: "Bash", input: { command: "swift test" } },
+  ] } }),
+  line({ type: "user", uuid: "u2", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "Test Suite 'All tests' passed" }] } }),
+  said("a2", "Done. The toggle is in **Settings**, under Appearance.\n\n- `SettingsView.swift`: the new toggle\n- `Theme.swift`: reads it at launch"),
+]);
 
 // Raw keys, as Claude reads them: a digit arrives without Enter.
 await standIn("demo-ask", join(root, "work", "api-server"), `stty -icanon -echo; exec cat >> '${promptIn}'`,

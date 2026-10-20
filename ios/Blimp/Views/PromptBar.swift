@@ -91,8 +91,8 @@ struct PromptBar: View {
 
     @ViewBuilder private var summary: some View {
         if let s = prompt.summary, !s.isEmpty {
-            Text(s)
-                .font(.system(.callout, design: .monospaced))
+            Text(Inline.summary(s))
+                .font(.callout)
                 .lineLimit(6)
                 .textSelection(.enabled)
         }

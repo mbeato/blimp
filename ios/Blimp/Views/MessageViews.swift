@@ -127,7 +127,7 @@ struct ToolLine: View {
             Button(action: onToggle) {
                 HStack(spacing: 6) {
                     Image(systemName: Self.symbol(message.name))
-                    Text(message.summary ?? message.name ?? "Tool").lineLimit(1)
+                    Text(Inline.summary(message.summary ?? message.name ?? "Tool")).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .font(.footnote)
@@ -184,6 +184,20 @@ enum Inline {
         }
         for range in unsafe { a[range].link = nil }
         return a
+    }
+
+    /// A tool's one-line summary from blimpd ("Ran `ls`"): what's in backticks as code, without the
+    /// backticks; nothing else is Markdown (a glob's `**` isn't bold).
+    static func summary(_ s: String) -> AttributedString {
+        let parts = s.components(separatedBy: "`")
+        guard parts.count >= 3, parts.count % 2 == 1 else { return AttributedString(s) }
+        var out = AttributedString()
+        for (i, p) in parts.enumerated() {
+            var a = AttributedString(p)
+            if i % 2 == 1 { a.inlinePresentationIntent = .code }
+            out += a
+        }
+        return out
     }
 
     static func safe(_ url: URL) -> Bool {
