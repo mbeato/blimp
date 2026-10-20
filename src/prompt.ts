@@ -27,8 +27,7 @@ export function promptFromHook(ev: any): Prompt | undefined {
       multiSelect: q?.multiSelect === true,
       options: (Array.isArray(q?.options) ? q.options : []).map((o: any) => ({ label: str(o?.label), ...(typeof o?.description === "string" && { description: o.description }) })),
     }));
-    // Digits pick and submit one single-choice question; anything more took the wrong boxes in the probe.
-    return { kind: "question", questions, answerable: questions.length === 1 && !questions[0].multiSelect && questions[0].options.length <= 9 };
+    return { kind: "question", questions, answerable: drivable(questions) };
   }
   if (e === "Elicitation") return { kind: "other", answerable: false };
 }
@@ -55,9 +54,11 @@ export function withScreenOptions(p: Prompt, screen: string): Prompt {
 
 // The keys come from the status file, which anything running as you can write: only a digit or Esc
 // is ever typed.
+// `pick` alone answers a permission or one single-choice question (the phone's voice answers use it).
 export function answerKeys(p: Prompt, pick: number): string | undefined {
   if (!Number.isInteger(pick) || pick < 0 || !p.answerable) return;
-  const keys = p.kind === "permission" ? p.keys[pick] : p.kind === "question" && pick < p.questions[0].options.length ? String(pick + 1) : undefined;
+  const single = p.kind === "question" && p.questions.length === 1 && !p.questions[0].multiSelect;
+  const keys = p.kind === "permission" ? p.keys[pick] : single && pick < p.questions[0].options.length ? String(pick + 1) : undefined;
   return typeof keys === "string" && /^[1-9]$|^\x1b$/.test(keys) ? keys : undefined;
 }
 
@@ -66,4 +67,140 @@ export function answerKeys(p: Prompt, pick: number): string | undefined {
 export function choiceLabel(p: Prompt, pick: number): string | undefined {
   if (!Number.isInteger(pick) || pick < 0) return;
   return p.kind === "permission" ? p.options[pick] : p.kind === "question" ? p.questions[0]?.options[pick]?.label : undefined;
+}
+
+// Answering every question of an AskUserQuestion dialog at once (docs/DESIGN.md, Chat). Claude Code 2.1.300
+// draws one question at a time under a tab bar; the keys below are what the probe found it needs
+// (.superpowers/ask-probe.md, summed up in DESIGN.md). Each step says what the screen must show before its
+// keys are typed, so a dialog that isn't where blimpd expects it stops the answer instead of taking keys
+// meant for another place.
+
+export type QuestionAnswer = { picks: number[]; text?: string } | { picks?: undefined; text: string };
+
+// What has to be on the screen before a step: question `q` (0-based) as the current one, with the cursor
+// on that row (1-based, or the multi-choice "Next"/"Submit" row), exactly these rows ticked, the typed
+// answer in its row. Or the review screen.
+export type Expect = { q: number; cursor: number | "next"; ticked?: number[]; typed?: boolean } | { review: true };
+export type Step = { expect: Expect; keys: string };
+
+const DOWN = "\x1b[B";
+const MAX_TEXT = 2000;
+
+// The digit for every option and for "Type something" must be one key; the screen tells the steps apart
+// by the question's text, so no two may be the same.
+function drivable(qs: Question[]): boolean {
+  const texts = qs.map((q) => squash(q.question));
+  return qs.length >= 1 && qs.length <= 9 && qs.every((q) => q.options.length >= 1 && q.options.length <= 8) &&
+    texts.every((t) => t) && new Set(texts).size === texts.length;
+}
+
+// A typed answer, as `input` cleans text, then on one line: the dialog's text row takes Enter as "done".
+export function cleanText(text: string): string {
+  return text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+}
+const oneLine = (text: string) => cleanText(text).replace(/\s+/g, " ").trim();
+
+// The keys for `answers` (one per question), or why not. `labels` is, per question, the labels of the
+// options picked as the phone showed them: a question whose options changed is refused.
+export function answerSteps(p: Prompt, answers: unknown, labels: unknown): { steps: Step[] } | { error: string } {
+  if (p.kind !== "question" || !p.answerable) return { error: "the question changed" };
+  const qs = p.questions;
+  if (!Array.isArray(answers) || answers.length !== qs.length || !Array.isArray(labels) || labels.length !== qs.length)
+    return { error: "the question changed" };
+  const steps: Step[] = [];
+  for (const [q, question] of qs.entries()) {
+    const a = answers[q] as any;
+    const n = question.options.length;
+    const picks: unknown = a?.picks ?? [];
+    const text = typeof a?.text === "string" ? oneLine(a.text) : undefined;
+    if (!Array.isArray(picks) || !picks.every((i) => Number.isInteger(i) && i >= 0 && i < n) || new Set(picks).size !== picks.length)
+      return { error: "that answer doesn't fit the question" };
+    if (a?.text !== undefined && (typeof a.text !== "string" || !text || a.text.length > MAX_TEXT))
+      return { error: "a typed answer must be some text, at most 2000 characters" };
+    const shown = labels[q];
+    if (!Array.isArray(shown) || shown.length !== picks.length || picks.some((i, k) => question.options[i].label !== shown[k]))
+      return { error: "the question changed" };
+    const paste = text && `\x1b[200~${text}\x1b[201~`;
+    if (!question.multiSelect) {
+      if (picks.length + (text ? 1 : 0) !== 1) return { error: "pick one option or type an answer" };
+      // A digit picks and moves on. "Type something" (options + 1) becomes a text field; Enter takes it.
+      if (!paste) steps.push({ expect: { q, cursor: 1 }, keys: String(picks[0] + 1) });
+      else steps.push({ expect: { q, cursor: 1 }, keys: String(n + 1) }, { expect: { q, cursor: n + 1 }, keys: paste }, { expect: { q, cursor: n + 1, typed: true }, keys: "\r" });
+    } else {
+      if (!picks.length && !text) return { error: "pick at least one option or type an answer" };
+      // Digits tick boxes and leave the cursor on row 1; ↓ walks it to the text row, then to Next/Submit.
+      const ticked: number[] = [];
+      for (const i of picks) {
+        steps.push({ expect: { q, cursor: 1, ticked: [...ticked] }, keys: String(i + 1) });
+        ticked.push(i + 1);
+      }
+      if (paste) {
+        steps.push({ expect: { q, cursor: 1, ticked: [...ticked] }, keys: DOWN.repeat(n) }, { expect: { q, cursor: n + 1, ticked: [...ticked] }, keys: paste });
+        ticked.push(n + 1); // pasting ticks its box
+        steps.push({ expect: { q, cursor: n + 1, ticked: [...ticked], typed: true }, keys: DOWN });
+      } else steps.push({ expect: { q, cursor: 1, ticked: [...ticked] }, keys: DOWN.repeat(n + 1) });
+      steps.push({ expect: { q, cursor: "next", ticked: [...ticked] }, keys: "\r" });
+    }
+  }
+  // One single-choice question submits with its answer; otherwise a review screen comes, where 1 submits.
+  if (qs.length > 1 || qs[0].multiSelect) steps.push({ expect: { review: true }, keys: "1" });
+  // Only these keys, whatever the status file said: digits, ↓, Enter, and a paste of cleaned text.
+  const safe = (k: string) => /^[1-9]$|^(\x1b\[B)+$|^\r$/.test(k) || /^\x1b\[200~[^\x00-\x1f\x7f-\x9f]+\x1b\[201~$/.test(k);
+  return steps.every((s) => safe(s.keys)) ? { steps } : { error: "that answer doesn't fit the question" };
+}
+
+// The dialog as the screen shows it: the last tab bar (` ☐ Color  ☒ Size  ✔ Submit` or ` ☐ Drink`), the
+// question under it, its numbered rows up to the line before "Chat about this", where the cursor ❯ is.
+export type Row = { n: number; label: string; ticked?: boolean };
+export type Dialog = { question: string; review: boolean; rows: Row[]; cursor?: number | "next" };
+
+const squash = (s: string) => s.replace(/\s+/g, "");
+
+export function parseDialog(screen: string): Dialog | undefined {
+  const lines = screen.split("\n");
+  const bar = lines.findLastIndex((l) => /^\s*(←\s+)?[☐☒] \S/.test(l));
+  if (bar < 0) return;
+  const head: string[] = [];
+  const rows: Row[] = [];
+  let cursor: Dialog["cursor"];
+  let next = false;
+  for (const l of lines.slice(bar + 1)) {
+    if (/^\s*─{3,}\s*$/.test(l) || /^\s*Enter to select/.test(l)) break;
+    const row = l.match(/^\s*(❯)?\s*(\d)\.\s+(?:\[(✔| )\]\s+)?(.*?)\s*$/);
+    if (row && Number(row[2]) === rows.length + 1) {
+      rows.push({ n: rows.length + 1, label: row[4], ...(row[3] && { ticked: row[3] === "✔" }) });
+      if (row[1]) cursor = rows.length;
+      next = false;
+      continue;
+    }
+    if (!rows.length) {
+      if (l.trim()) head.push(l.trim());
+      continue;
+    }
+    const nx = l.match(/^\s*(❯)?\s+(Next|Submit)\s*$/);
+    if (nx) {
+      next = true;
+      if (nx[1]) cursor = "next";
+    } else if (next && l.trim()) next = false;
+  }
+  const review = head[0] === "Review your answers";
+  return { question: review ? "" : head.join(" "), review, rows, ...(cursor !== undefined && { cursor }) };
+}
+
+export function screenMeets(p: Prompt, d: Dialog | undefined, e: Expect): boolean {
+  if (!d || p.kind !== "question") return false;
+  if ("review" in e) return d.review && d.cursor === 1 && d.rows[0]?.label === "Submit answers";
+  const q = p.questions[e.q];
+  if (!q || d.review || squash(d.question) !== squash(q.question) || d.cursor !== e.cursor) return false;
+  const n = q.options.length;
+  // Row n + 1 is "Type something." (or "[ ] Type something") until text is typed into it.
+  // A long label wraps: its row shows the start of it.
+  const same = (shown: string, label: string) => !!squash(shown) && squash(label).startsWith(squash(shown));
+  if (d.rows.length < n + 1 || d.rows.slice(0, n).some((r, i) => !same(r.label, q.options[i].label))) return false;
+  if (e.typed !== undefined && /^Type something\.?$/.test(d.rows[n].label) === e.typed) return false;
+  if (e.ticked) {
+    const on = d.rows.slice(0, n + 1).filter((r) => r.ticked).map((r) => r.n);
+    if (d.rows.slice(0, n + 1).some((r) => r.ticked === undefined) || on.join() !== [...e.ticked].sort((a, b) => a - b).join()) return false;
+  }
+  return true;
 }

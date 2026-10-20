@@ -1,13 +1,14 @@
 // test/real-claude.test.ts
-// The chat socket against a real Claude Code: a message, a permission prompt, and a question, all
-// answered through /chat. Opt-in (BLIMP_REAL_CLAUDE=1): it uses your Claude account.
+// The chat socket against a real Claude Code: a message, a permission prompt, a question, three questions
+// at once (one multi-choice, with typed answers) and a Stop, all through /chat. Opt-in
+// (BLIMP_REAL_CLAUDE=1): it uses your Claude account.
 // Its folder and Claude's saved conversation for it are removed afterwards.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { zmxPath } from "../src/sessions";
+import { parseZmxList, zmxPath } from "../src/sessions";
 
 const on = process.env.BLIMP_REAL_CLAUDE === "1";
 let tmp = "";
@@ -60,10 +61,16 @@ beforeAll(async () => {
   await until(() => existsSync(sock) && statSync(sock).isSocket() && (token = readFileSync(join(tmp, "token"), "utf8").trim()), "blimpd", 10000);
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (!on) return;
   for (const w of sockets) w.close();
-  if (name) Bun.spawnSync([zmxPath(), "kill", name], { env });
+  if (name) {
+    // Claude writes to its saved conversation as it exits: wait for it to be gone before removing that.
+    const pid = parseZmxList(Bun.spawnSync([zmxPath(), "list"], { env }).stdout.toString()).find((s) => s.name === name)?.pid;
+    Bun.spawnSync([zmxPath(), "kill", name], { env });
+    const alive = () => { try { return !!pid && process.kill(pid, 0); } catch { return false; } };
+    for (const end = Date.now() + 10000; alive() && Date.now() < end; ) await Bun.sleep(100);
+  }
   server?.kill();
   if (tmp) rmSync(tmp, { recursive: true, force: true });
   // Only this test's own folder: under the home folder, with the name beforeAll gave it.
@@ -77,9 +84,9 @@ afterAll(() => {
     const projects = join(homedir(), ".claude", "projects");
     if (existsSync(projects)) for (const d of readdirSync(projects)) if (mine.has(d)) rmSync(join(projects, d), { recursive: true, force: true });
   }
-});
+}, 20000);
 
-test.if(on)("a message, a permission, a question and a Stop, all through /chat", async () => {
+test.if(on)("a message, a permission, a question, three questions and a Stop, all through /chat", async () => {
   name = ((await (await api("/sessions", { method: "POST", body: JSON.stringify({ dir, kind: "ask" }) })).json()) as any).name;
 
   // A new folder asks whether to trust it, and no hook says so: answer it on a raw terminal.
@@ -120,6 +127,27 @@ test.if(on)("a message, a permission, a question and a Stop, all through /chat",
   send({ type: "answer", id: "a2", at: q.prompt.at, pick: green, label: q.prompt.questions[0].options[green].label });
   await until(() => texts().some((m) => m.role === "tool" && m.name === "AskUserQuestion" && /green/i.test(m.output ?? "")), "the answer in the transcript", 90000);
 
+  // Several questions at once, one multi-choice, with typed answers: all answered in one `answer`.
+  await until(async () => (await session())?.state === "done", "the turn to end", 90000);
+  send({ type: "input", id: "m4", text: 'Call the AskUserQuestion tool once with exactly these 3 questions. Q1 header "Pet", question "Which pet?", single-select, options Cat and Dog. Q2 header "Toppings", question "Which toppings?", multiSelect true, options Cheese, Ham and Olives. Q3 header "Drink", question "Which drink?", single-select, options Tea and Coffee.' });
+  const three = await until(async () => {
+    const s = await session();
+    return s?.prompt?.kind === "question" && s.prompt.questions.length === 3 && s;
+  }, "three questions");
+  expect(three.prompt.answerable).toBe(true);
+  const qs = three.prompt.questions;
+  const find = (q: number, re: RegExp) => qs[q].options.findIndex((o: any) => re.test(o.label));
+  const picks = [[find(0, /dog/i)], [find(1, /cheese/i), find(1, /olives/i)]];
+  send({ type: "answer", id: "a3", at: three.prompt.at,
+    answers: [{ picks: picks[0] }, { picks: picks[1], text: "pineapple" }, { text: "oat milk" }],
+    labels: [picks[0].map((i) => qs[0].options[i].label), picks[1].map((i) => qs[1].options[i].label), []] });
+  await until(() => got.find((m) => m.id === "a3"), "the answer's reply", 30000);
+  expect(got.find((m) => m.id === "a3")).toEqual({ type: "ack", id: "a3" });
+  const out = await until(() => texts().find((m) => m.role === "tool" && m.name === "AskUserQuestion" && /oat milk/.test(m.output ?? ""))?.output, "the answers in the transcript", 90000);
+  expect(out).toContain('"Which pet?"="Dog"');
+  expect(out).toContain('"Which toppings?"="Cheese, Olives, pineapple"');
+  expect(out).toContain('"Which drink?"="oat milk"');
+
   chat.close();
 
   // Stop, from a fresh socket: its zmx client is new, and zmx 0.5 drops ESC as a new client's
@@ -144,4 +172,4 @@ test.if(on)("a message, a permission, a question and a Stop, all through /chat",
   chat2.close();
   fresh.close();
   term.close();
-}, 400000);
+}, 500000);
