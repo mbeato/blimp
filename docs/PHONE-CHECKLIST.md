@@ -34,7 +34,8 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] The box clears only after blimpd accepts the message. Stop the tunnel and send. The red line "Not sent. Check the connection." shows and your text stays.
 - [ ] A permission answered with a button. Ask Claude to do something that needs permission. Yes and No show as buttons. Tap Yes. Claude carries on, on the Mac too.
 - [ ] A single-choice question answered with a button. Make Claude ask a question with options. Tap one. It is answered.
-- [ ] A question with several parts or several choices shows "Open on Mac to answer this", read-only.
+- [ ] Several questions at once. Make Claude ask two or three questions in one go, one of them with several choices. The bar shows "1 of 3", the header and question, the options. Tapping a single-choice option moves on; multi-choice options tick, then Next. Back goes to the question before. The review lists every answer; tapping one goes back to it. Submit: Claude's chat shows the answers.
+- [ ] A typed answer. In a question, tap "Type an answer", type, tap Use (or Next for a multi-choice question). Claude gets your words.
 - [ ] A tall question scrolls inside the bar.
 - [ ] Stop. While Claude works, Stop shows. Type something: Stop stays, with Send beside it. Tap Stop. Claude stops.
 - [ ] Answered once. Tap a permission button. The buttons stay greyed until the prompt goes away. A second tap does nothing.

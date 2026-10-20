@@ -1,8 +1,8 @@
 // The app end to end, in the simulator, against a real blimpd with stand-in Claude sessions (the
 // app-e2e job in .github/workflows/ios.yml; ios/e2e/setup.ts makes the sessions and the texts looked
 // for here). Pair, see the session list, read a chat, send a message, answer a permission prompt; Stop;
-// start, end and resume sessions; blimpd restarting; the Face ID lock. What reached the sessions is
-// checked by the job afterwards. Screenshots stay in the .xcresult.
+// start, end and resume sessions; blimpd restarting; the Face ID lock; two questions at once. What
+// reached the sessions is checked by the job afterwards. Screenshots stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
 // Keychain keeps the server) and so locked: the job enrols Face ID first, and each unlocks with a
@@ -196,6 +196,49 @@ final class BlimpUITests: XCTestCase {
         try until(labeled("Can't reach the server"), "exists == false", "Home to be online")
         try until(labeled("Reconnecting…"), "exists == false", "Home to be online")
         shot("19-home-after-restart")
+    }
+
+    // MARK: - Several questions at once
+
+    /// demo-quiz asks two questions as Claude's dialog does: a pick, then ticks and a typed answer, a review,
+    /// Submit. The job checks the keys the stand-in got are the ones real Claude needs.
+    func test7AnswerQuestions() throws {
+        try launchPaired()
+        let row = element("session-demo-quiz")
+        try wait(row, "the demo-quiz row")
+        row.tap()
+        try wait(labeled("1 of 2"), "the first of two questions")
+        try wait(labeled("Which database should the tests use?"), "the first question")
+        let sqlite = app.buttons["choice-SQLite"]
+        try wait(sqlite, "the SQLite option")
+        shot("20-question-1")
+        sqlite.tap()
+        // A single-choice pick moves on; the multi-choice options tick and wait for Next
+        try wait(labeled("2 of 2"), "the second question")
+        let lint = app.buttons["choice-Lint"]
+        try wait(lint, "the Lint option")
+        lint.tap()
+        app.buttons["choice-E2E"].tap()
+        try until(lint, "isSelected == true", "Lint to be ticked")
+        app.buttons["typeAnswer"].tap()
+        let field = element("answerField")
+        try wait(field, "the answer field")
+        try type("smoke\n", into: field)
+        shot("21-question-2")
+        let next = app.buttons["nextButton"]
+        try until(next, "isEnabled == true", "Review to be enabled")
+        next.tap()
+        // The review, then Submit sends both answers at once
+        let submit = app.buttons["submitAnswers"]
+        try wait(submit, "Submit on the review")
+        try wait(labeled("Lint, E2E, smoke"), "the second answer on the review")
+        try wait(labeled("SQLite"), "the first answer on the review")
+        shot("22-review")
+        submit.tap()
+        // The stand-in took the answers and stopped waiting, as Claude does: the questions go
+        try until(submit, "exists == false", "the questions to go once answered")
+        if labeled("Not sent").exists || labeled("Stopped part way").exists { throw failed("the answers were not taken") }
+        shot("23-answered")
     }
 
     // MARK: - Helpers

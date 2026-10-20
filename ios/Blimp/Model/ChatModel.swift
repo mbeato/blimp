@@ -150,19 +150,36 @@ final class ChatModel {
     /// to what was shown. blimpd checks the same again with the choice's label.
     func answer(_ pick: Int, to shown: Prompt) async {
         guard answerId == nil, !answered else { return }
-        guard prompt == shown, shown.choices.indices.contains(pick) else {
+        guard prompt == shown, shown.singleChoice, shown.choices.indices.contains(pick) else {
             lastError = Self.questionChanged
             return
         }
-        let id = UUID().uuidString
+        await deliver(.answer(id: UUID().uuidString, at: shown.at, pick: pick, label: shown.choices[pick]), to: shown)
+    }
+
+    /// Every question of the dialog that was on screen, at once. Sent only while that dialog is still up;
+    /// blimpd types it a step at a time and stops if Claude's screen isn't where it expects.
+    func answer(_ draft: QuestionDraft, to shown: Prompt) async {
+        guard answerId == nil, !answered else { return }
+        guard prompt == shown, shown.questions == draft.questions, let command = draft.command(id: UUID().uuidString, at: shown.at) else {
+            lastError = Self.questionChanged
+            return
+        }
+        await deliver(command, to: shown)
+    }
+
+    private func deliver(_ command: ChatCommand, to shown: Prompt) async {
+        let id = command.id
         lastError = nil
         answerId = id
         defer { answerId = nil }
-        switch await request(.answer(id: id, at: shown.at, pick: pick, label: shown.choices[pick]), id: id) {
+        switch await request(command, id: id) {
         case .ack: answeredAt = shown.at
         case .ended: break
         // A new wait, other options, or the Mac answered first; the bar shows the latest prompt.
         case .failed(let error) where error == "the question changed": lastError = Self.questionChanged
+        // blimpd typed part of it, then Claude's screen wasn't where it expected: it typed nothing more.
+        case .failed(let error) where error.hasPrefix("stopped:"): lastError = "Stopped part way. Finish answering on the Mac."
         case .failed(let error): lastError = "Not sent: \(error)"
         case .notSent, .timeout: lastError = Self.notSent
         }

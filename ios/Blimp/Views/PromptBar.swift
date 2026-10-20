@@ -1,5 +1,6 @@
-// What Claude is waiting on, above the input: a permission or a question with a button per choice,
-// or, when the phone can't answer it, the question read-only and a pointer to the Mac.
+// What Claude is waiting on, above the input: a permission with a button per choice, a question dialog
+// a question at a time (QuestionFlow), or, when the phone can't answer it, the question read-only and a
+// pointer to the Mac.
 import BlimpKit
 import SwiftUI
 
@@ -9,8 +10,10 @@ struct PromptBar: View {
     let busy: Bool
     /// A spoken answer's guess: this button is marked and waits for a tap; nothing was sent.
     var highlight: Int? = nil
-    /// The choice's index, and the prompt it was shown in.
+    /// The choice's index, and the prompt it was shown in: a permission, or one single-choice question.
     let onPick: (Int, Prompt) -> Void
+    /// Every question's answer, for any other question dialog (or a typed answer to one question).
+    let onAnswers: (QuestionDraft, Prompt) -> Void
     @State private var height: CGFloat = 0
 
     var body: some View {
@@ -48,15 +51,9 @@ struct PromptBar: View {
             }
             .disabled(busy)
         case .question:
-            if let q = prompt.questions?.first {
-                Text(q.question).font(.callout)
-                ForEach(Array(q.options.enumerated()), id: \.offset) { i, option in
-                    ChoiceButton(label: option.label, detail: option.description, style: .normal, marked: highlight == i) {
-                        onPick(i, prompt)
-                    }
-                }
+            QuestionFlow(prompt: prompt, highlight: highlight, onPick: onPick, onAnswers: onAnswers)
                 .disabled(busy)
-            }
+                .id(prompt.at)
         case .other:
             EmptyView()
         }
@@ -96,6 +93,182 @@ struct PromptBar: View {
                 .lineLimit(6)
                 .textSelection(.enabled)
         }
+    }
+}
+
+/// A question dialog like Claude's own: "1 of 3", the header and question, the options as compact rows
+/// (a tap picks and moves on; multi-choice rows tick, then Next), "Type an answer", and with more than
+/// one question a review before Submit. Back goes to the question before. Nothing is sent until the end.
+private struct QuestionFlow: View {
+    let prompt: Prompt
+    let highlight: Int?
+    let onPick: (Int, Prompt) -> Void
+    let onAnswers: (QuestionDraft, Prompt) -> Void
+    @State private var draft: QuestionDraft
+    @State private var typing = false
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    init(prompt: Prompt, highlight: Int?, onPick: @escaping (Int, Prompt) -> Void, onAnswers: @escaping (QuestionDraft, Prompt) -> Void) {
+        self.prompt = prompt
+        self.highlight = highlight
+        self.onPick = onPick
+        self.onAnswers = onAnswers
+        _draft = State(initialValue: QuestionDraft(questions: prompt.questions ?? []))
+    }
+
+    var body: some View {
+        if draft.done && draft.reviews {
+            review
+        } else if let q = draft.current {
+            question(q)
+        }
+    }
+
+    private func question(_ q: Question) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                if let h = q.header, !h.isEmpty {
+                    Text(h.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let p = draft.position { Text(p).font(.caption).foregroundStyle(.secondary) }
+            }
+            Text(q.question).font(.callout)
+            ForEach(Array(q.options.enumerated()), id: \.offset) { i, option in
+                if q.multiSelect {
+                    CheckRow(label: option.label, detail: option.description, checked: draft.isPicked(i)) { draft.pick(i) }
+                } else {
+                    ChoiceButton(label: option.label, detail: option.description, style: .normal, marked: highlight == i) { pick(i) }
+                }
+            }
+            typed(q)
+            HStack {
+                if draft.step > 0 {
+                    Button("Back") { move { draft.back() } }.accessibilityIdentifier("backButton")
+                }
+                Spacer()
+                if q.multiSelect {
+                    Button(nextLabel) { move { draft.next() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!draft.isAnswered(draft.step))
+                        .accessibilityIdentifier("nextButton")
+                }
+            }
+        }
+    }
+
+    /// "Type an answer": a field in place of the options (single-choice: Use moves on), or with them (multi-choice).
+    @ViewBuilder private func typed(_ q: Question) -> some View {
+        if typing {
+            HStack {
+                TextField("Your answer", text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        if q.multiSelect { focused = false } else { use() }
+                    }
+                    .onChange(of: text) { if q.multiSelect { draft.type(text) } }
+                    .accessibilityIdentifier("answerField")
+                if !q.multiSelect {
+                    Button("Use") { use() }
+                        .disabled(text.allSatisfy(\.isWhitespace))
+                        .accessibilityIdentifier("useAnswer")
+                }
+            }
+        } else {
+            Button {
+                typing = true
+                focused = true
+            } label: {
+                Label("Type an answer", systemImage: "keyboard").font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("typeAnswer")
+        }
+    }
+
+    private var review: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Review your answers").font(.callout.weight(.semibold))
+            ForEach(Array(draft.questions.enumerated()), id: \.offset) { i, q in
+                Button { move { draft.edit(i) } } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(q.question).font(.caption).foregroundStyle(.secondary)
+                        Text(draft.answer(i)).font(.callout)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("review-\(i)")
+            }
+            HStack {
+                Button("Back") { move { draft.back() } }.accessibilityIdentifier("backButton")
+                Spacer()
+                Button("Submit") { onAnswers(draft, prompt) }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("submitAnswers")
+            }
+        }
+    }
+
+    private var nextLabel: String {
+        draft.step < draft.questions.count - 1 ? "Next" : draft.reviews ? "Review" : "Submit"
+    }
+
+    /// One single-choice question goes as a pick, as voice answers do; otherwise the pick moves on.
+    private func pick(_ i: Int) {
+        if prompt.singleChoice {
+            onPick(i, prompt)
+        } else {
+            move { draft.pick(i) }
+        }
+    }
+
+    private func use() {
+        move { draft.type(text) }
+    }
+
+    /// A change of step: the field shows that question's typed answer. With one question there's no
+    /// review, so being done sends it, and the question stays up while it goes (and to try again).
+    private func move(_ change: () -> Void) {
+        change()
+        if draft.done && !draft.reviews {
+            onAnswers(draft, prompt)
+            draft.edit(0)
+        }
+        text = draft.done ? "" : draft.texts[draft.step]
+        typing = !text.isEmpty
+        focused = false
+    }
+}
+
+/// A multi-choice option: a box that ticks.
+private struct CheckRow: View {
+    let label: String
+    let detail: String?
+    let checked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: checked ? "checkmark.square.fill" : "square")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label).foregroundStyle(.primary)
+                    if let detail, !detail.isEmpty {
+                        Text(detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("choice-\(label)")
+        .accessibilityAddTraits(checked ? .isSelected : [])
     }
 }
 
