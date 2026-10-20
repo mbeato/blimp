@@ -5,7 +5,7 @@
 
 import type { ServerWebSocket, Subprocess } from "bun";
 import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from "./chat";
-import { answerKeys } from "./prompt";
+import { answerKeys, choiceLabel } from "./prompt";
 import { existsSync } from "node:fs";
 import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
 import { followSize, lastSize } from "./terminal";
@@ -149,9 +149,10 @@ function client(ws: ServerWebSocket<ChatData>) {
   return d.proc;
 }
 
-// keys says what to type when its turn comes (an answer checks its question is still up). Once
-// started, a write finishes even if the socket closes: closeChat waits for it.
-async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]>) {
+// keys says what to type when its turn comes (an answer checks its question is still up); recheck
+// runs again before each part after the first (input's Enter). Once started, a write finishes even
+// if the socket closes: closeChat waits for it.
+async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]>, recheck?: () => Promise<void>) {
   const d = ws.data;
   if (d.closed) throw new Error("the socket is closed");
   const fresh = !d.proc || d.proc.exitCode !== null;
@@ -170,7 +171,10 @@ async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]
     await Bun.sleep(50);
   }
   for (const [i, p] of parts.entries()) {
-    if (i) await Bun.sleep(50); // Enter apart from the paste, as a person would press it
+    if (i) {
+      await Bun.sleep(50); // Enter apart from the paste, as a person would press it
+      await recheck?.();
+    }
     term.write(p);
   }
 }
@@ -178,14 +182,14 @@ async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]
 // One typed thing at a time, so two inputs close together don't interleave. A repeated id is typed
 // once: the phone resends what it didn't see acknowledged, maybe on a new socket while the old one
 // is still typing it (then it waits for that one).
-async function typed(ws: ServerWebSocket<ChatData>, id: string, keys: () => Promise<string[]>) {
+async function typed(ws: ServerWebSocket<ChatData>, id: string, keys: () => Promise<string[]>, recheck?: () => Promise<void>) {
   const d = ws.data;
   const key = `${d.name}\0${id}`;
   const step = (d.queue ?? Promise.resolve()).then(async () => {
     if ((seen.get(d.name) ?? []).includes(id)) return;
     const other = typing.get(key);
     if (other) return other;
-    const p = write(ws, keys).then(() => void seen.set(d.name, [...(seen.get(d.name) ?? []), id].slice(-100)));
+    const p = write(ws, keys, recheck).then(() => void seen.set(d.name, [...(seen.get(d.name) ?? []), id].slice(-100)));
     typing.set(key, p);
     try {
       await p;
@@ -219,16 +223,24 @@ export async function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | B
       // presses, ctrl+\ detaches zmx's client, ctrl+C interrupts. Newlines and tabs stay; \r is a newline.
       const text = m.text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
       // Not while Claude asks something: the Enter after the paste would confirm its highlighted choice.
-      await typed(ws, id, async () => {
+      // Checked before the paste and again before Enter. A question that starts in between leaves the
+      // paste in Claude's input box without Enter: it isn't sent, and the id doesn't count as typed.
+      const notWaiting = async () => {
         if ((await find(d.name))?.state === "waiting") throw new Error("Claude is asking something. Answer it first.");
+      };
+      const keys = async () => {
+        await notWaiting();
         return ["\x1b[200~" + text + "\x1b[201~", "\r"];
-      });
+      };
+      await typed(ws, id, keys, notWaiting);
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer") {
       await typed(ws, id, async () => {
         const s = await find(d.name);
-        const keys = s?.state === "waiting" && s.prompt && s.prompt.at === m.at ? answerKeys(s.prompt, m.pick) : undefined;
+        // The same wait and the same choice under pick: the options can change within one wait.
+        const p = s?.state === "waiting" ? s.prompt : undefined;
+        const keys = p && p.at === m.at && typeof m.label === "string" && choiceLabel(p, m.pick) === m.label ? answerKeys(p, m.pick) : undefined;
         if (!keys) throw new Error("the question changed");
         return [keys];
       });

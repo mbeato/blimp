@@ -60,3 +60,10 @@ export function answerKeys(p: Prompt, pick: number): string | undefined {
   const keys = p.kind === "permission" ? p.keys[pick] : p.kind === "question" && pick < p.questions[0].options.length ? String(pick + 1) : undefined;
   return typeof keys === "string" && /^[1-9]$|^\x1b$/.test(keys) ? keys : undefined;
 }
+
+// The text of the choice at pick, as the phone shows it. An answer names it: the hook's fallback Yes/No
+// and the screen's options share the wait's `at`, and the same digit means another choice in each.
+export function choiceLabel(p: Prompt, pick: number): string | undefined {
+  if (!Number.isInteger(pick) || pick < 0) return;
+  return p.kind === "permission" ? p.options[pick] : p.kind === "question" ? p.questions[0]?.options[pick]?.label : undefined;
+}

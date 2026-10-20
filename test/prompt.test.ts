@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { answerKeys, parseScreenOptions, promptFromHook, withScreenOptions } from "../src/prompt";
+import { answerKeys, choiceLabel, parseScreenOptions, promptFromHook, withScreenOptions } from "../src/prompt";
 
 // What Claude Code 2.1.300 drew for a Bash permission prompt (from the probe, 2026-10-19).
 const SCREEN = ` Bash command
@@ -60,4 +60,15 @@ test("answerKeys", () => {
   // The keys come from a status file: only a digit or Esc is ever pressed, whatever it says.
   const bad = { kind: "permission" as const, tool: "Bash", summary: "", options: ["a", "b", "c", "d"], keys: ["rm -rf ~\r", "0", "\x1b\x1b", "9"], answerable: true as const };
   expect([0, 1, 2, 3].map((i) => answerKeys(bad, i))).toEqual([undefined, undefined, undefined, "9"]);
+});
+
+test("choiceLabel is the text of the choice at pick", () => {
+  const p = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "x" } })!;
+  expect(choiceLabel(p, 1)).toBe("No");
+  expect(choiceLabel(withScreenOptions(p, SCREEN), 1)).toBe("Yes, and don't ask again for rm -f nothing-here.txt and date commands in /Users/mbeato/x");
+  expect(choiceLabel(p, 2)).toBeUndefined();
+  const q = promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "?", multiSelect: false, options: [{ label: "a" }, { label: "b" }] }] } })!;
+  expect(choiceLabel(q, 1)).toBe("b");
+  expect(choiceLabel(q, -1)).toBeUndefined();
+  expect(choiceLabel({ kind: "other", answerable: false }, 0)).toBeUndefined();
 });

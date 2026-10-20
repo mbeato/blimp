@@ -267,7 +267,7 @@ describe("terminal", () => {
 describe("chat", () => {
   // A stand-in Claude: reads lines, answers `size` with its terminal size, echoes the rest with
   // ESC shown as ~ (zmx draws output through a terminal emulator, which would swallow a raw ESC).
-  const LOOP = `while IFS= read -r l; do case "$l" in size) echo "sz=$(stty size)";; *) printf 'got:%s\\n' "$(printf %s "$l" | tr '\\033' '~')";; esac; done`;
+  const LOOP = `while IFS= read -r l; do case "$l" in size) echo "sz=$(stty size)";; *wait-now*) [ -n "$WAIT_FILE" ] && printf %s "$WAIT_JSON" > "$WAIT_FILE"; printf 'got:%s\n' "$(printf %s "$l" | tr '\033' '~')";; ask) printf 'Do you want to proceed?\\n 1. Yes\\n 2. Yes, and always\\n 3. No\\n';; *) printf 'got:%s\\n' "$(printf %s "$l" | tr '\\033' '~')";; esac; done`;
   const claudeDir = join(tmp, "claude");
   const T = new Date().toISOString();
   const tline = (o: object) => JSON.stringify({ timestamp: T, ...o }) + "\n";
@@ -351,12 +351,47 @@ describe("chat", () => {
     const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
     const c = await socket(`/sessions/${name}/chat`);
     await until(() => c.messages.find((m) => m.type === "history"), "history");
-    c.ws.send(JSON.stringify({ type: "answer", id: "q1", at: at - 1, pick: 0 }));
+    c.ws.send(JSON.stringify({ type: "answer", id: "q1", at: at - 1, pick: 0, label: "Yes" }));
     await until(() => c.messages.find((m) => m.id === "q1"), "reply");
     expect(c.messages.find((m) => m.id === "q1")).toEqual({ type: "error", id: "q1", error: "the question changed" });
-    c.ws.send(JSON.stringify({ type: "answer", id: "q2", at, pick: 0 }));
+    c.ws.send(JSON.stringify({ type: "answer", id: "q0", at, pick: 0 })); // no label: not knowing what was shown, nothing is pressed
+    await until(() => c.messages.find((m) => m.id === "q0"), "reply");
+    expect(c.messages.find((m) => m.id === "q0")).toEqual({ type: "error", id: "q0", error: "the question changed" });
+    c.ws.send(JSON.stringify({ type: "answer", id: "q2", at, pick: 0, label: "Yes" }));
     await until(() => c.messages.find((m) => m.type === "ack" && m.id === "q2"), "ack");
     await enterUntil(viewer, "got:1", "the digit reached the session");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
+  test("an answer to options that changed under the same wait is refused", async () => {
+    // The hook can fire before Claude draws its dialog: the phone first sees the fallback Yes/No, then
+    // the screen's options, with the same `at`. Pick 1 was "No"; on the screen it is "Yes, and always".
+    const sid = "dededede-dede-dede-dede-dededededede";
+    const { name } = await fakeClaude("chat15", sid, []);
+    const at = Date.now();
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    writeFileSync(
+      join(tmp, "status", `${name}.json`),
+      JSON.stringify({ state: "waiting", at, sessionId: sid, event: "PermissionRequest",
+        prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }),
+    );
+    const options = async () => ((await (await api("/sessions")).json()) as any[]).find((s) => s.name === name)?.prompt?.options;
+    expect(await options()).toEqual(["Yes", "No"]);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    type(viewer.ws, "ask\r");
+    await until(async () => (await options())?.length === 3, "the options on screen", 1500);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "answer", id: "n1", at, pick: 1, label: "No" }));
+    await until(() => c.messages.find((m) => m.id === "n1"), "reply");
+    expect(c.messages.find((m) => m.id === "n1")).toEqual({ type: "error", id: "n1", error: "the question changed" });
+    type(viewer.ws, "\r");
+    await Bun.sleep(500);
+    expect(viewer.text).not.toContain("got:2");
+    c.ws.send(JSON.stringify({ type: "answer", id: "n2", at, pick: 2, label: "No" }));
+    await until(() => c.messages.find((m) => m.type === "ack" && m.id === "n2"), "ack");
+    await enterUntil(viewer, "got:3", "the digit for No reached the session");
     c.ws.close();
     viewer.ws.close();
   });
@@ -385,6 +420,33 @@ describe("chat", () => {
     c.ws.send(JSON.stringify({ type: "input", id: "w1", text: "typed while waiting" }));
     await until(() => c.messages.find((m) => m.type === "ack" && m.id === "w1"), "ack", 4000);
     await enterUntil(viewer, "typed while waiting", "the text reached the session");
+    c.ws.close();
+    viewer.ws.close();
+  });
+
+  test("input whose paste starts a question gets no Enter", async () => {
+    // The stand-in starts waiting as soon as it reads the paste's first line: the check before the
+    // paste passes, the one before Enter doesn't.
+    const sid = "efefefef-efef-efef-efef-efefefefefef";
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${tag}-chat16.json`);
+    const wait = JSON.stringify({ state: "waiting", at: Date.now() + 60_000, sessionId: sid, event: "PermissionRequest",
+      prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } });
+    const name = await shSession("chat16", ["env", `WAIT_FILE=${status}`, `WAIT_JSON=${wait}`, "sh", "-c", LOOP]);
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
+    mkdirSync(join(claudeDir, "sessions"), { recursive: true });
+    mkdirSync(join(claudeDir, "projects", "p"), { recursive: true });
+    writeFileSync(join(claudeDir, "projects", "p", `${sid}.jsonl`), "");
+    writeFileSync(join(claudeDir, "sessions", `${pid}.json`), JSON.stringify({ sessionId: sid, cwd: tmp, status: "idle" }));
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "e1", text: "wait-now\nrest of it" }));
+    await until(() => c.messages.find((m) => m.id === "e1"), "reply");
+    expect(c.messages.find((m) => m.id === "e1")).toEqual({ type: "error", id: "e1", error: "Claude is asking something. Answer it first." });
+    await until(() => viewer.text.includes("got:~[200~wait-now"), "the paste's first line");
+    await Bun.sleep(500);
+    expect(viewer.text).not.toContain("got:rest of it"); // the paste's last line, still waiting for Enter
     c.ws.close();
     viewer.ws.close();
   });
