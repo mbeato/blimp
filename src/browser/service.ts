@@ -153,7 +153,7 @@ export const hasTab = (id: string) => browserTabs().some((t) => t.id === id);
 // A live view of tab `id` for the app (view.ts).
 export function viewTab(id: string, sock: ViewSocket) {
   if (!chrome || !gate?.tabs().some((t) => t.id === id)) throw new Error("That browser tab is closed.");
-  return openView(chrome, id, sock);
+  return openView(chrome, (t) => gate!.attachDirect(t), id, sock);
 }
 
 // The gate's listener. It keeps the port it had last time if it's free, so sessions' MCPs from

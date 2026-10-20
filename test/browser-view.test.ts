@@ -56,7 +56,7 @@ async function viewer(id: string, autoAck = true) {
   const msgs: any[] = [];
   let closed: { code?: number; reason?: string } | undefined;
   let v: Awaited<ReturnType<typeof openView>>;
-  v = await openView(chrome, id, {
+  v = await openView(chrome, (t) => gate.attachDirect(t), id, {
     send(data) {
       if (typeof data === "string") msgs.push(JSON.parse(data));
       else {
@@ -155,5 +155,5 @@ live("two viewers of one tab both get frames; a closed tab ends its views", asyn
 }, 30_000);
 
 live("a tab that isn't there can't be viewed", async () => {
-  await expect(openView(chrome, "F00D", { send() {}, close() {} })).rejects.toThrow();
+  await expect(openView(chrome, (t) => gate.attachDirect(t), "F00D", { send() {}, close() {} })).rejects.toThrow();
 });

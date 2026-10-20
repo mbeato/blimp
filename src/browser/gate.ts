@@ -29,7 +29,8 @@ export class Gate {
   private pending = new Map<number, { conn: Conn; id?: number; after?: (m: CdpMessage) => void }>();
   private targets = new Map<string, Target>();
   private owners = new Map<string, Conn>(); // sessionId → client
-  private attachFor = new Map<string, Conn[]>(); // targetId → clients whose attach is on its way
+  // targetId → whose attach is on its way, in order: a client, or null for blimp's own (attachDirect).
+  private attachFor = new Map<string, (Conn | null)[]>();
   private conns = new Set<Conn>();
   private listeners: (() => void)[] = [];
   private discovering?: Promise<void>;
@@ -131,7 +132,7 @@ export class Gate {
   // Client c waits for its attachedToTarget, which Chrome sends before its answer. An attach
   // Chrome refuses (the tab just closed) takes c out of the line again, so the next attach to that
   // target isn't handed to it.
-  private queueAttach(c: Conn, targetId: string) {
+  private queueAttach(c: Conn | null, targetId: string) {
     this.attachFor.set(targetId, [...(this.attachFor.get(targetId) ?? []), c]);
     return (r: CdpMessage) => {
       if (!r.error) return;
@@ -139,6 +140,15 @@ export class Gate {
       if (rest.length) this.attachFor.set(targetId, rest);
       else this.attachFor.delete(targetId);
     };
+  }
+
+  // blimp's own session on a tab (the app's live view, view.ts): it goes through the gate's line, so
+  // its attachedToTarget is never taken for a client's. Its events go to no client.
+  async attachDirect(targetId: string): Promise<string | undefined> {
+    const done = this.queueAttach(null, targetId);
+    const r = await this.chrome.call("Target.attachToTarget", { targetId, flatten: true });
+    done(r);
+    return r.result?.sessionId;
   }
 
   // The gate attaches client c to a target.
@@ -215,7 +225,9 @@ export class Gate {
         const waiting = this.attachFor.get(id) ?? [];
         const c = waiting.shift();
         if (!waiting.length) this.attachFor.delete(id);
-        if (!c || !this.conns.has(c)) return;
+        if (!c) return; // blimp's own, or nobody's
+        // The client left meanwhile: the session goes too.
+        if (!this.conns.has(c)) return this.chrome.send({ id: this.next++, method: "Target.detachFromTarget", params: { sessionId: m.params.sessionId } });
         this.owners.set(m.params.sessionId, c);
         c.sessions.add(m.params.sessionId);
         // The gate never pauses targets, so nothing waits for the client to resume them.
@@ -239,16 +251,18 @@ export class Gate {
       return this.forward(c, m);
     }
     const p = m.params ?? {};
-    // Another folder's target is as good as no target.
-    if (m.method?.startsWith("Target.") && typeof p.targetId === "string" && !this.visible(c, this.targets.get(p.targetId))) return this.fail(c, m, NO_TARGET);
+    // Another folder's target is as good as no target, whatever the command.
+    if (typeof p.targetId === "string" && !this.visible(c, this.targets.get(p.targetId))) return this.fail(c, m, NO_TARGET);
     switch (m.method) {
       case "Target.setDiscoverTargets":
         c.discover = !!p.discover;
         if (c.discover) for (const t of this.targets.values()) if (this.visible(c, t)) this.send(c, { method: "Target.targetCreated", params: { targetInfo: t.info } });
         return this.reply(c, m, {});
       case "Target.setAutoAttach": {
+        // Already on: the client has its sessions; attaching again would give it a second of each.
+        const was = c.autoAttach;
         c.autoAttach = !!p.autoAttach;
-        if (!c.autoAttach) return this.reply(c, m, {});
+        if (!c.autoAttach || was) return this.reply(c, m, {});
         const mine = [...this.targets.values()].filter((t) => this.visible(c, t));
         return void Promise.all(mine.map((t) => this.attach(c, t.info.targetId))).then(() => this.reply(c, m, {}));
       }
@@ -264,9 +278,13 @@ export class Gate {
       // The browser is everyone's: a client's close (Puppeteer's browser.close()) closes nothing.
       case "Browser.close":
         return this.reply(c, m, {});
-      // A browser session would see every target, past the folder.
+      // A browser session would see every target, past the folder; a message to a session by id
+      // would reach another client's; a crash would end everyone's browser.
       case "Target.attachToBrowserTarget":
       case "Target.exposeDevToolsProtocol":
+      case "Target.sendMessageToTarget":
+      case "Browser.crash":
+      case "Browser.crashGpuProcess":
         return this.fail(c, m, "Not available here");
       default:
         return this.forward(c, m);

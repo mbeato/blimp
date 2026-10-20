@@ -131,11 +131,34 @@ live("tabs blimp opens and closes, and the changes it hears of", async () => {
   expect(changes).toBeGreaterThan(before);
 }, 20_000);
 
-live("a client can't close the browser everyone shares", async () => {
+live("a client can't close or crash the browser everyone shares, or reach another folder's tab by any command", async () => {
   const e = client("/p/e");
   expect((await e.call("Browser.close")).result).toEqual({});
+  expect((await e.call("Browser.crash")).error).toBeDefined();
+  expect((await e.call("Browser.crashGpuProcess")).error).toBeDefined();
   expect((await chrome.call("Browser.getVersion")).result.product).toMatch(/Chrom/);
-  // Nor reach every tab through a browser session.
+  // Nor reach every tab through a browser session, or another client's session by message.
   expect((await e.call("Target.attachToBrowserTarget")).error).toBeDefined();
+  expect((await e.call("Target.sendMessageToTarget", { sessionId: "X", message: "{}" })).error).toBeDefined();
+  const other = await gate.createTab("/p/other", "about:blank");
+  expect((await e.call("Browser.getWindowForTarget", { targetId: other })).error?.message).toBe("No target with given id found");
   e.close();
 });
+
+live("blimp's own attach (the app's live view) is never handed to a client attaching at the same time", async () => {
+  const id = await gate.createTab("/p/v", `http://127.0.0.1:${site.port}/v`);
+  const c = client("/p/v");
+  await c.call("Target.setDiscoverTargets", { discover: true });
+  // Both at once: blimp's first, then the client's.
+  const mine = gate.attachDirect(id);
+  const theirs = c.call("Target.attachToTarget", { targetId: id, flatten: true });
+  const [sid, r] = await Promise.all([mine, theirs]);
+  expect(sid).toBeString();
+  expect(r.result.sessionId).toBeString();
+  expect(r.result.sessionId).not.toBe(sid);
+  // The client's event is its own session, and it can use it.
+  await until(() => c.events("Target.attachedToTarget").some((m) => m.params.sessionId === r.result.sessionId), "the client's attach event");
+  expect(c.events("Target.attachedToTarget").some((m) => m.params.sessionId === sid)).toBe(false);
+  expect((await c.call("Runtime.evaluate", { expression: "2 * 3", returnByValue: true }, r.result.sessionId)).result.result.value).toBe(6);
+  c.close();
+}, 20_000);

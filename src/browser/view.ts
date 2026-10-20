@@ -21,9 +21,9 @@ const SELECTION = `(() => {
   return String(getSelection());
 })()`;
 
-export async function openView(chrome: Chrome, targetId: string, sock: ViewSocket): Promise<{ message(text: string): void; close(): void }> {
-  const att = await chrome.call("Target.attachToTarget", { targetId, flatten: true });
-  const s: string | undefined = att.result?.sessionId;
+// attach: the gate's attachDirect, so the view's session is never taken for a client's.
+export async function openView(chrome: Chrome, attach: (targetId: string) => Promise<string | undefined>, targetId: string, sock: ViewSocket): Promise<{ message(text: string): void; close(): void }> {
+  const s = await attach(targetId);
   if (!s) throw new Error("That browser tab is closed.");
   const call = (method: string, params: any = {}) => chrome.call(method, params, s);
   let closed = false;
