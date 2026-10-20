@@ -70,6 +70,8 @@ private struct ChatContent: View {
     @State private var lastStates: [String: SessionState] = [:]
     @State private var banner: Banner?
     @State private var onScreen = false
+    /// Claude has been starting for 20 s: it's likely stuck on a screen no hook reports.
+    @State private var startStuck = false
 
     private static let bottom = "bottom"
 
@@ -179,6 +181,12 @@ private struct ChatContent: View {
             try? await Task.sleep(for: .seconds(4))
             if !Task.isCancelled { banner = nil }
         }
+        .task(id: model.starting) {
+            startStuck = false
+            guard model.starting else { return }
+            try? await Task.sleep(for: .seconds(20))
+            if !Task.isCancelled { startStuck = true }
+        }
         // Links in Claude's replies: http and https open in Safari on tap, anything else does nothing.
         .environment(\.openURL, OpenURLAction { Inline.safe($0) ? .systemAction : .discarded })
     }
@@ -197,6 +205,9 @@ private struct ChatContent: View {
             }
         } else if model.noChat {
             Text("This server's blimpd can't show chats yet. Update it (see the README).").foregroundStyle(.secondary)
+        } else if model.starting && startStuck {
+            Text("Claude hasn't started. It may be waiting on a screen only the Mac can answer, like trusting this folder or signing in. Open it on the Mac.")
+                .foregroundStyle(.secondary)
         } else if model.starting {
             ProgressView()
         } else if model.macOnly {

@@ -2,8 +2,8 @@
 // app-e2e job in .github/workflows/ios.yml; ios/e2e/setup.ts makes the sessions and the texts looked
 // for here). Pair, see the session list, read a chat, hide the keyboard, send a message, answer a permission
 // prompt; Stop and a folded long reply; start, end and resume sessions; blimpd restarting; the Face ID
-// lock; two questions at once. What reached the sessions is checked by the job afterwards. Screenshots
-// stay in the .xcresult.
+// lock; two questions at once; a start that's stuck. What reached the sessions is checked by the job
+// afterwards. Screenshots stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
 // Keychain keeps the server) and so locked: the job enrols Face ID first, and each unlocks with a
@@ -270,6 +270,20 @@ final class BlimpUITests: XCTestCase {
         try until(submit, "exists == false", "the questions to go once answered")
         if labeled("Not sent").exists || labeled("Stopped part way").exists { throw failed("the answers were not taken") }
         shot("23-answered")
+    }
+
+    // MARK: - A start that's stuck
+
+    /// demo-stuck is Claude Code that never says which conversation it is (as on its folder-trust screen):
+    /// a spinner, then after 20 s a line that says to open it on the Mac.
+    func test8StuckStart() throws {
+        try launchPaired()
+        let row = element("session-demo-stuck")
+        try wait(row, "the demo-stuck row")
+        row.tap()
+        try wait(labeled("Claude hasn't started"), "the note that Claude hasn't started", timeout: 40)
+        if element("messageField").exists { throw failed("no message box while Claude hasn't started") }
+        shot("24-stuck-start")
     }
 
     // MARK: - Helpers

@@ -9,6 +9,8 @@
 //   demo-quiz  in api-server: Claude's question dialog with two questions, the second multi-choice
 //              (ios/e2e/fake-ask.ts draws it as Claude does); every key is appended to $E2E_DIR/quiz.in,
 //              the answers go to $E2E_DIR/quiz.json
+//   demo-stuck in api-server: Claude Code that never says which conversation it is, as when it's stuck
+//              on its folder-trust screen (no status file)
 //   a conversation in blimp-demo with no session running, for the project screen's Earlier list
 // The folders are under the home folder: blimpd starts sessions only there. Sessions the app starts
 // run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for.
@@ -133,6 +135,11 @@ await standIn("demo-quiz", join(work, "api-server"), `exec '${process.execPath}'
   quizSid, [user("u1", "Set up the test pipeline"), said("a1", "A couple of questions first.")]);
 writeFileSync(quizStatus, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: quizSid, event: "PermissionRequest",
   prompt: promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions } }) }));
+
+// Claude Code by the kind blimpd remembers it was started as, with no status file: starting, for good.
+Bun.spawnSync([zmxPath(), "attach", "demo-stuck", "sh", "-c", "exec cat > /dev/null"], { env, cwd: join(work, "api-server"), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+await until(() => parseZmxList(Bun.spawnSync([zmxPath(), "list"], { env }).stdout.toString()).some((s) => s.name === "demo-stuck" && s.pid > 0), "zmx session demo-stuck");
+writeFileSync(join(dirname(sock), "session-kinds.json"), JSON.stringify({ "demo-stuck": "claude" }));
 
 const token = readFileSync(join(dirname(sock), "token"), "utf8").trim();
 writeFileSync(join(root, "link"), `blimp://pair?url=${encodeURIComponent("http://127.0.0.1:7425")}&token=${token}`);
