@@ -1,6 +1,6 @@
 # Server browser: Claude browses, you watch
 
-Date: 2026-10-20. Status: design approved by Max, not built. Size: L (a week or more). Step 1 alone
+Date: 2026-10-20. Status: design approved by Max; spike passed (below); building step 1. Size: L (a week or more). Step 1 alone
 is M.
 
 ## Problem
@@ -126,6 +126,32 @@ Spike: a throwaway CDP proxy in front of this box's Playwright Chromium, and two
 `chrome-devtools-mcp` clients with different session paths. Each opens a page, lists pages, reads
 network requests and a page's source. Pass: each sees only its own pages, with no errors.
 Fail: use the fallback (tag only).
+
+**Result (2026-10-20): pass, filtering works; no fallback.** Chromium 156 (Playwright's), two and
+three `chrome-devtools-mcp@1.11.0` clients through a throwaway gate:
+- Each folder sees only its own pages; another folder's page id is "No page found".
+- Network requests come with headers and response bodies; source (`evaluate_script`), console,
+  and snapshot all work.
+- A page opened by a page (`window.open`) lands in the opener's folder.
+- A second session in the same folder sees the folder's pages, and keeps them after the first one
+  leaves.
+
+What the gate must do, learned there:
+- **`--password-store=basic` is required.** Without it, Chrome on a server with no desktop waits
+  on the keyring for the cookie key, and every page load hangs after the request is sent. Cookies
+  are then encrypted with a fixed key; the profile folder is the user's own (0700).
+- **Answer in Chrome's order.** `Target.setDiscoverTargets`: the `targetCreated` events for
+  existing targets, then the reply. `Target.setAutoAttach`: attached to existing targets, then
+  the reply. Replying first leaves Puppeteer with no pages on its first call.
+- **`Target.createTarget`:** Chrome's `targetCreated` can come before or after the reply. The
+  gate announces the target once it has both.
+- **Folder lookups.** The client's own attach goes through the gate's attach queue. Child
+  sessions (iframes, workers) attached inside a session belong to that session's client.
+- **Sites see "HeadlessChrome"** in the user agent. Launch with `--user-agent` set to the same
+  string without "Headless", so Google treats it as a normal Chrome.
+- **Not `--enable-automation`**: it isn't needed, and it marks the browser as automated.
+- A folder with no pages: `list_pages` answers with empty text, and Claude opens one with
+  `new_page`. Most tools need `pageId` (1.11).
 
 ## Not now
 
