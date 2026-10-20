@@ -1,6 +1,6 @@
 # Server browser: Claude browses, you watch
 
-Date: 2026-10-20. Status: design approved by Max; spike passed (below); building step 1. Size: L (a week or more). Step 1 alone
+Date: 2026-10-20. Status: built, steps 1–3 (branch server-browser). Downloads and file uploads are still "Not now". Size: L (a week or more). Step 1 alone
 is M.
 
 ## Problem
