@@ -47,7 +47,7 @@ export function closeTab(l: Layout, i: number): Layout {
 
 export const setPanes = (l: Layout, i: number, p: Panes): Layout => ({
   ...l,
-  tabs: l.tabs.map((t, j) => (j === i ? { ...t, panes: p.panes, focus: p.focus, groups: p.groups } : t)),
+  tabs: l.tabs.map((t, j) => (j === i ? { ...t, panes: p.panes, focus: p.focus, groups: p.groups, ...(p.order && { order: p.order }) } : t)),
 });
 
 export const encodeLayout = (l: Layout) => JSON.stringify(l);
@@ -81,7 +81,9 @@ export function decodeLayout(text: string): Layout | null {
       names.forEach((n: string) => used.add(n));
       groups.push(names);
     }
-    tabs.push({ server: t.server, dir: t.dir, panes, focus, groups });
+    // The session list's order, once dragged.
+    const order = Array.isArray(t.order) ? t.order.filter((n: unknown): n is string => typeof n === "string") : null;
+    tabs.push({ server: t.server, dir: t.dir, panes, focus, groups, ...(order && { order }) });
   }
   if (!tabs.length) return null;
   const front = tabs[Number.isInteger(v.active) ? Math.max(0, Math.min(v.active, tabs.length - 1)) : 0];

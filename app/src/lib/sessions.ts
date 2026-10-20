@@ -24,15 +24,30 @@ export const folderSessions = (sessions: Session[], dir: string) =>
 
 // The list's rows, newest first: a split group (its sessions in left-to-right order) sits where
 // its newest session would be, so an old pair doesn't jump above sessions started after it.
-export function listItems(listed: Session[], groups: Session[][]): (Session | Session[])[] {
+// order: the order the rows were dragged into (session names, top to bottom). Sessions it has
+// keep it; the others (a new one, say) keep the place newest first gives them, so a new session
+// still lands on top. A group sits where its first session in that order is.
+export function listItems(listed: Session[], groups: Session[][], order: string[] = []): (Session | Session[])[] {
+  const rank = new Map(order.map((n, i) => [n, i]));
+  const known = listed.filter((s) => rank.has(s.name)).sort((a, b) => rank.get(a.name)! - rank.get(b.name)!);
+  let k = 0;
+  const sorted = listed.map((s) => (rank.has(s.name) ? known[k++] : s));
   const items: (Session | Session[])[] = [];
   const placed = new Set<Session[]>();
-  for (const s of listed) {
+  for (const s of sorted) {
     const g = groups.find((g) => g.includes(s));
     if (!g) items.push(s);
     else if (!placed.has(g)) placed.add(g), items.push(g);
   }
   return items;
+}
+
+// The list's order once row `from` (a session, or a whole group) is dragged to the gap before row
+// `to` (items.length: after the last): every session's name, top to bottom, a group's together.
+export function moveItem(items: (Session | Session[])[], from: number, to: number): string[] {
+  const rest = items.filter((_, i) => i !== from);
+  rest.splice(to > from ? to - 1 : to, 0, items[from]);
+  return rest.flat().map((s) => s.name);
 }
 
 // Earlier conversations, minus the ones a running session already has open.

@@ -79,6 +79,22 @@ describe("prune", () => {
   test("returns the same object when nothing ended", () => {
     const p = P(["a", "b"], 0);
     expect(prune(p, () => true)).toBe(p);
+    const o = { ...p, order: ["b", "a"] };
+    expect(prune(o, () => true)).toBe(o);
+  });
+  test("ended sessions leave the list's order", () => {
+    expect(prune({ ...P(["a"]), order: ["c", "a", "b"] }, (n) => n !== "c")).toEqual({ ...P(["a"]), order: ["a", "b"] });
+  });
+});
+
+describe("the list's order", () => {
+  test("stays through clicks, drops and closed splits", () => {
+    const order = ["c", "b", "a"];
+    const p = { ...P(["a", "b"], 0, [["c", "d"]]), order };
+    expect(show(p, "c").order).toBe(order);
+    expect(dropAt(p, "d", 0, "left").order).toBe(order);
+    expect(removePane(p, 1).order).toBe(order);
+    expect(forget(p, ["a"]).order).toBe(order);
   });
 });
 

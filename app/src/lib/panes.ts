@@ -3,11 +3,12 @@
 // on screen. Each session is in at most one group. Pure, so the rules are unit tested.
 
 // groups: split groups not on screen now, each of two or more sessions.
-export type Panes = { panes: string[]; focus: number; groups: string[][] };
+// order: the session list's order, once its rows have been dragged (names, top to bottom).
+export type Panes = { panes: string[]; focus: number; groups: string[][]; order?: string[] };
 export type Side = "left" | "right";
 
 const clampFocus = (panes: string[], focus: number) => Math.max(0, Math.min(focus, panes.length - 1));
-const at = (p: Panes, panes: string[], focus: number, groups = p.groups): Panes => ({ panes, focus: clampFocus(panes, focus), groups });
+const at = (p: Panes, panes: string[], focus: number, groups = p.groups, order = p.order): Panes => ({ panes, focus: clampFocus(panes, focus), groups, ...(order && { order }) });
 
 // Kept groups without these sessions; a group left with one session is no group.
 const without = (groups: string[][], names: string[]) => groups.map((g) => g.filter((n) => !names.includes(n))).filter((g) => g.length > 1);
@@ -53,13 +54,13 @@ export function forget(p: Panes, names: string[]): Panes {
   return at(p, panes, f >= 0 ? f : p.focus, without(p.groups, names));
 }
 
-// Drops ended sessions: from the splits on screen and from the kept groups.
+// Drops ended sessions: from the splits on screen, the kept groups and the list's order.
 export function prune(p: Panes, alive: (name: string) => boolean): Panes {
-  if (p.panes.every(alive) && p.groups.every((g) => g.every(alive))) return p;
+  if (p.panes.every(alive) && p.groups.every((g) => g.every(alive)) && (p.order ?? []).every(alive)) return p;
   const focused = p.panes[p.focus];
   const panes = p.panes.filter(alive);
   const f = panes.indexOf(focused);
-  return at(p, panes, f >= 0 ? f : p.focus, p.groups.map((g) => g.filter(alive)).filter((g) => g.length > 1));
+  return at(p, panes, f >= 0 ? f : p.focus, p.groups.map((g) => g.filter(alive)).filter((g) => g.length > 1), p.order?.filter(alive));
 }
 
 // Where a drop at x (0..1 across the terminal) lands: which split, and which half of it.

@@ -735,6 +735,42 @@ body.dragging-session * {
   visibility: hidden;
 }
 
+/* A split group dragged within the list moves as one: the whole group is the empty slot. */
+.sgroup.moving {
+  outline: 1px dashed var(--fg-faint);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.sgroup.moving::before,
+.sgroup.moving .srow > * {
+  visibility: hidden;
+}
+
+.sgroup.moving .srow {
+  outline: none;
+  background: none;
+}
+
+/* Where a row dragged within the list would drop: a line in the gap between two rows, drawn
+   over the dragged row (z-index 20), which is often right on it. */
+.slist-drop {
+  position: relative;
+  height: 0;
+  z-index: 21;
+}
+
+.slist-drop::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--focus);
+}
+
 .srow.stale {
   opacity: 0.55;
 }
