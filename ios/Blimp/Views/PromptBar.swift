@@ -5,12 +5,12 @@ import SwiftUI
 
 struct PromptBar: View {
     let prompt: Prompt
-    /// An answer is on its way: the buttons wait.
+    /// An answer is on its way, or went through and the prompt is still up: the buttons wait.
     let busy: Bool
     /// A spoken answer's guess: this button is marked and waits for a tap; nothing was sent.
     var highlight: Int? = nil
-    /// The choice's index, and the `at` of the prompt it was shown for.
-    let onPick: (Int, Double) -> Void
+    /// The choice's index, and the prompt it was shown in.
+    let onPick: (Int, Prompt) -> Void
     @State private var height: CGFloat = 0
 
     var body: some View {
@@ -44,7 +44,7 @@ struct PromptBar: View {
         case .permission:
             summary
             ForEach(Array(prompt.choices.enumerated()), id: \.offset) { i, choice in
-                ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice), marked: highlight == i) { onPick(i, prompt.at) }
+                ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice), marked: highlight == i) { onPick(i, prompt) }
             }
             .disabled(busy)
         case .question:
@@ -52,7 +52,7 @@ struct PromptBar: View {
                 Text(q.question).font(.callout)
                 ForEach(Array(q.options.enumerated()), id: \.offset) { i, option in
                     ChoiceButton(label: option.label, detail: option.description, style: .normal, marked: highlight == i) {
-                        onPick(i, prompt.at)
+                        onPick(i, prompt)
                     }
                 }
                 .disabled(busy)

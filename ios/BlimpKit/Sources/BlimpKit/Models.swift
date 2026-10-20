@@ -183,18 +183,20 @@ public enum EventsMessage: Sendable, Equatable {
 
 public enum ChatCommand: Encodable, Sendable, Equatable {
     case input(id: String, text: String)
-    case answer(id: String, at: Double, pick: Int)
+    /// `label` is the choice's text as shown at `pick`: blimpd refuses the answer if that's changed.
+    case answer(id: String, at: Double, pick: Int, label: String)
     case interrupt(id: String)
 
-    private enum Key: String, CodingKey { case type, id, text, at, pick }
+    private enum Key: String, CodingKey { case type, id, text, at, pick, label }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
         switch self {
         case let .input(id, text):
             try c.encode("input", forKey: .type); try c.encode(id, forKey: .id); try c.encode(text, forKey: .text)
-        case let .answer(id, at, pick):
+        case let .answer(id, at, pick, label):
             try c.encode("answer", forKey: .type); try c.encode(id, forKey: .id); try c.encode(at, forKey: .at); try c.encode(pick, forKey: .pick)
+            try c.encode(label, forKey: .label)
         case let .interrupt(id):
             try c.encode("interrupt", forKey: .type); try c.encode(id, forKey: .id)
         }

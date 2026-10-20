@@ -19,6 +19,8 @@ final class ChatModel {
     /// The last time the store listed this session: what it was, once it's gone.
     private(set) var lastSeen: Session?
     private var socketEnded = false
+    /// The `at` of the last prompt blimpd acknowledged an answer for: its buttons stay off until a new wait.
+    private var answeredAt: Double?
     private var inputId: String?
     private var answerId: String?
     private var stopId: String?
@@ -34,6 +36,7 @@ final class ChatModel {
     @ObservationIgnored var onReply: ((ChatMessage) -> Void)?
 
     static let notSent = "Not sent. Check the connection."
+    static let questionChanged = "The question changed. Check it and answer again."
 
     init(name: String, store: Store) {
         self.name = name
@@ -59,6 +62,8 @@ final class ChatModel {
     var canResume: Bool { (session ?? lastSeen)?.sessionId != nil }
     var sendingText: Bool { inputId != nil }
     var answering: Bool { answerId != nil }
+    /// This prompt's answer went through: no second press while the session still shows it.
+    var answered: Bool { prompt != nil && prompt?.at == answeredAt }
     var stopping: Bool { stopId != nil }
 
     /// Opens the chat socket (again, after close()). The screen calls it on appear.
@@ -129,19 +134,25 @@ final class ChatModel {
         return false
     }
 
-    /// Picks `pick` (an index in `prompt.choices`) for the prompt that was on screen (or read aloud)
-    /// when it was picked, named by its `at`. If a new wait has replaced that prompt since, nothing is
-    /// sent: the index belongs to the old question, and the bar now shows the new one.
-    func answer(_ pick: Int, at: Double) async {
-        guard let prompt, prompt.at == at, answerId == nil else { return }
+    /// Picks `pick` (an index in `shown.choices`) for the prompt that was on screen (or read aloud)
+    /// when it was picked. If the prompt has changed since in any way (a new wait, or the screen's
+    /// options in place of the first Yes/No under the same wait), nothing is sent: the index belongs
+    /// to what was shown. blimpd checks the same again with the choice's label.
+    func answer(_ pick: Int, to shown: Prompt) async {
+        guard answerId == nil, !answered else { return }
+        guard prompt == shown, shown.choices.indices.contains(pick) else {
+            lastError = Self.questionChanged
+            return
+        }
         let id = UUID().uuidString
         lastError = nil
         answerId = id
         defer { answerId = nil }
-        switch await request(.answer(id: id, at: at, pick: pick), id: id) {
-        case .ack, .ended: break
-        // Another answer got there first (the Mac, or a new wait); the bar redraws from the latest prompt.
-        case .failed(let error) where error == "the question changed": break
+        switch await request(.answer(id: id, at: shown.at, pick: pick, label: shown.choices[pick]), id: id) {
+        case .ack: answeredAt = shown.at
+        case .ended: break
+        // A new wait, other options, or the Mac answered first; the bar shows the latest prompt.
+        case .failed(let error) where error == "the question changed": lastError = Self.questionChanged
         case .failed(let error): lastError = "Not sent: \(error)"
         case .notSent, .timeout: lastError = Self.notSent
         }

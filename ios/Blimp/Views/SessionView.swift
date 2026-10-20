@@ -58,8 +58,8 @@ private struct ChatContent: View {
     @State private var micStopping = false
     /// Bumped by each press, so a late failure of an earlier one changes nothing.
     @State private var micRound = 0
-    /// Prompts already showing or read: one is read aloud only when it's new.
-    @State private var promptsSeen: Set<Double> = []
+    /// Prompts already showing or read: one is read aloud only when it's new (or its choices changed).
+    @State private var promptsSeen: [Prompt] = []
     /// What was in the box when the mic started; the words heard go after it.
     @State private var micBase = ""
     /// The answerable prompt showing when the mic started: the words answer it instead of being sent.
@@ -146,12 +146,14 @@ private struct ChatContent: View {
         .onChange(of: listener.partial) { _, heard in
             if micOn { draft = Self.joined(micBase, heard) }
         }
-        // A new prompt: drop the old guess and note, and read it aloud when that's on.
-        .onChange(of: model.prompt?.at) { _, at in
+        // A new prompt, or new choices for the same one: drop the old guess and note, and read it aloud
+        // when that's on.
+        .onChange(of: model.prompt) { _, prompt in
             guess = nil
             voiceNote = nil
-            guard let at, promptsSeen.insert(at).inserted, readAloud, let prompt = model.prompt else { return }
-            Speaker.shared.say(prompt.spoken, id: Self.promptId)
+            guard let prompt, !promptsSeen.contains(prompt) else { return }
+            promptsSeen.append(prompt)
+            if readAloud { Speaker.shared.say(prompt.spoken, id: Self.promptId) }
         }
         .onChange(of: store.sessions) { _, sessions in noticeOthers(sessions) }
         // Leaving the app or locking the phone stops the mic; the words stay in the box, unsent. Not on
@@ -185,9 +187,10 @@ private struct ChatContent: View {
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 if let prompt = model.prompt {
-                    PromptBar(prompt: prompt, busy: model.answering, highlight: guess?.at == prompt.at ? guess?.pick : nil) { pick, at in
+                    PromptBar(prompt: prompt, busy: model.answering || model.answered,
+                              highlight: guess?.prompt == prompt ? guess?.pick : nil) { pick, shown in
                         guess = nil
-                        Task { await model.answer(pick, at: at) }
+                        Task { await model.answer(pick, to: shown) }
                     }
                     Divider()
                 }
@@ -243,7 +246,7 @@ private struct ChatContent: View {
     private func appeared() {
         onScreen = true
         readAloud = UserDefaults.standard.bool(forKey: readAloudKey)
-        if let at = model.prompt?.at { promptsSeen.insert(at) }
+        if let prompt = model.prompt { promptsSeen.append(prompt) }
         lastStates = Dictionary(store.sessions.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
         let key = readAloudKey
         model.onReply = { message in
@@ -329,16 +332,18 @@ private struct ChatContent: View {
     }
 
     /// Only a clear match is sent. A guess is marked and waits for a tap; anything else asks again.
+    /// The words are matched against the choices as they were when the mic started, and only while
+    /// the prompt is still exactly that (the options can change under the same wait).
     private func answerByVoice(_ heard: String, to asked: Prompt) {
-        guard model.prompt?.at == asked.at else {
+        guard model.prompt == asked else {
             voiceNote = "The question changed. Nothing was sent."
             return
         }
         switch VoiceAnswer.match(heard, choices: asked.choices) {
         case .clear(let pick):
-            Task { await model.answer(pick, at: asked.at) }
+            Task { await model.answer(pick, to: asked) }
         case .guess(let pick):
-            guess = Guess(at: asked.at, pick: pick)
+            guess = Guess(prompt: asked, pick: pick)
         case .none:
             voiceNote = "Didn't catch which one. Tap a button or try again."
         }
@@ -386,8 +391,9 @@ private struct ReconnectingBar: View {
     }
 }
 
+/// A spoken answer's guess, for the prompt it was heard for: shown only while that prompt is.
 private struct Guess: Equatable {
-    let at: Double
+    let prompt: Prompt
     let pick: Int
 }
 
