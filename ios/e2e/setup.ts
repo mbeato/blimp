@@ -72,16 +72,25 @@ await standIn("demo-chat", join(work, "blimp-demo"), echo, chatSid, [
 await standIn("demo-ask", join(work, "api-server"), `stty -icanon -echo; exec cat >> '${promptIn}'`,
   "e2e00000-0000-0000-0000-000000000002", [user("u1", "Run the test suite"), said("a1", "I'll run the tests.")]);
 
-// Working on something: the phone shows Stop, which presses Esc (raw keys again). Like Claude, it stops
-// working on Esc: its status file says idle, and the phone's Stop goes away.
+// Working on something: the phone shows Stop on the working row, which presses Esc (raw keys again). Like
+// Claude, it stops working on Esc: its status file says idle, and the phone's Stop goes away.
 const busySid = "e2e00000-0000-0000-0000-000000000003";
 const busyDir = join(work, "api-server");
 const idle = JSON.stringify({ sessionId: busySid, cwd: busyDir, status: "idle" });
 const stopped = String.raw`stty -icanon -echo; (while sleep 0.2; do case "$(tr '\033' E < '${stopIn}')" in *E) printf '%s' '${idle}' > '${join(claude, "sessions")}'/$$.json; break;; esac; done) & exec cat >> '${stopIn}'`;
 await standIn("demo-busy", busyDir, stopped, busySid,
-  // Longer than the screen, so the test sees the chat open at its end, not its start.
+  // Longer than the screen, so the test sees the chat open at its end, not its start; and one long
+  // reply near the end, which the phone folds (Show more).
   [user("u1", "Refactor the auth middleware"),
    ...Array.from({ length: 20 }, (_, i) => [said(`p${i}`, `Step ${i + 1}: looked at route ${i + 1} and its tests.`), user(`q${i}`, `Keep going with route ${i + 2}`)]).flat(),
+   said("long", [
+     "Here's the plan for the rest of the routes, so you can stop me before I touch anything you'd rather keep.",
+     "Every route today checks the session cookie itself, in slightly different ways: some read it before parsing the body, some after, and two of them skip the expiry check entirely. The new middleware does that check once, in one place, and hands each route the signed-in user.",
+     "- `auth.ts`: one `requireUser` middleware that reads the cookie, checks the signature and the expiry, and returns 401 with the same body everywhere\n- `routes/*.ts`: each route drops its own check and reads `req.user`\n- `admin.ts`: keeps its extra role check, now after `requireUser`\n- `auth.test.ts`: tests for a missing cookie, a bad signature, an expired session, and a good one",
+     "The two routes that skipped the expiry check will start refusing old sessions. That's the point, but anyone signed in for more than a week will be asked to sign in again once this ships.",
+     "I'll run the whole test suite after each route, not just at the end, so a break shows up next to the change that caused it.",
+   ].join("\n\n")),
+   user("q20", "Sounds good, go"),
    said("a1", "Working through the routes now.")], "busy");
 
 // A conversation in blimp-demo with nothing running it: the project screen lists it under Earlier.

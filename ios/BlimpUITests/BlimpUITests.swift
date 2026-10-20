@@ -1,6 +1,7 @@
 // The app end to end, in the simulator, against a real blimpd with stand-in Claude sessions (the
 // app-e2e job in .github/workflows/ios.yml; ios/e2e/setup.ts makes the sessions and the texts looked
-// for here). Pair, see the session list, read a chat, send a message, answer a permission prompt; Stop;
+// for here). Pair, see the session list, read a chat, hide the keyboard, send a message, answer a permission
+// prompt; Stop and a folded long reply;
 // start, end and resume sessions; blimpd restarting; the Face ID lock. What reached the sessions is
 // checked by the job afterwards. Screenshots stay in the .xcresult.
 //
@@ -43,17 +44,37 @@ final class BlimpUITests: XCTestCase {
         try wait(message("message.assistant", "under Appearance"), "the assistant reply")
         // The tool call as one line, its command without the summary's backticks
         try wait(labeled("Ran swift test"), "the tool line")
+        // The empty box: the mic inside it, no Send
+        let mic = app.buttons["Talk"]
+        try wait(mic, "the mic in the empty box")
+        if app.buttons["sendButton"].exists { throw failed("no Send while the box is empty") }
         shot("2-chat")
 
-        // Send a message; the box clears once blimpd has it
+        // The keyboard goes as in Messages: a drag down the chat, or a tap on it
         let input = element("messageField")
         try wait(input, "the message field")
+        let keyboard = app.keyboards.firstMatch
+        try focus(input)
+        try wait(keyboard, "the keyboard after tapping the message field")
+        shot("2a-keyboard")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        try until(keyboard, "exists == false", "a drag down the chat to hide the keyboard")
+        if app.keyboards.count != 0 { throw failed("no keyboard after the drag") }
+        try focus(input)
+        try wait(keyboard, "the keyboard again")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        try until(keyboard, "exists == false", "a tap on the chat to hide the keyboard")
+
+        // Send a message; the box clears once blimpd has it, and the mic is back
         try type("Thanks, ship it", into: input)
         let send = app.buttons["sendButton"]
         try wait(send, "Send")
         try until(send, "isEnabled == true", "Send to be enabled")
+        if mic.exists { throw failed("no mic once there's text") }
+        shot("2b-typing")
         send.tap()
-        try until(send, "exists == true AND isEnabled == false", "the message to be sent")
+        try wait(mic, "the box to clear once the message is sent")
         // The stand-in writes what it read and a reply to the transcript: both arrive in the open chat
         try wait(message("message.user", "Thanks, ship it"), "the sent message in the chat")
         try wait(message("message.assistant", "Shipped: Thanks, ship it"), "the reply to it")
@@ -104,17 +125,27 @@ final class BlimpUITests: XCTestCase {
         let newest = message("message.assistant", "Working through the routes now.")
         try wait(newest, "demo-busy's newest message")
         try until(newest, "isHittable == true", "the chat to open at its newest message")
-        // Working, and the box is empty: Stop in Send's place
+        // Working, and the box is empty: Stop on the working row, the mic in the box
         let stop = app.buttons["Stop"]
+        let working = labeled("working…")
         try wait(stop, "the Stop button")
+        try wait(working, "the working row")
+        try wait(app.buttons["Talk"], "the mic in the empty box")
         if app.buttons["sendButton"].exists { throw failed("no Send while working with an empty box") }
+        // The long reply above the newest is folded
+        let more = app.buttons["Show more"]
+        try wait(more, "Show more on the long reply")
         shot("8-stop")
         stop.tap()
-        // The stand-in stops working on Esc, as Claude does: Stop goes and Send is back
+        // The stand-in stops working on Esc, as Claude does: the working row and its Stop go
         try until(stop, "exists == false", "the session to stop working")
-        try wait(app.buttons["sendButton"], "Send after stopping")
+        try until(working, "exists == false", "the working row to go")
+        try wait(app.buttons["Talk"], "the mic after stopping")
         if labeled("Not sent").exists { throw failed("Stop was not sent") }
         shot("9-stopped")
+        more.tap()
+        try wait(app.buttons["Show less"], "Show less on the opened reply")
+        shot("9a-unfolded")
     }
 
     // MARK: - Start and end a session
@@ -337,17 +368,19 @@ final class BlimpUITests: XCTestCase {
     }
 
     /// Taps the field until it has the keyboard (the chat's input bar can be redrawn as the session's
-    /// state comes in, and a tap on the old one gives nothing focus), then types.
-    private func type(_ text: String, into field: XCUIElement) throws {
+    /// state comes in, and a tap on the old one gives nothing focus).
+    private func focus(_ field: XCUIElement) throws {
         for _ in 0..<5 {
             field.tap()
             let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
-            if XCTWaiter().wait(for: [focused], timeout: 3) == .completed {
-                field.typeText(text)
-                return
-            }
+            if XCTWaiter().wait(for: [focused], timeout: 3) == .completed { return }
         }
         throw failed("the keyboard in the message field")
+    }
+
+    private func type(_ text: String, into field: XCUIElement) throws {
+        try focus(field)
+        field.typeText(text)
     }
 
     private func wait(_ e: XCUIElement, _ what: String, timeout: TimeInterval = 30) throws {

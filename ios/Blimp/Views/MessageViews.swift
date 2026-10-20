@@ -1,5 +1,5 @@
-// How each chat message looks: your prompts as bubbles, Claude's replies as native Markdown,
-// tools as one grey line that opens to show what went in and came out.
+// How each chat message looks: your prompts as bubbles, Claude's replies as native Markdown (a long
+// one folded, with Show more), tools as one grey line that opens to show what went in and came out.
 import BlimpKit
 import SwiftUI
 
@@ -34,15 +34,44 @@ struct UserBubble: View {
     }
 }
 
+/// A step smaller than your bubbles. A reply taller than about 12 lines folds to that height, with
+/// Show more; read aloud still reads all of it.
 struct AssistantText: View {
     let text: String
+    @State private var open = false
+    @State private var height: CGFloat = 0
+    @ScaledMetric(relativeTo: .callout) private var foldHeight: CGFloat = 250
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(MarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
-                BlockView(block: block)
+        // a little over the fold, so folding never hides just a line or two
+        let long = height > foldHeight * 1.2
+        let folded = long && !open
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(MarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
+                    BlockView(block: block)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            .frame(maxHeight: folded ? foldHeight : nil, alignment: .top)
+            .clipped()
+            .mask {
+                if folded {
+                    LinearGradient(stops: [.init(color: .black, location: 0.7), .init(color: .clear, location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                } else {
+                    Color.black
+                }
+            }
+            if long {
+                Button(open ? "Show less" : "Show more") { open.toggle() }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
             }
         }
+        .font(.callout)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -163,11 +192,29 @@ struct ToolLine: View {
     }
 }
 
+/// The end of the chat while Claude works, or waits on something only the Mac can answer: Stop presses Esc.
 struct WorkingRow: View {
+    let waiting: Bool
+    let stopping: Bool
+    /// nil where the phone can't type into the session (Open on Mac): no Stop.
+    let onStop: (() -> Void)?
+
     var body: some View {
         HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
-            Text("working…").foregroundStyle(.secondary)
+            if waiting {
+                Circle().fill(.orange).frame(width: 8, height: 8)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+            Text(waiting ? "waiting…" : "working…").foregroundStyle(.secondary)
+            if let onStop {
+                Button("Stop", systemImage: "stop.fill", action: onStop)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .tint(.red)
+                    .disabled(stopping)
+            }
         }
         .font(.footnote)
     }

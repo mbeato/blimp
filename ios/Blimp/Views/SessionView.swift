@@ -81,13 +81,19 @@ private struct ChatContent: View {
                         MessageRow(message: message, expanded: expanded.contains(message.id)) { toggle(message.id) }
                             .modifier(BeingRead(reading: Speaker.shared.speakingId == message.id))
                     }
-                    if model.working { WorkingRow() }
+                    if showsWorking {
+                        WorkingRow(waiting: !model.working, stopping: model.stopping, onStop: typable ? stop : nil)
+                    }
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .padding(.horizontal)
                 .padding(.top, 12)
             }
             .defaultScrollAnchor(.bottom, for: .initialOffset)
+            // The keyboard goes as Messages' does: drag the chat down, or tap it (taps on tool lines and
+            // links still work).
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(TapGesture().onEnded { hideKeyboard() })
             .onScrollGeometryChange(for: Bool.self) { g in
                 g.visibleRect.maxY >= g.contentSize.height - 40
             } action: { _, bottom in
@@ -108,7 +114,7 @@ private struct ChatContent: View {
                 guard last != nil else { return }
                 if atBottom { proxy.scrollTo(Self.bottom, anchor: .bottom) } else { unseen = true }
             }
-            .onChange(of: model.working) {
+            .onChange(of: showsWorking) {
                 if atBottom { proxy.scrollTo(Self.bottom, anchor: .bottom) }
             }
             .overlay { empty }
@@ -217,11 +223,23 @@ private struct ChatContent: View {
                 }
                 errorLine
                 InputBar(
-                    text: $draft, canStop: model.working || model.waitingUnknown, sending: model.sendingText,
-                    stopping: model.stopping, listening: micOn || micStopping, onSend: send, onStop: { Task { await model.stop() } },
+                    text: $draft, sending: model.sendingText, listening: micOn || micStopping, onSend: send,
                     onMicDown: micDown, onMicUp: micUp)
             }
         }
+    }
+
+    /// The working row: while Claude works, or waits on something only the Mac can answer.
+    private var showsWorking: Bool { model.working || (typable && model.waitingUnknown) }
+    /// The input box shows (controls' last case), and so does Stop on the working row.
+    private var typable: Bool { !model.ended && !model.noChat && !model.starting && !model.macOnly }
+
+    private func stop() {
+        Task { await model.stop() }
+    }
+
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     @ViewBuilder private var errorLine: some View {
@@ -231,7 +249,7 @@ private struct ChatContent: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if model.log.messages.isEmpty && !model.working && !model.ended && !model.macOnly && !model.noChat && !model.starting {
+        if model.log.messages.isEmpty && !showsWorking && !model.ended && !model.macOnly && !model.noChat && !model.starting {
             if !model.loaded {
                 ProgressView()
             } else {

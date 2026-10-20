@@ -1,6 +1,7 @@
-// The box you type into: Return adds a line, Send sends. While Claude works, Stop shows: in Send's
-// place while the box is empty, beside it once there's text. The mic: hold to talk and let go to send, slide up first to keep the words
-// unsent; or tap to start and tap again to send.
+// The box you type into, the full width of the bar, with one round button inside its end: the mic
+// while the box is empty, Send once there's text (a spinner while sending). Return adds a line. The
+// mic: hold to talk and let go to send, slide up first to keep the words unsent; or tap to start and
+// tap again to send. Stop is on the chat's working row, not here.
 import SwiftUI
 
 /// How a press on the mic ended.
@@ -8,14 +9,10 @@ enum MicRelease { case send, keep }
 
 struct InputBar: View {
     @Binding var text: String
-    /// Claude works (or waits on something only the Mac can answer): Stop presses Esc.
-    let canStop: Bool
     let sending: Bool
-    let stopping: Bool
     /// The mic is on: from the press until the words are sent or kept.
     let listening: Bool
     let onSend: () -> Void
-    let onStop: () -> Void
     let onMicDown: () -> Void
     let onMicUp: (MicRelease) -> Void
 
@@ -32,24 +29,27 @@ struct InputBar: View {
     private var hasText: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: 4) {
             TextField("Message", text: $text, axis: .vertical)
                 .lineLimit(1...6)
-                .padding(.horizontal, 14)
+                .padding(.leading, 14)
                 .padding(.vertical, 9)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 20))
                 .accessibilityIdentifier("messageField")
-            mic
-                .frame(width: 36, height: 36)
-            if canStop {
-                stop
-                    .frame(width: 36, height: 36)
+            // The mic stays while it listens, though the words heard fill the box: swapping it would end the press.
+            Group {
+                if listening || (!hasText && !sending) {
+                    mic
+                } else if sending {
+                    ProgressView()
+                } else {
+                    send
+                }
             }
-            if sending || hasText || !canStop {
-                send
-                    .frame(width: 36, height: 36)
-            }
+            .frame(width: 32, height: 32)
+            .padding(.trailing, 4)
+            .padding(.bottom, 4)
         }
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 20))
         .overlay(alignment: .topTrailing) {
             if let hint {
                 Text(hint)
@@ -82,9 +82,9 @@ struct InputBar: View {
 
     private var mic: some View {
         Image(systemName: listening ? "mic.fill" : "mic")
-            .font(.title3)
+            .font(.body.weight(.medium))
             .foregroundStyle(listening ? Color.white : Color.accentColor)
-            .frame(width: 36, height: 36)
+            .frame(width: 32, height: 32)
             .background(listening ? Color.accentColor : Color.clear, in: Circle())
             .contentShape(Circle())
             .gesture(
@@ -126,25 +126,16 @@ struct InputBar: View {
             }
     }
 
-    private var stop: some View {
-        Button("Stop", systemImage: "stop.fill", action: onStop)
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.circle)
-            .tint(.red)
-            .disabled(stopping)
-    }
-
-    @ViewBuilder private var send: some View {
-        if sending {
-            ProgressView()
-        } else {
-            Button("Send", systemImage: "arrow.up", action: onSend)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .disabled(!hasText || listening)
-                .accessibilityIdentifier("sendButton")
+    private var send: some View {
+        Button(action: onSend) {
+            Image(systemName: "arrow.up")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(Color.accentColor, in: Circle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Send")
+        .accessibilityIdentifier("sendButton")
     }
 }
