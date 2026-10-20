@@ -43,7 +43,11 @@ function loadSaved(): Saved[] {
 function save() {
   if (!gate) return;
   const tabs: Saved[] = gate.tabs().map((t) => ({ folder: t.folder, url: t.url, ...(t.openedBy && { openedBy: t.openedBy }) }));
-  writeFileSync(tabsFile(), JSON.stringify(tabs, null, 2) + "\n", { mode: 0o600 });
+  try {
+    writeFileSync(tabsFile(), JSON.stringify(tabs, null, 2) + "\n", { mode: 0o600 });
+  } catch (e) {
+    console.log(`browser: couldn't save the tabs: ${(e as Error).message}`); // from a timer: never thrown
+  }
 }
 
 function changed() {
@@ -97,12 +101,11 @@ export function ensureChrome(): Promise<Gate> {
     ensureDir();
     const restore = loadSaved();
     const { c, g } = await launch(path);
-    for (const t of restore) await g.createTab(t.folder, t.url, t.openedBy).catch(() => {});
-    g.onChange(changed);
     chrome = c;
-    gate = g;
-    refresher = setInterval(() => void g.refresh().catch(() => {}), 2000);
+    // Watched from now on: a Chrome that dies while the tabs reopen ends the start, not hangs it.
+    let dead = false;
     c.exited.then(() => {
+      dead = true;
       if (chrome !== c) return;
       clearInterval(refresher);
       clearTimeout(saveTimer); // tabs.json keeps the tabs Chrome had, to reopen next time
@@ -110,6 +113,14 @@ export function ensureChrome(): Promise<Gate> {
       for (const ws of sockets) ws.close(1012, "Browser restarted");
       changed();
     });
+    for (const t of restore) {
+      if (dead) break;
+      await g.createTab(t.folder, t.url, t.openedBy).catch(() => {});
+    }
+    if (dead) throw new Error("Chrome exited as it started");
+    g.onChange(changed);
+    gate = g;
+    refresher = setInterval(() => void g.refresh().catch(() => {}), 2000);
     changed();
     return g;
   })().finally(() => (starting = null));

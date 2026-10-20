@@ -68,19 +68,27 @@ export type Chrome = {
   kill(): void;
 };
 
+// What `chrome --version` says, once per binary (it takes a while).
+const versions = new Map<string, string>();
+
 // Chrome reads commands on fd 3 and writes on fd 4, each a JSON message ended by a NUL byte.
 export function launchChrome(path: string, profileDir: string): Chrome {
-  const version = Bun.spawnSync([path, "--version"], { stdout: "pipe", stderr: "ignore" }).stdout.toString();
-  const p = spawn(path, chromeArgs(profileDir, userAgentFor(version)), { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
+  if (!versions.has(path)) versions.set(path, Bun.spawnSync([path, "--version"], { stdout: "pipe", stderr: "ignore" }).stdout.toString());
+  const p = spawn(path, chromeArgs(profileDir, userAgentFor(versions.get(path)!)), { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] });
   const toChrome = p.stdio[3] as Writable;
   const fromChrome = p.stdio[4] as Readable;
   const listeners: ((m: CdpMessage) => void)[] = [];
   const waiting = new Map<number, (m: CdpMessage) => void>();
   let next = 1e9;
+  let gone = false;
+  // Decoded as a stream, so a character split between chunks stays whole. Each chunk is searched
+  // for the NUL from where the last search stopped, so a big message isn't scanned again and again.
+  fromChrome.setEncoding("utf8");
   let buf = "";
-  fromChrome.on("data", (d: Buffer) => {
-    buf += d.toString();
-    for (let i; (i = buf.indexOf("\0")) >= 0; ) {
+  let from = 0;
+  fromChrome.on("data", (d: string) => {
+    buf += d;
+    for (let i; (i = buf.indexOf("\0", from)) >= 0; from = 0) {
       let m: CdpMessage;
       try {
         m = JSON.parse(buf.slice(0, i));
@@ -94,11 +102,20 @@ export function launchChrome(path: string, profileDir: string): Chrome {
         w(m);
       } else [...listeners].forEach((f) => f(m)); // a listener may unsubscribe as it runs
     }
+    from = buf.length;
   });
   // A write after Chrome is gone fails; exited says so.
   toChrome.on("error", () => {});
-  const exited = new Promise<number | null>((done) => p.on("exit", (code) => done(code)));
-  const send = (m: CdpMessage) => void toChrome.write(JSON.stringify(m) + "\0");
+  // Once Chrome is gone, every call waiting for an answer, and every later one, gets an error.
+  const exited = new Promise<number | null>((done) =>
+    p.on("exit", (code) => {
+      gone = true;
+      for (const w of waiting.values()) w({ error: { message: "Chrome exited" } });
+      waiting.clear();
+      done(code);
+    }),
+  );
+  const send = (m: CdpMessage) => void (gone || toChrome.write(JSON.stringify(m) + "\0"));
   return {
     send,
     onMessage: (f) => {
@@ -110,6 +127,7 @@ export function launchChrome(path: string, profileDir: string): Chrome {
     },
     call: (method, params = {}, sessionId) =>
       new Promise((done) => {
+        if (gone) return done({ error: { message: "Chrome exited" } });
         const id = next++;
         waiting.set(id, done);
         send({ id, method, params, ...(sessionId && { sessionId }) });

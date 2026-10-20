@@ -67,3 +67,19 @@ live("a launched Chrome answers over the pipe, loads a page, and passes for a no
     site.stop();
   }
 }, 20_000);
+
+live("text past a pipe chunk keeps its accents; calls to a Chrome that's gone answer with an error", async () => {
+  const chrome = launchChrome(path!, join(tmp, "profile-2"));
+  try {
+    const { result } = await chrome.call("Target.createTarget", { url: "about:blank" });
+    const s = (await chrome.call("Target.attachToTarget", { targetId: result.targetId, flatten: true })).result.sessionId;
+    // 200 000 two-byte characters, odd-aligned: chunk ends fall inside characters.
+    const r = await chrome.call("Runtime.evaluate", { expression: "'x' + 'é'.repeat(200000)", returnByValue: true }, s);
+    expect(r.result.result.value).toBe("x" + "é".repeat(200000));
+  } finally {
+    chrome.kill();
+    await chrome.exited;
+  }
+  const after = await Promise.race([chrome.call("Browser.getVersion"), Bun.sleep(2000).then(() => "hung")]);
+  expect(after).toMatchObject({ error: { message: "Chrome exited" } });
+}, 20_000);
