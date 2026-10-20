@@ -48,6 +48,9 @@ struct Inner {
     /// Window label -> the "<server key>/<session>" of every split in every one of its tabs, kept
     /// while the window is in the background too, so other windows can say "in another window".
     shown: HashMap<String, Vec<String>>,
+    /// "<server key>/<session>" -> the window that last took it on purpose (a click, a drop, ⌘K),
+    /// until that window stops showing it: if another window shows it too, this one keeps it.
+    taken: HashMap<String, String>,
     /// Window labels, the one focused most recently last: where windows overlap, a drop goes
     /// to the one most likely on top.
     focus_order: Vec<String>,
@@ -58,6 +61,36 @@ struct Inner {
     /// The window a session dragged out of another one is over (drag_hover), to tell it when
     /// the drag leaves.
     hovered: Option<String>,
+}
+
+impl Inner {
+    /// Window `label` now shows `sessions`. A session is in one window at a time: one it just
+    /// added that another window shows already (an empty terminal filled, a split group brought
+    /// back) stays there, unless this window took it on purpose. Returns (window, session) for
+    /// each window that lets a session go.
+    fn show(&mut self, label: &str, sessions: Vec<String>) -> Vec<(String, String)> {
+        let old = self.shown.insert(label.to_string(), sessions.clone()).unwrap_or_default();
+        self.taken.retain(|s, l| l != label || !old.contains(s) || sessions.contains(s));
+        let mut release = Vec::new();
+        for s in sessions.iter().filter(|s| !old.contains(s)) {
+            let others: Vec<&String> = self.shown.iter().filter(|(l, v)| *l != label && v.contains(s)).map(|(l, _)| l).collect();
+            if others.is_empty() {
+                continue;
+            }
+            if self.taken.get(s).is_some_and(|l| l == label) {
+                release.extend(others.into_iter().map(|l| (l.clone(), s.clone())));
+            } else {
+                release.push((label.to_string(), s.clone()));
+            }
+        }
+        release
+    }
+
+    /// Window `label` takes `session` on purpose: the other windows showing it, to let it go.
+    fn take(&mut self, label: &str, session: &str) -> Vec<String> {
+        self.taken.insert(session.to_string(), label.to_string());
+        self.shown.iter().filter(|(l, v)| *l != label && v.iter().any(|s| s == session)).map(|(l, _)| l.clone()).collect()
+    }
 }
 
 /// The windows to save: open ones, and ones closed within QUIT_GRACE.
@@ -104,6 +137,7 @@ impl Windows {
             inner.projects.remove(label);
             inner.viewing.remove(label);
             inner.shown.remove(label);
+            inner.taken.retain(|_, l| l != label);
             inner.focus_order.retain(|l| l != label);
             if let Some(o) = inner.open.iter_mut().find(|o| o.label == label) {
                 o.closed = Some(Instant::now());
@@ -343,12 +377,15 @@ pub fn set_shown(
     windows: State<'_, Windows>,
     sessions: Vec<String>,
 ) -> HashMap<String, Vec<String>> {
-    let shown = {
+    let (shown, release) = {
         let mut inner = windows.inner.lock().unwrap();
-        inner.shown.insert(window.label().to_string(), sessions);
-        inner.shown.clone()
+        let release = inner.show(window.label(), sessions);
+        (inner.shown.clone(), release)
     };
     let _ = app.emit("shown", shown.clone());
+    for (l, s) in release {
+        let _ = app.emit_to(l.as_str(), "release-session", s);
+    }
     shown
 }
 
@@ -375,14 +412,11 @@ pub fn focus_session(
     Ok(true)
 }
 
-/// This window took a session another window showed (dragged it into a split here): those
-/// windows stop showing it ("release-session"), so it's never on screen twice.
+/// This window shows a session on purpose (a click, a drop, ⌘K): other windows showing it stop
+/// ("release-session"), so it's never on screen twice.
 #[tauri::command]
 pub fn take_session(app: AppHandle, window: Window, windows: State<'_, Windows>, session: String) {
-    let labels: Vec<String> = {
-        let inner = windows.inner.lock().unwrap();
-        inner.shown.iter().filter(|(k, v)| *k != window.label() && v.contains(&session)).map(|(k, _)| k.clone()).collect()
-    };
+    let labels = windows.inner.lock().unwrap().take(window.label(), &session);
     for l in labels {
         let _ = app.emit_to(l.as_str(), "release-session", session.clone());
     }
@@ -424,6 +458,45 @@ mod tests {
         let list = [open("main", None), open("w-1", Some(now - Duration::from_secs(1))), open("w-2", Some(now - Duration::from_secs(60)))];
         let names: Vec<String> = kept(&list, now).into_iter().map(|s| s.layout).collect();
         assert_eq!(names, ["main", "w-1"]);
+    }
+
+    fn shows(inner: &mut Inner, label: &str, sessions: &[&str]) -> Vec<(String, String)> {
+        inner.show(label, sessions.iter().map(|s| s.to_string()).collect())
+    }
+    fn go(label: &str, session: &str) -> (String, String) {
+        (label.into(), session.into())
+    }
+
+    #[test]
+    fn a_session_another_window_has_stays_there_unless_taken() {
+        let mut inner = Inner::default();
+        assert!(shows(&mut inner, "main", &["s/a"]).is_empty());
+        // Filled in on its own (a new window's empty terminal, a launch): this window lets it go.
+        assert_eq!(shows(&mut inner, "w-1", &["s/a", "s/b"]), [go("w-1", "s/a")]);
+        // Still shown in both until w-1 lets go: its other updates release nothing more.
+        assert!(shows(&mut inner, "w-1", &["s/a", "s/b", "s/c"]).is_empty());
+        assert!(shows(&mut inner, "w-1", &["s/b", "s/c"]).is_empty());
+        // Taken on purpose: the other window lets it go, even if it's still listed there when
+        // this window's update comes.
+        assert_eq!(inner.take("w-1", "s/a"), ["main"]);
+        assert_eq!(shows(&mut inner, "w-1", &["s/a", "s/b", "s/c"]), [go("main", "s/a")]);
+        assert!(shows(&mut inner, "main", &[]).is_empty());
+        // Back in main on its own while w-1 has it: main lets it go.
+        assert_eq!(shows(&mut inner, "main", &["s/a"]), [go("main", "s/a")]);
+    }
+
+    #[test]
+    fn a_take_lasts_until_that_window_stops_showing_it() {
+        let mut inner = Inner::default();
+        assert!(inner.take("main", "s/a").is_empty());
+        shows(&mut inner, "main", &["s/a"]);
+        shows(&mut inner, "main", &[]);
+        shows(&mut inner, "w-1", &["s/a"]);
+        // main shows it again on its own (a split group brought back): w-1 has it now, so w-1 keeps it.
+        assert_eq!(shows(&mut inner, "main", &["s/a"]), [go("main", "s/a")]);
+        // A take made before the window's update that shows it still counts.
+        assert_eq!(inner.take("main", "s/a"), ["w-1"]);
+        assert_eq!(shows(&mut inner, "main", &["s/a"]), Vec::<(String, String)>::new());
     }
 
     #[test]

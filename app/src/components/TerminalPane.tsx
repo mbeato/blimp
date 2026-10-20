@@ -99,7 +99,8 @@ function useNow(ms: number) {
 // onMoveOut: sessions leaving for another window (right-click > Open in New Window, or a drag let
 // go outside the window at a point on screen); the pane then stops showing them.
 // elsewhere: another window of this app shows the session. It's listed only there, and never picked
-// to fill a terminal here. onTake: a session dragged into a split here (App lets that window know).
+// to fill a terminal here. onTake: a session shown here on purpose (a click, a drag, a drop from
+// another window); App has any other window showing it let it go.
 export function TerminalPane(props: {
   link: ServerLink;
   dir: string;
@@ -226,6 +227,7 @@ export function TerminalPane(props: {
     // At the drop point, or on the right when it's not over the terminal (or the tab just came forward).
     dropIn: (name, x, y) => {
       away.delete(name);
+      props.onTake(name);
       const t = targetAt(x, y);
       onPanes((q) => (t ? dropAt(q, name, t.at, t.side) : q.panes.length ? dropAt(q, name, q.panes.length - 1, "right") : show(q, name)));
     },
@@ -274,6 +276,7 @@ export function TerminalPane(props: {
 
   const showHere = (name: string) => {
     away.delete(name);
+    props.onTake(name);
     onPanes((q) => show(q, name));
   };
 
