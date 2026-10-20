@@ -7,6 +7,8 @@ struct PromptBar: View {
     let prompt: Prompt
     /// An answer is on its way: the buttons wait.
     let busy: Bool
+    /// A spoken answer's guess: this button is marked and waits for a tap; nothing was sent.
+    var highlight: Int? = nil
     /// The choice's index, and the `at` of the prompt it was shown for.
     let onPick: (Int, Double) -> Void
     @State private var height: CGFloat = 0
@@ -42,14 +44,16 @@ struct PromptBar: View {
         case .permission:
             summary
             ForEach(Array(prompt.choices.enumerated()), id: \.offset) { i, choice in
-                ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice)) { onPick(i, prompt.at) }
+                ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice), marked: highlight == i) { onPick(i, prompt.at) }
             }
             .disabled(busy)
         case .question:
             if let q = prompt.questions?.first {
                 Text(q.question).font(.callout)
                 ForEach(Array(q.options.enumerated()), id: \.offset) { i, option in
-                    ChoiceButton(label: option.label, detail: option.description, style: .normal) { onPick(i, prompt.at) }
+                    ChoiceButton(label: option.label, detail: option.description, style: .normal, marked: highlight == i) {
+                        onPick(i, prompt.at)
+                    }
                 }
                 .disabled(busy)
             }
@@ -101,9 +105,22 @@ private struct ChoiceButton: View {
     let label: String
     let detail: String?
     let style: Style
+    let marked: Bool
     let action: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            button
+                .overlay {
+                    if marked { RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor, lineWidth: 2).padding(-3) }
+                }
+            if marked {
+                Text("Did you mean this? Tap to send.").font(.caption).foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    @ViewBuilder private var button: some View {
         switch style {
         case .prominent: Button(action: action) { text }.buttonStyle(.borderedProminent)
         case .normal: Button(action: action) { text }.buttonStyle(.bordered)

@@ -30,6 +30,8 @@ final class ChatModel {
     @ObservationIgnored private var watching = false
     @ObservationIgnored private var replies: [String: CheckedContinuation<Reply, Never>] = [:]
     @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
+    /// Called with each new reply from Claude as it arrives (by `append`, never from a history), to read it aloud.
+    @ObservationIgnored var onReply: ((ChatMessage) -> Void)?
 
     static let notSent = "Not sent. Check the connection."
 
@@ -177,7 +179,15 @@ final class ChatModel {
         case .failed(let id, let error): reply(id, .failed(error))
         default:
             if case .history = event { loaded = true }
+            // An append repeats a message when it grows (a tool's output): only a first sighting is new.
+            var replies: [ChatMessage] = []
+            if case .append(let messages) = event {
+                replies = messages.filter { m in
+                    m.role == .assistant && !(m.text ?? "").isEmpty && !log.messages.contains { $0.id == m.id }
+                }
+            }
             log.apply(event)
+            if let onReply { replies.forEach(onReply) }
         }
     }
 

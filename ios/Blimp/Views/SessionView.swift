@@ -1,4 +1,7 @@
 // A session as a chat: the messages, what Claude is waiting on as buttons, and a box to type into.
+// Voice: the mic types (or answers the prompt), the speaker toggle reads new replies and prompts aloud,
+// and a banner says when another session starts waiting or finishes.
+import AudioToolbox
 import BlimpKit
 import SwiftUI
 
@@ -41,11 +44,26 @@ private struct ChatScreen: View {
 private struct ChatContent: View {
     let model: ChatModel
     let onResumed: (String) -> Void
+    @Environment(Store.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
     @State private var expanded: Set<String> = []
     @State private var atBottom = true
     @State private var unseen = false
     @State private var resuming = false
+    // Voice
+    @State private var listener = Listener()
+    @State private var micOn = false
+    /// What was in the box when the mic started; the words heard go after it.
+    @State private var micBase = ""
+    /// The answerable prompt showing when the mic started: the words answer it instead of being sent.
+    @State private var micPrompt: Prompt?
+    @State private var guess: Guess?
+    @State private var voiceNote: String?
+    @State private var readAloud = false
+    @State private var lastStates: [String: SessionState] = [:]
+    @State private var banner: Banner?
+    @State private var onScreen = false
 
     private static let bottom = "bottom"
 
@@ -55,6 +73,7 @@ private struct ChatContent: View {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(model.log.messages) { message in
                         MessageRow(message: message, expanded: expanded.contains(message.id)) { toggle(message.id) }
+                            .modifier(BeingRead(reading: Speaker.shared.speakingId == message.id))
                     }
                     if model.working { WorkingRow() }
                     Color.clear.frame(height: 1).id(Self.bottom)
@@ -81,6 +100,10 @@ private struct ChatContent: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 if model.reconnecting && !model.ended { ReconnectingBar() }
             }
+            .overlay(alignment: .top) {
+                if let banner { BannerView(banner: banner).transition(.move(edge: .top).combined(with: .opacity)) }
+            }
+            .animation(.snappy, value: banner)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 8) {
                     if unseen {
@@ -105,7 +128,35 @@ private struct ChatContent: View {
         .navigationTitle(model.title)
         .navigationSubtitle(model.folder)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(readAloud ? "Stop reading aloud" : "Read aloud",
+                       systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
+            }
+        }
         .onReturnFromBackground { model.reconnectNow() }
+        .onAppear(perform: appeared)
+        .onDisappear(perform: disappeared)
+        .onChange(of: listener.partial) { _, heard in
+            if micOn { draft = Self.joined(micBase, heard) }
+        }
+        // A new prompt: drop the old guess and note, and read it aloud when that's on.
+        .onChange(of: model.prompt?.at) { _, at in
+            guess = nil
+            voiceNote = nil
+            if at != nil, readAloud, let prompt = model.prompt { Speaker.shared.say(prompt.spoken, id: Self.promptId) }
+        }
+        .onChange(of: store.sessions) { _, sessions in noticeOthers(sessions) }
+        // Leaving the app or locking the phone stops the mic; the words stay in the box, unsent. Not on
+        // .inactive: the first-use permission alert makes the app inactive while it waits for an answer.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background, micOn { micUp(.keep) }
+        }
+        .task(id: banner) {
+            guard banner != nil else { return }
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { banner = nil }
+        }
         // Links in Claude's replies: http and https open in Safari on tap, anything else does nothing.
         .environment(\.openURL, OpenURLAction { Inline.safe($0) ? .systemAction : .discarded })
     }
@@ -127,15 +178,22 @@ private struct ChatContent: View {
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 if let prompt = model.prompt {
-                    PromptBar(prompt: prompt, busy: model.answering) { pick, at in
+                    PromptBar(prompt: prompt, busy: model.answering, highlight: guess?.at == prompt.at ? guess?.pick : nil) { pick, at in
+                        guess = nil
                         Task { await model.answer(pick, at: at) }
                     }
                     Divider()
                 }
+                if listener.preparing {
+                    Text("Getting speech ready…").font(.caption).foregroundStyle(.secondary)
+                } else if let voiceNote {
+                    Text(voiceNote).font(.caption).foregroundStyle(.secondary)
+                }
                 errorLine
                 InputBar(
                     text: $draft, working: model.working, sending: model.sendingText, stopping: model.stopping,
-                    onSend: send, onStop: { Task { await model.stop() } })
+                    listening: micOn, onSend: send, onStop: { Task { await model.stop() } },
+                    onMicDown: micDown, onMicUp: micUp)
             }
         }
     }
@@ -170,6 +228,129 @@ private struct ChatContent: View {
         }
     }
 
+    // MARK: - Voice
+
+    private static let promptId = "prompt"
+    private var readAloudKey: String { "readAloud.\(model.name)" }
+
+    private func appeared() {
+        onScreen = true
+        readAloud = UserDefaults.standard.bool(forKey: readAloudKey)
+        lastStates = Dictionary(store.sessions.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
+        let key = readAloudKey
+        model.onReply = { message in
+            guard UserDefaults.standard.bool(forKey: key) else { return }
+            Speaker.shared.say(SpokenText.from(markdown: message.text ?? ""), id: message.id)
+        }
+    }
+
+    /// Only the session on screen speaks or listens.
+    private func disappeared() {
+        onScreen = false
+        model.onReply = nil
+        Speaker.shared.stop()
+        if micOn { micUp(.keep) }
+    }
+
+    private func setReadAloud(_ on: Bool) {
+        readAloud = on
+        UserDefaults.standard.set(on, forKey: readAloudKey)
+        if !on { Speaker.shared.stop() }
+    }
+
+    private var vocabulary: [String] {
+        [model.folder] + store.sessions.flatMap { [$0.title, URL(fileURLWithPath: $0.dir).lastPathComponent] }
+    }
+
+    private func micDown() {
+        guard !micOn else { return }
+        Speaker.shared.hushed = true
+        voiceNote = nil
+        guess = nil
+        micOn = true
+        micBase = draft
+        if let p = model.prompt, p.answerable, p.kind != .other, !p.choices.isEmpty { micPrompt = p } else { micPrompt = nil }
+        let words = vocabulary
+        Task {
+            do {
+                try await listener.start(vocabulary: words)
+            } catch is CancellationError {
+                // let go before it was ready
+            } catch {
+                guard micOn else { return }
+                micOn = false
+                Speaker.shared.hushed = false
+                draft = micBase
+                voiceNote = (error as? ListenError) == .denied
+                    ? "Turn on Microphone and Speech Recognition for blimp in Settings > Apps > blimp."
+                    : "This iPhone can't listen right now."
+            }
+        }
+    }
+
+    private func micUp(_ release: MicRelease) {
+        guard micOn else { return }
+        micOn = false
+        let base = micBase
+        let asked = micPrompt
+        micPrompt = nil
+        Task {
+            let heard = await listener.stop()
+            Speaker.shared.hushed = false
+            let words = Self.joined(base, heard)
+            if release == .keep {
+                draft = words
+            } else if let asked {
+                draft = base
+                if !heard.isEmpty { answerByVoice(heard, to: asked) }
+            } else {
+                draft = words
+                if !heard.isEmpty { send() }
+            }
+        }
+    }
+
+    /// Only a clear match is sent. A guess is marked and waits for a tap; anything else asks again.
+    private func answerByVoice(_ heard: String, to asked: Prompt) {
+        guard let now = model.prompt, now.at == asked.at else {
+            voiceNote = "The question changed. Nothing was sent."
+            return
+        }
+        switch VoiceAnswer.match(heard, choices: asked.choices) {
+        case .clear(let pick):
+            Task { await model.answer(pick, at: asked.at) }
+        case .guess(let pick):
+            guess = Guess(at: asked.at, pick: pick)
+        case .none:
+            voiceNote = "Didn't catch which one. Tap a button or try again."
+        }
+    }
+
+    private static func joined(_ base: String, _ heard: String) -> String {
+        guard !base.isEmpty, !heard.isEmpty else { return base + heard }
+        return base.last!.isWhitespace ? base + heard : base + " " + heard
+    }
+
+    /// Another session newly waiting or finished, while this screen is up and the app is open: a banner and a sound.
+    private func noticeOthers(_ sessions: [Session]) {
+        var next: [String: SessionState] = [:]
+        for s in sessions where s.name != model.name {
+            next[s.name] = s.state
+            guard onScreen, scenePhase == .active, let before = lastStates[s.name], before != s.state else { continue }
+            switch s.state {
+            case .waiting: show(Banner(name: s.name, text: "\(s.title) is waiting", waiting: true))
+            case .done: show(Banner(name: s.name, text: "\(s.title) finished", waiting: false))
+            case .working, .unknown: break
+            }
+        }
+        lastStates = next
+    }
+
+    private func show(_ b: Banner) {
+        banner = b
+        AudioServicesPlaySystemSound(1007)
+    }
+
     private func resume() async {
         resuming = true
         defer { resuming = false }
@@ -184,5 +365,59 @@ private struct ReconnectingBar: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
             .background(.bar)
+    }
+}
+
+private struct Guess: Equatable {
+    let at: Double
+    let pick: Int
+}
+
+private struct Banner: Equatable, Hashable {
+    let name: String
+    let text: String
+    let waiting: Bool
+}
+
+/// Slides in at the top; a tap opens that session.
+private struct BannerView: View {
+    let banner: Banner
+
+    var body: some View {
+        NavigationLink(value: SessionRoute(name: banner.name)) {
+            HStack(spacing: 8) {
+                if banner.waiting { Circle().fill(.orange).frame(width: 8, height: 8) }
+                Text(banner.text).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+        .padding(.top, 6)
+    }
+}
+
+/// The reply being read aloud is marked; a tap on it stops the reading.
+private struct BeingRead: ViewModifier {
+    let reading: Bool
+
+    func body(content: Content) -> some View {
+        if reading {
+            content
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12).inset(by: -6))
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "speaker.wave.2.fill").font(.caption).foregroundStyle(.secondary).offset(x: 4, y: -4)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { Speaker.shared.stop() }
+                .accessibilityHint("Being read aloud. Tap to stop.")
+        } else {
+            content
+        }
     }
 }

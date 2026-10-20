@@ -1,15 +1,29 @@
-// Settings: which server this phone is paired with, and sign out. (Voice settings come with the voice task.)
+// Settings: which server this phone is paired with, the voice replies are read in, and sign out.
+import AVFoundation
 import SwiftUI
 
 struct SettingsView: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @State private var voices: [AVSpeechSynthesisVoice] = []
+    /// The picked voice's identifier; nil is the best one installed.
+    @State private var chosen = UserDefaults.standard.string(forKey: Speaker.voiceKey)
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Server") {
                     Text(store.server?.url.absoluteString ?? "Not paired").textSelection(.enabled)
+                }
+                Section {
+                    voiceRow("Automatic", detail: "The best one installed", id: nil)
+                    ForEach(voices, id: \.identifier) { voice in
+                        voiceRow(voice.name, detail: Self.quality(voice), id: voice.identifier)
+                    }
+                } header: {
+                    Text("Voice")
+                } footer: {
+                    Text("Better voices: Settings > Accessibility > Spoken Content > Voices, then download a Premium voice.")
                 }
                 Section {
                     Button("Sign out", role: .destructive) {
@@ -22,6 +36,34 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .toolbar { Button("Done") { dismiss() } }
+            .onAppear { voices = Speaker.installed }
+            .onDisappear { Speaker.shared.stop() }
+        }
+    }
+
+    private func voiceRow(_ name: String, detail: String, id: String?) -> some View {
+        Button {
+            chosen = id
+            if let id { UserDefaults.standard.set(id, forKey: Speaker.voiceKey) } else { UserDefaults.standard.removeObject(forKey: Speaker.voiceKey) }
+            Speaker.shared.stop()
+            Speaker.shared.say("This is how replies will sound.", id: "sample")
+        } label: {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(name).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if chosen == id { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
+            }
+        }
+    }
+
+    private static func quality(_ voice: AVSpeechSynthesisVoice) -> String {
+        switch voice.quality {
+        case .premium: "Premium"
+        case .enhanced: "Enhanced"
+        default: "Standard"
         }
     }
 }
