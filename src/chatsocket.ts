@@ -7,7 +7,7 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from "./chat";
 import { answerKeys, answerSteps, choiceLabel, cleanText, type Expect, type Prompt, parseDialog, screenMeets } from "./prompt";
 import { existsSync } from "node:fs";
-import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
+import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxOutput, zmxPath } from "./sessions";
 import { followSize, lastSize } from "./terminal";
 
 export type ChatData = {
@@ -285,8 +285,7 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
 async function onScreen(name: string, p: Prompt, e: Expect) {
   const end = Date.now() + 3000;
   for (;;) {
-    const r = Bun.spawn([zmxPath(), "history", name], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-    const screen = (await new Response(r.stdout).text()).split("\n").slice(-120).join("\n");
+    const screen = (await zmxOutput("history", name)).split("\n").slice(-120).join("\n");
     if (screenMeets(p, parseDialog(screen), e)) return;
     if (Date.now() > end) {
       const where = "review" in e ? "the review screen" : `question ${e.q + 1}`;
