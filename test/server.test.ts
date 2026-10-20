@@ -1056,7 +1056,9 @@ describe("kinds and keys", () => {
     });
     await until(() => s.text.includes(waitFor), `${kind} output`);
     s.ws.close();
-    return { name: made_, text: s.text };
+    // Lines the terminal wrapped at 120 columns joined again: with the browser MCP's arguments
+    // (on a machine with Chrome), the arguments line is longer than that.
+    return { name: made_, text: s.text.replace(/\r\n/g, "") };
   }
 
   beforeAll(async () => {
