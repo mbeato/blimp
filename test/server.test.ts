@@ -614,6 +614,22 @@ describe("chat", () => {
     viewer.ws.close();
   });
 
+  test("a Stop queued behind an input when the socket closes is still sent", async () => {
+    // The phone's link drops right after Stop: the input is still being typed (a new client waits for
+    // zmx to attach it), so Stop waits its turn, and the socket closes before it starts.
+    const { name } = await fakeClaude("chat17", "bdbdbdbd-bdbd-bdbd-bdbd-bdbdbdbdbdbd", []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "input", id: "q1", text: "before stop" }));
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "q2" }));
+    c.ws.close();
+    await until(() => viewer.text.includes("got:~[200~before stop~[201~"), "the input reached the session");
+    await enterUntil(viewer, "got:~\r", "Stop's Esc reached the session");
+    await until(() => clients(name) === 1, "the chat client to go");
+    viewer.ws.close();
+  });
+
   test("the same input id sent on two sockets at once is typed once", async () => {
     const { name } = await fakeClaude("chat13", "cccccccc-cccc-cccc-cccc-cccccccccccc", []);
     const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
