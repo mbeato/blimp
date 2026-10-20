@@ -16,7 +16,7 @@ mkdirSync(folder);
 
 const { findChrome } = await import("../src/browser/chrome");
 const { browserTabs, startBrowserGate, stopBrowser, openTab } = await import("../src/browser/service");
-const { mcpConfigPath, portFile } = await import("../src/browser/mcp");
+const { gateKey, mcpConfigPath, portFile } = await import("../src/browser/mcp");
 const { zmxPath, zmxEnv, parseZmxList } = await import("../src/sessions");
 
 const live = findChrome() ? test : test.skip;
@@ -56,9 +56,10 @@ afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-// A CDP client over the gate's WebSocket.
-async function cdp(path: string) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+// A CDP client over the gate's WebSocket: with the gate's key unless `key` says otherwise, and
+// headers as given (a web page's WebSocket would send Origin).
+async function cdp(path: string, key: string | null = gateKey(), headers: Record<string, string> = {}) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${path}${key === null ? "" : `?key=${key}`}`, { headers } as any);
   const log: any[] = [];
   const waits = new Map<number, (m: any) => void>();
   ws.onmessage = (e) => {
@@ -82,6 +83,18 @@ live("the gate writes its port and the MCP config sessions get", () => {
   expect(Number(readFileSync(portFile(), "utf8"))).toBe(port);
   const config = JSON.parse(readFileSync(mcpConfigPath(), "utf8"));
   expect(config.mcpServers["blimp-browser"].args.at(-1)).toBe("browser-mcp");
+});
+
+live("only a client with the gate's key, and no web page, gets in", async () => {
+  expect(gateKey()).toMatch(/^[0-9a-f]{64}$/);
+  expect((await cdp(`/s/${session}`, null)).opened).toBe(false);
+  expect((await cdp(`/s/${session}`, "0".repeat(64))).opened).toBe(false);
+  // A page in the server's own Chrome runs as the same user; its WebSocket says where it's from.
+  expect((await cdp(`/s/${session}`, gateKey(), { Origin: "https://evil.example" })).opened).toBe(false);
+  expect((await cdp(`/s/${session}`, gateKey(), { Host: "evil.example:80" })).opened).toBe(false);
+  const ok = await cdp(`/s/${session}`);
+  expect(ok.opened).toBe(true);
+  ok.ws.close();
 });
 
 live("only a session that exists gets in", async () => {

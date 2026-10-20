@@ -11,7 +11,8 @@ import { HttpError } from "../files";
 import { isSafeName, parseZmxList, realDir, zmxListAsync } from "../sessions";
 import { findChrome, launchChrome, type Chrome } from "./chrome";
 import { Gate, type Tab } from "./gate";
-import { browserDir, mcpConfig, mcpConfigPath, portFile, selfCommand } from "./mcp";
+import { timingSafeEqual } from "node:crypto";
+import { browserDir, gateKey, mcpConfig, mcpConfigPath, portFile, selfCommand } from "./mcp";
 import { peerUid } from "./peer";
 import { openView, type ViewSocket } from "./view";
 
@@ -152,13 +153,23 @@ export async function startBrowserGate(): Promise<number> {
   try {
     last = Number(readFileSync(portFile(), "utf8").trim()) || 0;
   } catch {}
+  const key = Buffer.from(gateKey());
   const options = {
     hostname: "127.0.0.1",
     async fetch(req: Request, srv: Server) {
+      // Your own process (the uid), not a web page (pages send Origin; DNS rebinding changes
+      // Host), and one that could read the key file.
       const ip = srv.requestIP(req);
       if (!ip || peerUid(ip.address, ip.port) !== process.getuid!()) return new Response("not yours", { status: 403 });
-      const m = new URL(req.url).pathname.match(/^\/s\/([^/]+)$/);
-      const session = m ? decodeURIComponent(m[1]) : "";
+      if (req.headers.has("origin") || req.headers.get("host") !== `127.0.0.1:${srv.port}`) return new Response("not from a page", { status: 403 });
+      const url = new URL(req.url);
+      const given = Buffer.from(url.searchParams.get("key") ?? "");
+      if (given.length !== key.length || !timingSafeEqual(given, key)) return new Response("wrong key", { status: 403 });
+      const m = url.pathname.match(/^\/s\/([^/]+)$/);
+      let session = "";
+      try {
+        session = m ? decodeURIComponent(m[1]) : "";
+      } catch {}
       if (!isSafeName(session)) return new Response("not found", { status: 404 });
       const z = parseZmxList(await zmxListAsync()).find((s) => s.name === session);
       if (!z) return new Response(`no session named ${session}`, { status: 404 });
