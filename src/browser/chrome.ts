@@ -60,7 +60,8 @@ export function chromeArgs(profileDir: string, ua: string): string[] {
 
 export type Chrome = {
   send(m: CdpMessage): void;
-  onMessage(f: (m: CdpMessage) => void): void;
+  // Every message that isn't the answer to a call(); returns the unsubscribe.
+  onMessage(f: (m: CdpMessage) => void): () => void;
   // A command of blimpd's own, answered by id (from 1e9 up, apart from the gate's).
   call(method: string, params?: any, sessionId?: string): Promise<CdpMessage>;
   exited: Promise<number | null>;
@@ -91,7 +92,7 @@ export function launchChrome(path: string, profileDir: string): Chrome {
       if (w) {
         waiting.delete(m.id!);
         w(m);
-      } else listeners.forEach((f) => f(m));
+      } else [...listeners].forEach((f) => f(m)); // a listener may unsubscribe as it runs
     }
   });
   // A write after Chrome is gone fails; exited says so.
@@ -100,7 +101,13 @@ export function launchChrome(path: string, profileDir: string): Chrome {
   const send = (m: CdpMessage) => void toChrome.write(JSON.stringify(m) + "\0");
   return {
     send,
-    onMessage: (f) => void listeners.push(f),
+    onMessage: (f) => {
+      listeners.push(f);
+      return () => {
+        const i = listeners.indexOf(f);
+        if (i >= 0) listeners.splice(i, 1);
+      };
+    },
     call: (method, params = {}, sessionId) =>
       new Promise((done) => {
         const id = next++;

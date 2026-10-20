@@ -13,6 +13,7 @@ import { findChrome, launchChrome, type Chrome } from "./chrome";
 import { Gate, type Tab } from "./gate";
 import { browserDir, mcpConfig, mcpConfigPath, portFile, selfCommand } from "./mcp";
 import { peerUid } from "./peer";
+import { openView, type ViewSocket } from "./view";
 
 export type { Tab };
 type Saved = { folder: string; url: string; openedBy?: string };
@@ -133,6 +134,14 @@ export async function openTab(folder: string, url: string): Promise<string> {
 export async function closeTab(id: string): Promise<void> {
   if (!gate || !gate.tabs().some((t) => t.id === id)) throw new HttpError(404, "no such browser tab");
   await gate.closeTab(id);
+}
+
+export const hasTab = (id: string) => browserTabs().some((t) => t.id === id);
+
+// A live view of tab `id` for the app (view.ts).
+export function viewTab(id: string, sock: ViewSocket) {
+  if (!chrome || !gate?.tabs().some((t) => t.id === id)) throw new Error("That browser tab is closed.");
+  return openView(chrome, id, sock);
 }
 
 // The gate's listener. It keeps the port it had last time if it's free, so sessions' MCPs from

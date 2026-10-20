@@ -5,9 +5,9 @@
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { Server } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
-import { browserTabs, closeTab, onBrowserChange, openTab, startBrowserGate } from "./browser/service";
+import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, download, guard, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, recentFolders } from "./folders";
@@ -27,7 +27,9 @@ import {
 } from "./sessions";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
-type WsData = AttachData | EventsData;
+// A live view of a server browser tab (browser/view.ts): input waits in queue until it's open.
+type ViewData = { kind: "view"; id: string; view?: Awaited<ReturnType<typeof viewTab>>; queue: string[]; gone?: boolean };
+type WsData = AttachData | EventsData | ViewData;
 
 // <socket dir>/token, made once: 32 random bytes as hex, readable only by you.
 export function loadToken(dir: string): string {
@@ -142,6 +144,13 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
     if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
     return Response.json({ id: await openTab(real, url) }, { status: 201 });
   }
+  const view = path.match(/^\/browser\/tabs\/([^/]+)\/view$/);
+  if (view && get) {
+    const id = decodeURIComponent(view[1]);
+    if (!hasTab(id)) throw new HttpError(404, "no such browser tab");
+    if (server.upgrade(req, { data: { kind: "view", id, queue: [] } satisfies ViewData })) return;
+    throw new HttpError(400, "expected a WebSocket");
+  }
   const tab = path.match(/^\/browser\/tabs\/([^/]+)$/);
   if (tab && req.method === "DELETE") {
     await closeTab(decodeURIComponent(tab[1]));
@@ -184,6 +193,19 @@ async function route(req: Request, url: URL, server: Server): Promise<Response |
   return error(404, "not found");
 }
 
+function openViewSocket(ws: ServerWebSocket<ViewData>) {
+  Promise.resolve()
+    .then(() => viewTab(ws.data.id, { send: (d) => void ws.send(d), close: (code, reason) => ws.close(code, reason) }))
+    .then(
+      (v) => {
+        if (ws.data.gone) return v.close();
+        ws.data.view = v;
+        for (const m of ws.data.queue.splice(0)) v.message(m);
+      },
+      (e) => ws.close(1011, String((e as Error).message).slice(0, 120)),
+    );
+}
+
 export function serve(): Server {
   checkZmxDir(); // refuse to start, rather than fail every zmx call later
   const sock = socketPath();
@@ -221,15 +243,23 @@ export function serve(): Server {
     websocket: {
       open(ws) {
         if (ws.data.kind === "attach") openAttach(ws as any);
+        else if (ws.data.kind === "view") openViewSocket(ws as any);
         else openEvents(ws as any, server);
       },
       message(ws, msg) {
         if (ws.data.kind === "attach") attachMessage(ws as any, msg);
-        else eventsMessage(ws as any, msg);
+        else if (ws.data.kind === "view") {
+          const d = ws.data;
+          if (d.view) d.view.message(String(msg));
+          else d.queue.push(String(msg));
+        } else eventsMessage(ws as any, msg);
       },
       close(ws) {
         if (ws.data.kind === "attach") closeAttach(ws as any);
-        else closeEvents(ws as any);
+        else if (ws.data.kind === "view") {
+          ws.data.gone = true;
+          ws.data.view?.close();
+        } else closeEvents(ws as any);
       },
     },
   });

@@ -427,6 +427,16 @@ describe("server browser", () => {
     expect(mine).toMatchObject({ folder: homeDir, url });
     expect(await (await api(`/browser/tabs?dir=${encodeURIComponent(homedir())}`)).json()).toEqual([]);
     await until(() => e.messages.some((m) => m.type === "browser" && m.tabs.some((t: any) => t.id === id && t.title === "Served")), "the tab with its title on the events socket", 8000);
+    // A live view: frames (JPEG) once it has a size; a click goes to the page.
+    expect((await api(`/browser/tabs/nope/view`)).status).toBe(404);
+    const v = await socket(`/browser/tabs/${id}/view`);
+    const frames: ArrayBuffer[] = [];
+    v.ws.onmessage = (ev) => (typeof ev.data === "string" ? v.messages.push(JSON.parse(ev.data)) : frames.push(ev.data as ArrayBuffer));
+    v.ws.send(JSON.stringify({ type: "size", width: 320, height: 200, scale: 1 }));
+    await until(() => frames.length > 0, "a frame");
+    expect(new Uint8Array(frames[0])[0]).toBe(0xff);
+    await until(() => v.messages.some((m) => m.type === "info" && m.url === url), "the view's info");
+    v.ws.close();
     expect((await api(`/browser/tabs/${id}`, { method: "DELETE" })).status).toBe(204);
     await until(async () => !((await (await api("/browser/tabs")).json()) as any[]).some((t) => t.id === id), "the tab to close");
     e.ws.close();
