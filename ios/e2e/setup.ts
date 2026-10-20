@@ -4,7 +4,8 @@
 //   demo-chat  in blimp-demo: a conversation; every line typed into it is appended to $E2E_DIR/chat.in
 //              and, with a reply, to its transcript
 //   demo-ask   in api-server: waiting on a permission prompt; every key pressed is appended to $E2E_DIR/prompt.in
-//   demo-busy  in api-server: working (Claude's status "busy"); every key pressed is appended to $E2E_DIR/stop.in
+//   demo-busy  in api-server: working (Claude's status "busy"); every key pressed is appended to $E2E_DIR/stop.in,
+//              and an Esc makes it idle
 //   a conversation in blimp-demo with no session running, for the project screen's Earlier list
 // The folders are under the home folder: blimpd starts sessions only there. Sessions the app starts
 // run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for.
@@ -71,9 +72,14 @@ await standIn("demo-chat", join(work, "blimp-demo"), echo, chatSid, [
 await standIn("demo-ask", join(work, "api-server"), `stty -icanon -echo; exec cat >> '${promptIn}'`,
   "e2e00000-0000-0000-0000-000000000002", [user("u1", "Run the test suite"), said("a1", "I'll run the tests.")]);
 
-// Working on something: the phone shows Stop, which presses Esc (raw keys again).
-await standIn("demo-busy", join(work, "api-server"), `stty -icanon -echo; exec cat >> '${stopIn}'`,
-  "e2e00000-0000-0000-0000-000000000003", [user("u1", "Refactor the auth middleware"), said("a1", "Working through the routes now.")], "busy");
+// Working on something: the phone shows Stop, which presses Esc (raw keys again). Like Claude, it stops
+// working on Esc: its status file says idle, and the phone's Stop goes away.
+const busySid = "e2e00000-0000-0000-0000-000000000003";
+const busyDir = join(work, "api-server");
+const idle = JSON.stringify({ sessionId: busySid, cwd: busyDir, status: "idle" });
+const stopped = String.raw`stty -icanon -echo; (while sleep 0.2; do case "$(tr '\033' E < '${stopIn}')" in *E) printf '%s' '${idle}' > '${join(claude, "sessions")}'/$$.json; break;; esac; done) & exec cat >> '${stopIn}'`;
+await standIn("demo-busy", busyDir, stopped, busySid,
+  [user("u1", "Refactor the auth middleware"), said("a1", "Working through the routes now.")], "busy");
 
 // A conversation in blimp-demo with nothing running it: the project screen lists it under Earlier.
 // Claude keeps it in a folder named after the real path of where it ran.

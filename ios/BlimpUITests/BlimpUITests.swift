@@ -107,8 +107,9 @@ final class BlimpUITests: XCTestCase {
         if app.buttons["sendButton"].exists { throw failed("no Send while working with an empty box") }
         shot("8-stop")
         stop.tap()
-        // The press is acknowledged (Stop turns back on) and nothing says it failed
-        try until(stop, "isEnabled == true", "Stop to be acknowledged")
+        // The stand-in stops working on Esc, as Claude does: Stop goes and Send is back
+        try until(stop, "exists == false", "the session to stop working")
+        try wait(app.buttons["sendButton"], "Send after stopping")
         if labeled("Not sent").exists { throw failed("Stop was not sent") }
         shot("9-stopped")
     }
