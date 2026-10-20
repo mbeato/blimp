@@ -15,7 +15,8 @@ let port = 0;
 const PAGE = `<!doctype html><title>Form page</title>
 <style>body{margin:0} button{position:absolute;left:10px;top:10px;width:100px;height:40px} form{position:absolute;left:10px;top:80px} input{width:200px;height:30px}</style>
 <button onclick="document.title='clicked'">b</button>
-<form onsubmit="event.preventDefault();document.title='sent:'+this.q.value"><input name="q"></form>`;
+<form onsubmit="event.preventDefault();document.title='sent:'+this.q.value"><input name="q"></form>
+<p style="position:absolute;left:10px;top:140px;margin:0;font:20px sans-serif">pickme</p>`;
 
 test.beforeAll(async () => {
   server = createServer((req, res) => res.writeHead(200, { "content-type": "text/html" }).end(PAGE));
@@ -105,4 +106,38 @@ test.describe("Retina", () => {
     await expect(tab).toHaveText(/clicked/, { timeout: 10_000 });
     killSession(`${sess}-r`);
   });
+});
+
+// Copy out of the page as the Mac's Edit menu (and its ⌘C) does: the copy command on the field
+// that has focus, there and then, with nothing to wait for. The field holds the page's selection.
+test("text selected in the page copies to the clipboard with the Edit menu's Copy", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const dir = fixtureDir("browser-copy");
+  startSession(`${sess}-c`, dir, ["sh", "-c", "exec cat"]);
+  await openSessionTab(page, dir);
+  await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
+  const tab = frontTab(page).locator(".ftabs .tab.active");
+  const viewer = frontTab(page).locator(".viewer:not([hidden])");
+  const address = viewer.getByLabel("Address");
+  await expect(address).toBeFocused({ timeout: 10_000 });
+  await address.fill(`127.0.0.1:${port}/form`);
+  await address.press("Enter");
+  await expect(tab).toHaveText(/Form page/, { timeout: 10_000 });
+  await page.evaluate(() => navigator.clipboard.writeText("before"));
+  await viewer.locator(".page-live canvas").dblclick({ position: { x: 30, y: 150 } });
+  await expect.poll(async () => {
+    await page.evaluate(() => document.execCommand("copy"));
+    return page.evaluate(() => navigator.clipboard.readText());
+  }).toBe("pickme");
+  // Cut: typed text, selected with ⌘A, leaves the field and lands on the clipboard.
+  await viewer.locator(".page-live canvas").click({ position: { x: 60, y: 95 } });
+  await page.keyboard.type("cutme");
+  await page.keyboard.press("Meta+a");
+  // Once the server has said what's selected (before that, Cut has nothing to cut).
+  await expect(viewer.getByLabel("Type into the page")).toHaveValue("cutme");
+  await page.evaluate(() => document.execCommand("cut"));
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("cutme");
+  await page.keyboard.press("Enter");
+  await expect(tab).toHaveText(/sent:(?!cutme)/, { timeout: 10_000 });
+  killSession(`${sess}-c`);
 });
