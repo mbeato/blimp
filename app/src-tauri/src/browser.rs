@@ -36,6 +36,9 @@ struct Change {
     title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     loading: Option<bool>,
+    /// A link here asked for a new window: open this address in a new tab.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    open: Option<String>,
 }
 
 /// What Send to session takes from a page.
@@ -71,6 +74,28 @@ fn may_load(url: &Url) -> bool {
     }
 }
 
+/// What a view tells sites it is: Safari, at the version installed, which runs on the same
+/// system WebKit as these views. Without it a view sends WebKit's bare user agent, with no Safari
+/// in it, and sites like Google serve the pages they keep for unknown old browsers.
+#[cfg(target_os = "macos")]
+fn user_agent() -> &'static str {
+    static UA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    UA.get_or_init(|| {
+        let version = plist::Value::from_file("/Applications/Safari.app/Contents/Info.plist")
+            .ok()
+            .and_then(|p| p.as_dictionary()?.get("CFBundleShortVersionString")?.as_string().map(str::to_string));
+        safari_ua(version.as_deref())
+    })
+}
+
+/// Safari's user agent (its OS part is frozen at 10_15_7, as Safari's own is) at `version`, if
+/// that looks like one.
+#[cfg(any(target_os = "macos", test))]
+fn safari_ua(version: Option<&str>) -> String {
+    let v = version.filter(|v| v.split('.').all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))).unwrap_or("26.0");
+    format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{v} Safari/605.1.15")
+}
+
 fn is_label(s: &str) -> bool {
     s.strip_prefix("b-").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
@@ -99,23 +124,23 @@ pub fn browser_open(app: AppHandle, window: Window, browsers: State<'_, Browsers
     let owner = window.label().to_string();
     let (a, o, l) = (app.clone(), owner.clone(), label.clone());
     let (a2, o2, l2) = (app.clone(), owner.clone(), label.clone());
-    let (a3, l3) = (app.clone(), label.clone());
+    let (a3, o3, l3) = (app.clone(), owner.clone(), label.clone());
     let b = WebviewBuilder::new(&label, WebviewUrl::External(url))
         .on_navigation(may_load)
         .on_page_load(move |v, p| {
             let url = v.url().map(|u| u.to_string()).unwrap_or_else(|_| p.url().to_string());
-            emit(&a, &o, Change { label: l.clone(), url: Some(url), title: None, loading: Some(matches!(p.event(), PageLoadEvent::Started)) });
+            emit(&a, &o, Change { label: l.clone(), url: Some(url), title: None, loading: Some(matches!(p.event(), PageLoadEvent::Started)), open: None });
         })
-        .on_document_title_changed(move |_, title| emit(&a2, &o2, Change { label: l2.clone(), url: None, title: Some(title), loading: None }))
-        // A link that opens a new window opens here instead.
+        .on_document_title_changed(move |_, title| emit(&a2, &o2, Change { label: l2.clone(), url: None, title: Some(title), loading: None, open: None }))
+        // A link that opens a new window opens in a new tab instead.
         .on_new_window(move |url, _| {
-            if matches!(url.scheme(), "http" | "https") {
-                if let Some(v) = a3.get_webview(&l3) {
-                    let _ = v.navigate(url);
-                }
+            if web_url(url.as_str()).is_ok() {
+                emit(&a3, &o3, Change { label: l3.clone(), url: None, title: None, loading: None, open: Some(url.to_string()) });
             }
             NewWindowResponse::Deny
         });
+    #[cfg(target_os = "macos")]
+    let b = b.user_agent(user_agent());
     #[cfg(target_os = "macos")]
     let b = b.data_store_identifier(*b"blimp-browser-v1"); // macOS 14+; older ones use the default store
     #[cfg(not(target_os = "macos"))]
@@ -231,6 +256,16 @@ mod tests {
         assert!(ok("http://localhost:8080/"));
         assert!(!ok("tauri://localhost/") && !ok("http://tauri.localhost/x") && !ok("https://tauri.localhost/") && !ok("http://ipc.localhost/cmd"));
         assert!(!ok("file:///Users/me/.ssh/id_ed25519") && !ok("ipc://localhost/x") && !ok("asset://localhost/x") && !ok("about:config"));
+    }
+
+    #[test]
+    fn sites_see_safari() {
+        let ua = |v| safari_ua(v);
+        assert_eq!(ua(Some("18.5")), "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15");
+        assert!(ua(Some("26.0.1")).contains(" Version/26.0.1 Safari/"));
+        for odd in [None, Some(""), Some("18."), Some("18.5 beta"), Some("x")] {
+            assert!(ua(odd).contains(" Version/26.0 Safari/"), "{odd:?}");
+        }
     }
 
     #[test]

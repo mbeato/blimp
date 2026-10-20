@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { pageFile, pageFileName, shownUrl, typedUrl, view, type Page, type PageText } from "../lib/browser";
+import { HOME, pageFile, pageFileName, shownUrl, typedUrl, view, type Page, type PageText } from "../lib/browser";
 import { inTauri } from "../lib/connection";
 import { openWebLink } from "../lib/links";
 import { useOverlay } from "../lib/overlay";
@@ -38,16 +38,16 @@ export function PageView(props: {
   useEffect(() => {
     if (!editing) setDraft(shownUrl(page, page.url));
   }, [page.url, page.base, editing]);
-  // A new tab starts in the address field.
+  // A new tab (no address yet, or at the start page) starts in the address field.
   useEffect(() => {
-    if (!page.url && !page.port) input.current?.focus();
+    if (!page.port && (!page.url || page.url === HOME)) input.current?.focus();
   }, []);
 
   useNativeView(native ? page : null, area, props.shown, props.onLabel);
 
   const go = (text: string) => {
     const url = typedUrl(page, text);
-    if (!url) return props.onNotice(`Not a web address: ${text}`);
+    if (!url) return;
     setEditing(false);
     input.current?.blur();
     props.onGo(url);
@@ -96,7 +96,7 @@ export function PageView(props: {
         <input
           ref={input}
           aria-label="Address"
-          placeholder="Type an address"
+          placeholder="Search Google or type an address"
           value={draft}
           onChange={(e) => (setEditing(true), setDraft(e.target.value))}
           onFocus={(e) => e.target.select()}
@@ -138,7 +138,7 @@ export function PageView(props: {
       {page.error ? (
         <div className="empty error">{page.error}</div>
       ) : !page.url ? (
-        <div className="empty">{page.port ? `Opening port ${page.port.port}…` : "Type an address above"}</div>
+        <div className="empty">{page.port ? `Opening port ${page.port.port}…` : "Search or type an address above"}</div>
       ) : native ? (
         <div ref={area} className="page-frame page-native" data-view={page.label} />
       ) : (
