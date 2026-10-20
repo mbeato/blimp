@@ -2,6 +2,12 @@
 # Stand-in for Claude Code in sessions blimpd starts during the iPhone e2e test. It records its zmx
 # session, pid and arguments in $E2E_DIR/claude.args, writes the status file Claude would (the resumed
 # conversation's id after --resume, else a new one), then appends whatever it reads to $E2E_DIR/started.in.
+# blimpd's naming call (src/names.ts: claude -p, the conversation on stdin) isn't a session: it gets a
+# long-ish name for demo-quiz's conversation, to see how names fit on the phone, and none for the others.
+if [ "$1" = -p ]; then
+  grep -q "Set up the test pipeline" && echo "Configure Integration Test Pipeline" && exit 0
+  exit 1
+fi
 echo "$ZMX_SESSION $$ [$*]" >> "$E2E_DIR/claude.args"
 sid=e2e00000-0000-0000-0001-$(printf %012d $$)
 [ "$1" = --resume ] && sid=$2
