@@ -81,9 +81,7 @@ private struct ChatContent: View {
                         MessageRow(message: message, expanded: expanded.contains(message.id)) { toggle(message.id) }
                             .modifier(BeingRead(reading: Speaker.shared.speakingId == message.id))
                     }
-                    if showsWorking {
-                        WorkingRow(waiting: !model.working, stopping: model.stopping, onStop: typable ? stop : nil)
-                    }
+                    workingRow
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .padding(.horizontal)
@@ -234,8 +232,11 @@ private struct ChatContent: View {
     /// The input box shows (controls' last case), and so does Stop on the working row.
     private var typable: Bool { !model.ended && !model.noChat && !model.starting && !model.macOnly }
 
-    private func stop() {
-        Task { await model.stop() }
+    @ViewBuilder private var workingRow: some View {
+        if showsWorking {
+            let onStop: (() -> Void)? = typable ? { Task { await model.stop() } } : nil
+            WorkingRow(waiting: !model.working, stopping: model.stopping, onStop: onStop)
+        }
     }
 
     private func hideKeyboard() {
