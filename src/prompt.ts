@@ -174,7 +174,9 @@ export function parseDialog(screen: string): Dialog | undefined {
       continue;
     }
     if (!rows.length) {
-      if (l.trim()) head.push(l.trim());
+      // A long question is drawn with a "│" down its left side.
+      const text = l.trim().replace(/^│\s?/, "").trim();
+      if (text) head.push(text);
       continue;
     }
     const nx = l.match(/^\s*(❯)?\s+(Next|Submit)\s*$/);
