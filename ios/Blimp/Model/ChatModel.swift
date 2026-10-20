@@ -60,8 +60,12 @@ final class ChatModel {
     var working: Bool { session?.state == .working }
     /// What Claude is asking, while it waits for an answer.
     var prompt: Prompt? { session?.state == .waiting ? session?.prompt : nil }
+    /// Claude waits, and blimpd doesn't know on what (no hook prompt): only the Mac can answer it.
+    var waitingUnknown: Bool { session?.state == .waiting && session?.prompt == nil }
+    /// Claude Code was just started in it and hasn't said which conversation it is yet.
+    var starting: Bool { session?.kind == "claude" && session?.sessionId == nil }
     /// blimpd can't show or type into it (not Claude, or no transcript): only the Mac can.
-    var macOnly: Bool { !log.readable || session?.isClaude == false }
+    var macOnly: Bool { !starting && (!log.readable || session?.isClaude == false) }
     var canResume: Bool { (session ?? lastSeen)?.sessionId != nil }
     var sendingText: Bool { inputId != nil }
     var answering: Bool { answerId != nil }

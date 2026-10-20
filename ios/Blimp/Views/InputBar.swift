@@ -1,5 +1,5 @@
-// The box you type into: Return adds a line, Send sends. While Claude works and the box is empty,
-// Stop takes Send's place. The mic: hold to talk and let go to send, slide up first to keep the words
+// The box you type into: Return adds a line, Send sends. While Claude works, Stop shows: in Send's
+// place while the box is empty, beside it once there's text. The mic: hold to talk and let go to send, slide up first to keep the words
 // unsent; or tap to start and tap again to send.
 import SwiftUI
 
@@ -8,7 +8,8 @@ enum MicRelease { case send, keep }
 
 struct InputBar: View {
     @Binding var text: String
-    let working: Bool
+    /// Claude works (or waits on something only the Mac can answer): Stop presses Esc.
+    let canStop: Bool
     let sending: Bool
     let stopping: Bool
     /// The mic is on: from the press until the words are sent or kept.
@@ -39,8 +40,14 @@ struct InputBar: View {
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 20))
             mic
                 .frame(width: 36, height: 36)
-            action
-                .frame(width: 36, height: 36)
+            if canStop {
+                stop
+                    .frame(width: 36, height: 36)
+            }
+            if sending || hasText || !canStop {
+                send
+                    .frame(width: 36, height: 36)
+            }
         }
         .overlay(alignment: .topTrailing) {
             if let hint {
@@ -118,16 +125,18 @@ struct InputBar: View {
             }
     }
 
-    @ViewBuilder private var action: some View {
+    private var stop: some View {
+        Button("Stop", systemImage: "stop.fill", action: onStop)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.circle)
+            .tint(.red)
+            .disabled(stopping)
+    }
+
+    @ViewBuilder private var send: some View {
         if sending {
             ProgressView()
-        } else if working && !hasText {
-            Button("Stop", systemImage: "stop.fill", action: onStop)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .tint(.red)
-                .disabled(stopping)
         } else {
             Button("Send", systemImage: "arrow.up", action: onSend)
                 .labelStyle(.iconOnly)

@@ -184,6 +184,8 @@ private struct ChatContent: View {
             }
         } else if model.noChat {
             Text("This server's blimpd can't show chats yet. Update it (see the README).").foregroundStyle(.secondary)
+        } else if model.starting {
+            ProgressView()
         } else if model.macOnly {
             Text("Open on Mac to use this session").foregroundStyle(.secondary)
         } else {
@@ -195,6 +197,9 @@ private struct ChatContent: View {
                         Task { await model.answer(pick, to: shown) }
                     }
                     Divider()
+                } else if model.waitingUnknown {
+                    Text("Claude is waiting. Open it on the Mac to answer.").font(.callout).foregroundStyle(.secondary)
+                    Divider()
                 }
                 if listener.preparing {
                     Text("Getting speech ready…").font(.caption).foregroundStyle(.secondary)
@@ -203,8 +208,8 @@ private struct ChatContent: View {
                 }
                 errorLine
                 InputBar(
-                    text: $draft, working: model.working, sending: model.sendingText, stopping: model.stopping,
-                    listening: micOn, onSend: send, onStop: { Task { await model.stop() } },
+                    text: $draft, canStop: model.working || model.waitingUnknown, sending: model.sendingText,
+                    stopping: model.stopping, listening: micOn || micStopping, onSend: send, onStop: { Task { await model.stop() } },
                     onMicDown: micDown, onMicUp: micUp)
             }
         }
@@ -217,7 +222,7 @@ private struct ChatContent: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if model.log.messages.isEmpty && !model.working && !model.ended && !model.macOnly && !model.noChat {
+        if model.log.messages.isEmpty && !model.working && !model.ended && !model.macOnly && !model.noChat && !model.starting {
             if !model.loaded {
                 ProgressView()
             } else {
