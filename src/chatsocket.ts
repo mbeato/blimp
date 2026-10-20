@@ -150,9 +150,9 @@ function client(ws: ServerWebSocket<ChatData>) {
   return d.proc;
 }
 
-// keys says what to type when its turn comes (an answer checks its question is still up); recheck
-// runs again before each part after the first (input's Enter, each step of a dialog). A write finishes
-// even if the socket closes: closeChat waits for it.
+// keys says what to type when its turn comes, right before it's typed (input checks Claude isn't asking
+// something, an answer that its question is still up); recheck runs again before each part after the
+// first (each step of a dialog). A write finishes even if the socket closes: closeChat waits for it.
 type Recheck = (part: number) => Promise<void>;
 async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]>, recheck?: Recheck) {
   const d = ws.data;
@@ -162,10 +162,10 @@ async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]
     const alive = await sessionExists(d.name).catch(() => false);
     if (!alive) throw new Error("the session ended");
   }
-  const parts = await keys();
   const term = client(ws).terminal!;
   // Typing too soon after the client starts can land before zmx has attached it.
   if (fresh) await Promise.race([d.ready, Bun.sleep(1000)]);
+  const parts = await keys();
   // zmx 0.5 drops an Esc that is a new client's first input; an empty paste passes and the TUI ignores it.
   if (fresh && parts[0].startsWith("\x1b") && !parts[0].startsWith("\x1b[200~")) {
     term.write("\x1b[200~\x1b[201~");
@@ -173,7 +173,7 @@ async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]
   }
   for (const [i, p] of parts.entries()) {
     if (i) {
-      await Bun.sleep(50); // Enter apart from the paste, as a person would press it
+      await Bun.sleep(50); // apart, as a person would press them
       await recheck?.(i);
     }
     term.write(p);
@@ -232,16 +232,12 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       // presses, ctrl+\ detaches zmx's client, ctrl+C interrupts. Newlines and tabs stay; \r is a newline.
       const text = cleanText(m.text);
       // Not while Claude asks something: the Enter after the paste would confirm its highlighted choice.
-      // Checked before the paste and again before Enter. A question that starts in between leaves the
-      // paste in Claude's input box without Enter: it isn't sent, and the id doesn't count as typed.
-      const notWaiting = async () => {
+      // Checked right before the paste, which goes in one write with its Enter (Claude 2.1.300 sends it,
+      // queues it while working): a question can't start between them and leave the text in Claude's box.
+      await typed(ws, id, async () => {
         if ((await find(d.name))?.state === "waiting") throw new Error("Claude is asking something. Answer it first.");
-      };
-      const keys = async () => {
-        await notWaiting();
-        return ["\x1b[200~" + text + "\x1b[201~", "\r"];
-      };
-      await typed(ws, id, keys, notWaiting);
+        return ["\x1b[200~" + text + "\x1b[201~\r"];
+      });
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer" && m.answers !== undefined) {
