@@ -2,7 +2,49 @@
 
 This is the iPhone app for blimp. It shows the Claude sessions running on your server. You can read them, type to them, answer their questions and permission prompts, start new ones and end them.
 
-It talks to `blimpd`, the small program that runs on your server. The chat features need a blimpd from the phone-chat branch, or the next release. An older blimpd will show the session list but not the chat.
+It talks to `blimpd`, the small program that runs on your server. The chat features need a blimpd from the phone-chat branch, or the next release. An older blimpd will show the session list but not the chat. The chat then says "This server's blimpd can't show chats yet."
+
+## Put this branch's blimpd on your server
+
+Do this once, on the server. Released blimpd (0.2.6 and older) has no chat. Its hooks also don't record what Claude is asking. So every chat would fail.
+
+1. Go to where the phone-chat branch is checked out, and get the latest. For Max, that is `~/blimp-phone`.
+
+```
+cd ~/blimp-phone
+```
+
+```
+git pull
+```
+
+2. Build blimpd from it.
+
+```
+~/.bun/bin/bun build src/main.ts --compile --outfile /tmp/blimpd
+```
+
+3. Put it in place of the installed one.
+
+```
+install -m 755 /tmp/blimpd ~/.local/bin/blimpd
+```
+
+4. Restart the service.
+
+```
+systemctl --user restart blimpd
+```
+
+This is safe. The service uses `KillMode=process`, so running sessions keep running. The Mac app reconnects by itself.
+
+Claude's hooks run this same file, `~/.local/bin/blimpd`. So from now on, they record what Claude asks, and the phone shows it as buttons.
+
+To go back to the release, run the installer again:
+
+```
+curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh | sh
+```
 
 ## Try it in the simulator (no Tailscale)
 
@@ -32,7 +74,11 @@ ssh <server> cat .blimp/token
 
 Max: `ssh claude1 cat .blimp/token`
 
-4. Build the project and open it.
+4. In your blimp folder on the Mac, switch to the phone-chat branch. Then build the project and open it.
+
+```
+git checkout phone-chat
+```
 
 ```
 cd ios && xcodegen generate && open Blimp.xcodeproj
@@ -46,7 +92,7 @@ cd ios && xcodegen generate && open Blimp.xcodeproj
 blimp://pair?url=http%3A%2F%2F127.0.0.1%3A7425&token=<token>
 ```
 
-The app opens the home screen. The first launch asks for Face ID. In the simulator, use Features, Face ID, Enrolled, then Matching Face. Or use the passcode.
+The app opens the home screen. The first launch, with nothing paired yet, doesn't ask for Face ID. The next launch does. In the simulator, use Features, Face ID, Enrolled, then Matching Face. Or use the passcode.
 
 ## The real phone
 

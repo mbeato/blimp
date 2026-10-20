@@ -48,6 +48,8 @@ As built (part 1), see DESIGN.md's Chat section:
 - zmx 0.5 drops an ESC that is a new client's first input; blimpd sends an empty bracketed paste first.
 - Writes from one socket go one at a time. Before starting its zmx client, blimpd checks the session still exists.
 - `input`, `answer` and `interrupt` are all de-duplicated by `id` (last 100 per session), remembered only after the write succeeded.
+- `input` is refused while the session is waiting ("Claude is asking something. Answer it first."): the Enter after the paste would confirm the prompt's highlighted choice. It is checked before the paste and again right before the Enter; a question that starts in between leaves the paste in Claude's box, not sent.
+- `answer` carries `label`, the text of the choice the phone showed at `pick`, and is refused ("the question changed") unless the current prompt's choice at `pick` has that text. The hook's fallback Yes/No and the screen's options share one `at`, so `at` alone let pick 1 ("No") press 2 ("Yes, and don't ask again").
 
 ### Messages
 
@@ -124,7 +126,9 @@ As built (part 2, the app up to voice):
 - `/events` is decoded one session at a time. A bad session is dropped, so one bad entry doesn't blank the list.
 - The app reconnects only when it returns from the background, not on every `.active`. This keeps healthy links up through Control Center or Face ID. A link that died in a short inactive spell is found by the 20 s ping.
 - Resume swaps the session in place. Where the screens go is decided in HomeView and ProjectView.
-- A session missing from the `/events` list does not end its chat (blimpd publishes `[]` when `zmx list` fails). Only close 4000, a 404 on the chat handshake, or "the session ended" end it. The server double-checks the chat socket's end. If this is wrong, a session killed while its chat socket is down shows "Reconnecting…" until the reconnect gets a 404.
+- Tests: `swift test` of BlimpKit on Linux and on macOS, plus a simulator build of the app with warnings as errors (the "iOS" workflow). There is no `xcodebuild test`; the screens are checked by hand (`docs/PHONE-CHECKLIST.md`).
+- The ATS exception for plain http to `localhost` and `127.0.0.1` is in every build, not only Debug (the simulator's SSH tunnel needs it).
+- A session missing from the `/events` list does not end its chat (blimpd publishes `[]` when `zmx list` fails). Only close 4000, "the session ended", or a 404 on the chat handshake for a session that a non-empty `/events` list no longer has end it. Any other 404 means a blimpd with no chat route (0.2.6 and older): the chat says so, with no Resume. `/events` keeps retrying on a 404. The server double-checks the chat socket's end. If this is wrong, a session killed while its chat socket is down shows "Reconnecting…" until the reconnect gets a 404.
 
 ### Screens
 
@@ -151,7 +155,7 @@ As built (part 2):
 - Voice answers never send what they aren't sure of; this beats the plan's looser rule. A `.clear` match comes from a label contained in what was heard, or a yes/no, only when every heard word belongs to the matched label or a short filler list. Any negation or hedge word (not, no for a choice that isn't No, nope, dont, never, but, except, wait, neither, both) or opposite yes/no makes it at most a `.guess`. Contradictory words give `.none`. Some natural phrasings need a tap.
 - Ambiguous prefixes are checked first: two or more words that start two or more choices give `.none`, before a single choice is matched by containment. So "yes and" is unclear.
 - The mic uses `AVAudioConverter` by hand to feed the analyzer (`AnalyzerInputConverter` needs iOS 27). It sets the `.record` category without `.duckOthers`, which `.record` refuses. The read-aloud gate (speak only while the app is open and unlocked) sits in BlimpApp. One class is `@unchecked Sendable`, with the reason written beside it.
-- The voice library code (BlimpKit only) was built in a side branch at the same time as the screens, then cherry-picked onto `phone-chat`. The only overlap was `Models.swift`.
+- The voice library code (BlimpKit only) was built in a side branch at the same time as the screens, then cherry-picked onto `phone-chat`. Its commits were cherry-picked back onto phone-chat without conflicts.
 
 - **Speech to text:** Apple's SpeechAnalyzer, on the device, no audio leaves the phone. Custom vocabulary from the session's project folder names, session titles, and a fixed list (blimp, blimpd, zmx, Claude, Codex).
 - **Mic button:** hold to talk, or tap to start and tap to stop. Words show in the input box as they're recognized. Release (or the second tap) sends. Swipe up while holding keeps the text in the box unsent, to edit.
