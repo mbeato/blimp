@@ -31,6 +31,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             tunnel::connect,
             tunnel::disconnect,
+            tunnel::drop_tunnel,
             tunnel::forward_port,
             tunnel::unforward_port,
             tunnel::update_server,
