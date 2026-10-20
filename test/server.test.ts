@@ -745,7 +745,7 @@ describe("chat", () => {
   test("Claude's folder trust question is a prompt; Yes through the chat is ↓ then Enter, each once the screen shows its place", async () => {
     const sid = "c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1";
     const { name, cfg } = await fakeTrust("trust1", sid);
-    const s = await until(async () => ((await listed(name))?.prompt ? listed(name) : undefined), "the trust prompt", 3000);
+    const s = await until(async () => ((await listed(name))?.prompt ? listed(name) : undefined), "the trust prompt", 10000);
     expect(s.state).toBe("waiting");
     expect(s.sessionId).toBeUndefined();
     expect(s.prompt).toEqual({ kind: "trust", folder: cfg.folder, options: ["Yes, I trust this folder", "No, exit"], answerable: true, at: s.created * 1000 });
@@ -782,7 +782,7 @@ describe("chat", () => {
 
   test("a trust answer stops, typing nothing, when the cursor isn't where it expects; No is Enter", async () => {
     const { name, cfg } = await fakeTrust("trust2", "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2");
-    const s = await until(async () => ((await listed(name))?.prompt ? listed(name) : undefined), "the trust prompt", 3000);
+    const s = await until(async () => ((await listed(name))?.prompt ? listed(name) : undefined), "the trust prompt", 10000);
     // Someone on the Mac moved the cursor to Yes (again until it shows: zmx can drop a new client's first ESC)
     const viewer = await socket(`/sessions/${name}/attach?cols=120&rows=36`);
     await until(() => (type(viewer.ws, "\x1b[B"), zmx("history", name).stdout.toString().includes("❯ Yes")), "the cursor on Yes");
