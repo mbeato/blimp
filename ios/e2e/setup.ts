@@ -79,7 +79,10 @@ const busyDir = join(work, "api-server");
 const idle = JSON.stringify({ sessionId: busySid, cwd: busyDir, status: "idle" });
 const stopped = String.raw`stty -icanon -echo; (while sleep 0.2; do case "$(tr '\033' E < '${stopIn}')" in *E) printf '%s' '${idle}' > '${join(claude, "sessions")}'/$$.json; break;; esac; done) & exec cat >> '${stopIn}'`;
 await standIn("demo-busy", busyDir, stopped, busySid,
-  [user("u1", "Refactor the auth middleware"), said("a1", "Working through the routes now.")], "busy");
+  // Longer than the screen, so the test sees the chat open at its end, not its start.
+  [user("u1", "Refactor the auth middleware"),
+   ...Array.from({ length: 20 }, (_, i) => [said(`p${i}`, `Step ${i + 1}: looked at route ${i + 1} and its tests.`), user(`q${i}`, `Keep going with route ${i + 2}`)]).flat(),
+   said("a1", "Working through the routes now.")], "busy");
 
 // A conversation in blimp-demo with nothing running it: the project screen lists it under Earlier.
 // Claude keeps it in a folder named after the real path of where it ran.

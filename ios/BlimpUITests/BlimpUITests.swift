@@ -100,7 +100,10 @@ final class BlimpUITests: XCTestCase {
         let row = element("session-demo-busy")
         try wait(row, "the demo-busy row")
         row.tap()
-        try wait(message("message.user", "Refactor the auth middleware"), "demo-busy's chat")
+        // A long chat opens at its newest message
+        let newest = message("message.assistant", "Working through the routes now.")
+        try wait(newest, "demo-busy's newest message")
+        try until(newest, "isHittable == true", "the chat to open at its newest message")
         // Working, and the box is empty: Stop in Send's place
         let stop = app.buttons["Stop"]
         try wait(stop, "the Stop button")

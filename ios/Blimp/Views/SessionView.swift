@@ -94,6 +94,15 @@ private struct ChatContent: View {
                 atBottom = bottom
                 if bottom { unseen = false }
             }
+            // A history comes after the screen has laid out, empty, so the initial anchor misses it, and
+            // the jump in content height reads as "scrolled up". Open at the end; after a reconnect, stay
+            // at the end only if you were there.
+            .onChange(of: model.histories) { old, _ in
+                guard old == 0 || atBottom else { return }
+                atBottom = true
+                unseen = false
+                Task { @MainActor in proxy.scrollTo(Self.bottom, anchor: .bottom) }
+            }
             // a new or longer last message: follow it if you're at the bottom, else say so
             .onChange(of: model.log.messages.last) { _, last in
                 guard last != nil else { return }

@@ -16,6 +16,8 @@ final class ChatModel {
     private(set) var reconnecting = false
     /// A first history has come (an empty one for a brand-new session).
     private(set) var loaded = false
+    /// Bumped by each history (the first, and each one after a reconnect), so the screen can jump to the end.
+    private(set) var histories = 0
     /// The last time the store listed this session: what it was, once it's gone.
     private(set) var lastSeen: Session?
     private var socketEnded = false
@@ -200,7 +202,6 @@ final class ChatModel {
         case .ack(let id): reply(id, .ack)
         case .failed(let id, let error): reply(id, .failed(error))
         default:
-            if case .history = event { loaded = true }
             // An append repeats a message when it grows (a tool's output): only a first sighting is new.
             var newReplies: [ChatMessage] = []
             if case .append(let messages) = event {
@@ -209,6 +210,10 @@ final class ChatModel {
                 }
             }
             log.apply(event)
+            if case .history = event {
+                loaded = true
+                histories += 1
+            }
             if let onReply { newReplies.forEach(onReply) }
         }
     }
