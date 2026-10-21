@@ -131,7 +131,7 @@ Each item says what to do, and what should happen. If the result is different, w
 
 - [ ] **HTML files as pages.**
   Do: ask Claude to write an HTML report with a chart image and a stylesheet in a folder next to it (`img/`, `css/`), and a `<script>` that changes the heading. Open the HTML file. Switch the app between light and dark mode.
-  Expect: it shows as a page on white, with the image and the stylesheet's look. The heading is the one in the file (the script does not run). Click Edit: the HTML text opens in the editor, and an edit saves. Click Preview: the page shows the edit. Ask Claude to change the file: the page updates by itself.
+  Expect: it shows as a page on white, with the image and the stylesheet's look. The heading is the one in the file (the script does not run). Click Edit: the HTML text opens in the editor, and an edit saves. Click Preview: the page shows the edit. Ask Claude to change the file: the page updates by itself (back at the top).
 
 - [ ] **Gallery of a folder's images.**
   Do: right-click a folder with a few dozen images (renders or screenshots) and pick Show as Gallery. Scroll down. Ask Claude to write one more image there. Click a picture.

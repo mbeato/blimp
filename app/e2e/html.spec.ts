@@ -2,17 +2,21 @@
 // the images and stylesheets next to it; Edit shows its text. A folder of renders shows as a
 // gallery that keeps up as new ones are written.
 
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { cspViolations, fixtureDir, killSession, openSessionTab, startSession } from "./helpers";
 
 const page1 = `blimpe2e-html-${process.pid}`;
+const page2 = `blimpe2e-html2-${process.pid}`;
 const gal = `blimpe2e-gallery-${process.pid}`;
+const gal2 = `blimpe2e-gallery2-${process.pid}`;
 
 test.afterAll(() => {
   killSession(page1);
+  killSession(page2);
   killSession(gal);
+  killSession(gal2);
 });
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
@@ -124,4 +128,103 @@ test("a folder shows as a gallery of its images, newest first, that keeps up and
   await page.getByRole("menuitem", { name: "Show as Gallery" }).click();
   await expect(ws.locator(".gallery .empty")).toContainText("No images in empty");
   expect(await cspViolations(page)).toEqual([]);
+});
+
+const LINKS = `<!doctype html>
+<html><head>
+<link rel="stylesheet" href="css/bg.css">
+<style>#box2 { width: 10px; height: 10px; background-image: url("img/dot.png"); }</style>
+</head><body>
+<p><a id="toc" href="#end">Jump to the end</a> <a id="rel" href="other.html">Other page</a> <a id="web" href="https://example.invalid/">Web</a></p>
+<div id="box" style="width: 10px; height: 10px"></div>
+<div id="box2"></div>
+<div id="box3" style="width: 10px; height: 10px; background-image: url(img/dot.png)"></div>
+<picture><source id="src" srcset="img/dot.png"><img id="pic" src="img/dot.png" alt="pic"></picture>
+${'<img class="rep" src="img/dot.png" alt="rep">'.repeat(5)}
+${"<p>filler</p>".repeat(300)}
+<h2 id="end">The end</h2>
+</body></html>
+`;
+
+test("an HTML page's links stay in the page, its CSS images come from the server, and each image is read once", async ({ page }) => {
+  const dir = fixtureDir("html-links");
+  mkdirSync(join(dir, "css"), { recursive: true });
+  mkdirSync(join(dir, "img"), { recursive: true });
+  writeFileSync(join(dir, "toc.html"), LINKS);
+  writeFileSync(join(dir, "other.html"), "<!doctype html><h1>Other</h1>\n");
+  // The stylesheet's url() is relative to its own folder; a "</style>" in it can't end the <style> it becomes.
+  writeFileSync(join(dir, "css", "bg.css"), '#box { background-image: url(../img/dot.png); }\n#web { background-image: url(https://example.invalid/x.png); }\n/* </style><p id="escaped">out</p> */\n');
+  writeFileSync(join(dir, "img", "dot.png"), PNG);
+  startSession(page2, dir);
+
+  const reads: string[] = [];
+  page.on("request", (r) => {
+    const u = new URL(r.url());
+    if (u.pathname.endsWith("/fs/file")) reads.push(u.searchParams.get("path") ?? "");
+  });
+  await openSessionTab(page, dir);
+  const ws = page.locator(".wb:not([hidden])");
+  await ws.locator(".tree").getByText("toc.html").click();
+  const doc = ws.locator("iframe.html-view").contentFrame();
+  await expect(doc.locator("#toc")).toBeVisible();
+
+  // url() in a stylesheet, a <style> and a style attribute: inlined from the server like <img>.
+  for (const id of ["#box", "#box2", "#box3"]) await expect(doc.locator(id)).toHaveCSS("background-image", /^url\("data:image\/png;base64,/);
+  await expect(doc.locator("#escaped")).toHaveCount(0);
+  // <source> would load from the app's origin: left out, so the <img> in the <picture> shows.
+  expect(await doc.locator("#src").getAttribute("srcset")).toBeNull();
+  await expect(doc.locator("#pic")).toHaveAttribute("src", /^data:image\/png;base64,/);
+  // The same picture, used 9 times, is read from the server once.
+  expect(reads.filter((p) => p.endsWith("/img/dot.png"))).toHaveLength(1);
+
+  // A link to a part of the page scrolls to it; the page stays.
+  await expect(doc.locator("#end")).not.toBeInViewport();
+  await doc.locator("#toc").click();
+  await expect(doc.locator("#end")).toBeInViewport();
+  await expect(doc.locator("#toc")).toHaveText("Jump to the end");
+  // Links that would take the frame elsewhere do nothing.
+  expect(await doc.locator("#rel").getAttribute("href")).toBeNull();
+  expect(await doc.locator("#web").getAttribute("href")).toBeNull();
+  await doc.locator("#rel").click();
+  await doc.locator("#web").click();
+  await expect(doc.locator("#toc")).toHaveText("Jump to the end");
+  expect(await cspViolations(page)).toEqual([]);
+});
+
+test("a gallery keeps up when its folder is deleted and made again, and a picture that failed to load loads on the next change", async ({ page }) => {
+  const dir = fixtureDir("gallery2");
+  const renders = join(dir, "renders");
+  rmSync(renders, { recursive: true, force: true });
+  mkdirSync(renders);
+  writeFileSync(join(renders, "a.png"), PNG);
+  startSession(gal2, dir);
+
+  await openSessionTab(page, dir);
+  const ws = page.locator(".wb:not([hidden])");
+  await ws.locator(".tree").getByText("renders").click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Show as Gallery" }).click();
+  const tiles = ws.locator(".gallery .gallery-tile");
+  await expect(tiles.locator(".gallery-name")).toHaveText(["a.png"]);
+
+  // rm -rf renders && mkdir renders, as a render script does: the old tiles go, and new renders show up.
+  rmSync(renders, { recursive: true });
+  await expect(tiles).toHaveCount(0, { timeout: 5000 });
+  await expect(ws.locator(".gallery .view-note")).toBeVisible();
+  mkdirSync(renders);
+  writeFileSync(join(renders, "b.png"), PNG);
+  await expect(tiles.locator(".gallery-name")).toHaveText(["b.png"], { timeout: 5000 });
+  await expect(ws.locator(".gallery .view-note")).toHaveCount(0);
+  await page.waitForTimeout(500);
+  writeFileSync(join(renders, "c.png"), PNG);
+  await expect(tiles.locator(".gallery-name")).toHaveText(["c.png", "b.png"], { timeout: 5000 });
+
+  // A picture whose read fails (offline, say) stays blank, and loads again on the next change.
+  await page.route(/\/fs\/file\?.*d\.png/, (r) => r.abort());
+  writeFileSync(join(renders, "d.png"), PNG);
+  await expect(tiles.first().locator(".gallery-name")).toHaveText("d.png", { timeout: 5000 });
+  await page.waitForTimeout(500);
+  await expect(tiles.first().locator("img")).toHaveCount(0);
+  await page.unroute(/\/fs\/file\?.*d\.png/);
+  writeFileSync(join(renders, "e.txt"), "not a picture\n");
+  await expect(tiles.filter({ hasText: "d.png" }).locator("img")).toHaveAttribute("src", /^blob:/, { timeout: 5000 });
 });

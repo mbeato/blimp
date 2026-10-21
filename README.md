@@ -157,7 +157,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Text and code** open in Monaco, the editor inside VS Code. It has the same keys, search and replace, and multi-cursor.
 - **Edits save by themselves**, one second after you stop typing, and at once when you click away, switch files or switch apps. A dot on the tab means the latest edit is not saved yet. **⌘S** saves at once.
 - **Markdown** shows rendered. Click **Edit** to change it and **Preview** to go back. A relative link opens that file in a tab. An `http` or `https` link opens in your default browser. Other links do not open.
-- **HTML files** show as a web page. The page's images and stylesheets next to it show too. Its scripts do not run, and nothing on it loads from the web. Click **Edit** to change it and **Preview** to go back.
+- **HTML files** show as a web page. The page's images and stylesheets next to it show too. Its scripts do not run, and nothing on it loads from the web. A link to a part of the page scrolls to it; other links do nothing. When the file changes, the page shows the new version from the top. Click **Edit** to change it and **Preview** to go back.
 - **Images** (png, jpg, jpeg, gif, webp, svg, ico, bmp) show fitted to the pane.
 - **See a folder's images in one place:** right-click the folder and pick **Show as Gallery**. A tab shows all its images, newest first, with each name and how long ago it changed. New images show up by themselves. Click one to open it in its own tab.
 - **PDF** files show all pages, with pdf.js.

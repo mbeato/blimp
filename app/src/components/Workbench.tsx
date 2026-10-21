@@ -165,6 +165,9 @@ export function Workbench(props: {
   // per folder when it changes on the server, so its gallery lists it again.
   const galleries = useRef(new Set<string>()).current;
   const ticks = useRef(new Map<string, number>()).current;
+  // Galleries' folders that weren't there at their last listing. A folder's watch ends when it's
+  // deleted, so its parent's says when it's back (rm -rf renders && mkdir renders).
+  const goneDirs = useRef(new Set<string>()).current;
   // Saves not finished yet (sent, or waiting for the one before). Models are disposed only after
   // these finish, so leaving a project mid-save still sends what was typed meanwhile.
   const pending = useRef(new Set<Promise<void>>()).current;
@@ -566,12 +569,35 @@ export function Workbench(props: {
   const closeGallery = (key: string) => {
     const order = [...docs.keys(), ...galleries, ...pages.keys()];
     galleries.delete(key);
+    goneDirs.delete(galleryDir(key)!);
     const rest = order.filter((k) => k !== key);
     const i = order.indexOf(key);
     setActiveState((a) => (a === key ? (rest[Math.min(i, rest.length - 1)] ?? null) : a));
     rerender();
   };
   const bump = (dir: string) => ticks.set(dir, (ticks.get(dir) ?? 0) + 1);
+  const listGallery = (dir: string) => {
+    if (!link.api) return Promise.reject(new Error("Not connected."));
+    return link.api.fsList(dir).then(
+      (l) => {
+        if (goneDirs.delete(dir)) {
+          // Back: watch it again (blimpd dropped it), and list it once more for what was written
+          // before the watch was.
+          link.watch(id, watching());
+          bump(dir);
+          rerender();
+        }
+        return l;
+      },
+      (e) => {
+        if (e instanceof ApiError && e.status === 404 && galleries.has(galleryKey(dir)) && !goneDirs.has(dir)) {
+          goneDirs.add(dir);
+          rerender();
+        }
+        throw e;
+      },
+    );
+  };
 
   // A file tab, a gallery or a browser tab.
   const closeTab = (key: string) => (key.startsWith("tab:") ? closePage(key) : galleryDir(key) !== null ? closeGallery(key) : void closeDoc(key));
@@ -610,6 +636,7 @@ export function Workbench(props: {
       const doc = docs.get(p);
       if (doc) void checkRemote(doc);
       if (galleries.has(galleryKey(p))) (bump(p), rerender());
+      for (const d of goneDirs) if (parentDir(d) === p) (bump(d), rerender());
     }
   };
   useEffect(() => link.onFs((paths) => onFs.current(paths)), [link]);
@@ -625,10 +652,10 @@ export function Workbench(props: {
     }
   }, [link.status]);
 
-  // blimpd watches the expanded folders, the galleries' folders and the open files for this
-  // window's events socket.
+  // blimpd watches the expanded folders, the galleries' folders (or their parents while they're
+  // gone) and the open files for this window's events socket.
   function watching() {
-    return watchPaths([...expanded.current, ...[...galleries].map((k) => galleryDir(k)!)], docs.keys());
+    return watchPaths([...expanded.current, ...[...galleries].map((k) => galleryDir(k)!), ...[...goneDirs].map(parentDir)], docs.keys());
   }
   const watchKey = watching().join("\n");
   useEffect(() => link.watch(id, watchKey ? watchKey.split("\n") : []), [watchKey, link]);
@@ -985,7 +1012,7 @@ export function Workbench(props: {
               <Gallery
                 dir={galleryDir(key)!}
                 tick={ticks.get(galleryDir(key)!) ?? 0}
-                list={(d) => (link.api ? link.api.fsList(d) : Promise.reject(new Error("Not connected.")))}
+                list={listGallery}
                 load={(p) => (link.api ? link.api.fsRead(p) : Promise.reject(new Error("Not connected.")))}
                 onOpen={(p) => openFile(p)}
               />

@@ -12,9 +12,19 @@ type Load = (path: string) => Promise<FileBody>;
 
 // One picture in the grid. It reads its file only once it scrolls into sight, through run (a few
 // at a time), as a blob URL: the token stays out of the page, and SVG scripts never run in <img>.
-function Thumb(props: { path: string; entry: DirEntry; load: Load; run: ReturnType<typeof limiter>; onOpen: (path: string) => void }) {
+// A read that fails (offline, say) is tried again at the gallery's next tick.
+function Thumb(props: { path: string; entry: DirEntry; tick: number; load: Load; run: ReturnType<typeof limiter>; onOpen: (path: string) => void }) {
   const box = useRef<HTMLButtonElement>(null);
   const [url, setUrl] = useState("");
+  const [round, setRound] = useState(0);
+  const tick = useRef(props.tick);
+  tick.current = props.tick;
+  const failedAt = useRef<number | null>(null); // the tick its last read failed at
+  useEffect(() => {
+    if (failedAt.current === null || failedAt.current === props.tick) return;
+    failedAt.current = null;
+    setRound((r) => r + 1);
+  }, [props.tick]);
   useEffect(() => {
     let live = true;
     let made = "";
@@ -29,7 +39,7 @@ function Thumb(props: { path: string; entry: DirEntry; load: Load; run: ReturnTy
           made = URL.createObjectURL(new Blob([b.bytes], { type: imageType(props.path) }));
           setUrl(made);
         })
-        .catch(() => {}); // unreadable: the tile keeps its name and no picture
+        .catch(() => void (live && (failedAt.current = tick.current))); // the tile keeps its name and no picture
     });
     seen.observe(box.current!);
     return () => {
@@ -37,7 +47,7 @@ function Thumb(props: { path: string; entry: DirEntry; load: Load; run: ReturnTy
       seen.disconnect();
       if (made) URL.revokeObjectURL(made);
     };
-  }, [props.path]);
+  }, [props.path, round]);
   return (
     <button ref={box} className="gallery-tile" title={props.entry.name} onClick={() => props.onOpen(props.path)}>
       <span className="gallery-thumb">{url && <img src={url} alt={props.entry.name} draggable={false} />}</span>
@@ -58,7 +68,8 @@ export function Gallery(props: { dir: string; tick: number; list: (dir: string) 
     let live = true;
     props.list(props.dir).then(
       (l) => live && (setImages(galleryImages(l.entries)), setError("")),
-      (e) => live && setError(errorText(e)),
+      // Gone (deleted, maybe made again soon): its old pictures go too.
+      (e) => live && (setImages(null), setError(errorText(e))),
     );
     return () => {
       live = false;
@@ -77,7 +88,7 @@ export function Gallery(props: { dir: string; tick: number; list: (dir: string) 
       {!!images?.length && (
         <div className="gallery-grid">
           {images.map((e) => (
-            <Thumb key={`${e.name}\n${e.mtime}`} path={joinPath(props.dir, e.name)} entry={e} load={props.load} run={run} onOpen={props.onOpen} />
+            <Thumb key={`${e.name}\n${e.mtime}`} path={joinPath(props.dir, e.name)} entry={e} tick={props.tick} load={props.load} run={run} onOpen={props.onOpen} />
           ))}
         </div>
       )}
