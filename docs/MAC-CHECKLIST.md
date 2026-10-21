@@ -169,6 +169,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a folder with two Claude sessions, one working and one idle. Hover each and click the trash icon. Start a New shell from the + menu.
   Expect: only that folder's sessions are listed, each with its mark. The idle one ends at once and its conversation moves to Earlier. The working one asks "End this session?" first. `zmx list` on the server agrees. The shell row shows `>_` and its name.
 
+- [ ] **Which session is on what.**
+  Do: in a git repo on the server with `gh` signed in, check out a branch that has a pull request. Start two Claude sessions there and ask each to edit the same file. Hover each row, then hover the red sign before its title. Right-click a row and pick **Open PR #n**. Press ⌘K.
+  Expect: within about a minute, each row shows a red (not amber) warning sign. Its tooltip says "Also on branch *x*: *other title*" and "Both edited *file* with *other title*". The row's tooltip says "On branch *x*". **Open PR #n** opens the pull request in your default browser. ⌘K shows the branch after the folder.
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**

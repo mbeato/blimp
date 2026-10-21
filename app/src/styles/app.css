@@ -859,6 +859,15 @@ body.dragging-session * {
   place-items: center;
 }
 
+/* Another session on the same branch or files (TerminalPane's Clash): red, never amber. */
+.srow-clash {
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin-right: -2px;
+  color: var(--danger);
+}
+
 .srow-mark.shell {
   font: 600 10px ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--fg-dim);

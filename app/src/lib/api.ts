@@ -35,6 +35,18 @@ export type Session = {
   jobs?: Job[]; // background work Claude started, running or ended in the last 30 min (older blimpd, or none: absent)
   context?: { used: number; limit: number }; // tokens in Claude's context window, and its size (older blimpd: absent)
   git?: { cwd: string; branch?: string }; // the folder and branch Claude's latest line was in (older blimpd: absent)
+  work?: Work; // its checkout, branch, pull requests and clashes with other sessions (older blimpd: absent)
+};
+
+// Which session is on what (blimpd's work.ts). root: the checkout's top folder; worktree: a linked one.
+// prs: the branch's newest 3 pull requests, any state. clash: another session (by name) on the same
+// branch of the same checkout, or that edited the same files in the last 6 hours (relative to root).
+export type Work = {
+  branch?: string;
+  root?: string;
+  worktree?: boolean;
+  prs?: { number: number; title: string; state: string; url: string }[];
+  clash?: { session: string; reason: "branch" | "files"; files?: string[] }[];
 };
 
 // Background work Claude started (blimpd's activity.ts): a Bash command run in the background, a Monitor,
