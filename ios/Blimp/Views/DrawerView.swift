@@ -1,8 +1,10 @@
-// The drawer from the left: the project picker, the project's inbox (where a new chat starts), its running sessions, then its past
-// conversations folded under Earlier (each newest activity first, with its mark), and Settings. A tap opens one;
-// press and hold a running one to end it. It follows the finger: a swipe right in the chat pulls it out (HomeView's
-// `pull`), a swipe left on it or beside it pushes it back, and letting go settles it open or closed by where it is
-// and how fast it went. A tap beside it closes it too.
+// The drawer from the left: the project picker, the project's inbox (where a new chat starts, and which says how
+// many sessions in every project need you), its running sessions, then its past conversations folded under Earlier
+// (each newest activity first, with its mark, and under its title its branch, jobs and handoff), and Settings. A tap
+// opens one; a swipe right on a row or press and hold has its actions (Stop, Mark read, End; Resume a past one).
+// It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`), a swipe left on it or beside
+// it pushes it back, and letting go settles it open or closed by where it is and how fast it went. A tap beside it
+// closes it too.
 import BlimpKit
 import SwiftUI
 
@@ -20,8 +22,12 @@ struct DrawerView: View {
     let onPick: (DrawerRow) -> Void
     let onInbox: () -> Void
     let onSettings: () -> Void
+    /// How many sessions, in every project, wait on you: the inbox's Needs you.
+    let needs: Int
+    let actions: RowActions
+    /// Opens a session: the one a row's Resume started.
+    let onOpen: (String) -> Void
     @Environment(Store.self) private var store
-    @State private var pendingEnd: Session?
     /// Earlier folds away (folded at first), as on the Mac; kept on this phone.
     @AppStorage("drawerEarlierOpen") private var earlierOpen = false
     /// A swipe left that's pushing it back: how far it has gone (at most 0), nil while there's none.
@@ -56,7 +62,6 @@ struct DrawerView: View {
             .animation(.snappy, value: open)
             .animation(.snappy, value: still)
         }
-        .endConfirmation($pendingEnd, store: store)
     }
 
     private func closing(width: CGFloat) -> some Gesture {
@@ -81,7 +86,14 @@ struct DrawerView: View {
         VStack(alignment: .leading, spacing: 0) {
             picker.padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
             Button(action: onInbox) {
-                Label("Inbox", systemImage: "tray").frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Label("Inbox", systemImage: "tray")
+                    Spacer()
+                    if needs > 0 {
+                        Text(needs == 1 ? "1 needs you" : "\(needs) need you").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
@@ -127,15 +139,12 @@ struct DrawerView: View {
     private var past: [DrawerRow] { rows.filter { if case .past = $0.item { true } else { false } } }
 
     private func rowButton(_ row: DrawerRow) -> some View {
-        Button { onPick(row) } label: { RowLabel(row: row) }
+        Button { onPick(row) } label: { RowLabel(row: row, sessions: store.sessions) }
             .foregroundStyle(.primary)
             .listRowBackground(row.id == selected ? Color.secondary.opacity(0.15) : Color.clear)
             .accessibilityIdentifier(row.id)
-            .contextMenu {
-                if case .running(let s) = row.item {
-                    Button("End session", systemImage: "xmark.circle") { pendingEnd = s }
-                }
-            }
+            // From the left: a swipe left closes the drawer.
+            .modifier(RowMenu(item: row.item, edge: .leading, actions: actions, onOpen: onOpen))
     }
 
     /// The project's name with a chevron; a tap lists the projects to pick from, each with its top mark.
@@ -164,17 +173,59 @@ struct DrawerView: View {
     }
 }
 
+/// A row: its mark, its title (a session a handoff started has an arrow before it), and under it how long ago,
+/// then its handoff, branch and jobs; a red warning when it may get in another session's way.
 struct RowLabel: View {
     let row: DrawerRow
+    /// Every running session, for the other session's title in a clash and a handoff's parent.
+    var sessions: [Session] = []
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Each minute, for the jobs' running time.
+        TimelineView(.everyMinute) { context in
+            content(now: context.date.timeIntervalSince1970 * 1000)
+        }
+    }
+
+    private var session: Session? {
+        if case .running(let s) = row.item { return s }
+        return nil
+    }
+
+    private func content(now: Double) -> some View {
+        let caption = session.map { RowCaption($0, all: sessions, now: now) }
+        return HStack(spacing: 10) {
             MarkView(mark: row.mark)
             VStack(alignment: .leading, spacing: 2) {
-                // two lines for a long name, rather than cut off
-                Text(row.title).lineLimit(2)
-                Text(ago(ms: row.activity)).font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    if let continued = caption?.continued {
+                        Image(systemName: "arrow.turn.down.right").font(.caption).foregroundStyle(.secondary).accessibilityLabel(continued)
+                    }
+                    // two lines for a long name, rather than cut off
+                    Text(row.title).lineLimit(2)
+                }
+                Text([ago(ms: row.activity), caption?.text].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if let clash = caption?.clash, !clash.isEmpty {
+                ClashMark(lines: clash)
             }
         }
+    }
+}
+
+/// Another session may get in this one's way (the same branch, or the same files edited): red, never amber,
+/// which means "waiting for you". VoiceOver says with whom and why; so does the row's press-and-hold menu.
+struct ClashMark: View {
+    let lines: [String]
+
+    var body: some View {
+        Image(systemName: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
+            .accessibilityLabel(lines.joined(separator: ". "))
     }
 }

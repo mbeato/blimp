@@ -2,6 +2,8 @@
 
 This is the iPhone app for blimp. It shows the Claude sessions running on your server. You can read them, type to them, answer their questions and permission prompts (and, in a new folder, whether Claude may trust it), start new ones and end them.
 
+The inbox lists what needs you in every project at the top. You can answer a permission or a simple question right there, without opening the chat. Swipe a row to stop, end or mark it read. Press and hold a row to continue it in a new session. Each row shows its branch and background jobs, and a red mark when it may get in another session's way.
+
 It talks to `blimpd`, the small program that runs on your server. The chat features need a blimpd from the phone-chat branch, or the next release. An older blimpd will show the session list but not the chat. The chat then says "This server's blimpd can't show chats yet."
 
 ## Put this branch's blimpd on your server

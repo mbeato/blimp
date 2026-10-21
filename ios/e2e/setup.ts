@@ -4,6 +4,8 @@
 //   demo-chat  in blimp-demo: a conversation; every line typed into it is appended to $E2E_DIR/chat.in
 //              and, with a reply, to its transcript
 //   demo-ask   in api-server: waiting on a permission prompt; every key pressed is appended to $E2E_DIR/prompt.in
+//   demo-perm  in blimp-demo: waiting on a permission prompt with its command, answered from another project's
+//              inbox (Needs you) over POST /sessions/<name>/answer; every key is appended to $E2E_DIR/perm.in
 //   demo-busy  in api-server: working (Claude's status "busy"), its latest step "npm run lint"; every key pressed
 //              is appended to $E2E_DIR/stop.in, and an Esc makes it idle
 //   demo-quiz  in api-server: Claude's question dialog with two questions, the second multi-choice
@@ -59,7 +61,8 @@ async function standIn(name: string, dir: string, script: string, sessionId: str
 const chatIn = join(root, "chat.in");
 const promptIn = join(root, "prompt.in");
 const stopIn = join(root, "stop.in");
-for (const f of [chatIn, promptIn, stopIn]) writeFileSync(f, "");
+const permIn = join(root, "perm.in");
+for (const f of [chatIn, promptIn, stopIn, permIn]) writeFileSync(f, "");
 
 // Like Claude, it writes what it read (paste markers off) and a reply to its transcript, so the phone sees both arrive.
 const chatSid = "e2e00000-0000-0000-0000-000000000001";
@@ -78,6 +81,10 @@ await standIn("demo-chat", join(work, "blimp-demo"), echo, chatSid, [
 // Raw keys, as Claude reads them: a digit arrives without Enter.
 await standIn("demo-ask", join(work, "api-server"), `stty -icanon -echo; exec cat >> '${promptIn}'`,
   "e2e00000-0000-0000-0000-000000000002", [user("u1", "Run the test suite"), said("a1", "I'll run the tests.")]);
+
+// Another, in blimp-demo, for the inbox's Needs you row: answered without opening its chat.
+await standIn("demo-perm", join(work, "blimp-demo"), `stty -icanon -echo; exec cat >> '${permIn}'`,
+  "e2e00000-0000-0000-0000-000000000007", [user("u1", "Build it"), said("a1", "I'll build it.")]);
 
 // Working on something: the phone shows Stop on the working row, which presses Esc (raw keys again). Like
 // Claude, it stops working on Esc: its status file says idle, and the phone's Stop goes away.
@@ -119,6 +126,12 @@ writeFileSync(
   join(status, "demo-ask.json"),
   JSON.stringify({ state: "waiting", at: Date.now(), sessionId: "e2e00000-0000-0000-0000-000000000002", event: "PermissionRequest",
     prompt: { kind: "permission", tool: "Bash", summary: "Ran `npm test`", options: ["Yes", "No"], keys: ["1", "\u001b"], answerable: true } }),
+);
+
+writeFileSync(
+  join(status, "demo-perm.json"),
+  JSON.stringify({ state: "waiting", at: Date.now(), sessionId: "e2e00000-0000-0000-0000-000000000007", event: "PermissionRequest",
+    prompt: { kind: "permission", tool: "Bash", summary: "Ran `npm run build`", options: ["Yes", "No"], keys: ["1", "\u001b"], answerable: true, input: "npm run build" } }),
 );
 
 // Two questions at once, as Claude asks them: a pick, then ticks and a typed answer. The stand-in sets its

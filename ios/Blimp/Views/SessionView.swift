@@ -218,6 +218,7 @@ private struct ChatContent: View {
                     PromptBar(prompt: prompt, busy: model.answering || model.answered || model.stopping,
                               highlight: guess?.prompt == prompt ? guess?.pick : nil,
                               maxHeight: max(320, screenHeight * 0.6),
+                              sending: model.answering, answered: model.answered, folder: model.session?.git?.cwd, onDeny: { text, shown in await RowActions.deny(name: model.name, shown, text, api: store.api) },
                               onDismiss: prompt.kind == .trust ? nil : { Task { await model.dismiss(prompt) } }) { pick, shown in
                         guess = nil
                         Task { await model.answer(pick, to: shown) }

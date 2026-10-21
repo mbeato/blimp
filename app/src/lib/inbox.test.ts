@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Conversation, Note, Session } from "./api";
-import { askedWords, inbox } from "./inbox";
+import { askedWords, inbox, needsYou } from "./inbox";
 
 const s = (name: string, extra: Partial<Session> = {}): Session => ({
   name,
@@ -37,10 +37,41 @@ test("waiting on you: a session that waits, with what it asks; or one done with 
   expect(lines(r).waiting).toEqual(["PERM: Ran `bun test`", "ASK: Which layout?", "OTHER: release it?", "PROSE: ship v0.2.16?"]);
 });
 
-test("work still going on isn't listed: a working session, or one done with a progress note, even unread", () => {
-  const r = inbox([s("busy", { state: "working", unread: true, note: note("done", "released") }), s("part", { unread: true, note: note("progress", "fixing a flaky test") })], []);
+test("work still going on is under Working, the longest-running first; a turn done mid-way, even unread, is with the other sessions", () => {
+  const r = inbox(
+    [
+      s("busy", { state: "working", unread: true, updatedAt: 9000, stateSince: 5000, note: note("done", "released") }),
+      s("older", { state: "working", updatedAt: 9500, stateSince: 2000 }),
+      s("part", { unread: true, note: note("progress", "fixing a flaky test") }),
+    ],
+    [],
+  );
   expect(lines(r)).toEqual({ waiting: [], done: [] });
-  expect(Object.keys(r)).toEqual(["waiting", "done"]);
+  expect(r.working.map((l) => l.id)).toEqual(["session-older", "session-busy"]);
+  expect(r.working.map((l) => l.since)).toEqual([2000, 5000]);
+  expect(r.other.map((l) => l.id)).toEqual(["session-part"]);
+  expect(Object.keys(r)).toEqual(["waiting", "done", "working", "other"]);
+});
+
+test("shells, runs and sessions already read are the other sessions, newest first", () => {
+  const r = inbox([s("read", { unread: false, updatedAt: 2000 }), s("sh", { kind: "shell", sessionId: undefined, state: "unknown", updatedAt: 3000 })], []);
+  expect(r.other.map((l) => l.id)).toEqual(["session-sh", "session-read"]);
+  expect(r.other.map((l) => l.words)).toEqual([undefined, undefined]);
+});
+
+test("needs you: every project's waiting sessions, oldest wait first, with the shown project's past questions", () => {
+  const yes = { kind: "permission" as const, summary: "Ran `ls`" };
+  const r = needsYou(
+    [
+      s("new", { state: "waiting", stateSince: 9000, updatedAt: 9000, prompt: yes }),
+      s("far", { dir: "/q", state: "waiting", stateSince: 2000, updatedAt: 2000, prompt: yes }),
+      s("asks", { dir: "/q", stateSince: 5000, updatedAt: 5000, note: note("question", "ship it?") }),
+      s("busy", { state: "working", stateSince: 1000 }),
+    ],
+    [c("c1", { unread: true, updatedAt: 4000, note: note("question", "which?") }), c("c2", { unread: true, updatedAt: 3000, note: note("done", "x") })],
+  );
+  expect(r.map((l) => l.id)).toEqual(["session-far", "past-c1", "session-asks", "session-new"]);
+  expect(r.map((l) => l.words)).toEqual(["Ran `ls`", "which?", "ship it?", "Ran `ls`"]);
 });
 
 test("done: a session done and unread, with its note; once seen it's gone", () => {

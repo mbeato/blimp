@@ -38,10 +38,10 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] A typed answer. In a question, tap "Type an answer", type, tap Use (or Next for a multi-choice question). Claude gets your words.
 - [ ] A tall question scrolls inside the bar.
 - [ ] Stop. While Claude works, Stop shows. Type something: Stop stays, with Send beside it. Tap Stop. Claude stops.
-- [ ] Answered once. Tap a permission button. The buttons stay greyed until the prompt goes away. A second tap does nothing.
-- [ ] Changed options. A permission can first show Yes and No, then a moment later all of Claude's options. If you tap just as they change, nothing is pressed and "The question changed. Check it and answer again." shows.
+- [ ] Answered once. Tap a permission button. The phone gives a tap you can feel and says "Sent…", then "Answered" with a tick and a second, softer buzz. The buttons stay greyed until the prompt goes away. A second tap does nothing. (phone, for the buzz)
+- [ ] Real options only. Make Claude ask a permission. For a moment the bar says "Loading choices…" with a spinner, then Claude's own options show (for example Yes, then "Yes, and don't ask again …" as a small link under the buttons, then No). Yes and No never show first and then change.
 - [ ] No tool steps. The chat shows only your messages and Claude's replies. While Claude works, the working row says its latest step after "working…" (for example "Ran npm test").
-- [ ] The inbox. Open the app: the inbox of the project you used last. On top, a short paragraph on where the project's work stands, written a little after a session's turn ends; a few words about each session it mentions are a link. Tap one: that session's chat opens. Under it, Waiting on you and Done, a line per session with a few words on where it stands (Haiku's note). No In progress list: the paragraph tells what's still going on. Tap a line: its chat opens. A Done line goes once you've opened that session. The drawer's Inbox comes back here.
+- [ ] The inbox. Open the app: the inbox of the project you used last. On top, a short paragraph on where the project's work stands, written a little after a session's turn ends, with "as of 2m ago" under it; a few words about each session it mentions are a link. Tap one: that session's chat opens. Then, in this order: Needs you (every project's), "Finished, not read yet" (a blue dot, Haiku's few words, "finished 3m ago"), Working ("working 14m") and "+3 other" for the rest, folded. There is no Sessions list: the drawer has it. Tap a line: its chat opens. A Finished line goes once you've opened that session. The drawer's Inbox comes back here.
 - [ ] A new chat. The box at the bottom of the inbox. Type and send: Claude starts there with your message, and the chat becomes that session. In a chat, the top right has the speaker, then Inbox (a tray), which goes back to the inbox.
 - [ ] The project picker. Open the drawer and tap the project's name at its top: the projects, newest activity first, with "Asking you something" or "New reply" under one that needs you. Pick one: its inbox.
 - [ ] The drawer. Swipe right anywhere, in a chat too, or tap the button at the top left: the project picker, Inbox, the running sessions under Active, and the past ones under Earlier, folded until you tap it (it stays as you left it). The newest activity on top in each. A swipe left or a tap beside it closes it. Settings is at its bottom.
@@ -49,10 +49,28 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] Marks. A session asking you something shows an amber question mark; one with a reply you haven't seen, a blue dot; one working, a spinner. The drawer button shows the mark of anything but the chat on screen.
 - [ ] Read on one, read on both. Open a session with a blue dot on the phone: the dot goes on the phone and on the Mac. Show one with a blue dot on the Mac (window in front): it goes on the phone too.
 - [ ] A past conversation. Tap one in the drawer: it opens to read, and nothing starts (the Mac lists no new session). Send something: it resumes with that message.
-- [ ] End a session. Press and hold its row in the drawer, End session, confirm. It leaves the drawer.
+- [ ] End a session. Press and hold its row in the drawer, End session, confirm. It leaves the drawer. The same from a swipe right on its row in the drawer, or a swipe left on its row in the inbox: End asks first.
 - [ ] Links. A link to a web page opens in Safari when tapped. A link with another kind of address (for example `file:` or `tel:`) is not tappable.
 - [ ] Scrolling. A long chat opens at the bottom. A new message follows only when you are already at the bottom. If you scrolled up, a "New" pill shows. Tapping it scrolls down.
 - [ ] The prompt bar does not jump. When a permission appears, the bar slides in without flicker on its first frame.
+
+## Needs you, prompts and rows
+
+- [ ] Needs you across projects. Make sessions in two projects ask something. Open either project's inbox: both are under Needs you, the oldest first, each with "asked 6m ago" and the other one with its project's name. The drawer's Inbox says "2 need you".
+- [ ] Allow and Deny in the row. A permission under Needs you shows its command and Allow and Deny. Tap Allow without opening the chat: a buzz, "Sent…", then "Answered". Claude carries on, on the Mac too. Deny on another one: Claude is told no. (phone, for the buzz)
+- [ ] A risky command asks once more. Make Claude ask to run `git push --force` (or `rm -rf` something). Its command is red in the row, and Allow asks "Allow this?" first. In the chat, a red line says it can push, deploy, delete or force.
+- [ ] A question's choices in the row. A one-question, single-choice prompt shows its options as chips under Needs you; a tap answers it. Two or more questions show "Answer (2)", which opens the chat at the question.
+- [ ] A plan. Make Claude plan something (plan mode) and ask to go ahead. The chat shows "Claude's plan" with the plan as text, then its real options. "No, tell Claude what to change…" opens a field: type what to change, Send. Claude stays in plan mode and gets your words. In the inbox the row says "Review plan", which opens the chat.
+- [ ] No, and why. On a permission in the chat, tap "No, and tell Claude why…", type a reason, Send. Claude is told no, then reads your reason as a message. One step.
+- [ ] A banner on any screen. On the inbox or with the drawer open, make a session in another project start waiting. A banner "… is waiting" slides in at the top with a double buzz; a tap opens it. A session that finishes working gives one light tick and no banner. (phone, for the buzz)
+- [ ] Since you left. Leave the app in the background for more than 30 minutes, then come back. The inbox's top line reads "Since 11:40 PM: 4 finished, 1 asking, 2 working". Tap it: only what changed since shows ("Show all" goes back). Open a session: the line goes.
+- [ ] A stale paragraph dims. After the paragraph was written, make a session it mentions start or stop working. The paragraph turns lighter until it is written again.
+- [ ] A long job. A session working more than 30 minutes shows a clock instead of the spinner under Working.
+- [ ] Swipe actions. Swipe left on an inbox row of a working session: Stop, End. On one with a new reply: Mark read (the blue dot goes, on the Mac too). In the drawer, the same from a swipe right. A past conversation in the drawer: Resume starts it again with no message, and its chat opens. A swipe on a row doesn't open or close the drawer.
+- [ ] The row's caption. A session on a git branch shows the branch under its title ("2m ago · feat-x"); with background jobs, "1 job · 14m", then "job done" for half an hour after one ends.
+- [ ] A clash. Two sessions on the same branch, or that edited the same file: a red warning triangle on each row (never amber). Press and hold: the menu's top says "Also on branch feat-x: …" or "Both edited … with …", and "On branch feat-x (worktree)" in a worktree.
+- [ ] Continue in new session. Press and hold a Claude session's row, Continue in new session. Its caption says "Writing handoff"; when the new session starts, it opens. The new session's row has an arrow before its title ("Continued from …" to VoiceOver), and the old one says "Handed off". Against a blimpd too old for it: "This server's blimpd is too old to continue in a new session. Update it first."
+- [ ] An ended session keeps its name. End a session on the Mac while its chat is open on the phone. The title at the top stays the session's name, not "Starting…".
 
 ## Ended sessions
 
