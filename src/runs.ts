@@ -2,8 +2,9 @@
 // Each run is a zmx session of its own, of kind "run", started in the folder its Claude session works in
 // (the folder of its latest line, so a `cd` into a worktree counts), through your login shell, as typing
 // it there would. The command goes to the shell as an argument and runs with `eval "$1"`, never pasted
-// into the script. When it ends, the shell writes its exit code, prints "── exit N ──" and stays on as
-// a login shell, so the output stays on screen and the session lives until you close it.
+// into the script. Ctrl-C stops the command, not the run. When it ends, the shell writes its exit code,
+// prints "── exit N ──" and stays on as a login shell (in the run's folder again, as the command runs in
+// a subshell), so the output stays on screen and the session lives until you close it.
 //   <socket dir>/runs/<name>.json      what blimpd started: command, parent, folders, startedAt (600)
 //   <socket dir>/runs/<name>.end.json  what the shell wrote when it ended: exit, endedAt (600)
 // "Send result to Claude" types the exit code and the output's last lines into the Claude session.
@@ -23,11 +24,16 @@ export const runsDir = () => join(blimpDir(), "runs");
 const MAX_COMMAND = 4000;
 
 // $1 the command, $2 the runs folder, $3 the shell to stay on in. ZMX_SESSION is the run's zmx name
-// (zmx sets it). The command runs in a subshell, so an `exit` in it ends only the command.
+// (zmx sets it). The command runs in a subshell, so an `exit` in it ends only the command. While it runs
+// the wrapper catches SIGINT with a handler that does nothing (not ignores it: the subshell then gets
+// Ctrl-C's default), so Ctrl-C ends the command and the wrapper goes on. "── output ──" after the
+// echoed command marks where its output starts, however the echo wrapped (runOutput).
 const WRAPPER = [
-  `printf '$ %s\\n' "$1"`,
+  `trap : INT`,
+  `printf '$ %s\\n── output ──\\n' "$1"`,
   `(eval "$1")`,
   `c=$?`,
+  `trap - INT`,
   `f="$2/$ZMX_SESSION.end.json"`,
   `(umask 077; printf '{"exit":%s,"endedAt":%s000}\\n' "$c" "$(date +%s)" > "$f.tmp") && mv -f "$f.tmp" "$f"`,
   `printf '\\n── exit %s ──\\n' "$c"`,
@@ -95,19 +101,19 @@ function prune(live: string[], dir: string) {
   }
 }
 
-// The command's output from the run's screen and scrollback: what's between the command the wrapper
-// printed and its "── exit N ──" line, at most the last 40 lines and 4000 characters, as plain text,
+// The command's output from the run's screen and scrollback: what's between the wrapper's
+// "── output ──" and "── exit N ──" lines, at most the last 40 lines and 4000 characters, as plain text,
 // with what looks like a secret taken out (it's typed into Claude's conversation).
 // A line as a terminal shows it: colors out, and of a line a \r rewrote (a progress bar) its last state.
 const plain = (line: string) => (line.replace(ANSI, "").split("\r").filter((p) => p.trim()).at(-1) ?? "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "").trimEnd();
 
-export function runOutput(history: string, command: string): string {
+export function runOutput(history: string): string {
   let lines = history.split("\n").map(plain);
   const end = lines.findLastIndex((l) => /^── exit -?\d+ ──$/.test(l.trim()));
   if (end >= 0) lines = lines.slice(0, end);
-  const first = plain(`$ ${command.split("\n")[0]}`);
-  const start = lines.findLastIndex((l) => l === first);
-  if (start >= 0) lines = lines.slice(start + command.split("\n").length);
+  // The first: nothing before the wrapper prints it, and the command's own output may.
+  const start = lines.findIndex((l) => l === "── output ──");
+  if (start >= 0) lines = lines.slice(start + 1);
   while (lines.length && !lines[0]) lines.shift();
   while (lines.length && !lines.at(-1)) lines.pop();
   lines = lines.slice(-40);
@@ -119,7 +125,9 @@ export function runOutput(history: string, command: string): string {
 export function resultMessage(run: Run, output: string): string {
   const lines = run.command.split("\n");
   const shown = Array.from(lines[0]).length > 100 ? Array.from(lines[0]).slice(0, 100).join("") + "…" : lines[0] + (lines.length > 1 ? " …" : "");
-  const head = `[blimp run] \`${shown}\` finished with exit ${run.exit}.`;
+  // An inline span with more backticks than any run in the command, so the command can't end it.
+  const ticks = "`".repeat(Math.max(0, ...[...shown.matchAll(/`+/g)].map((m) => m[0].length)) + 1);
+  const head = `[blimp run] ${ticks.length > 1 ? `${ticks} ${shown} ${ticks}` : `\`${shown}\``} finished with exit ${run.exit}.`;
   if (!output) return `${head} It printed nothing.`;
   // A fence longer than any run of backticks in the output, so the output can't end it.
   const fence = "`".repeat(Math.max(3, ...[...output.matchAll(/`+/g)].map((m) => m[0].length + 1)));
@@ -136,7 +144,7 @@ export async function sendResult(name: string, dir = runsDir()): Promise<void> {
   const p = Bun.spawn([zmxPath(), "history", name], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
   const history = await new Response(p.stdout).text();
   try {
-    await typeInto(run.parent, resultMessage(run, redact(runOutput(history, run.command))), { enter: true });
+    await typeInto(run.parent, resultMessage(run, redact(runOutput(history))), { enter: true });
   } catch (e) {
     if (e instanceof Asking) throw new HttpError(409, e.message);
     if ((e as Error).message === "the session ended") throw new HttpError(404, "its Claude session has ended");

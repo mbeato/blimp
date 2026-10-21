@@ -8,27 +8,28 @@ const tmp = mkdtempSync(join(tmpdir(), "blimp-runs-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 describe("runOutput", () => {
-  test("what the command printed: after the command line the run showed, before its exit line", () => {
-    const history = "profile says hi\n$ bun test\n\x1b[32m3 pass\x1b[0m\n0 fail\n\n── exit 0 ──\nuser@host:~/web$ ls\nREADME.md\n";
-    expect(runOutput(history, "bun test")).toBe("3 pass\n0 fail");
+  test("what the command printed: after the run's output line, before its exit line", () => {
+    const history = "profile says hi\n$ bun test\n── output ──\n\x1b[32m3 pass\x1b[0m\n0 fail\n\n── exit 0 ──\nuser@host:~/web$ ls\nREADME.md\n";
+    expect(runOutput(history)).toBe("3 pass\n0 fail");
   });
 
-  test("a command of several lines is skipped whole; a progress bar shows its last state", () => {
-    const history = "$ cd app\nbun install\n10%\r50%\r100% done\n── exit 1 ──\n";
-    expect(runOutput(history, "cd app\nbun install")).toBe("100% done");
+  test("a command wider than the terminal (its echo soft-wrapped) or of several lines is skipped whole; a progress bar shows its last state", () => {
+    const history = "Last login: Tue\n$ gh workflow run deploy.yml --repo characterq\nuilt/characterquilt-app\n── output ──\n✓ Created\n── exit 0 ──\n";
+    expect(runOutput(history)).toBe("✓ Created");
+    expect(runOutput("$ cd app\nbun install\n── output ──\n10%\r50%\r100% done\n── exit 1 ──\n")).toBe("100% done");
   });
 
   test("at most the last 40 lines and 4000 characters", () => {
     const many = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
-    expect(runOutput(`$ x\n${many}\n── exit 0 ──\n`, "x").split("\n")).toEqual(Array.from({ length: 40 }, (_, i) => `line ${i + 60}`));
+    expect(runOutput(`$ x\n── output ──\n${many}\n── exit 0 ──\n`).split("\n")).toEqual(Array.from({ length: 40 }, (_, i) => `line ${i + 60}`));
     const wide = Array.from({ length: 10 }, (_, i) => `${i}${"y".repeat(999)}`).join("\n");
-    const out = runOutput(`$ x\n${wide}\n── exit 0 ──\n`, "x");
+    const out = runOutput(`$ x\n── output ──\n${wide}\n── exit 0 ──\n`);
     expect(out.length).toBeLessThanOrEqual(4000);
     expect(out.split("\n")[0]).toStartWith("7");
   });
 
-  test("no command line on screen (scrolled away): everything before the exit line", () => {
-    expect(runOutput("a\nb\n── exit 2 ──\n", "gone")).toBe("a\nb");
+  test("no output line on screen (scrolled away): everything before the exit line", () => {
+    expect(runOutput("a\nb\n── exit 2 ──\n")).toBe("a\nb");
   });
 });
 
@@ -42,6 +43,8 @@ describe("resultMessage", () => {
   test("a command of several lines shows its first; output with ``` gets a longer fence; no output says so", () => {
     expect(resultMessage({ ...run, command: "cd app\nbun x" }, "")).toBe("[blimp run] `cd app …` finished with exit 1. It printed nothing.");
     expect(resultMessage(run, "```ts\nx\n```")).toEndWith("output:\n````\n```ts\nx\n```\n````");
+    // A command with backticks gets a longer inline span, so they can't end it.
+    expect(resultMessage({ ...run, command: "echo `date`" }, "")).toStartWith("[blimp run] `` echo `date` `` finished");
   });
 });
 

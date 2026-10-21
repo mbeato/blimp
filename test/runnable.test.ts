@@ -21,8 +21,24 @@ describe("runnableCommands", () => {
   });
 
   test("inline code that starts with a command word counts, one line each; other inline code doesn't", () => {
-    const text = "Try `bun run e2e copy.spec.ts`, or `npm test`. The file is `src/x.ts` and `bunx` alone isn't one; `python3 -m http.server` and `cd app` are.";
-    expect(runnableCommands([text])).toEqual(["cd app", "python3 -m http.server", "npm test", "bun run e2e copy.spec.ts"]);
+    const text = "Try `bun run e2e copy.spec.ts`, or `npm test`. The file is `src/x.ts` and `bunx` alone isn't one; `python3 -m http.server` and `cd app && bun i` are.";
+    expect(runnableCommands([text])).toEqual(["cd app && bun i", "python3 -m http.server", "npm test", "bun run e2e copy.spec.ts"]);
+  });
+
+  test("inline `! command` (what you'd type in Claude Code) is a command, whatever its first word", () => {
+    const text = "Run this yourself: `! bash /private/tmp/claude-501/x.sh`, then `! gh workflow run deploy.yml --ref main`. Not `!important` or `!=`.";
+    expect(runnableCommands([text])).toEqual(["gh workflow run deploy.yml --ref main", "bash /private/tmp/claude-501/x.sh"]);
+  });
+
+  test("a bare `cd <dir>` does nothing in a run of its own (the shell left open starts in Claude's folder): left out", () => {
+    expect(runnableCommands(["Go `cd app`, `cd \"my dir\"` or `! cd ~/x`, then `cd app; ls`."])).toEqual(["cd app; ls"]);
+  });
+
+  test("a block that shows $ prompts and their output: only the prompted lines (and lines they continue with \\)", () => {
+    expect(runnableCommands(["```console\n$ npm test\n> x@1 test\n> jest\nPASS\n```"])).toEqual(["npm test"]);
+    expect(runnableCommands(["```bash\n$ ls\nfile1\nfile2\n$ docker run \\\n  -it x\nhello\n```"])).toEqual(["ls\ndocker run \\\n  -it x"]);
+    // No prompts at all: the whole block.
+    expect(runnableCommands(["```bash\ncd app\nbun i\n```"])).toEqual(["cd app\nbun i"]);
   });
 
   test("blocks and inline code in the order they come", () => {
@@ -69,7 +85,7 @@ const notification = JSON.stringify({ parentUuid: "a", ...base, type: "user", me
 
 describe("the latest reply's commands, from the transcript", () => {
   test("a reply's text is said; a typed prompt starts a new reply; a tool's result and a notification don't", () => {
-    expect(lineEvents(reply("Run `npm test`"))).toContainEqual({ type: "said", text: "Run `npm test`" });
+    expect(lineEvents(reply("Run `npm test`"))).toContainEqual({ type: "said", at: Date.parse("2026-10-21T15:52:30.961Z"), text: "Run `npm test`" });
     expect(lineEvents(prompt("run the tests and tell me"))).toContainEqual({ type: "prompt" });
     expect(lineEvents(toolResult).some((e) => e.type === "prompt")).toBe(false);
     expect(lineEvents(notification).some((e) => e.type === "prompt")).toBe(false);
@@ -87,8 +103,11 @@ describe("the latest reply's commands, from the transcript", () => {
     const file = join(tmp, "reply.jsonl");
     writeFileSync(file, [prompt("first"), reply("Old: `npm old`"), prompt("second"), reply("Run:\n```bash\nbun test\n```"), toolResult, notification, reply("Or `npm test`.")].join("\n") + "\n");
     expect(sessionActivity(file, "claude").runnable).toEqual(["npm test", "bun test"]);
+    // When the reply began (its first text): a run from before it is for an older reply.
+    expect(sessionActivity(file, "claude").runnableAt).toBe(Date.parse("2026-10-21T15:52:30.961Z"));
     appendFileSync(file, prompt("thanks") + "\n");
     expect(sessionActivity(file, "claude")).not.toHaveProperty("runnable");
+    expect(sessionActivity(file, "claude")).not.toHaveProperty("runnableAt");
     appendFileSync(file, reply("No commands this time.") + "\n");
     expect(sessionActivity(file, "claude")).not.toHaveProperty("runnable");
   });

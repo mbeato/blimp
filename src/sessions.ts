@@ -54,6 +54,7 @@ export type Session = ZmxSession & {
   git?: Git;
   // Commands in Claude's latest reply, newest first (runnable.ts): what the apps' Run button offers.
   runnable?: string[];
+  runnableAt?: number; // when that reply began (ms): a run started before it is for an older reply
   // A run's command, the Claude session it's for, and once it ended, when and its exit code (runs.ts).
   run?: Omit<Run, "dir">;
 };

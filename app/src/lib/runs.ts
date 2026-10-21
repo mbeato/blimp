@@ -1,11 +1,12 @@
-// The Run bar above a Claude session's terminal: the commands in Claude's latest reply (blimpd's
+// The Run bar over the top of a Claude session's terminal: the commands in Claude's latest reply (blimpd's
 // runnable), each with a Run button, and once one has run, its exit code and "Send result to Claude".
 // Pure, so the rules are unit tested; components/RunBar.tsx draws it.
 
 import type { Session } from "./api";
 import { isClaude } from "./sessions";
 
-// A command, and its newest run for this session (blimpd's run sessions name the session they're for).
+// A command, and its newest run for this session (blimpd's run sessions name the session they're for)
+// since this reply began: one from an older reply with the same command would show an old result.
 export type RunItem = { command: string; run?: Session };
 
 const SHOWN = 3;
@@ -17,7 +18,7 @@ export function runBar(s: Session, sessions: Session[], hidden: string[]): { key
   const key = [s.name, ...s.runnable].join("\0");
   if (hidden.includes(key)) return null;
   const items = s.runnable.map((command) => {
-    const runs = sessions.filter((x) => x.run?.parent === s.name && x.run.command === command);
+    const runs = sessions.filter((x) => x.run?.parent === s.name && x.run.command === command && x.run.startedAt >= (s.runnableAt ?? 0));
     const run = runs.sort((a, b) => b.run!.startedAt - a.run!.startedAt)[0];
     return { command, ...(run && { run }) };
   });

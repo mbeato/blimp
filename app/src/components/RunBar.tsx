@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Session } from "../lib/api";
 import { oneLine, type RunItem, runBar } from "../lib/runs";
 
-// A slim bar above a Claude session's terminal with the commands in Claude's latest reply (lib/runs.ts).
+// A slim bar over the top of a Claude session's terminal with the commands in Claude's latest reply (lib/runs.ts).
 // Each one's full text is its tooltip; clicking Run is the go-ahead (nothing runs before). A run opens in a
 // split to the right; once it ended, its exit code and Send result to Claude, which types the exit code
 // and the last lines of its output into Claude. × hides the bar until a reply with other commands.

@@ -597,15 +597,6 @@ export function TerminalPane(props: {
                   </button>
                 </div>
               )}
-              {bar && (
-                <RunBar
-                  bar={bar}
-                  onRun={(command) => void runCommand(name, command)}
-                  onShow={(run) => showBeside(name, run.name)}
-                  onSend={sendRunResult}
-                  onHide={() => setHiddenRuns((h) => [...h.slice(-50), bar.key])}
-                />
-              )}
               <div
                 className="tsplit-body"
                 // A screenshot on the clipboard goes up like a dropped file, its path typed in. Caught
@@ -618,6 +609,16 @@ export function TerminalPane(props: {
                   void uploadInto(name, items);
                 }}
               >
+                {/* Over the terminal's top, not above it: coming and going, it doesn't resize Claude's terminal. */}
+                {bar && (
+                  <RunBar
+                    bar={bar}
+                    onRun={(command) => void runCommand(name, command)}
+                    onShow={(run) => showBeside(name, run.name)}
+                    onSend={sendRunResult}
+                    onHide={() => setHiddenRuns((h) => [...h.slice(-50), bar.key])}
+                  />
+                )}
                 <TerminalView
                   link={link}
                   name={name}
@@ -814,6 +815,12 @@ export function TerminalPane(props: {
             {sessionOf(ctx.name) && (
               <button role="menuitem" title="For another session: its Claude can read this one's conversation and send it a message" onClick={() => (setCtx(null), void navigator.clipboard.writeText(sessionReference(sessionOf(ctx.name)!)).catch(() => {}))}>
                 Copy Reference
+              </button>
+            )}
+            {/* The bar's Send goes with the reply (at your next prompt); a run's own menu keeps it. */}
+            {sessionOf(ctx.name)?.run?.exit !== undefined && (
+              <button role="menuitem" title="Type its exit code and the last lines of its output into Claude" onClick={() => (setCtx(null), sendRunResult(sessionOf(ctx.name)!))}>
+                Send Result to Claude
               </button>
             )}
           </div>

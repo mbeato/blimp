@@ -1622,7 +1622,7 @@ describe("runs", () => {
     const v = await socket(`/sessions/${name}/attach?cols=120&rows=30`);
     await until(() => v.text.includes("fake-shell size="), "the shell after the run");
     const screen = zmx("history", name).stdout.toString();
-    expect(screen).toContain(`$ pwd; echo out-$((40+2)); exit 3\n${dir}\nout-42\n`);
+    expect(screen).toContain(`$ pwd; echo out-$((40+2)); exit 3\n── output ──\n${dir}\nout-42\n`);
     expect(screen).toContain("── exit 3 ──");
     v.ws.close();
     expect(zmxNames()).toContain(name);
@@ -1655,6 +1655,21 @@ describe("runs", () => {
     const early = await post(`/runs/${slow}/send`);
     expect([early.status, (await early.json()).error]).toEqual([400, "the run hasn't ended yet"]);
   }, 20000);
+
+  test("Ctrl-C stops the command, not the run: its exit code is 130 and the session and its shell stay", async () => {
+    const { name: parent } = await fakeClaude("run5", "a5a5a5a5-a5a5-4a5a-8a5a-a5a5a5a5a5a5", []);
+    const { name } = await (await post("/runs", { session: parent, command: "sleep 30" })).json();
+    made.push(name);
+    const v = await socket(`/sessions/${name}/attach?cols=120&rows=30`);
+    await until(() => v.text.includes("── output ──"), "the run to start");
+    await Bun.sleep(200);
+    type(v.ws, "\x03");
+    await until(async () => (await listed(name))?.run?.exit === 130, "exit 130");
+    await until(() => v.text.includes("fake-shell size="), "the shell after the run");
+    expect(v.text).toContain("── exit 130 ──");
+    v.ws.close();
+    expect(zmxNames()).toContain(name);
+  }, 15000);
 
   test("POST /runs checks the command and the session; a run or session that isn't there is 404", async () => {
     const { name: parent } = await fakeClaude("run4", "a4a4a4a4-a4a4-4a4a-8a4a-a4a4a4a4a4a4", []);

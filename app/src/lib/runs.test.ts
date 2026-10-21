@@ -42,6 +42,14 @@ test("each command has its newest run for this session, running or ended", () =>
   expect(runBar(claude, [claude, old, newer, other], [])!.shown).toEqual([{ command: "bun test", run: newer }, { command: "ls" }]);
 });
 
+test("a run from before this reply began is an older reply's, not this one's", () => {
+  const claude = s("web", { runnable: ["bun test"], runnableAt: 10 });
+  const old = run("web-run-1", "web", "bun test", 9, { exit: 1 });
+  expect(runBar(claude, [claude, old], [])!.shown).toEqual([{ command: "bun test" }]);
+  const now = run("web-run-2", "web", "bun test", 10);
+  expect(runBar(claude, [claude, old, now], [])!.shown).toEqual([{ command: "bun test", run: now }]);
+});
+
 test("oneLine: a command of several lines as one, for a button", () => {
   expect(oneLine("cd app\n  bun install\n")).toBe("cd app ⏎ bun install");
 });

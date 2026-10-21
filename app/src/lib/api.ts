@@ -36,6 +36,7 @@ export type Session = {
   context?: { used: number; limit: number }; // tokens in Claude's context window, and its size (older blimpd: absent)
   git?: { cwd: string; branch?: string }; // the folder and branch Claude's latest line was in (older blimpd: absent)
   runnable?: string[]; // commands in Claude's latest reply, newest first, for the Run bar (older blimpd, or none: absent)
+  runnableAt?: number; // ms, when that reply began: runs from before it are an older reply's (older blimpd: absent)
   run?: Run; // a run session's command and the Claude session it's for (older blimpd: absent)
 };
 
