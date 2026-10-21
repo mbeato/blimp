@@ -746,11 +746,8 @@ body.dragging-session * {
 }
 
 /* "2 jobs": background work Claude started. A click opens the jobs popover. Not amber even on a
-   waiting row: amber is only for waiting. Over the hovered row's trash button, which reaches down
-   into this line at the right end, where this sits. */
+   waiting row: amber is only for waiting. */
 .srow-jobs {
-  position: relative;
-  z-index: 1;
   color: var(--fg-dim);
   cursor: pointer;
 }
@@ -1011,6 +1008,13 @@ body.dragging-session * {
 
 .srow:hover .srow-time {
   visibility: hidden;
+}
+
+/* On a row with "2 jobs" at the end of its second line, the trash button stays on the first (the
+   time's), so the two never overlap and a click on the trash never opens the jobs. */
+.srow:has(.srow-jobs) .srow-trash {
+  top: 1px;
+  height: 20px;
 }
 
 .srow-trash:hover {

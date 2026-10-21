@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Job, Session } from "./api";
-import { duration, jobNotice, jobState, jobsWords, JobWatcher } from "./jobs";
+import { duration, jobNotice, jobState, jobsWords, JobWatcher, viewingList } from "./jobs";
 
 const MIN = 60_000;
 const NOW = 1_000_000_000;
@@ -83,7 +83,7 @@ test("a job that goes from running to done notifies once, keyed by server, sessi
   w.update("srv", "/home/u", [s("a", [j("x")])]);
   w.update("srv", "/home/u", [s("a", [j("x", { status: "done", endedAt: NOW, exit: 0 })])]);
   w.update("srv", "/home/u", [s("a", [j("x", { status: "done", endedAt: NOW, exit: 0 })])]);
-  expect(calls).toEqual([{ title: "Job x finished", body: "Title a · ~/proj", id: { session: "srv/a/x", wait: `srv/a/x/${NOW}` } }]);
+  expect(calls).toEqual([{ title: "Job x finished", body: "Title a · ~/proj", id: { session: "jobs:srv/a", wait: `srv/a/x/${NOW}` } }]);
 });
 
 test("a job that fails notifies with its exit code", () => {
@@ -121,5 +121,26 @@ test("no notification while this window has focus and shows that session's jobs"
   const { w, calls } = setup("srv/a");
   w.update("srv", "/home/u", [s("a", [j("x")]), s("b", [j("y")])]);
   w.update("srv", "/home/u", [s("a", [j("x", { status: "done", endedAt: NOW })]), s("b", [j("y", { status: "done", endedAt: NOW })])]);
-  expect(calls.map((c) => c.id.session)).toEqual(["srv/b/y"]);
+  expect(calls.map((c) => c.id.wait)).toEqual([`srv/b/y/${NOW}`]);
+});
+
+test("with two windows, a job whose list is open in the focused one notifies from neither", () => {
+  // claim_notice (windows.rs): no if a focused window's list has id.session, else once per id.wait.
+  const viewing = new Map<string, string[]>();
+  const noticed = new Set<string>();
+  const shown: string[] = [];
+  const claim = (id: { session: string; wait: string }) =>
+    ![...viewing.values()].some((v) => v.includes(id.session)) && !noticed.has(id.wait) && !!noticed.add(id.wait);
+  // Window A has focus, shows srv/a and has its jobs open; window B shows nothing (no focus).
+  viewing.set("A", viewingList(["srv/a"], "srv/a"));
+  const a = new JobWatcher((title, _b, id) => claim(id) && shown.push(title), (session) => session === "srv/a");
+  const b = new JobWatcher((title, _b, id) => claim(id) && shown.push(title), () => false);
+  const both = (sessions: Session[]) => [a, b].forEach((w) => w.update("srv", "/home/u", sessions));
+  both([s("a", [j("x"), j("y")])]);
+  both([s("a", [j("x", { status: "done", endedAt: NOW }), j("y")])]);
+  expect(shown).toEqual([]);
+  // A closes the jobs list: the next one that ends is announced, once.
+  viewing.set("A", viewingList(["srv/a"], null));
+  both([s("a", [j("x", { status: "done", endedAt: NOW }), j("y", { status: "done", endedAt: NOW })])]);
+  expect(shown).toEqual(["Job y finished"]);
 });

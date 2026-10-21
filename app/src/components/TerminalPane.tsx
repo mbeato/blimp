@@ -467,8 +467,15 @@ export function TerminalPane(props: {
   const jobsKey = jobsAt && popJobs?.length ? `${link.key}/${jobsAt.name}` : null;
   useEffect(() => {
     jobsOpen.current = jobsKey;
-    return () => void (jobsOpen.current === jobsKey && (jobsOpen.current = null));
+    jobsOpen.changed();
+    return () => {
+      if (jobsOpen.current !== jobsKey) return;
+      jobsOpen.current = null;
+      jobsOpen.changed();
+    };
   }, [jobsKey]);
+  // Gone for good, so a job there later doesn't bring it (and its scrim) back without a click.
+  useEffect(() => void (jobsAt && !jobsKey && setJobsAt(null)), [jobsAt, jobsKey]);
   const openMenu = (e: ReactMouseEvent, name: string) => {
     e.preventDefault();
     e.stopPropagation();

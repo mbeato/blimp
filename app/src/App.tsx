@@ -43,7 +43,7 @@ import { closeTab, dropHomeTabs, homeTab, keepServers, moveTab, newLayout, openT
 import { startReorder } from "./lib/reorder";
 import { getSettings, startSettings, useSettings } from "./lib/settings";
 import { notify, setBadge, toMarkSeen, WaitWatcher } from "./lib/waiting";
-import { jobsOpen, JobWatcher } from "./lib/jobs";
+import { jobsOpen, JobWatcher, viewingList } from "./lib/jobs";
 
 type DialogKind = "palette" | "open" | "add" | "settings" | null;
 
@@ -180,19 +180,21 @@ export function App() {
   useEffect(() => void setWindowTitle(root && front?.dir ? `${baseName(root)} — blimp` : "blimp"), [root, front?.dir]);
 
   // What this window shows (the front tab's splits), while it has focus: no notification for
-  // those sessions from any window.
+  // those sessions from any window, nor for the jobs of a session whose jobs popover is open.
   const viewing = front ? front.panes.map((n) => `${front.server}/${n}`) : [];
   viewingRef.current = viewing;
   const viewingKey = viewing.join("\n");
   useEffect(() => {
     const sync = () => {
-      setViewing(document.hasFocus() ? viewingRef.current : []);
+      setViewing(document.hasFocus() ? viewingList(viewingRef.current, jobsOpen.current) : []);
       links.forEach(markSeen);
     };
     sync();
+    jobsOpen.changed = sync;
     window.addEventListener("focus", sync);
     window.addEventListener("blur", sync);
     return () => {
+      jobsOpen.changed = () => {};
       window.removeEventListener("focus", sync);
       window.removeEventListener("blur", sync);
     };

@@ -43,13 +43,21 @@ export function jobNotice(j: Job, s: Session, home: string): { title: string; bo
 }
 
 // The session ("<server key>/<session name>") whose jobs popover this window has open, while it's open.
-export const jobsOpen: { current: string | null } = { current: null };
+// changed: App sends it on to Rust with what the window shows (viewingList).
+export const jobsOpen: { current: string | null; changed: () => void } = { current: null, changed: () => {} };
+
+// What a focused window tells Rust it shows (setViewing): its sessions on screen, and "jobs:<session>"
+// while that session's jobs popover is open. Every window's JobWatcher sees a job end, so the window
+// with the popover open staying quiet isn't enough: claim_notice refuses the others' notices too.
+export const jobsMark = (session: string) => `jobs:${session}`;
+export const viewingList = (viewing: string[], open: string | null) => (open ? [...viewing, jobsMark(open)] : viewing);
 
 // Remembers each server's job states and notifies when one goes from running to done or failed. Like
-// WaitWatcher, the first list from a server only records them. id.session is the job's own key, not the
-// session's: claim_notice (Rust) skips sessions on screen in a focused window, and a job isn't one.
-// id.wait has when it ended, so each window announces it once, and an agent that ends again does again.
-// quiet(session): this window has focus and that session's jobs popover open.
+// WaitWatcher, the first list from a server only records them. id.session is jobsMark(session), not the
+// session: claim_notice (Rust) skips sessions on screen in a focused window, and a job is announced
+// anyway, unless a focused window has its session's jobs open. id.wait has when it ended, so it's
+// announced once across windows, and an agent that ends again is again.
+// quiet(session): this window has focus and that session's jobs popover open (the browser has no Rust).
 export class JobWatcher {
   private last = new Map<string, Map<string, Job["status"]>>();
 
@@ -68,7 +76,7 @@ export class JobWatcher {
         if ((j.status !== "done" && j.status !== "failed") || prev.get(`${s.name}/${j.id}`) !== "running") continue;
         if (this.quiet(session)) continue;
         const n = jobNotice(j, s, home);
-        this.notify(n.title, n.body, { session: `${session}/${j.id}`, wait: `${session}/${j.id}/${j.endedAt ?? ""}` });
+        this.notify(n.title, n.body, { session: jobsMark(session), wait: `${session}/${j.id}/${j.endedAt ?? ""}` });
       }
     }
   }
