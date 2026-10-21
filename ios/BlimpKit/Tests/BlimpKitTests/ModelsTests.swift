@@ -60,6 +60,9 @@ let sessionJSON = """
     guard case .history(let m) = h else { Issue.record("not history: \(h)"); return }
     #expect(m.map(\.id) == ["u1", "a#0"])
     #expect(m[1].role == .tool && m[1].summary == "Ran `ls`")
+    let c = ChatEvent.decode(Data(#"{"type":"append","messages":[{"id":"c1","at":3,"role":"compacted"}]}"#.utf8))
+    guard case .append(let cm) = c else { Issue.record("not append: \(c)"); return }
+    #expect(cm.map(\.role) == [.compacted])
     #expect(ChatEvent.decode(Data(#"{"type":"reset"}"#.utf8)) == .reset)
     #expect(ChatEvent.decode(Data(#"{"type":"unreadable"}"#.utf8)) == .unreadable)
     #expect(ChatEvent.decode(Data(#"{"type":"ack","id":"m1"}"#.utf8)) == .ack(id: "m1"))

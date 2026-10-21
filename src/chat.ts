@@ -9,6 +9,7 @@ export type ToolMessage = { id: string; at: number; role: "tool"; name: string; 
 export type ChatMessage =
   | { id: string; at: number; role: "user"; text: string }
   | { id: string; at: number; role: "assistant"; text: string }
+  | { id: string; at: number; role: "compacted" }
   | ToolMessage;
 
 // tools: tool_use id -> its message, so a later result can fill it in (then it's dropped).
@@ -70,6 +71,8 @@ export function messagesFromLine(line: string, s: ChatScan): ChatMessage[] {
   const at = Date.parse(r?.timestamp) || 0;
   const c = r?.message?.content;
   const out: ChatMessage[] = [];
+  // Claude Code writes a compaction's summary as a prompt; the chat shows one line instead.
+  if (r?.type === "user" && r.isCompactSummary) return [{ id: r.uuid, at, role: "compacted" }];
   if (r?.type === "user" && !r.isMeta) {
     if (typeof c === "string") return typed(c) ? [{ id: r.uuid, at, role: "user", text: c }] : [];
     if (!Array.isArray(c)) return [];

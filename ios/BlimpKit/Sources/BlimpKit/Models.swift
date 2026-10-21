@@ -147,7 +147,7 @@ public struct Session: Codable, Sendable, Equatable, Identifiable {
 }
 
 public enum ChatRole: String, Codable, Sendable, Equatable {
-    case user, assistant, tool
+    case user, assistant, tool, compacted
     public init(from decoder: Decoder) throws {
         self = ChatRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .tool
     }

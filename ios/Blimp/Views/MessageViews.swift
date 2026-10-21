@@ -11,6 +11,12 @@ struct MessageRow: View {
         case .user: UserBubble(text: message.text ?? "")
         case .assistant: AssistantText(text: message.text ?? "")
         case .tool: EmptyView()
+        case .compacted:
+            Text("Session compacted")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("message.compacted")
         }
     }
 }

@@ -28,6 +28,15 @@ describe("messagesFromLine", () => {
     expect(messagesFromLine(line({ type: "ai-title", aiTitle: "x" }), s)).toEqual([]);
   });
 
+  test("a compaction is one line, not the summary Claude Code writes as a prompt", () => {
+    const s = newScan("/home/u/p");
+    const summary = "This session is being continued from a previous conversation that ran out of context. The summary below…";
+    expect(messagesFromLine(line({ type: "system", subtype: "compact_boundary", uuid: "b1", content: "Conversation compacted" }), s)).toEqual([]);
+    expect(messagesFromLine(user("u1", summary, { isCompactSummary: true, isVisibleInTranscriptOnly: true }), s)).toEqual([
+      { id: "u1", at, role: "compacted" },
+    ]);
+  });
+
   test("a tool call is one line, and its result fills it in under the same id", () => {
     const s = newScan("/home/u/p");
     const call = messagesFromLine(assistant("a1", [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "bun test\necho more" } }]), s);
