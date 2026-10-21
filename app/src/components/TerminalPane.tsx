@@ -872,7 +872,8 @@ export function TerminalPane(props: {
               setCtx(null);
             }}
           />
-          <div className="menu context-menu" role="menu" style={{ left: Math.min(ctx.x, innerWidth - 240), top: Math.min(ctx.y, innerHeight - 180) }} onKeyDown={(e) => e.key === "Escape" && setCtx(null)}>
+          {/* Kept in the window by its real height: how many items it has depends on the session (a PR each). */}
+          <div className="menu context-menu" role="menu" ref={(el) => void (el && (el.style.top = `${Math.max(4, Math.min(ctx.y, innerHeight - el.offsetHeight - 4))}px`))} style={{ left: Math.min(ctx.x, innerWidth - 240) }} onKeyDown={(e) => e.key === "Escape" && setCtx(null)}>
             <button role="menuitem" autoFocus onClick={() => moveOut([ctx.name])}>
               Open in New Window
             </button>
