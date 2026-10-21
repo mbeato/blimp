@@ -301,6 +301,7 @@ export function listSessions(
   seen: Seen = readSeen(),
   notes: Notes = shownNotes(),
   activity = true, // jobs, context and git: `blimpd sessions` without --json shows none of them
+  work = activity, // which session is on what (work.ts): `blimpd sessions --json` adds it itself, with withWorkNow
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
@@ -337,7 +338,7 @@ export function listSessions(
       ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
     };
   });
-  return activity ? withWork(rows) : rows;
+  return work ? withWork(rows) : rows;
 }
 
 function runZmxList(): string {

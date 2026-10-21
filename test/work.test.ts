@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type OnWhat, type PR, clashes, parsePrs, prsOf, readRoot, withWork } from "../src/work";
+import { type OnWhat, type PR, clashes, ghPrs, parsePrs, prsOf, readRoot, withWork, withWorkNow } from "../src/work";
 
 const NOW = 1_800_000_000_000;
 const H = 3600_000;
@@ -30,6 +30,9 @@ describe("clashes", () => {
       expect(clashes([on("a", { root: "/r", branch, files: old }), on("b", { root: "/r", branch })], NOW).size).toBe(0);
       const c = clashes([on("a", { root: "/r", branch, files: edited("/r/x.ts") }), on("b", { root: "/r", branch })], NOW);
       expect(c.get("b")).toEqual([{ session: "a", reason: "branch" }]);
+      // A scratch or notes file outside the checkout isn't editing it.
+      const outside = [{ path: "/tmp/scratch/msg.txt", at: NOW }];
+      expect(clashes([on("a", { root: "/r", branch, files: outside }), on("b", { root: "/r", branch })], NOW).size).toBe(0);
     }
   });
 
@@ -101,6 +104,24 @@ describe("pull requests", () => {
     await Bun.sleep(20);
     expect(prsOf("/r", "fails", t + 1, look)).toBeUndefined();
   });
+
+  test("a gh whose output never closes gives none after the time limit, not a lookup that never ends", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "blimp-gh-"));
+    const sh = join(tmp, "sh");
+    // A child of the shell keeps its output open after the shell is killed.
+    writeFileSync(sh, "#!/bin/sh\nsleep 5 &\nexec sleep 5\n");
+    chmodSync(sh, 0o755);
+    const shell = process.env.SHELL;
+    process.env.SHELL = sh;
+    try {
+      const at = Date.now();
+      expect(await ghPrs(tmp, "x", 200)).toBeUndefined();
+      expect(Date.now() - at).toBeLessThan(2000);
+    } finally {
+      process.env.SHELL = shell;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 8000);
 });
 
 describe("a session's checkout", () => {
@@ -124,6 +145,24 @@ describe("a session's checkout", () => {
     expect(await readRoot(join(tmp, "gone"))).toBeUndefined();
     rmSync(tmp, { recursive: true, force: true });
   });
+
+  test("git before 2.31, which prints an option it doesn't know (--path-format) as a line, still gives the real root", async () => {
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), "blimp-work-")));
+    const repo = join(tmp, "repo");
+    mkdirSync(join(repo, "src"), { recursive: true });
+    git(repo, "init", "-q", "-b", "main");
+    const bin = join(tmp, "bin");
+    mkdirSync(bin);
+    const real = Bun.which("git")!;
+    writeFileSync(
+      join(bin, "git"),
+      `#!/bin/bash\na=(); for x in "$@"; do if [[ $x == --path-format=* ]]; then echo "$x"; else a+=("$x"); fi; done; exec ${real} "\${a[@]}"\n`,
+    );
+    chmodSync(join(bin, "git"), 0o755);
+    expect(await readRoot(join(repo, "src"), join(bin, "git"))).toEqual({ root: repo, worktree: false });
+    expect(await readRoot(repo, join(bin, "git"))).toEqual({ root: repo, worktree: false });
+    rmSync(tmp, { recursive: true, force: true });
+  });
 });
 
 describe("withWork", () => {
@@ -141,5 +180,20 @@ describe("withWork", () => {
     expect(out[2]).toEqual(rows[2]);
     expect(out[3]).toEqual(rows[3]);
     expect(JSON.stringify(out)).not.toContain('"files":[{');
+  });
+
+  test("withWorkNow (blimpd sessions --json, run once) waits for the checkouts, so the first list has them, and looks up no PRs", async () => {
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), "blimp-work-")));
+    const repo = join(tmp, "now-repo");
+    mkdirSync(repo);
+    Bun.spawnSync(["git", "init", "-q", "-b", "feat"], { cwd: repo });
+    const rows = [
+      { name: "a", transcript: "/t/a", git: { cwd: repo, branch: "feat" } },
+      { name: "b", transcript: "/t/b", git: { cwd: repo, branch: "feat" } },
+    ];
+    const out = await withWorkNow(rows, NOW, () => []);
+    expect(out[0].work).toEqual({ branch: "feat", root: repo, clash: [{ session: "b", reason: "branch" }] });
+    expect(out[1].work).toEqual({ branch: "feat", root: repo, clash: [{ session: "a", reason: "branch" }] });
+    rmSync(tmp, { recursive: true, force: true });
   });
 });

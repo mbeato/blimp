@@ -22,6 +22,7 @@ import { runPair } from "./pair";
 import { runSend } from "./send";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
+import { withWorkNow } from "./work";
 
 // Codex's part of install-hooks and uninstall-hooks. A hooks.json that isn't strict JSON (comments,
 // say) is left as it is, and Claude Code's hooks still count as done.
@@ -36,7 +37,8 @@ function codexHooks(f: () => void) {
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "sessions") {
   const json = args.includes("--json");
-  const rows = listSessions(undefined, undefined, undefined, undefined, undefined, undefined, undefined, json);
+  const listed = listSessions(undefined, undefined, undefined, undefined, undefined, undefined, undefined, json, false);
+  const rows = json ? await withWorkNow(listed) : listed;
   if (json) console.log(JSON.stringify(rows, null, 2));
   else console.log(rows.length ? formatList(rows) : "no running sessions");
 } else if (cmd === "serve") {
