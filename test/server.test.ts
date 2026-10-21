@@ -122,11 +122,12 @@ beforeAll(async () => {
   }, "blimpd to start");
 });
 
-// More than the default 5 s: this many zmx kills one after another take longer.
-afterAll(() => {
+// More than the default 5 s: this many zmx kills take longer. All at once: one takes about half a
+// second, and one after another the 70-odd sessions ran past the limit and stayed on.
+afterAll(async () => {
   server?.kill();
   // --force: a session flooding its terminal (`yes`) is too busy to answer a plain kill, and stayed on.
-  for (const name of made) zmx("kill", name, "--force");
+  await Promise.all(made.map((name) => Bun.spawn([zmxPath(), "kill", name, "--force"], { env, stdin: "ignore", stdout: "ignore", stderr: "ignore" }).exited));
   rmSync(tmp, { recursive: true, force: true });
   rmSync(homeDir, { recursive: true, force: true });
 }, 30000);
