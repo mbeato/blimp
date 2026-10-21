@@ -10,6 +10,7 @@ import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
 import { InboxSummary } from "./InboxSummary";
+import { SecretDialog } from "./SecretDialog";
 import { inbox } from "../lib/inbox";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
@@ -144,6 +145,8 @@ export function TerminalPane(props: {
   const [drag, setDrag] = useState<Drag | null>(null);
   // Right-click menu on a session (its row or its split's header), at the pointer.
   const [ctx, setCtx] = useState<{ name: string; x: number; y: number } | null>(null);
+  // Give a Secret's dialog, for this session.
+  const [secretFor, setSecretFor] = useState<string | null>(null);
   const [listWidth, setListWidth] = useState(230);
   const box = useRef<HTMLDivElement>(null);
   // Moved to another window: not picked to fill an empty terminal here (the user can still
@@ -782,9 +785,15 @@ export function TerminalPane(props: {
                 Copy Reference
               </button>
             )}
+            {api && sessionOf(ctx.name)?.sessionId && (
+              <button role="menuitem" title="A key or password for Claude, without pasting it into the chat" onClick={() => (setCtx(null), setSecretFor(ctx.name))}>
+                Give a Secret…
+              </button>
+            )}
           </div>
         </>
       )}
+      {secretFor && api && <SecretDialog api={api} session={secretFor} title={sessionOf(secretFor) ? sessionTitle(sessionOf(secretFor)!) : secretFor} onClose={() => setSecretFor(null)} />}
     </div>
   );
 }

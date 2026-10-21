@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Kind } from "../lib/api";
+import type { Api, Kind, Secret } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { changeSettings, DEFAULTS, useSettings, type Settings } from "../lib/settings";
+import { relTime } from "../lib/time";
 import { appVersion } from "../lib/version";
 import { Dialog } from "./Dialog";
 
@@ -140,7 +141,38 @@ function Models(props: { link: ServerLink; named: boolean; onCodexSignIn: () => 
       <Row div label="Codex" note={!codex ? "" : !codex.available ? "Not installed" : codex.note === "signed in" ? "Signed in" : "Not signed in"}>
         {codex?.available && <button onClick={props.onCodexSignIn}>Sign in</button>}
       </Row>
+      <Secrets api={api} />
       <p className="settings-note">Your own kinds of session live in ~/.blimp/kinds.json on the server.</p>
+      {error && <p className="settings-error">{error}</p>}
+    </div>
+  );
+}
+
+// The secrets given to that server's sessions (a session's right-click, Give a Secret…): names only,
+// each with Remove. Nothing shows for a blimpd without secrets (older: 404).
+function Secrets(props: { api: Api }) {
+  const [list, setList] = useState<Secret[] | null>(null);
+  const [error, setError] = useState("");
+  const load = () => void props.api.secrets().then(setList, () => setList(null));
+  useEffect(load, [props.api]);
+  if (!list) return null;
+  const remove = (name: string) =>
+    props.api.removeSecret(name).then(
+      () => (setError(""), load()),
+      (e) => setError(errorText(e)),
+    );
+  return (
+    <div className="secrets">
+      <Row div label="Secrets" note={list.length ? "Claude reads them from files on the server" : "None yet. Give one from a session's right-click menu."}>
+        {null}
+      </Row>
+      {list.map((s) => (
+        <Row div key={s.name} label={s.name} note={`Saved ${relTime(s.mtime)}`}>
+          <button aria-label={`Remove ${s.name}`} onClick={() => void remove(s.name)}>
+            Remove
+          </button>
+        </Row>
+      ))}
       {error && <p className="settings-error">{error}</p>}
     </div>
   );

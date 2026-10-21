@@ -169,6 +169,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a folder with two Claude sessions, one working and one idle. Hover each and click the trash icon. Start a New shell from the + menu.
   Expect: only that folder's sessions are listed, each with its mark. The idle one ends at once and its conversation moves to Earlier. The working one asks "End this session?" first. `zmx list` on the server agrees. The shell row shows `>_` and its name.
 
+- [ ] **Give a Secret.**
+  Do: right-click a Claude session, pick Give a Secret…, type the name `TEST_SECRET` and paste any text as the value. Click Save and Tell Claude. Then ask Claude "is TEST_SECRET set up? don't show it".
+  Expect: the dialog closes. Claude gets a note saying where the file is, and the note does not have the value. Claude reads the file without printing the value. Settings > Models lists TEST_SECRET. Remove takes it away. In the files on the left, opening `~/.blimp/secrets/TEST_SECRET` shows "that's one of blimp's own files".
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**
