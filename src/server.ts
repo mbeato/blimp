@@ -17,6 +17,7 @@ import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZai
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { startNotes } from "./notes";
+import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
 import { markSeen, startSeen } from "./seen";
@@ -148,6 +149,18 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (!isSafeName(name) || !(await sessionExists(name))) throw new HttpError(404, `no session named ${name}`);
     await killSession(name);
     return new Response(null, { status: 204 });
+  }
+
+  // The return card: what a Claude session is for, what's done, what's open (recaps.ts). min: 404
+  // unless it has had that many prompts.
+  const recapOf = path.match(/^\/sessions\/([^/]+)\/recap$/);
+  if (recapOf && get) {
+    const name = decodeURIComponent(recapOf[1]);
+    const min = Number(q.get("min") ?? 0);
+    if (!Number.isInteger(min) || min < 0) throw new HttpError(400, "min must be a whole number");
+    const s = isSafeName(name) ? listSessions(claudeDir(), await zmxListAsync()).find((x) => x.name === name) : undefined;
+    if (!s) throw new HttpError(404, `no session named ${name}`);
+    return Response.json(await recap(s, min));
   }
 
   const attach = path.match(/^\/sessions\/([^/]+)\/attach$/);
