@@ -2539,6 +2539,12 @@ body.dragging-session * {
   line-height: 1.4;
 }
 
+/* Under the Run bar when both show: the bar (28px) would cover the card's top and its ×. */
+.runbar ~ .recap-card {
+  top: 38px;
+  max-height: calc(100% - 48px);
+}
+
 .recap-card .tab-close {
   position: absolute;
   top: 7px;
