@@ -822,6 +822,28 @@ body.dragging-session * {
   color: inherit;
 }
 
+/* How full Claude's context window is, from half full: a thin bar along the row's bottom edge, quieter
+   than another number beside the time. Red from 80%, when it's time to hand off. */
+.ctx-meter {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--fg-faint);
+  opacity: 0.6;
+  pointer-events: none; /* over the row's bottom edge: its clicks and drags are the row's */
+}
+
+.ctx-meter.high {
+  background: var(--danger);
+  opacity: 0.9;
+}
+
+/* A session continued from another one (Continue in New Session). */
+.srow-parent {
+  color: var(--fg-faint);
+}
+
 .srow:hover,
 .srow-main.earlier:hover:not(:disabled) {
   background: var(--hover);

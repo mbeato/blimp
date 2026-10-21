@@ -124,6 +124,13 @@ A conversation is unread when Claude wrote text (not only a tool call; not a sid
 - **Where:** `<socket dir>/seen.json`, `{ "since": ms, "seen": { [sessionId]: ms } }`, mode 600, written through a temp file and a rename. blimpd makes it when it starts, if it's missing: `since` is then, so nothing from before counts as unread. Before it exists, nothing is unread.
 - `unread` shows in `GET /sessions` (and so `/events`, within a second) and `GET /conversations`.
 
+### Handoff
+
+`POST /sessions/<name>/handoff` (no body) → 202 `{ "state": "writing" }`: Continue in New Session (src/handoff.ts). Claude Code sessions only (400 otherwise; 404 for no such session). blimpd types a request into the session (typing.ts, paste + Enter) to write `notes/<YYYY-MM-DD>/HANDOFF-<short-slug>.md` in its folder and reply with only its path. 409 while Claude asks something (the same text as the chat's refusal), while a handoff for it is being written, or before it has a transcript.
+- Every second, blimpd follows the transcript from where it was when the request was typed. Once the request reached Claude (a `user` line, or a `queued_command` attachment while it worked), the first main-thread reply that names a `.md` file written since the request (absolute, or relative to the session's folder or the reply's `cwd`; the last one named wins) is the handoff. A new session of the same kind starts in the same folder with first message `Read <file> and do it` (relative when inside the folder), as `POST /sessions` with `prompt` does. No file in 20 minutes: failed, "No handoff file came back".
+- **Where:** `<socket dir>/handoffs.json`, `{ [parent zmx name]: { state: "writing"|"started"|"failed", child?, file?, error?, at, dir, kind, transcript, offset } }`, mode 600, through a temp file and a rename; only links with a live parent or child, from the last 7 days. A restarted blimpd goes on following a handoff being written.
+- `GET /sessions` gives the parent `handoff: { state, child?, file?, error? }` and the child `parent: <zmx name>`.
+
 ### Terminal
 
 `GET /sessions/<name>/attach?token=…&cols=<n>&rows=<n>` upgrades to a WebSocket.

@@ -22,6 +22,7 @@ import {
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type Git, type Job, sessionActivity } from "./activity";
+import { type Handoffs, type HandoffView, handoffLinks, readHandoffs } from "./handoff";
 import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
 import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
@@ -51,6 +52,10 @@ export type Session = ZmxSession & {
   jobs?: Job[];
   context?: { used: number; limit: number };
   git?: Git;
+  // One-click handoff (handoff.ts): on the session that handed off, its state, the new session and the
+  // file; on that new session, the zmx name of the one it came from.
+  handoff?: HandoffView;
+  parent?: string;
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -298,6 +303,7 @@ export function listSessions(
   seen: Seen = readSeen(),
   notes: Notes = shownNotes(),
   activity = true, // jobs, context and git: `blimpd sessions` without --json shows none of them
+  handoffs: Handoffs = readHandoffs(),
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
@@ -332,6 +338,7 @@ export function listSessions(
       unread: isUnread(seen, info.sessionId, scan?.replied),
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
       ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
+      ...handoffLinks(handoffs, z.name, z.created),
     };
   });
 }

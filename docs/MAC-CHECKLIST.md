@@ -177,6 +177,14 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: in a session, press Shift+Tab until Claude is in plan mode, and ask for a short plan. When it asks "Would you like to proceed?", run the first `curl` from the item above.
   Expect: that session's `prompt` has `"tool": "ExitPlanMode"`, a `plan` with the plan's text, and `options` as the screen shows them (its last row, "Tell Claude what to change", is listed as "No, keep planning").
 
+- [ ] **Continue in New Session.**
+  Do: in a real Claude session that did some work, right-click its row and pick Continue in New Session. Wait for Claude to answer.
+  Expect: the row says "Writing handoff…" while Claude writes. Claude saves notes/<today>/HANDOFF-….md in the folder and replies with its path. A new session opens in a split to the right, and its first message is "Read notes/…/HANDOFF-….md and do it". The old row says "Handed off". The new row has a ↳ before its title, and its tooltip names the old session.
+
+- [ ] **Context meter.**
+  Do: open a folder with a long Claude session (over half of its context window used; `/context` in Claude shows how much).
+  Expect: a thin grey bar along the bottom of its row, as long as the part used. Over 80% it is red. Hovering the row shows "Context N% (… of … tokens)", close to what Claude's own status line says. It is easy to see but doesn't draw the eye more than the amber "waiting" mark.
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**
