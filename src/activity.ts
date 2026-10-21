@@ -414,8 +414,10 @@ function readBranch(cwd: string): string | undefined {
   }
 }
 
-// The files a session's Claude edited (absolute, newest first, at most 200), for the server only.
-export const editedFiles = (file: string): EditedFile[] => transcriptActivity(file)?.files ?? [];
+// The files a session's Claude edited (absolute, newest first, at most 200), for the server only. The
+// session list (work.ts) asks right after sessionActivity read the same file, so that scan is used as it
+// is, without opening the file again; a file not scanned yet is read now.
+export const editedFiles = (file: string): EditedFile[] => (scans.get(file) ?? transcriptActivity(file))?.files ?? [];
 
 // What the session list shows of a transcript (sessions.ts): only what there is. processStart: when the
 // Claude process now on it started (ms). Background work dies with the process that started it, and a

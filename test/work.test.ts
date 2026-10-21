@@ -56,6 +56,20 @@ describe("clashes", () => {
     expect(c.get("a")).toEqual([{ session: "b", reason: "files", files: ["1", "2", "3", "4", "5"] }]);
   });
 
+  test("a session and the ones handed off from it are no clash, even on main with the handoff file and the same files edited", () => {
+    const parent = on("p", { root: "/r", branch: "main", files: edited("/r/notes/2026-10-22/HANDOFF-x.md", "/r/src/a.ts") });
+    const child = on("c", { root: "/r", branch: "main", parent: "p" });
+    expect(clashes([parent, child], NOW).size).toBe(0);
+    expect(clashes([parent, { ...child, files: edited("/r/src/a.ts") }], NOW).size).toBe(0);
+    // Its child's child too; another session on the branch still clashes with each of them.
+    const grandchild = on("g", { root: "/r", branch: "main", parent: "c", files: edited("/r/src/a.ts") });
+    const other = on("o", { root: "/r", branch: "main" });
+    const c = clashes([parent, child, grandchild, other], NOW);
+    expect(c.get("p")).toEqual([{ session: "o", reason: "branch" }]);
+    expect(c.get("g")).toEqual([{ session: "o", reason: "branch" }]);
+    expect(c.get("o")?.map((x) => x.session)).toEqual(["p", "g"]); // c and o have edited nothing: on main, no clash
+  });
+
   test("the same branch and the same files with one session: both reasons", () => {
     const c = clashes([on("a", { root: "/r", branch: "f", files: edited("/r/x") }), on("b", { root: "/r", branch: "f", files: edited("/r/x") })], NOW);
     expect(c.get("a")).toEqual([{ session: "b", reason: "branch" }, { session: "b", reason: "files", files: ["x"] }]);
@@ -180,6 +194,15 @@ describe("withWork", () => {
     expect(out[2]).toEqual(rows[2]);
     expect(out[3]).toEqual(rows[3]);
     expect(JSON.stringify(out)).not.toContain('"files":[{');
+  });
+
+  test("a row's parent (handoff.ts) is what links it to the session it was handed off from: no clash between them", () => {
+    const rows = [
+      { name: "p", transcript: "/t/p", git: { cwd: "/nowhere-p", branch: "feat" } },
+      { name: "c", transcript: "/t/c", git: { cwd: "/nowhere-p", branch: "feat" }, parent: "p" },
+    ];
+    const out = withWork(rows, NOW, () => edited("/x/y.ts"));
+    expect(out.map((r) => r.work)).toEqual([{ branch: "feat" }, { branch: "feat" }]);
   });
 
   test("withWorkNow (blimpd sessions --json, run once) waits for the checkouts, so the first list has them, and looks up no PRs", async () => {

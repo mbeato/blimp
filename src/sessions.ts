@@ -357,6 +357,13 @@ export function listSessions(
   return work ? withWork(rows) : rows;
 }
 
+// The list without jobs, context, git or work, for the background loops and the lookups that use none
+// of them (naming, notes, digests, typing into a session): git and gh then run only for a list someone
+// sees (events.ts while an app listens, GET /sessions), not every few seconds with no app connected.
+export function listSessionsLite(dir = claudeDir(), zmxOut = runZmxList()): Session[] {
+  return listSessions(dir, zmxOut, undefined, undefined, undefined, undefined, undefined, false, false);
+}
+
 function runFields({ dir, ...run }: Run) {
   return { run, title: cut(run.command.split("\n")[0].trim(), 70), ...(dir && { dir }) };
 }

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ChatMessage, type ChatScan, newScan, readAppended } from "./chat";
 import { CLAUDE_KINDS } from "./kinds";
-import { blimpDir, claudeDir, listSessions, loginShell, type Session, transcriptPath, transcriptTitles, zmxListAsync } from "./sessions";
+import { blimpDir, claudeDir, listSessionsLite, loginShell, type Session, transcriptPath, transcriptTitles, zmxListAsync } from "./sessions";
 
 export type Name = { name: string; at: number; prompts: number }; // at: ms; prompts: user prompts then
 export type Names = Record<string, Name>; // by Claude's sessionId
@@ -196,7 +196,7 @@ export async function nameTick(ask = askClaude, now = Date.now): Promise<void> {
   busy = true;
   try {
     const dir = claudeDir();
-    const sessions = listSessions(dir, await zmxListAsync());
+    const sessions = listSessionsLite(dir, await zmxListAsync());
     const names = readNames();
     const live = new Set<string>();
     for (const s of sessions) {

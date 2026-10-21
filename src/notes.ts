@@ -7,7 +7,7 @@ import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CLAUDE_KINDS } from "./kinds";
 import { askClaude, clip, follow, namesOn, newSummary, type Summary } from "./names";
-import { blimpDir, claudeDir, listSessions, type Session, transcriptPath, zmxListAsync } from "./sessions";
+import { blimpDir, claudeDir, listSessionsLite, type Session, transcriptPath, zmxListAsync } from "./sessions";
 
 export type NoteStatus = "done" | "progress" | "question";
 // turn: "<prompts>/<replies>" of the transcript when it was written, so the next turn gets a new one.
@@ -101,7 +101,7 @@ type Deps = {
   on: () => boolean;
 };
 const live: Deps = {
-  sessions: async () => listSessions(claudeDir(), await zmxListAsync()),
+  sessions: async () => listSessionsLite(claudeDir(), await zmxListAsync()),
   transcript: (id) => transcriptPath(claudeDir(), id),
   get file() {
     return notesFile();

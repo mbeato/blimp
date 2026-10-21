@@ -1875,6 +1875,12 @@ describe("runs", () => {
     const v = await socket(`/sessions/${name}/attach?cols=120&rows=30`);
     await until(() => v.text.includes("── output ──"), "the run to start");
     await Bun.sleep(200);
+    // zmx passes a client's keys to the session only while that client "leads" it, and a client takes the
+    // lead only by typing a printable key; a Ctrl-C alone from a client that doesn't lead is dropped. On
+    // zmx 0.5 a client that attaches as the one that started the session leaves sometimes doesn't lead
+    // (3 in 10 here; zmx 0.8.1, which install.sh installs, 15 in 15). That's zmx, not the run: a key first.
+    type(v.ws, "x");
+    await Bun.sleep(100);
     type(v.ws, "\x03");
     await until(async () => (await listed(name))?.run?.exit === 130, "exit 130");
     await until(() => v.text.includes("fake-shell size="), "the shell after the run");
@@ -1883,11 +1889,15 @@ describe("runs", () => {
     expect(zmxNames()).toContain(name);
   }, 15000);
 
-  test("POST /runs checks the command and the session; a run or session that isn't there is 404", async () => {
+  test("POST /runs checks the command and the session (Claude must run there); a run or session that isn't there is 404", async () => {
     const { name: parent } = await fakeClaude("run4", "a4a4a4a4-a4a4-4a4a-8a4a-a4a4a4a4a4a4", []);
     expect((await post("/runs", { command: "ls" })).status).toBe(400);
     for (const command of ["", " ", "x".repeat(4001), 7]) expect((await post("/runs", { session: parent, command })).status).toBe(400);
     expect((await post("/runs", { session: `${tag}-nope`, command: "ls" })).status).toBe(404);
+    // A session with no Claude in it can't take the result back.
+    const shell = await shSession("run4sh", ["sh", "-c", LOOP]);
+    const r = await post("/runs", { session: shell, command: "ls" });
+    expect([r.status, (await r.json()).error]).toEqual([400, `Claude isn't running in ${shell}`]);
     expect((await post(`/runs/${tag}-nope/send`)).status).toBe(404);
     // A session blimpd didn't start as a run isn't one.
     expect((await post(`/runs/${parent}/send`)).status).toBe(404);

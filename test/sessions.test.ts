@@ -186,6 +186,12 @@ test("listSessions adds a Claude session's background jobs, context and git fold
   // `blimpd sessions` without --json shows none of it, so it doesn't read it.
   const bare = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} }, {}, false)[0];
   for (const k of ["jobs", "context", "git"]) expect(bare).not.toHaveProperty(k);
+  // Nor the background loops and lookups (names, notes, digests, typing), which use none of it: so they
+  // run no git or gh with no app connected.
+  const { listSessionsLite } = await import("../src/sessions");
+  const lite = listSessionsLite(home, zmxOut)[0];
+  for (const k of ["jobs", "context", "git", "work", "runnable"]) expect(lite).not.toHaveProperty(k);
+  expect(lite).toMatchObject({ name: "web-1", sessionId: "s1", kind: "claude" });
   // Claude started again on this transcript (a resume): the job didn't survive the old process.
   writeFileSync(join(home, "sessions", "42.json"), JSON.stringify({ sessionId: "s1", cwd: "/home/u/web", status: "busy", startedAt: Date.now() - 1000 }));
   const [r] = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} });

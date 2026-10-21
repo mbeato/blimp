@@ -17,8 +17,9 @@ export type Clash = { session: string; reason: "branch" | "files"; files?: strin
 // worktree: the checkout is a linked worktree (git worktree add), not the repo's main folder.
 export type Work = { branch?: string; root?: string; worktree?: boolean; prs?: PR[]; clash?: Clash[] };
 
-// What clashes are worked out from, per session: its zmx name, checkout, branch and edited files.
-export type OnWhat = { name: string; root?: string; branch?: string; files: EditedFile[] };
+// What clashes are worked out from, per session: its zmx name, checkout, branch and edited files, and
+// the session it was handed off from (handoff.ts), if any.
+export type OnWhat = { name: string; root?: string; branch?: string; files: EditedFile[]; parent?: string };
 
 const RECENT = 6 * 3600_000;
 const MAX_FILES = 5;
@@ -28,14 +29,21 @@ const MAIN = ["main", "master"];
 const shortPath = (path: string, root?: string) => (root && path.startsWith(root + "/") ? path.slice(root.length + 1) : path);
 
 // Each session's clashes with the others, in list order. Sessions with none aren't in the map.
+// A session and the ones handed off from it (or from those) are one piece of work, not a clash: the
+// new one starts in the same checkout on purpose, and continues the same files.
 export function clashes(list: OnWhat[], now = Date.now()): Map<string, Clash[]> {
   const recent = list.map((s) => s.files.filter((f) => f.at >= now - RECENT));
   const inRepo = list.map((s, k) => !!s.root && recent[k].some((f) => f.path.startsWith(s.root + "/")));
+  const parents = new Map(list.flatMap((s) => (s.parent ? [[s.name, s.parent] as const] : [])));
+  const from = (child: string, parent: string) => {
+    for (let p = parents.get(child), n = 0; p && n < 50; p = parents.get(p), n++) if (p === parent) return true;
+    return false;
+  };
   const out = new Map<string, Clash[]>();
   list.forEach((a, i) => {
     const mine: Clash[] = [];
     list.forEach((b, j) => {
-      if (i === j) return;
+      if (i === j || from(a.name, b.name) || from(b.name, a.name)) return;
       const quiet = !inRepo[i] && !inRepo[j];
       if (a.root && a.root === b.root && a.branch && a.branch === b.branch && !(MAIN.includes(a.branch) && quiet)) mine.push({ session: b.name, reason: "branch" });
       const theirs = new Set(recent[j].map((f) => f.path));
@@ -140,8 +148,8 @@ export function prsOf(root: string, branch: string, now = Date.now(), look = ghP
 // The session list with each Claude session's work added, when there's any (sessions.ts). Rows without
 // a git folder (shells, a Claude session before its first line) are left as they are.
 // PRs are not looked up for main or master: a PR's head is its own branch, and `--head main` lists forks'.
-export function withWork<T extends { name: string; transcript?: string; git?: Git }>(rows: T[], now = Date.now(), filesOf = editedFiles, prsFor = prsOf): (T & { work?: Work })[] {
-  const ons = rows.map((s) => (s.git && s.transcript ? { name: s.name, branch: s.git.branch, ...rootOf(s.git.cwd, now), files: filesOf(s.transcript) } : undefined));
+export function withWork<T extends { name: string; transcript?: string; git?: Git; parent?: string }>(rows: T[], now = Date.now(), filesOf = editedFiles, prsFor = prsOf): (T & { work?: Work })[] {
+  const ons = rows.map((s) => (s.git && s.transcript ? { name: s.name, branch: s.git.branch, ...rootOf(s.git.cwd, now), files: filesOf(s.transcript), ...(s.parent && { parent: s.parent }) } : undefined));
   const clash = clashes(ons.filter((o) => !!o), now);
   return rows.map((s, i) => {
     const o = ons[i];
@@ -161,7 +169,7 @@ export function withWork<T extends { name: string; transcript?: string; git?: Gi
 // The same for `blimpd sessions --json`, which lists once and exits: it waits for each folder's checkout,
 // so the list has it, and looks up no pull requests (gh is slow, and the process would wait for it after
 // printing). GET /sessions has them.
-export async function withWorkNow<T extends { name: string; transcript?: string; git?: Git }>(rows: T[], now = Date.now(), filesOf = editedFiles) {
+export async function withWorkNow<T extends { name: string; transcript?: string; git?: Git; parent?: string }>(rows: T[], now = Date.now(), filesOf = editedFiles) {
   const cwds = new Set(rows.flatMap((s) => (s.git && s.transcript ? [s.git.cwd] : [])));
   await Promise.all([...cwds].map(async (cwd) => roots.set(cwd, { read: now, found: await readRoot(cwd) })));
   return withWork(rows, now, filesOf, () => undefined);

@@ -7,7 +7,7 @@
 
 import type { Subprocess } from "bun";
 import { cleanText } from "./prompt";
-import { claudeDir, listSessions, type Session, sessionExists, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
+import { claudeDir, listSessionsLite, type Session, sessionExists, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
 import { followSize, lastSize } from "./terminal";
 
 // A session's zmx client, started on the first write. queue: the last thing this typist typed. typed: its
@@ -24,7 +24,7 @@ export class Asking extends Error {
 }
 
 export async function findSession(name: string): Promise<Session | undefined> {
-  return listSessions(claudeDir(), await zmxListAsync()).find((s) => s.name === name);
+  return listSessionsLite(claudeDir(), await zmxListAsync()).find((s) => s.name === name);
 }
 
 const seen = new Map<string, string[]>(); // session -> last 100 ids typed, across typists

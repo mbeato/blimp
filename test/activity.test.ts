@@ -365,7 +365,14 @@ describe("transcriptActivity", () => {
     expect(transcriptActivity(f)!.jobs.get("b5bbkbpfm")).toMatchObject({ status: "failed", exit: 1 });
     expect(editedFiles(f)).toEqual([]);
     appendFileSync(f, R.edit + "\n");
+    // The edited files are the last scan's (the session list scans just before it asks), not read again.
+    expect(editedFiles(f)).toEqual([]);
+    transcriptActivity(f);
     expect(editedFiles(f)).toEqual([{ path: "/Users/u/blimp/app/src/lib/browser.ts", at: tsOf("edit") }]);
+    // A file not scanned yet is read.
+    const g = join(tmp, "edited-only.jsonl");
+    writeFileSync(g, R.edit + "\n");
+    expect(editedFiles(g)).toEqual([{ path: "/Users/u/blimp/app/src/lib/browser.ts", at: tsOf("edit") }]);
     // Rewritten shorter: read again from the start.
     writeFileSync(f, R.bashCall + "\n");
     const a = transcriptActivity(f)!;

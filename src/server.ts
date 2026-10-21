@@ -142,6 +142,8 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const cmd = checkCommand(command);
     const parent = listSessions(claudeDir(), await zmxListAsync()).find((s) => s.name === session);
     if (!parent) throw new HttpError(404, `no session named ${session}`);
+    // Its result goes back to Claude there, so Claude must be running there (as for a secret's note).
+    if (!parent.sessionId) throw new HttpError(400, `Claude isn't running in ${session}`);
     return Response.json({ name: await startRun(parent, cmd) }, { status: 201 });
   }
   const runSend = path.match(/^\/runs\/([^/]+)\/send$/);

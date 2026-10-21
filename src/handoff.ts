@@ -262,6 +262,7 @@ export async function askHandoff(name: string, file = handoffsFile()): Promise<H
       await typeInto(name, handoffText(new Date(at)), { enter: true });
     } catch (e) {
       if (e instanceof Asking) throw new HttpError(409, e.message);
+      if ((e as Error).message === "the session ended") throw new HttpError(404, `no session named ${name}`);
       throw e;
     }
     const live = await real.live();

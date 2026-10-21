@@ -9,7 +9,7 @@ import { basename, join } from "node:path";
 import { CLAUDE_KINDS } from "./kinds";
 import { askClaude, clip, follow, namesOn, newSummary, type Summary } from "./names";
 import type { ShownNote } from "./notes";
-import { blimpDir, claudeDir, listSessions, type Session, transcriptPath, zmxListAsync } from "./sessions";
+import { blimpDir, claudeDir, listSessionsLite, type Session, transcriptPath, zmxListAsync } from "./sessions";
 
 // sessions: the names its links point at, link n at sessions[n - 1]. key: what it was written from (digestKey).
 export type Digest = { text: string; sessions: string[]; at: number; key: string };
@@ -118,7 +118,7 @@ type Deps = {
   on: () => boolean;
 };
 const live: Deps = {
-  sessions: async () => listSessions(claudeDir(), await zmxListAsync()),
+  sessions: async () => listSessionsLite(claudeDir(), await zmxListAsync()),
   transcript: (id) => transcriptPath(claudeDir(), id),
   get file() {
     return digestsFile();
