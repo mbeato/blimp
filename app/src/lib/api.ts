@@ -35,7 +35,13 @@ export type Session = {
   jobs?: Job[]; // background work Claude started, running or ended in the last 30 min (older blimpd, or none: absent)
   context?: { used: number; limit: number }; // tokens in Claude's context window, and its size (older blimpd: absent)
   git?: { cwd: string; branch?: string }; // the folder and branch Claude's latest line was in (older blimpd: absent)
+  runnable?: string[]; // commands in Claude's latest reply, newest first, for the Run bar (older blimpd, or none: absent)
+  run?: Run; // a run session's command and the Claude session it's for (older blimpd: absent)
 };
+
+// A command run from the Run bar (blimpd's runs.ts), in a session of its own: the Claude session it's for,
+// the folder it runs in, and once it ended, when (ms) and its exit code.
+export type Run = { command: string; parent: string; cwd: string; startedAt: number; endedAt?: number; exit?: number };
 
 // Background work Claude started (blimpd's activity.ts): a Bash command run in the background, a Monitor,
 // an async agent or a workflow. Times in ms; lastLine: a running bash job's or Monitor's last output line
@@ -122,6 +128,16 @@ export class Api {
 
   kinds() {
     return this.json<Kind[]>("/kinds");
+  }
+
+  // Runs a command Claude handed over, for that Claude session: the new run session's name.
+  run(session: string, command: string) {
+    return this.post<{ name: string }>("/runs", { session, command });
+  }
+
+  // Types a run's exit code and last output lines into its Claude session (409 while Claude asks something).
+  async sendRunResult(name: string) {
+    await this.req(`/runs/${encodeURIComponent(name)}/send`, { method: "POST" });
   }
 
   // Whether the server has each key. Keys only ever go to it, never come back.

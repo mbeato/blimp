@@ -562,6 +562,110 @@ h2 {
   position: relative;
 }
 
+/* The Run bar (components/RunBar.tsx): commands from Claude's latest reply, above its terminal. */
+.runbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  background: var(--bg-side);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Only the commands are cut in a narrow split: the +N menu below the bar must not be. */
+.runbar-items {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.runbar-label {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+
+/* A command keeps enough of itself to be read; commands that don't fit are cut at the bar's end. */
+.runbar-run {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 96px;
+  max-width: 320px;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.runbar-run:not(:first-child) {
+  margin-left: 6px;
+}
+
+.runbar-run:hover,
+.runbar-more:hover,
+.runbar-send:hover,
+.runbar-status:hover {
+  background: var(--selected);
+}
+
+.runbar-run svg {
+  flex: none;
+  color: var(--fg-dim);
+}
+
+.runbar code,
+.runbar-menu code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 11px ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.runbar-status,
+.runbar-more,
+.runbar-send {
+  flex: none;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.runbar-status.failed {
+  color: var(--danger);
+}
+
+.runbar-send {
+  border: 1px solid var(--line);
+  color: var(--fg);
+}
+
+.runbar-hide {
+  margin-left: auto;
+  visibility: visible;
+}
+
+.runbar-menu {
+  left: 0;
+  right: auto;
+  top: 24px;
+  max-width: 420px;
+}
+
 .tsplit-divider {
   position: absolute;
   top: 0;

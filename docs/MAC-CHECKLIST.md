@@ -169,6 +169,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a folder with two Claude sessions, one working and one idle. Hover each and click the trash icon. Start a New shell from the + menu.
   Expect: only that folder's sessions are listed, each with its mark. The idle one ends at once and its conversation moves to Earlier. The working one asks "End this session?" first. `zmx list` on the server agrees. The shell row shows `>_` and its name.
 
+- [ ] **Run a command Claude gives you.**
+  Do: ask Claude "give me a bash command that prints the date and sleeps 3 seconds, in a code block, don't run it". Hover the command in the Run bar above its terminal, then click it. When it ends, click Send result to Claude. Then ask Claude for a command that fails (`ls /nope`), run it, and press Send result while Claude asks you something (ask it to create a file first, so it waits for your answer).
+  Expect: the tooltip shows the whole command. A split opens to the right, in the folder Claude works in, and shows the output, then `── exit 0 ──` and a shell prompt. The bar says "exit 0"; Send result types "[blimp run] … finished with exit 0" with the output into Claude, and Claude answers it. The failing one says "exit 2" in red. While Claude asks something, a notice says "Claude is asking something. Answer it first." and nothing is typed. In a narrow split the bar cuts the last commands, not the first one's button. × hides the bar until Claude's next reply with commands.
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**
