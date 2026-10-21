@@ -1146,7 +1146,9 @@ esac; done
     const child = await listed(started.handoff.child);
     expect([child.parent, child.kind, child.dir]).toEqual([name, "claude", dir]);
     const s = await socket(`/sessions/${started.handoff.child}/attach?cols=100&rows=30`);
-    await until(() => s.text.includes("-- Read notes/today/HANDOFF-tests.md and do it]"), "the first message in Claude's arguments");
+    // Wrapped rows joined again: with the browser MCP's arguments (on a machine with Chrome, as CI), the
+    // arguments line is longer than the terminal is wide (as for kinds, 217453f).
+    await until(() => s.text.replace(/\r\n/g, "").includes("-- Read notes/today/HANDOFF-tests.md and do it]"), "the first message in Claude's arguments");
     s.ws.close();
     expect(statSync(join(tmp, "handoffs.json")).mode & 0o777).toBe(0o600);
   }, 30000);
