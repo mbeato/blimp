@@ -10,6 +10,7 @@ import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
 import { InboxSummary } from "./InboxSummary";
+import { RecapCard, useRecaps } from "./RecapCard";
 import { inbox } from "../lib/inbox";
 import { jobsOpen, jobsWords } from "../lib/jobs";
 import { JobsPopover } from "./JobsPopover";
@@ -533,6 +534,9 @@ export function TerminalPane(props: {
   }, [jobsKey]);
   // Gone for good, so a job there later doesn't bring it (and its scrim) back without a click.
   useEffect(() => void (jobsAt && !jobsKey && setJobsAt(null)), [jobsAt, jobsKey]);
+  // Return cards, for the Claude sessions on screen here while this tab is in front.
+  const isConversation = (name: string) => !!sessionOf(name)?.sessionId && isClaude(sessionOf(name)!);
+  const recaps = useRecaps(api, link.key, props.front ? p.panes.filter(isConversation) : []);
   const openMenu = (e: ReactMouseEvent, name: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -681,6 +685,7 @@ export function TerminalPane(props: {
                     onHide={() => setHiddenRuns((h) => [...h.slice(-50), bar.key])}
                   />
                 )}
+                {recaps.cards[name] && <RecapCard card={recaps.cards[name]} onClose={() => recaps.dismiss(name)} />}
                 <TerminalView
                   link={link}
                   name={name}
@@ -878,6 +883,11 @@ export function TerminalPane(props: {
             {sessionOf(ctx.name) && (
               <button role="menuitem" title="For another session: its Claude can read this one's conversation and send it a message" onClick={() => (setCtx(null), void navigator.clipboard.writeText(sessionReference(sessionOf(ctx.name)!)).catch(() => {}))}>
                 Copy Reference
+              </button>
+            )}
+            {isConversation(ctx.name) && (
+              <button role="menuitem" title="What this session is for, what's done and what's still open" onClick={() => (setCtx(null), p.panes.includes(ctx.name) || showHere(ctx.name), recaps.show(ctx.name))}>
+                Recap
               </button>
             )}
             {sessionOf(ctx.name) && isClaude(sessionOf(ctx.name)!) && (

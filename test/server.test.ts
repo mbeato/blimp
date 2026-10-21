@@ -1708,6 +1708,30 @@ cat "${answer}"
     }
   }, 20000);
 
+  // The return card (recaps.ts): written by the model on request, kept until Claude replies again.
+  test("GET /sessions/<name>/recap: the model's goal, done and open, the same until a new reply lands", async () => {
+    writeFileSync(answer, "GOAL | Fix the phone login\nDONE | Token refresh fixed\nOPEN | Release it\n");
+    const sid = "99999999-9999-4999-8999-999999999999";
+    const lines = [user("u1", "fix the phone login"), said("a1", "Fixed."), user("u2", "add tests"), said("a2", "Added."), user("u3", "ship it"), said("a3", "Shipping.")];
+    const name = await fakeClaude("n5", sid, lines);
+    const recapCalls = () => stdins().filter((t) => t.includes("coming back to this Claude Code session")).length;
+    const get = (n: string, q = "") => fetch(`http://blimpd/sessions/${n}/recap${q}`, { unix: nSock, headers: { Authorization: `Bearer ${nToken}` } } as any);
+    const r = await get(name, "?min=3");
+    expect(r.status).toBe(200);
+    const card = await r.json();
+    expect(card).toMatchObject({ goal: "Fix the phone login", done: ["Token refresh fixed"], open: ["Release it"] });
+    expect(recapCalls()).toBe(1);
+    expect(await (await get(name)).json()).toEqual(card);
+    expect(recapCalls()).toBe(1);
+    expect(statSync(join(nTmp, "recaps.json")).mode & 0o777).toBe(0o600);
+    expect(await (await get(name, "?min=4")).json()).toEqual({ error: "Not enough to recap yet" });
+    appendFileSync(join(nClaude, "projects", "p", `${sid}.jsonl`), said("a4", "Released v0.2.20."));
+    expect((await get(name)).status).toBe(200);
+    expect(recapCalls()).toBe(2);
+    expect(stdins().find((t) => t.includes("coming back") && t.includes("Released v0.2.20."))).toBeDefined();
+    expect((await get(`${tag}-nope`)).status).toBe(404);
+  }, 20000);
+
   test('nothing is called with "names": false, and Claude\'s titles show again', async () => {
     writeFileSync(join(nTmp, "config.json"), JSON.stringify({ names: false }));
     writeFileSync(answer, "Should Not Show\n");
@@ -1718,6 +1742,9 @@ cat "${answer}"
     const sessions = await list();
     expect(sessions.find((s) => s.name === name)?.title).toBe("tidy the readme");
     expect(sessions.find((s) => s.sessionId === "55555555-5555-5555-5555-555555555555")?.title).toBe("make the mobile app login work again");
+    const r = await fetch(`http://blimpd/sessions/${name}/recap`, { unix: nSock, headers: { Authorization: `Bearer ${nToken}` } } as any);
+    expect([r.status, await r.json()]).toEqual([404, { error: "Recaps are off" }]);
+    expect(stdins().length).toBe(before);
   }, 20000);
 });
 
