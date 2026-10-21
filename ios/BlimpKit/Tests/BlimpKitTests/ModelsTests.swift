@@ -63,6 +63,9 @@ let sessionJSON = """
     let c = ChatEvent.decode(Data(#"{"type":"append","messages":[{"id":"c1","at":3,"role":"compacted"}]}"#.utf8))
     guard case .append(let cm) = c else { Issue.record("not append: \(c)"); return }
     #expect(cm.map(\.role) == [.compacted])
+    let sh = ChatEvent.decode(Data(#"{"type":"append","messages":[{"id":"s1","at":4,"role":"shell","input":"ls","output":"a"}]}"#.utf8))
+    guard case .append(let shm) = sh else { Issue.record("not append: \(sh)"); return }
+    #expect(shm.map(\.role) == [.shell] && shm[0].input == "ls" && shm[0].output == "a")
     #expect(ChatEvent.decode(Data(#"{"type":"reset"}"#.utf8)) == .reset)
     #expect(ChatEvent.decode(Data(#"{"type":"unreadable"}"#.utf8)) == .unreadable)
     #expect(ChatEvent.decode(Data(#"{"type":"ack","id":"m1"}"#.utf8)) == .ack(id: "m1"))

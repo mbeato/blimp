@@ -17,6 +17,40 @@ struct MessageRow: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("message.compacted")
+        case .shell: ShellRun(command: message.input ?? "", output: message.output)
+        }
+    }
+}
+
+/// A ! command you ran: the command as your bubble, what it printed under it in monospace (more
+/// than 12 lines fold, with Show more). No output yet: it's still running.
+struct ShellRun: View {
+    let command: String
+    let output: String?
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            UserBubble(text: "! " + command)
+            if let output, !output.isEmpty {
+                let long = output.split(separator: "\n", omittingEmptySubsequences: false).count > 12
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(output)
+                        .font(.system(.footnote, design: .monospaced))
+                        .lineLimit(long && !open ? 12 : nil)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("message.shell.output")
+                    if long {
+                        Button(open ? "Show less" : "Show more") { open.toggle() }
+                            .font(.footnote.weight(.semibold))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            }
         }
     }
 }

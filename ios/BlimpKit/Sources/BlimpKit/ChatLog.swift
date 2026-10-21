@@ -17,7 +17,7 @@ public struct ChatLog: Equatable, Sendable {
     public var latestStep: ChatMessage? {
         for m in messages.reversed() {
             if m.role == .tool { return m }
-            if m.role == .user { return nil }
+            if m.role == .user || m.role == .shell { return nil }
         }
         return nil
     }

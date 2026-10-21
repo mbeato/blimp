@@ -1,20 +1,23 @@
 // A Claude transcript as chat messages, for the phone (docs/DESIGN.md, Chat). The transcript is
 // Claude Code's internal format: each content block is its own entry, tool results come back as
 // user entries. Only what a person would see in a chat app is kept: what you typed, what Claude
-// said, and one line per tool call.
+// said, one line per tool call, and the ! commands you ran with their output.
 
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 
 export type ToolMessage = { id: string; at: number; role: "tool"; name: string; summary: string; input: string; output?: string; error?: boolean };
+export type ShellMessage = { id: string; at: number; role: "shell"; input: string; output?: string };
 export type ChatMessage =
   | { id: string; at: number; role: "user"; text: string }
   | { id: string; at: number; role: "assistant"; text: string }
   | { id: string; at: number; role: "compacted" }
-  | ToolMessage;
+  | ToolMessage
+  | ShellMessage;
 
 // tools: tool_use id -> its message, so a later result can fill it in (then it's dropped).
-export type ChatScan = { offset: number; dir: string; tools: Map<string, ToolMessage> };
-export const newScan = (dir: string): ChatScan => ({ offset: 0, dir, tools: new Map() });
+// shells: the same for ! commands, by the command's entry (its output's entry is a child of it).
+export type ChatScan = { offset: number; dir: string; tools: Map<string, ToolMessage>; shells: Map<string, ShellMessage> };
+export const newScan = (dir: string): ChatScan => ({ offset: 0, dir, tools: new Map(), shells: new Map() });
 
 // Never between the two halves of an emoji: a lone surrogate can make the phone reject the whole frame.
 const cut = (s: string, n: number) => s.slice(0, /[\ud800-\udbff]/.test(s[n - 1] ?? "") ? n - 1 : n);
@@ -55,6 +58,13 @@ export function toolSummary(name: string, input: any, dir: string): string {
 
 const toolInput = (name: string, input: any) => cap(name === "Bash" ? str(input?.command) : JSON.stringify(input ?? {}, null, 2));
 
+// What's between <tag> and the last </tag>: output can itself print the closing tag.
+const inTag = (c: string, tag: string) => {
+  const a = c.indexOf(`<${tag}>`);
+  const b = c.lastIndexOf(`</${tag}>`);
+  return a < 0 || b < a ? "" : c.slice(a + tag.length + 2, b);
+};
+
 function resultText(c: unknown): string {
   if (typeof c === "string") return c;
   if (!Array.isArray(c)) return "";
@@ -73,6 +83,19 @@ export function messagesFromLine(line: string, s: ChatScan): ChatMessage[] {
   const out: ChatMessage[] = [];
   // Claude Code writes a compaction's summary as a prompt; the chat shows one line instead.
   if (r?.type === "user" && r.isCompactSummary) return [{ id: r.uuid, at, role: "compacted" }];
+  // A ! command is a prompt that's only <bash-input>; its output, the next entry, is only <bash-stdout> and <bash-stderr>.
+  if (r?.type === "user" && typeof c === "string" && c.startsWith("<bash-input>")) {
+    const m: ShellMessage = { id: r.uuid, at, role: "shell", input: cap(inTag(c, "bash-input").trim()) };
+    s.shells.set(r.uuid, m);
+    return [{ ...m }];
+  }
+  if (r?.type === "user" && typeof c === "string" && c.startsWith("<bash-stdout>")) {
+    const m = s.shells.get(r.parentUuid);
+    if (!m) return [];
+    s.shells.delete(r.parentUuid);
+    m.output = cap([inTag(c, "bash-stdout"), inTag(c, "bash-stderr")].map((t) => t.replace(/\n+$/, "")).filter(Boolean).join("\n"));
+    return [{ ...m }];
+  }
   if (r?.type === "user" && !r.isMeta) {
     if (typeof c === "string") return typed(c) ? [{ id: r.uuid, at, role: "user", text: c }] : [];
     if (!Array.isArray(c)) return [];

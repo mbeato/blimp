@@ -45,6 +45,21 @@ describe("messagesFromLine", () => {
     expect(result).toEqual([{ ...call[0], output: "3 pass", error: true }]);
   });
 
+  test("a ! command you ran is one message, and its output fills it in under the same id", () => {
+    const s = newScan("/home/u/p");
+    const run = messagesFromLine(user("u1", "<bash-input> ls -a</bash-input>"), s);
+    expect(run).toEqual([{ id: "u1", at, role: "shell", input: "ls -a" }]);
+    const out = messagesFromLine(user("u2", "<bash-stdout>a <b>\n</bash-stdout><bash-stderr>warn</bash-stderr>", { parentUuid: "u1" }), s);
+    expect(out).toEqual([{ ...run[0], output: "a <b>\nwarn" }]);
+    // Nothing printed: an empty output, so the phone knows it finished.
+    messagesFromLine(user("u3", "<bash-input>true</bash-input>"), s);
+    expect(messagesFromLine(user("u4", "<bash-stdout></bash-stdout><bash-stderr></bash-stderr>", { parentUuid: "u3" }), s)).toEqual([
+      { id: "u3", at, role: "shell", input: "true", output: "" },
+    ]);
+    // Output whose command came before what was read: skipped, as a tool result is.
+    expect(messagesFromLine(user("u5", "<bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>", { parentUuid: "gone" }), s)).toEqual([]);
+  });
+
   test("tool input and output are capped at 20 000 characters", () => {
     const s = newScan("/");
     const [m] = messagesFromLine(assistant("a1", [{ type: "tool_use", id: "t1", name: "Write", input: { file_path: "/x", content: "y".repeat(30000) } }]), s);

@@ -163,7 +163,7 @@ public struct Note: Codable, Sendable, Equatable {
 }
 
 public enum ChatRole: String, Codable, Sendable, Equatable {
-    case user, assistant, tool, compacted
+    case user, assistant, tool, compacted, shell
     public init(from decoder: Decoder) throws {
         self = ChatRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .tool
     }
