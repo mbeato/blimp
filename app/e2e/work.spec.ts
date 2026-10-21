@@ -15,10 +15,10 @@ test.afterAll(() => (killSession(a), killSession(b)));
 
 test("two sessions on one branch that edited the same file each warn of the other; the PR opens from the menu", async ({ page }) => {
   const claude = process.env.BLIMP_E2E_CLAUDE!;
-  // A stand-in gh, first on the test blimpd's PATH: one open pull request for the branch.
+  // A stand-in gh, first on the test blimpd's PATH: three pull requests for the branch (gh's --limit 3).
   writeFileSync(
     join(dirname(claude), "bin", "gh"),
-    `#!/bin/sh\nprintf '[{"number":42,"title":"Make %s work","state":"OPEN","url":"https://github.com/o/r/pull/42"}]\\n' "$4"\n`,
+    `#!/bin/sh\nprintf '[{"number":42,"title":"Make %s work","state":"OPEN","url":"https://github.com/o/r/pull/42"},{"number":41,"title":"Try it","state":"CLOSED","url":"https://github.com/o/r/pull/41"},{"number":40,"title":"Start it","state":"MERGED","url":"https://github.com/o/r/pull/40"}]\\n' "$4"\n`,
     { mode: 0o755 },
   );
   const dir = fixtureDir("work");
@@ -71,7 +71,7 @@ test("two sessions on one branch that edited the same file each warn of the othe
   const { base, token } = e2e();
   await expect(async () => {
     const sessions = await (await fetch(`${base}/sessions`, { headers: { Authorization: `Bearer ${token}` } })).json();
-    expect(sessions.find((s: any) => s.name === a)?.work?.prs).toHaveLength(1);
+    expect(sessions.find((s: any) => s.name === a)?.work?.prs).toHaveLength(3);
   }).toPass({ timeout: 10_000 });
   // Then on the events socket's next list; a menu opened before it has no PR item yet, so close it and try again.
   await expect(async () => {
@@ -88,4 +88,16 @@ test("two sessions on one branch that edited the same file each warn of the othe
   await page.keyboard.press("Meta+k");
   const option = page.getByRole("option").filter({ hasText: "Fix the parser" });
   await expect(option.locator(".list-side")).toHaveText("~/work · feat");
+  await page.keyboard.press("Escape");
+
+  // Right-clicked low in the window, the menu with every item (a PR each: 9 here) still fits inside it.
+  const h = page.viewportSize()!.height;
+  await row.evaluate((el, y) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 100, clientY: y })), h - 10);
+  const menu = page.locator(".context-menu");
+  await expect(page.getByRole("menuitem", { name: "Open PR #40" })).toBeVisible();
+  for (const name of ["Recap", "Continue in New Session", "Give a Secret…"]) await expect(page.getByRole("menuitem", { name })).toBeVisible();
+  const box = (await menu.boundingBox())!;
+  expect(box.height).toBeGreaterThan(200);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(h);
 });
