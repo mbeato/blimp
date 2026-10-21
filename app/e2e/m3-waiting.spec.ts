@@ -19,14 +19,14 @@ test("waiting shows within 5 s and fires a notification", async ({ page }) => {
   // Seen once first: the app doesn't announce sessions that were already waiting when it opened.
   const row = sessionRow(page, name);
   await expect(row).toBeVisible();
-  await expect(row.locator(".dot")).toHaveCount(0);
+  await expect(row.locator(".ask")).toHaveCount(0);
 
   // What `blimpd hook` writes when Claude asks a question (a Notification hook).
   const { statusDir } = e2e();
   mkdirSync(statusDir, { recursive: true });
   writeFileSync(join(statusDir, `${name}.json`), JSON.stringify({ state: "waiting", at: Date.now(), event: "Notification" }));
 
-  await expect(row.locator(".dot")).toBeVisible({ timeout: 5000 });
+  await expect(row.locator(".ask")).toBeVisible({ timeout: 5000 });
   // The fixtures folder is the test blimpd's home.
   const folder = "~" + dir.slice(e2e().fixtures.length);
   await expect

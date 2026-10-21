@@ -41,7 +41,7 @@ import { forgetProject, lastLayout, lastServer, rememberLayout, rememberProject 
 import { tildify } from "./lib/sessions";
 import { closeTab, dropHomeTabs, homeTab, keepServers, newLayout, openTab, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
 import { getSettings, startSettings, useSettings } from "./lib/settings";
-import { notify, setBadge, WaitWatcher } from "./lib/waiting";
+import { notify, setBadge, toMarkSeen, WaitWatcher } from "./lib/waiting";
 
 type DialogKind = "palette" | "open" | "add" | "settings" | null;
 
@@ -77,8 +77,17 @@ export function App() {
     () => ({ focused: document.hasFocus(), viewing: viewingRef.current }),
   );
   const settings = useSettings();
+  // The sessions on screen in this window while it has focus are read, here and on the phone.
+  const seenSent = useRef(new Map<string, number>()).current;
+  const markSeen = (l: ServerLink) => {
+    if (l.status !== "connected" || !l.sessions || !l.api) return;
+    const api = l.api;
+    for (const id of toMarkSeen(l.key, l.sessions, { focused: document.hasFocus(), viewing: viewingRef.current }, seenSent))
+      void api.seen(id).catch(() => {});
+  };
   const onLinkChange = useRef((l: ServerLink) => {
     if (l.status === "connected" && l.sessions) watcher.current!.update(l.key, l.home, l.sessions);
+    markSeen(l);
     rerender();
   }).current;
 
@@ -167,7 +176,10 @@ export function App() {
   viewingRef.current = viewing;
   const viewingKey = viewing.join("\n");
   useEffect(() => {
-    const sync = () => setViewing(document.hasFocus() ? viewingRef.current : []);
+    const sync = () => {
+      setViewing(document.hasFocus() ? viewingRef.current : []);
+      links.forEach(markSeen);
+    };
     sync();
     window.addEventListener("focus", sync);
     window.addEventListener("blur", sync);

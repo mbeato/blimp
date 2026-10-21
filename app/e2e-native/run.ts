@@ -524,7 +524,7 @@ try {
   // blimptest-a is on screen, so b becoming waiting must notify.
   mkdirSync(join(tmp, "status"), { recursive: true });
   writeFileSync(join(tmp, "status", "blimptest-b.json"), JSON.stringify({ state: "waiting", at: Date.now(), event: "PermissionRequest" }));
-  const waiting = await until(8000, () => js(`return !!document.querySelector('.srow[data-session="blimptest-b"] .dot')`));
+  const waiting = await until(8000, () => js(`return !!document.querySelector('.srow[data-session="blimptest-b"] .ask')`));
   await sleep(1500);
   const p4 = await probe();
   const notes = p4.invokes.filter((i: any) => i.cmd.startsWith("plugin:notification") || i.cmd === "claim_notice");

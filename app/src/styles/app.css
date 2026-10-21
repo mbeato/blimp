@@ -864,6 +864,23 @@ body.dragging-session * {
   color: var(--fg-dim);
 }
 
+/* Claude asks you something: an amber question mark. */
+.ask {
+  flex: none;
+  font: 800 12px/1 -apple-system, system-ui, sans-serif;
+  color: var(--waiting);
+  text-shadow: 0 0 6px var(--waiting-glow);
+}
+
+/* A reply you haven't seen, on the Mac or the phone. */
+.unread-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--unread);
+}
+
 .state-dot {
   width: 7px;
   height: 7px;

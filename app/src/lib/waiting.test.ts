@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Session } from "./api";
-import { WaitWatcher, type Focus } from "./waiting";
+import { toMarkSeen, WaitWatcher, type Focus } from "./waiting";
 
 const s = (name: string, state: Session["state"]): Session => ({
   name,
@@ -71,4 +71,16 @@ test("servers are tracked separately", () => {
   w.update("two", "/home/u", [s("a", "working")]);
   w.update("two", "/home/u", [s("a", "waiting")]);
   expect(calls).toHaveLength(1); // two/a is not the active tab
+});
+
+test("toMarkSeen: unread sessions on screen in a focused window, once until blimpd catches up", () => {
+  const u = (name: string, id: string | undefined, unread: boolean): Session => ({ ...s(name, "done"), sessionId: id, unread });
+  const list = [u("a", "c-a", true), u("b", "c-b", true), u("c", "c-c", false), u("d", undefined, true)];
+  const viewing = ["srv/a", "srv/c", "srv/d"];
+  const sent = new Map<string, number>();
+  expect(toMarkSeen("srv", list, { focused: false, viewing }, sent, 0)).toEqual([]);
+  expect(toMarkSeen("srv", list, { focused: true, viewing }, sent, 0)).toEqual(["c-a"]);
+  expect(toMarkSeen("srv", list, { focused: true, viewing }, sent, 1000)).toEqual([]);
+  expect(toMarkSeen("srv", list, { focused: true, viewing }, sent, 4000)).toEqual(["c-a"]);
+  expect(toMarkSeen("other", list, { focused: true, viewing }, sent, 9000)).toEqual([]);
 });

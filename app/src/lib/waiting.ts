@@ -38,6 +38,20 @@ export class WaitWatcher {
   }
 }
 
+// The conversations to mark read (blimpd's /seen): the unread sessions on screen in a window that has
+// focus. sent: when each was last sent, so it isn't sent again before blimpd's list catches up.
+export function toMarkSeen(server: string, sessions: Session[], f: Focus, sent: Map<string, number>, now = Date.now()): string[] {
+  if (!f.focused) return [];
+  const out: string[] = [];
+  for (const s of sessions) {
+    if (!s.unread || !s.sessionId || !f.viewing.includes(`${server}/${s.name}`)) continue;
+    if (now - (sent.get(s.sessionId) ?? -Infinity) < 3000) continue;
+    sent.set(s.sessionId, now);
+    out.push(s.sessionId);
+  }
+  return out;
+}
+
 let permission: Promise<boolean> | null = null;
 
 async function allowed(): Promise<boolean> {
