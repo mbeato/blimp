@@ -1,13 +1,15 @@
 // The chat socket (docs/DESIGN.md, Chat): a session's conversation as messages, and a way to type
 // into it, for the phone. Each socket keeps one zmx client attached while it's open, at the size
 // the session is shown at elsewhere: a client per message, or one of another size, upsets Claude's
-// screen (the probe in the phone spec). How keys are typed is in typing.ts, shared with blimpd's own messages.
+// screen (the probe in the phone spec). How keys are typed is in typing.ts, shared with blimpd's own messages;
+// how answers are typed is in answer.ts, shared with POST /sessions/<name>/answer.
 
 import type { ServerWebSocket } from "bun";
 import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from "./chat";
-import { answerKeys, answerSteps, choiceLabel, cleanText, type Expect, type Prompt, parseDialog, parseTrust, screenMeets, trustSteps } from "./prompt";
+import { answer } from "./answer";
+import { cleanText } from "./prompt";
 import { existsSync } from "node:fs";
-import { claudeDir, type Session, transcriptPath, zmxEnv, zmxPath } from "./sessions";
+import { claudeDir, type Session, transcriptPath } from "./sessions";
 import { Asking, findSession, forget, release, typed, type Typist, typist, wasTyped } from "./typing";
 
 export type ChatData = {
@@ -169,88 +171,13 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       await typed(d.typist, id, keys, notWaiting);
       return send(ws, { type: "ack", id });
     }
-    if (m.type === "answer" && m.answers !== undefined) {
-      // Every question of a dialog: blimpd types it step by step, each after the screen shows its place.
-      let steps: { expect: Expect }[] = [];
-      let p: Prompt | undefined;
-      await typed(d.typist, id, async () => {
-        const s = await find(d.name);
-        p = s?.state === "waiting" && s.prompt?.at === m.at ? s.prompt : undefined;
-        const r = p ? answerSteps(p, m.answers, m.labels) : { error: "the question changed" };
-        if ("error" in r) throw new Error(r.error);
-        steps = r.steps;
-        await onScreen(d.name, p!, steps[0].expect);
-        return r.steps.map((s) => s.keys);
-      }, (i) => onScreen(d.name, p!, steps[i].expect));
-      return send(ws, { type: "ack", id });
-    }
-    if (m.type === "answer") {
-      let steps: ReturnType<typeof trustSteps>;
-      let preview: { p: Prompt; steps: { expect: Expect }[] } | undefined;
-      await typed(d.typist, id, async () => {
-        const s = await find(d.name);
-        // The same wait and the same choice under pick: the options can change within one wait.
-        const p = s?.state === "waiting" ? s.prompt : undefined;
-        const same = p && p.at === m.at && typeof m.label === "string" && choiceLabel(p, m.pick) === m.label;
-        // Folder trust has no digits: the cursor is moved and Enter pressed, each after the screen shows it.
-        if (same && p.kind === "trust" && (steps = trustSteps(m.pick))) {
-          await onTrust(d.name, steps[0].cursor);
-          return steps.map((t) => t.keys);
-        }
-        // A question with previews: the digit moves the cursor, then Enter, each after the screen shows its place.
-        if (same && p.kind === "question" && p.questions[0]?.preview) {
-          const r = answerSteps(p, [{ picks: [m.pick] }], [[m.label]]);
-          if ("error" in r) throw new Error(r.error);
-          preview = { p, steps: r.steps };
-          await onScreen(d.name, p, r.steps[0].expect);
-          return r.steps.map((s) => s.keys);
-        }
-        const keys = same ? answerKeys(p, m.pick) : undefined;
-        if (!keys) throw new Error("the question changed");
-        return [keys];
-      }, (i) => (preview ? onScreen(d.name, preview.p, preview.steps[i].expect) : onTrust(d.name, steps![i].cursor)));
-      return send(ws, { type: "ack", id });
-    }
-    if (m.type === "interrupt") {
-      // With `at`, the phone dismisses that question: Esc only while it's still up. Otherwise the Esc would
-      // stop Claude's work, if it was answered on the Mac just before.
-      await typed(d.typist, id, async () => {
-        if (m.at !== undefined) {
-          const s = await find(d.name);
-          if (s?.state !== "waiting" || s.prompt?.at !== m.at) throw new Error("the question changed");
-        }
-        return ["\x1b"];
-      });
-      return send(ws, { type: "ack", id });
-    }
-    fail("unknown message");
+    // answer, interrupt and deny (answer.ts); anything else is "unknown message".
+    await answer(d.typist, id, m);
+    return send(ws, { type: "ack", id });
   } catch (e) {
     fail((e as Error).message);
   }
 }
-
-// Waits (up to 3 s) for Claude's screen to show where the next keys belong. Otherwise the answer stops
-// there: the rest would land in the wrong place.
-async function untilScreen(name: string, where: string, want: string, meets: (screen: string) => boolean, read: (screen: string) => unknown) {
-  const end = Date.now() + 3000;
-  for (;;) {
-    const r = Bun.spawn([zmxPath(), "history", name], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-    const screen = (await new Response(r.stdout).text()).split("\n").slice(-120).join("\n");
-    if (meets(screen)) return;
-    if (Date.now() > end) {
-      // What it saw, so a stopped answer can be told apart from a new dialog layout.
-      console.error(`answer for ${name} stopped before ${where} (${want}); the screen read as ${JSON.stringify(read(screen))}; the screen's end:\n${screen.split("\n").slice(-30).join("\n")}`);
-      throw new Error(`stopped: Claude's screen didn't show ${where} as expected. Finish it on the Mac.`);
-    }
-    await Bun.sleep(100);
-  }
-}
-
-const onScreen = (name: string, p: Prompt, e: Expect) =>
-  untilScreen(name, "review" in e ? "the review screen" : `question ${e.q + 1}`, JSON.stringify(e), (s) => screenMeets(p, parseDialog(s), e), parseDialog);
-
-const onTrust = (name: string, cursor: "yes" | "no") =>
-  untilScreen(name, "the folder trust question", `cursor on ${cursor}`, (s) => parseTrust(s)?.cursor === cursor, parseTrust);
 
 // Everything the phone sent is typed first (a message still waiting for the history, or queued behind
 // another), then the client goes: killed mid-write, its last keys could be lost while the id counts as typed.

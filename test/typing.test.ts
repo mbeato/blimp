@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseZmxList, zmxEnv, zmxPath } from "../src/sessions";
-import { Asking, typeInto } from "../src/typing";
+import { Asking, release, typeInto, typist, write } from "../src/typing";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-typing-"));
 const tag = `blimptest-ty${process.pid}`;
@@ -86,5 +86,25 @@ describe("typeInto", () => {
     const { name } = await fakeClaude("e");
     await typeInto(name, "x", { enter: true });
     await until(() => parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)?.clients === 0, "the client to go");
+  });
+});
+
+describe("write", () => {
+  // An answer's check (is the question still up?) runs as close to its keys as it can: after a new client
+  // has attached, not before, or the attach's wait would come between the check and the Esc.
+  test("a new client attaches before the keys are decided", async () => {
+    const { name } = await fakeClaude("f");
+    const t = typist(name);
+    let attached: number | undefined;
+    try {
+      await write(t, async () => {
+        attached = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)?.clients;
+        return ["x\r"];
+      });
+    } finally {
+      await release(t);
+    }
+    expect(attached).toBe(1);
+    await until(() => screen(name).includes("got:x"), "the line");
   });
 });

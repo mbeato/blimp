@@ -17,6 +17,8 @@ These screenshots come from the browser build that the end-to-end tests use. The
 
 There is also an iPhone app. It shows your sessions and their chat, and you can answer prompts and talk to Claude by voice. It is not released yet. See [ios/README.md](ios/README.md).
 
+The server can also answer a prompt without the terminal. The phone sends the answer, and blimpd types the same keys you would. It types them only if Claude still asks the same thing. If you already answered on the Mac, nothing is typed. "No, because…" is one step: blimpd presses Esc, then types your reason as a message. A permission prompt also says what Claude wants to run or change: the whole command, the file, or the web address. A command that pushes, deploys, force-resets or deletes things is marked as risky.
+
 **Pair your iPhone.** On the server, run `blimpd pair`. It prints a QR code and a `blimp://` link. On the iPhone, open blimp and tap Scan QR code, or paste the link. The phone gets its own token, separate from the Mac's. To cut the phone off, run `blimpd pair --revoke` on the server. The Mac keeps working. The phone reaches the server through Tailscale, so `blimpd pair` takes the server's address from Tailscale. Without Tailscale, give the address yourself: `blimpd pair --url <address>`.
 
 ## Requirements

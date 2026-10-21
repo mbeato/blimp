@@ -2,26 +2,62 @@
 // question; for permission prompts only the screen shows the options (they vary by command), so
 // blimpd reads them from `zmx history` once per wait. Answers are key presses, decided here only.
 
+import { redact } from "./activity";
 import { toolSummary } from "./chat";
 
 // preview: a single-choice question whose options have a `preview`. Claude Code draws those in a box beside
 // the rows, with no "Type something" row, and a digit there only moves the cursor.
 export type Question = { question: string; header?: string; multiSelect: boolean; preview?: true; options: { label: string; description?: string }[] };
+// A permission also says what it would do, so it can be judged away from the terminal: input (the command,
+// file, address or search, readableInput), plan (ExitPlanMode's plan), risky (riskyCommand). Older blimpd: absent.
 export type Prompt =
-  | { kind: "permission"; tool: string; summary: string; options: string[]; keys: string[]; answerable: true }
+  | { kind: "permission"; tool: string; summary: string; options: string[]; keys: string[]; answerable: true; input?: string; plan?: string; risky?: boolean }
   | { kind: "question"; questions: Question[]; answerable: boolean }
   | { kind: "trust"; folder: string; options: string[]; answerable: true }
   | { kind: "other"; answerable: false };
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
+// Secrets out first, then cut, so half a secret never shows. By code point: never half an emoji.
+const shown = (s: string, max: number) => Array.from(redact(s)).slice(0, max).join("");
+
+// What a permission would run or touch, as the phone shows it under the question. Only these tools: another
+// tool's input (an MCP tool's JSON) can hold a secret in a shape the redaction doesn't know.
+export function readableInput(tool: string, input: any): string {
+  const v = tool === "Bash" ? input?.command
+    : ["Edit", "MultiEdit", "Write", "Read"].includes(tool) ? input?.file_path
+    : tool === "NotebookEdit" ? input?.notebook_path
+    : tool === "WebFetch" ? input?.url
+    : tool === "WebSearch" ? input?.query
+    : "";
+  return shown(str(v), 2000);
+}
+
+// A command that pushes, deploys, deletes, forces or hard-resets: the phone shows it in red, so a Yes
+// there is a careful one. Words, not a parse: a false alarm costs a second look.
+const RISKY = [/\bpush\b(?!\s*\()/i, /\bdeploy\b/i, /--force\b/i, /\breset\s+--hard\b/i, /\bdrop(?:db)?\b/i, /\bdelete\b/i, /\bbranch\s+-D\b/];
+// rm with both a recursive and a force flag, in any order or spelling (-rf, -fr, -r -f, -Rf, --recursive -f;
+// --force alone is in RISKY).
+const rmRf = (c: string) =>
+  [...c.matchAll(/\brm\b([^;&|\n]*)/g)].some(([, args]) => {
+    const flags = [...args.matchAll(/(?:^|\s)-([A-Za-z]+)\b/g)].map((m) => m[1]).join("") + (/(?:^|\s)--recursive\b/.test(args) ? "r" : "");
+    return /[rR]/.test(flags) && flags.includes("f");
+  });
+export const riskyCommand = (command: string) => RISKY.some((re) => re.test(command)) || rmRf(command);
 
 export function promptFromHook(ev: any): Prompt | undefined {
   const e = ev?.hook_event_name;
   // In default mode Claude also sends PermissionRequest for the question tool: that is the question.
   if (e === "PermissionRequest" && ev.tool_name !== "AskUserQuestion") {
     const tool = str(ev.tool_name);
+    const input = readableInput(tool, ev.tool_input);
+    const plan = tool === "ExitPlanMode" ? shown(str(ev.tool_input?.plan), 8000) : "";
+    // The summary shows the command's start: secrets out before toolSummary cuts it.
+    const summary = toolSummary(tool, tool === "Bash" ? { command: redact(str(ev.tool_input?.command)) } : ev.tool_input, str(ev.cwd));
     // Without the screen: Yes is the first option, and Esc says no.
-    return { kind: "permission", tool, summary: toolSummary(tool, ev.tool_input, str(ev.cwd)), options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true };
+    return {
+      kind: "permission", tool, summary, options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true,
+      ...(input && { input }), ...(plan && { plan }), ...(tool === "Bash" && riskyCommand(str(ev.tool_input?.command)) && { risky: true }),
+    };
   }
   if ((e === "PreToolUse" || e === "PermissionRequest") && ev.tool_name === "AskUserQuestion") {
     const questions: Question[] = (Array.isArray(ev.tool_input?.questions) ? ev.tool_input.questions : []).map((q: any) => ({

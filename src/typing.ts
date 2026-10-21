@@ -10,8 +10,9 @@ import { cleanText } from "./prompt";
 import { claudeDir, listSessions, type Session, sessionExists, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
 import { followSize, lastSize } from "./terminal";
 
-// A session's zmx client, started on the first keys. queue: the last thing this typist typed.
-export type Typist = { name: string; proc?: Subprocess; ready?: Promise<void>; unfollow?: () => void; queue?: Promise<unknown> };
+// A session's zmx client, started on the first write. queue: the last thing this typist typed. typed: its
+// client has had keys (a write whose check refused it attached one and typed none).
+export type Typist = { name: string; proc?: Subprocess; ready?: Promise<void>; unfollow?: () => void; queue?: Promise<unknown>; typed?: boolean };
 
 export const typist = (name: string): Typist => ({ name });
 
@@ -34,12 +35,13 @@ const queues = new Map<string, Promise<unknown>>(); // session -> the last thing
 export const forget = (name: string) => void seen.delete(name);
 export const wasTyped = (name: string, id: string) => (seen.get(name) ?? []).includes(id);
 
-// The zmx client is started on the first keys, not before: a phone that only reads adds no client.
+// The zmx client is started on the first write, not before: a phone that only reads adds no client.
 function client(t: Typist) {
   if (t.proc && t.proc.exitCode === null) return t.proc;
   const { cols, rows } = lastSize(t.name);
   let ready!: () => void;
   t.ready = new Promise<void>((r) => (ready = r));
+  t.typed = false;
   const proc = (t.proc = Bun.spawn([zmxPath(), "attach", t.name], {
     env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor" },
     // Its output is the same screen the viewers see, so nobody needs it here. zmx draws that screen
@@ -66,12 +68,13 @@ export async function write(t: Typist, keys: () => Promise<string[]>, recheck?: 
     const alive = await sessionExists(t.name).catch(() => false);
     if (!alive) throw new Error("the session ended");
   }
-  const parts = await keys();
   const term = client(t).terminal!;
-  // Typing too soon after the client starts can land before zmx has attached it.
+  // Typing too soon after the client starts can land before zmx has attached it. Attached before keys
+  // decides what to type: an answer's check that its question is still up stays right before its keys.
   if (fresh) await Promise.race([t.ready, Bun.sleep(1000)]);
+  const parts = await keys();
   // zmx 0.5 drops an Esc that is a new client's first input; an empty paste passes and the TUI ignores it.
-  if (fresh && parts[0].startsWith("\x1b") && !parts[0].startsWith("\x1b[200~")) {
+  if (!t.typed && parts[0].startsWith("\x1b") && !parts[0].startsWith("\x1b[200~")) {
     term.write("\x1b[200~\x1b[201~");
     await Bun.sleep(50);
   }
@@ -81,6 +84,7 @@ export async function write(t: Typist, keys: () => Promise<string[]>, recheck?: 
       await recheck?.(i);
     }
     term.write(p);
+    t.typed = true;
   }
 }
 

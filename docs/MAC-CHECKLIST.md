@@ -169,6 +169,14 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a folder with two Claude sessions, one working and one idle. Hover each and click the trash icon. Start a New shell from the + menu.
   Expect: only that folder's sessions are listed, each with its mark. The idle one ends at once and its conversation moves to Earlier. The working one asks "End this session?" first. `zmx list` on the server agrees. The shell row shows `>_` and its name.
 
+- [ ] **"No, because…" from outside the terminal (real Claude).**
+  Do: in a blimp session, ask Claude to run `git push --dry-run`, so it asks first. In Terminal on the server, run `curl -s --unix-socket ~/.blimp/blimpd.sock -H "Authorization: Bearer $(cat ~/.blimp/token)" http://blimpd/sessions` and find that session: write down its `name` and its `prompt.at`. Then run `curl -s --unix-socket ~/.blimp/blimpd.sock -H "Authorization: Bearer $(cat ~/.blimp/token)" -d '{"deny":true,"at":<at>,"text":"use a branch instead"}' http://blimpd/sessions/<name>/answer`. Run that last command once more.
+  Expect: the session's `prompt` has `"input": "git push --dry-run"` and `"risky": true`. The first answer returns `{"id":…}`. In blimp's terminal the prompt closes, "use a branch instead" is sent as your message, and Claude replies to it. The second one returns `{"error":"the question changed"}` and types nothing.
+
+- [ ] **A plan's text in the session list (real Claude).**
+  Do: in a session, press Shift+Tab until Claude is in plan mode, and ask for a short plan. When it asks "Would you like to proceed?", run the first `curl` from the item above.
+  Expect: that session's `prompt` has `"tool": "ExitPlanMode"`, a `plan` with the plan's text, and `options` as the screen shows them (its last row, "Tell Claude what to change", is listed as "No, keep planning").
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**

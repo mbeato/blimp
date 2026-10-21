@@ -2,11 +2,12 @@
 // the app reaches it through `ssh -L`. The forwarded port on the Mac is open to anything there,
 // web pages included, so every request also needs the token.
 
-import { timingSafeEqual, randomBytes } from "node:crypto";
+import { timingSafeEqual, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
+import { answerOnce } from "./answer";
 import { newScan, readLast } from "./chat";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
@@ -166,6 +167,23 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (!isSafeName(name) || !(await sessionExists(name))) throw new HttpError(404, `no session named ${name}`);
     if (upgrade(chatData(name))) return;
     throw new HttpError(400, "expected a WebSocket");
+  }
+
+  // Answering what Claude asks without a chat socket (answer.ts): the chat's answer {at, pick, label} or
+  // {at, answers, labels}, {stop: true[, at]} for its interrupt, {deny: true, at, text} for no and why.
+  // An id makes a retry safe: one already typed is answered again without typing.
+  const ans = path.match(/^\/sessions\/([^/]+)\/answer$/);
+  if (ans && req.method === "POST") {
+    const name = decodeURIComponent(ans[1]);
+    const b = (await req.json()) as any;
+    if (!b || typeof b !== "object" || Array.isArray(b)) throw new HttpError(400, "expected an answer");
+    if (b.id !== undefined && (typeof b.id !== "string" || !b.id || b.id.length > 100)) throw new HttpError(400, "id must be a string of 1 to 100 characters");
+    if (!isSafeName(name)) throw new HttpError(404, `no session named ${name}`);
+    if (b.stop !== true && b.deny !== true && !Number.isInteger(b.pick) && !Array.isArray(b.answers))
+      throw new HttpError(400, "expected an answer: pick, answers, stop or deny");
+    const id: string = b.id ?? randomUUID();
+    await answerOnce(name, id, b.stop === true ? { type: "interrupt", at: b.at } : b.deny === true ? { type: "deny", at: b.at, text: b.text } : { ...b, type: "answer" });
+    return Response.json({ id });
   }
 
   if (path === "/events" && get) {
