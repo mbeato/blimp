@@ -44,19 +44,33 @@ private struct NoSessions: Error {}
 
 // MARK: - Next waiting
 
-@Test func nextWaitingIsTheOtherSessionThatHasWaitedLongest() {
+@Test func nextWaitingIsTheOtherSessionTheInboxListsFirstUnderWaitingOnYouAcrossFolders() {
+    var asked = session("asked", dir: "/c", created: 0, state: .done, since: 200)
+    asked.note = Note(status: .question, text: "Which one?", at: 200)
+    var finished = session("finished", dir: "/a", created: 0, state: .done, since: 400, unread: true)
+    finished.note = Note(status: .done, text: "Done.", at: 400)
     let list = [
-        session("here", dir: "/a", created: 1, state: .waiting, since: 1),
-        session("new", dir: "/a", created: 1, state: .waiting, since: 300),
-        session("old", dir: "/b", created: 1, state: .waiting, since: 100),
-        session("busy", dir: "/a", created: 1, state: .working, since: 50),
+        session("here", dir: "/a", created: 0, state: .waiting, since: 500),
+        session("old", dir: "/b", created: 0, state: .waiting, since: 100),
+        session("new", dir: "/a", created: 0, state: .waiting, since: 300),
+        asked,
+        // Done and unread is the inbox's Done, not Waiting on you; working isn't listed.
+        finished,
+        session("busy", dir: "/a", created: 0, state: .working, since: 600),
         // Waiting, but no Claude in it to answer.
-        session("shell", dir: "/a", created: 1, state: .waiting, since: 10, id: nil),
+        session("shell", dir: "/a", created: 0, state: .waiting, since: 700, id: nil),
     ]
+    // Newest first, as the inbox sorts the heading.
     let next = NextWaiting.after("here", in: list)
-    #expect(next?.session.name == "old")
-    #expect(next?.count == 2)
-    #expect(next?.words == "Next: old is waiting (2 left)")
+    #expect(next?.session.name == "new")
+    #expect(next?.count == 3)
+    #expect(next?.words == "Next: new is waiting (3 left)")
+    // Done with a question for you counts, as in the inbox.
+    #expect(NextWaiting.after("new", in: list)?.session.name == "here")
+    #expect(NextWaiting.after("x", in: [asked])?.session.name == "asked")
+    // Two as new as each other: the list's order.
+    let tie = [session("b", dir: "/a", created: 0, state: .waiting, since: 5), session("a", dir: "/a", created: 0, state: .waiting, since: 5)]
+    #expect(NextWaiting.after("x", in: tie)?.session.name == "b")
 }
 
 @Test func withOneOtherWaitingTheChipNamesItAloneAndWithNoneThereIsNoChip() {
@@ -114,4 +128,21 @@ private struct NoSessions: Error {}
     #expect(RunStatus.sending("r").words == "Sending…")
     #expect(RunStatus.sent("r").words == "Result sent to Claude")
     #expect(RunStatus.ended("r", exit: 0).canSend && !RunStatus.running("r").canSend && !RunStatus.sent("r").canSend)
+}
+
+// MARK: - Secrets and recaps
+
+@Test func aKeyThatLostItsLineBreaksIsRefusedAndOneThatKeptThemOrAnyOtherValueIsNot() {
+    #expect(SecretText.lostLineBreaks("-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1rZXk -----END OPENSSH PRIVATE KEY-----"))
+    #expect(!SecretText.lostLineBreaks("-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n"))
+    #expect(!SecretText.lostLineBreaks("-----BEGIN RSA PRIVATE KEY-----\r\nMIIE\r\n-----END RSA PRIVATE KEY-----"))
+    #expect(!SecretText.lostLineBreaks("sk-proj-abc123"))
+}
+
+@Test func anOlderBlimpdsNotFoundSaysToUpdateItForSecretsAndRecaps() {
+    #expect(SecretText.notSaved("not found") == "This server's blimpd is too old for secrets. Update it first.")
+    #expect(SecretText.notSaved("a secret is 1 to 16384 characters") == "Not saved: a secret is 1 to 16384 characters")
+    #expect(RecapText.failure("not found") == "This server's blimpd is too old for recaps. Update it first.")
+    #expect(RecapText.failure("no session named web-1") == "no session named web-1")
+    #expect(RecapText.failure("Recaps are off") == "Recaps are off")
 }

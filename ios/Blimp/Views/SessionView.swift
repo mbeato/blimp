@@ -1,7 +1,7 @@
 // A session as a chat: the messages, what Claude is waiting on as buttons, and a box to type into.
 // Voice: the mic types (or answers the prompt), the speaker toggle reads new replies and prompts aloud,
 // and a banner says when another session starts waiting or finishes. While Claude works, Stop (and Stop and
-// send, with text in the box) is pinned above the box. Opened after time away: a "since you left" line, and
+// send, with text in the box) is pinned above the box. Opened (or come back to) after time away: a "since you left" line, and
 // the return card at the top after an hour. The toolbar has the context gauge (from half full) and a menu
 // with Recap and Give a Secret; Run is under the commands of Claude's latest reply (ChatExtras.swift).
 import AudioToolbox
@@ -51,6 +51,7 @@ private struct ChatContent: View {
     let onInbox: () -> Void
     let onResumed: (String) -> Void
     @Environment(Store.self) private var store
+    @Environment(Lock.self) private var lock
     @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
     @State private var atBottom = true
@@ -193,12 +194,13 @@ private struct ChatContent: View {
                 InboxButton(action: onInbox)
             }
         }
+        // Back with this chat up. After 5 minutes away the lock comes first (Root sets it as the app comes back,
+        // so it's read a moment later): then this waits for the unlock, if the chat is still there by then.
         .onReturnFromBackground {
-            model.reconnectNow()
-            // Back after a while with this chat up: on screen again, and the return card if it's been an hour.
-            let last = ChatModel.lastShown(model.name)
-            ChatModel.markShown(model.name)
-            if recap == nil { recapIfDue(last) }
+            Task { @MainActor in if !lock.locked, onScreen { cameBack() } }
+        }
+        .onChange(of: lock.locked) { _, locked in
+            if !locked, onScreen { cameBack() }
         }
         // On screen with the app in front: Claude's replies are read, here and on the Mac.
         .task(id: SeenKey(conversation: model.session?.sessionId, unread: model.session?.unread == true,
@@ -225,7 +227,7 @@ private struct ChatContent: View {
         // .inactive: the first-use permission alert makes the app inactive while it waits for an answer.
         .onChange(of: scenePhase) { _, phase in
             if phase == .background, micOn { micUp(.keep) }
-            if phase == .background, onScreen { ChatModel.markShown(model.name) }
+            if phase == .background, onScreen, !lock.locked { ChatModel.markShown(model.name) }
         }
         .sheet(item: $confirming) { c in
             RunConfirmSheet(command: c.command, folder: runFolder) { Task { await model.run(c.command) } }
@@ -321,7 +323,7 @@ private struct ChatContent: View {
                 }
                 errorLine
                 InputBar(
-                    text: $draft, sending: model.sendingText, listening: micOn || micStopping, onSend: send,
+                    text: $draft, sending: model.sendingText || model.redirecting, listening: micOn || micStopping, onSend: send,
                     onMicDown: micDown, onMicUp: micUp)
             }
         }
@@ -381,6 +383,18 @@ private struct ChatContent: View {
         }
     }
 
+    /// Back to this chat from the background or the lock: a new visit from when it was last on screen, so the
+    /// reconnect's history places it again ("since you left"), and the return card if it's been an hour.
+    private func cameBack() {
+        let last = ChatModel.lastShown(model.name)
+        ChatModel.markShown(model.name)
+        model.newVisit(from: last)
+        placed = false
+        since = nil
+        model.reconnectNow()
+        if recap == nil { recapIfDue(last) }
+    }
+
     /// The return card by itself: for a Claude session not on screen here for an hour (or ever).
     private func recapIfDue(_ lastShown: Double?) {
         guard model.session?.isClaude == true, RecapCard.due(lastShown: lastShown, now: Date.now.timeIntervalSince1970 * 1000) else { return }
@@ -397,7 +411,7 @@ private struct ChatContent: View {
                 let r = try await model.recap(auto: auto)
                 if ask == recapAsk { recap = .shown(r) }
             } catch {
-                if ask == recapAsk { recap = auto ? nil : .failed(Store.words(for: error)) }
+                if ask == recapAsk { recap = auto ? nil : .failed(RecapText.failure(Store.words(for: error))) }
             }
         }
     }
@@ -460,10 +474,12 @@ private struct ChatContent: View {
         }
     }
 
-    /// Only the session on screen speaks or listens.
+    /// Only the session on screen speaks or listens. Gone while you can see it: on screen until now. Not when
+    /// the lock takes its place (or it goes with the app in the background): the time it went to the background
+    /// stays the last time it was on screen.
     private func disappeared() {
         onScreen = false
-        ChatModel.markShown(model.name)
+        if scenePhase == .active, !lock.locked { ChatModel.markShown(model.name) }
         model.onReply = nil
         Speaker.shared.stop()
         if micOn { micUp(.keep) }

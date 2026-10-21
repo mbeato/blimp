@@ -34,7 +34,8 @@ final class ChatModel {
     /// An answer or a Dismiss went through in this visit: the chat offers the next session waiting.
     private(set) var answeredHere = false
     /// When this phone last had the chat on screen before this visit (ms; nil for never), and whether it had a
-    /// reply neither app had shown as the visit began: for "since you left" and the return card.
+    /// reply neither app had shown as the visit began (or the list says so later: back from the background, the
+    /// list can come after the screen): for "since you left" and the return card.
     private(set) var visitFrom: Double?
     private(set) var unreadAtOpen = false
     /// Stop and send: between the Esc and the message.
@@ -128,8 +129,7 @@ final class ChatModel {
 
     /// Opens the chat socket (again, after close()). The screen calls it on appear: a new visit.
     func open() {
-        visitFrom = Self.lastShown(name)
-        unreadAtOpen = session?.unread == true
+        newVisit(from: Self.lastShown(name))
         answeredHere = false
         lastError = nil
         Self.markShown(name)
@@ -164,6 +164,12 @@ final class ChatModel {
         socket?.reconnectNow()
     }
 
+    /// A new visit: the chat opened, or the app came back to it. last: when it was on screen before (ms).
+    func newVisit(from last: Double?) {
+        visitFrom = last
+        unreadAtOpen = session?.unread == true
+    }
+
     // Keeps lastSeen up to date while open: each change to this session in the store calls it again.
     private func watch(_ round: Int) {
         guard watching, round == watchRound else { return }
@@ -171,6 +177,7 @@ final class ChatModel {
             Task { @MainActor in self?.watch(round) }
         }
         if let s, s != lastSeen { lastSeen = s }
+        if s?.unread == true { unreadAtOpen = true }
     }
 
     /// The session is over: no more reconnecting, and what's still waiting for a reply gets none.
@@ -182,8 +189,13 @@ final class ChatModel {
     }
 
     /// Types `text` into the session. true once blimpd acknowledged it; false (and lastError set)
-    /// if it didn't, and then nothing is kept or queued.
+    /// if it didn't, and then nothing is kept or queued. Not during Stop and send: it sends the box's text itself.
     func send(_ text: String) async -> Bool {
+        guard !redirecting else { return false }
+        return await type(text)
+    }
+
+    private func type(_ text: String) async -> Bool {
         let id = UUID().uuidString
         lastError = nil
         inputId = id
@@ -290,7 +302,7 @@ final class ChatModel {
             lastError = "Claude didn't stop. Nothing was sent."
             return false
         }
-        return await send(text)
+        return await type(text)
     }
 
     // MARK: - Over HTTP
@@ -337,7 +349,7 @@ final class ChatModel {
         do {
             try await api.saveSecret(name: secret, value: value)
         } catch {
-            return "Not saved: " + Store.words(for: error)
+            return SecretText.notSaved(Store.words(for: error))
         }
         do {
             try await api.tellSecret(name: secret, session: name)

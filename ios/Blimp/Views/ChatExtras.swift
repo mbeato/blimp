@@ -1,7 +1,8 @@
 // The parts of a chat beyond its messages: Run under a command Claude handed over (with a sheet that shows
 // the whole command before it runs, then "Send result to Claude" once it ended), the return card ("where
 // was I?"), the sheet that gives Claude a secret, the context gauge, the "since you left" line and the
-// chip to the next session waiting. The rules are in BlimpKit (ChatRules, RecapCard, ContextText, SecretRule).
+// chip to the next session waiting. The rules are in BlimpKit (ChatRules, RecapCard, ContextText, SecretRule,
+// SecretText).
 import BlimpKit
 import SwiftUI
 
@@ -218,7 +219,11 @@ struct SecretSheet: View {
                 } header: {
                     Text("Value")
                 } footer: {
-                    Text("Saved in a file on your server (~/.blimp/secrets). Claude is told where it is, not what it is.")
+                    if brokenKey {
+                        Text("This key needs its line breaks. Give it from the Mac.").foregroundStyle(.red)
+                    } else {
+                        Text("Saved in a file on your server (~/.blimp/secrets). Claude is told where it is, not what it is.")
+                    }
                 }
                 Section {
                     Button {
@@ -226,7 +231,7 @@ struct SecretSheet: View {
                     } label: {
                         if saving { ProgressView() } else { Text("Save and Tell Claude") }
                     }
-                    .disabled(!SecretRule.validName(name) || !SecretRule.validValue(value) || saving)
+                    .disabled(!SecretRule.validName(name) || !SecretRule.validValue(value) || brokenKey || saving)
                     .accessibilityIdentifier("secretSave")
                     if let error {
                         Text(error).font(.footnote).foregroundStyle(.red)
@@ -243,6 +248,9 @@ struct SecretSheet: View {
         }
         .onDisappear { value = "" }
     }
+
+    /// A PEM or SSH key pasted here: this field drops its line breaks, so it would be saved broken.
+    private var brokenKey: Bool { SecretText.lostLineBreaks(value) }
 
     private func save() async {
         saving = true

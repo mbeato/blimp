@@ -1,6 +1,7 @@
 // Rules for a chat open on the phone: which reply never folds, where the "since you left" line goes, which
-// session to answer next, and what a code block's Run button says (feature 2: blimpd runs a command Claude
-// handed over in a run session of its own, then can type its result back to Claude).
+// session to answer next, what a code block's Run button says (feature 2: blimpd runs a command Claude
+// handed over in a run session of its own, then can type its result back to Claude), and the words when a
+// secret or a recap didn't come through.
 import Foundation
 
 public enum ChatFold {
@@ -31,11 +32,16 @@ public struct NextWaiting: Equatable, Sendable {
         count > 1 ? "Next: \(session.title) is waiting (\(count) left)" : "Next: \(session.title) is waiting"
     }
 
-    /// The session other than `name` that has waited longest, among those with Claude (or Claude Code's folder
-    /// trust question) in them; nil when none waits.
+    /// The session other than `name` the inbox lists first under Waiting on you, across folders: by the
+    /// inbox's rule (Inbox.init: it waits, or it's done with a question for you) and in its order (newest
+    /// first, ties in the list's order). Only those with Claude (or Claude Code's folder trust question) in
+    /// them: the chip opens it to answer. nil when none waits.
     public static func after(_ name: String, in sessions: [Session]) -> NextWaiting? {
-        let others = sessions.filter { $0.name != name && $0.state == .waiting && ($0.isClaude || $0.prompt != nil) }
-        guard let first = others.min(by: { ($0.stateSince ?? $0.activity) < ($1.stateSince ?? $1.activity) }) else { return nil }
+        let others = sessions.filter { s in
+            s.name != name && (s.isClaude || s.prompt != nil) && (s.state == .waiting || (s.state == .done && s.note?.status == .question))
+        }
+        // max keeps the first of equals
+        guard let first = others.max(by: { $0.activity < $1.activity }) else { return nil }
         return NextWaiting(session: first, count: others.count)
     }
 }
@@ -85,5 +91,28 @@ public enum RunStatus: Equatable, Sendable {
     public var canSend: Bool {
         if case .ended = self { return true }
         return false
+    }
+}
+
+/// Give a Secret's words.
+public enum SecretText {
+    /// A PEM or SSH key that came through without its line breaks (the phone's secure field drops them):
+    /// saved like that, Claude's command would fail with it.
+    public static func lostLineBreaks(_ value: String) -> Bool {
+        value.contains("-----BEGIN") && !value.contains(where: \.isNewline)
+    }
+
+    /// The words when PUT /secrets/<name> failed with blimpd's `message`. A blimpd from before secrets answers
+    /// the route with a bare "not found".
+    public static func notSaved(_ message: String) -> String {
+        message == "not found" ? "This server's blimpd is too old for secrets. Update it first." : "Not saved: \(message)"
+    }
+}
+
+public enum RecapText {
+    /// The words when GET /sessions/<name>/recap failed with blimpd's `message`. A blimpd from before recaps
+    /// answers the route with a bare "not found" (a missing session says "no session named …").
+    public static func failure(_ message: String) -> String {
+        message == "not found" ? "This server's blimpd is too old for recaps. Update it first." : message
     }
 }
