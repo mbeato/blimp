@@ -763,6 +763,7 @@ body.dragging-session * {
   height: 2px;
   background: var(--fg-faint);
   opacity: 0.6;
+  pointer-events: none; /* over the row's bottom edge: its clicks and drags are the row's */
 }
 
 .ctx-meter.high {

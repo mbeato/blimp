@@ -45,12 +45,16 @@ test("a session past half its context window has a thin bar under its row, red f
   fakeClaude(low, dir, [usage(100_000)]);
   await openApp(page, { dir, session: low });
   const bar = (name: string) => sessionRow(page, name).locator(".ctx-meter");
-  await expect(bar(half)).toHaveAttribute("title", "Context 62% (620k of 1M tokens)");
+  await expect(bar(half)).toHaveAttribute("aria-label", "Context 62% (620k of 1M tokens)");
   await expect(bar(half)).not.toHaveClass(/high/);
   await expect(bar(full)).toHaveClass(/high/);
   await expect(bar(low)).toHaveCount(0);
   // The row's tooltip says it too: the bar is too thin to point at.
   expect(await sessionRow(page, half).getAttribute("title")).toContain("Context 62% (620k of 1M tokens)");
+  // The bar lies over the row's bottom edge without taking its clicks: those still open the session.
+  const box = (await bar(half).boundingBox())!;
+  const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".srow-main, .ctx-meter")?.className, { x: box.x + 5, y: box.y + 1 });
+  expect(hit).toContain("srow-main");
   for (const n of [half, full, low]) killSession(n);
 });
 

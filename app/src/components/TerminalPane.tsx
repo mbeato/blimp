@@ -575,7 +575,7 @@ export function TerminalPane(props: {
                 <path d="M2.5 4.5h11M6 4.5V2.5h4v2M4 4.5l.7 9h6.6l.7-9M6.8 7v4.5M9.2 7v4.5" fill="none" stroke="currentColor" />
               </svg>
             </button>
-            {meter && <span className={"ctx-meter" + (meter.high ? " high" : "")} style={{ width: `${meter.width}%` }} title={meter.label} role="img" aria-label={meter.label} />}
+            {meter && <span className={"ctx-meter" + (meter.high ? " high" : "")} style={{ width: `${meter.width}%` }} role="img" aria-label={meter.label} />}
           </>
         )}
       </div>

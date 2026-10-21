@@ -50,6 +50,26 @@ describe("namedFile", () => {
     expect(namedFile("notes/2026-10-21/HANDOFF-login.mdx", [dir], since)).toBeUndefined();
   });
 
+  test("a fresh Markdown file named on the way, in a sentence, is not the handoff; a HANDOFF file is, and so is a reply that is only a path", () => {
+    const readme = join(dir, "README-fresh.md");
+    writeFileSync(readme, "readme\n");
+    expect(namedFile("Done with the fix: updated README-fresh.md with the new flag. Now I'll write the handoff.", [dir], since)).toBeUndefined();
+    expect(namedFile("Wrote notes/2026-10-21/HANDOFF-login.md for the next session.", [dir], since)).toBe(fresh);
+    expect(namedFile("README-fresh.md", [dir], since)).toBe(readme);
+    expect(namedFile("`README-fresh.md`.", [dir], since)).toBe(readme);
+  });
+
+  test("a folder with spaces in its path: the whole reply, in backticks, or in a sentence", () => {
+    const spaced = join(mkdtempSync(join(tmpdir(), "blimp-handoff-")), "My Proj");
+    mkdirSync(join(spaced, "notes", "2026-10-21"), { recursive: true });
+    const h = join(spaced, "notes", "2026-10-21", "HANDOFF-a.md");
+    writeFileSync(h, "a\n");
+    expect(namedFile(h, [spaced], since)).toBe(h);
+    expect(namedFile(`\`${h}\``, [spaced], since)).toBe(h);
+    expect(namedFile(`Saved it to ${h}.`, [spaced], since)).toBe(h);
+    expect(namedFile(`Saved it to \`${h}\`, read it next.`, [spaced], since)).toBe(h);
+  });
+
   test("the last one that matches wins, and the next folder is tried when the first has none", () => {
     const other = mkdtempSync(join(tmpdir(), "blimp-handoff-"));
     const second = join(other, "HANDOFF-b.md");
@@ -75,6 +95,12 @@ describe("replyEvent", () => {
     expect(replyEvent(line({ type: "user", message: { content: "hello" } }))).toBeUndefined();
     expect(replyEvent("not json")).toBeUndefined();
   });
+
+  test("a tool result with the request's words in it (Claude reading this code) is not the request", () => {
+    const text = handoffText(new Date(T0));
+    expect(replyEvent(line({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: text }] }, toolUseResult: { stdout: text } }))).toBeUndefined();
+    expect(replyEvent(line({ type: "user", message: { role: "user", content: [{ type: "text", text }] } }))).toEqual({ asked: true });
+  });
 });
 
 describe("handoffs.json", () => {
@@ -99,12 +125,36 @@ describe("handoffs.json", () => {
     expect(readHandoffs(join(dir, "bad.json"))).toEqual({});
   });
 
+  // zmx's created, in seconds: parents from before the request, children from when they started.
+  const before = T0 / 1000 - 60;
+  const started = T0 / 1000 + 5;
+
   test("the parent gets the handoff's state, child, file and error; the child its parent", () => {
-    const all = { p: rec({ state: "started", child: "k", file: "/w/h.md" }), q: rec({ state: "failed", error: "No handoff file came back" }) };
-    expect(handoffLinks(all, "p")).toEqual({ handoff: { state: "started", child: "k", file: "/w/h.md" } });
-    expect(handoffLinks(all, "k")).toEqual({ parent: "p" });
-    expect(handoffLinks(all, "q")).toEqual({ handoff: { state: "failed", error: "No handoff file came back" } });
-    expect(handoffLinks(all, "z")).toEqual({});
+    const all = { p: rec({ state: "started", child: "k", file: "/w/h.md", startedAt: T0 + 5000 }), q: rec({ state: "failed", error: "No handoff file came back" }) };
+    expect(handoffLinks(all, "p", before)).toEqual({ handoff: { state: "started", child: "k", file: "/w/h.md" } });
+    expect(handoffLinks(all, "k", started)).toEqual({ parent: "p" });
+    expect(handoffLinks(all, "q", before)).toEqual({ handoff: { state: "failed", error: "No handoff file came back" } });
+    expect(handoffLinks(all, "z", before)).toEqual({});
+  });
+
+  test("a session in a chain is both: continued from one, handed off to the next", () => {
+    const all = { a: rec({ state: "started", child: "b", startedAt: T0 + 5000 }), b: rec({ at: T0 + 60_000 }) };
+    expect(handoffLinks(all, "b", started)).toEqual({ handoff: { state: "writing" }, parent: "a" });
+  });
+
+  test("a later session given an ended one's name is neither its parent nor its child", () => {
+    const all = { p: rec({ state: "started", child: "k", startedAt: T0 + 5000 }) };
+    const later = T0 / 1000 + 3600;
+    expect(handoffLinks(all, "p", later)).toEqual({});
+    expect(handoffLinks(all, "k", later)).toEqual({});
+  });
+
+  test("an earlier child keeps its link when its parent hands off again, and keeps the record", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "blimp-handoff-")), "handoffs.json");
+    const all = { p: rec({ state: "writing", at: T0 + 600_000, earlier: [{ child: "k1", at: T0, startedAt: T0 + 5000 }] }) };
+    expect(handoffLinks(all, "k1", started)).toEqual({ parent: "p" });
+    saveHandoffs(all, ["k1"], T0 + 600_000, file);
+    expect(Object.keys(readHandoffs(file))).toEqual(["p"]);
   });
 });
 
@@ -140,10 +190,24 @@ describe("handoffTick", () => {
     appendFileSync(transcript, asked() + said("Writing it now.") + said("notes/HANDOFF-a.md"));
     await handoffTick(deps(at + 3000), file);
     expect(starts).toEqual([[dir, "claude-glm", "Read notes/HANDOFF-a.md and do it"]]);
-    expect(handoffLinks(readHandoffs(file), "p")).toEqual({ handoff: { state: "started", child: "p-child", file: join(dir, "notes", "HANDOFF-a.md") } });
+    expect(handoffLinks(readHandoffs(file), "p", 0)).toEqual({ handoff: { state: "started", child: "p-child", file: join(dir, "notes", "HANDOFF-a.md") } });
     // Started once.
     await handoffTick(deps(at + 4000), file);
     expect(starts.length).toBe(1);
+  });
+
+  test("asked while Claude works: a file it edits for the work and names in a reply is not the handoff", async () => {
+    const { dir, transcript, file, starts, deps, at } = setup();
+    writeFileSync(join(dir, "README.md"), "flag\n");
+    const queued = line({ type: "attachment", attachment: { type: "queued_command", prompt: handoffText(new Date(T0)) } });
+    appendFileSync(transcript, queued + said("Done with the fix: updated README.md with the new flag. Now I'll write the handoff."));
+    await handoffTick(deps(at + 1000), file);
+    expect(starts).toEqual([]);
+    expect(readHandoffs(file).p.state).toBe("writing");
+    writeFileSync(join(dir, "HANDOFF-flag.md"), "# flag\n");
+    appendFileSync(transcript, said("HANDOFF-flag.md"));
+    await handoffTick(deps(at + 2000), file);
+    expect(starts.map((s) => s[2])).toEqual(["Read HANDOFF-flag.md and do it"]);
   });
 
   test("a file outside the session's folder is given to the new session by its full path", async () => {
@@ -158,7 +222,7 @@ describe("handoffTick", () => {
   test("no file after 20 minutes: failed, saying why; a session that ended takes its handoff with it", async () => {
     const a = setup();
     await handoffTick(a.deps(a.at + 20 * 60_000 + 1), a.file);
-    expect(handoffLinks(readHandoffs(a.file), "p")).toEqual({ handoff: { state: "failed", error: "No handoff file came back" } });
+    expect(handoffLinks(readHandoffs(a.file), "p", 0)).toEqual({ handoff: { state: "failed", error: "No handoff file came back" } });
     const b = setup();
     await handoffTick(b.deps(b.at + 1000, ["other"]), b.file);
     expect(readHandoffs(b.file)).toEqual({});
@@ -169,6 +233,6 @@ describe("handoffTick", () => {
     writeFileSync(join(dir, "HANDOFF-c.md"), "c\n");
     appendFileSync(transcript, asked() + said("HANDOFF-c.md"));
     await handoffTick({ ...deps(at + 1000), start: async () => { throw new Error("Claude Code on GLM can't start here: no Z.ai key"); } }, file);
-    expect(handoffLinks(readHandoffs(file), "p").handoff).toEqual({ state: "failed", file: join(dir, "HANDOFF-c.md"), error: "Claude Code on GLM can't start here: no Z.ai key" });
+    expect(handoffLinks(readHandoffs(file), "p", 0).handoff).toEqual({ state: "failed", file: join(dir, "HANDOFF-c.md"), error: "Claude Code on GLM can't start here: no Z.ai key" });
   });
 });

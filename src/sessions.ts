@@ -338,7 +338,7 @@ export function listSessions(
       unread: isUnread(seen, info.sessionId, scan?.replied),
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
       ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
-      ...handoffLinks(handoffs, z.name),
+      ...handoffLinks(handoffs, z.name, z.created),
     };
   });
 }

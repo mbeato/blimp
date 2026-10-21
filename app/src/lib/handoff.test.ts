@@ -14,6 +14,8 @@ test("the context meter shows from half full, and in red from 80%", () => {
   expect(contextMeter({ used: 499_000, limit: 1_000_000 })).toBeUndefined();
   expect(contextMeter({ used: 10, limit: 0 })).toBeUndefined();
   expect(contextMeter({ used: 620_000, limit: 1_000_000 })).toEqual({ width: 62, high: false, label: "Context 62% (620k of 1M tokens)" });
+  // Shown as 80%, so red too.
+  expect(contextMeter({ used: 795_000, limit: 1_000_000 })).toEqual({ width: 80, high: true, label: "Context 80% (795k of 1M tokens)" });
   expect(contextMeter({ used: 160_000, limit: 200_000 })).toEqual({ width: 80, high: true, label: "Context 80% (160k of 200k tokens)" });
   // Over the window (an old limit for a model): the bar stops at full.
   expect(contextMeter({ used: 250_000, limit: 200_000 })).toEqual({ width: 100, high: true, label: "Context 125% (250k of 200k tokens)" });

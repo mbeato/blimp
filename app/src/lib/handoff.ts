@@ -19,7 +19,7 @@ export function contextMeter(c: Session["context"]): { width: number; high: bool
   const used = c.used / c.limit;
   if (used < 0.5) return;
   const percent = Math.round(used * 100);
-  return { width: Math.min(100, percent), high: used >= 0.8, label: `Context ${percent}% (${tokens(c.used)} of ${tokens(c.limit)} tokens)` };
+  return { width: Math.min(100, percent), high: percent >= 80, label: `Context ${percent}% (${tokens(c.used)} of ${tokens(c.limit)} tokens)` };
 }
 
 // What the row says instead of its state: "Writing handoff…" while Claude writes it, "Handed off" once
