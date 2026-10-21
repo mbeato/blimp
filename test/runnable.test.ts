@@ -25,6 +25,11 @@ describe("runnableCommands", () => {
     expect(runnableCommands([text])).toEqual(["cd app", "python3 -m http.server", "npm test", "bun run e2e copy.spec.ts"]);
   });
 
+  test("blocks and inline code in the order they come", () => {
+    const text = "Try `npm a`, then:\n\n```bash\nnpm b\n```\n\nor `npm c`.";
+    expect(runnableCommands([text])).toEqual(["npm c", "npm b", "npm a"]);
+  });
+
   test("inline code inside a fenced block isn't read again", () => {
     const text = "```bash\necho `node -v`\n```";
     expect(runnableCommands([text])).toEqual(["echo `node -v`"]);

@@ -12,11 +12,14 @@ const LONGEST = 4000;
 function commandsIn(text: string): string[] {
   const out: string[] = [];
   const lines = text.split("\n");
-  const prose: string[] = [];
   for (let i = 0; i < lines.length; i++) {
     const open = lines[i].match(/^(\s*)(`{3,}|~{3,})\s*([\w+-]*)/);
     if (!open) {
-      prose.push(lines[i]);
+      // Inline code: `like this`, not ``this``.
+      for (const m of lines[i].matchAll(/(?<!`)`([^`]+)`(?!`)/g)) {
+        const code = m[1].trim();
+        if (WORDS.test(code)) out.push(code);
+      }
       continue;
     }
     const [, indent, fence, lang] = open;
@@ -32,11 +35,6 @@ function commandsIn(text: string): string[] {
       if (body) out.push(body);
     }
     i = end;
-  }
-  // Inline code in the prose between blocks: `like this`, not ``this``.
-  for (const m of prose.join("\n").matchAll(/(?<!`)`([^`\n]+)`(?!`)/g)) {
-    const code = m[1].trim();
-    if (WORDS.test(code)) out.push(code);
   }
   return out;
 }
