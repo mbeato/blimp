@@ -33,7 +33,7 @@ final class BlimpUITests: XCTestCase {
 
         // A project's inbox; the drawer lists blimp-demo's session by title, with a reply not seen yet
         // (the stand-ins' replies came after blimpd started)
-        try wait(element("projectPicker"), "the project picker")
+        try wait(element("drawerButton"), "Home")
         shot("1-inbox")
         try pickProject("blimp-demo")
         try openDrawer()
@@ -41,6 +41,7 @@ final class BlimpUITests: XCTestCase {
         try wait(chatRow, "the demo-chat row")
         try until(chatRow, "label CONTAINS 'Add a dark mode toggle to settings'", "the demo-chat row's title")
         try until(chatRow, "label CONTAINS 'New reply'", "demo-chat's reply to be unread")
+        try showEarlier()
         try wait(labeled("Fix the login redirect"), "the past conversation in the drawer")
         shot("1-drawer")
 
@@ -119,7 +120,7 @@ final class BlimpUITests: XCTestCase {
         app = XCUIApplication()
         app.launch()
         let unlock = app.buttons["Unlock"].firstMatch
-        let home = element("projectPicker")
+        let home = element("drawerButton")
         try wait(unlock, "the lock screen")
         if home.exists { throw failed("Home showing behind the lock") }
         allowFaceID()
@@ -213,6 +214,7 @@ final class BlimpUITests: XCTestCase {
         try launchPaired()
         try pickProject("blimp-demo")
         try openDrawer()
+        try showEarlier()
         let past = element("past-e2e00000-0000-0000-0000-000000000004")
         try wait(past, "the past conversation in the drawer")
         shot("15-drawer-past")
@@ -336,16 +338,16 @@ final class BlimpUITests: XCTestCase {
         shot("29-chat-name")
     }
 
-    // MARK: - The drawer from the edge
+    // MARK: - The drawer from a swipe
 
-    /// A swipe right from the left edge opens the drawer; a swipe left closes it.
-    func test9DrawerFromTheEdge() throws {
+    /// A swipe right, from the middle of the screen too, opens the drawer; a swipe left closes it.
+    func test9DrawerFromASwipe() throws {
         try launchPaired()
         let new = element("drawerNewChat")
         if new.exists { throw failed("the drawer closed at launch") }
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5)))
-        try wait(new, "the drawer after a swipe from the edge")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        try wait(new, "the drawer after a swipe right")
         shot("30-drawer-edge")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
@@ -376,29 +378,41 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Picks a project from the picker above the chat, unless it's the one showing; it opens to its inbox.
+    /// Picks a project from the picker at the top of the drawer, unless it's the one showing; it opens to its inbox,
+    /// and the drawer is closed after.
     private func pickProject(_ name: String) throws {
+        try openDrawer()
         let picker = element("projectPicker")
         try wait(picker, "the project picker")
-        if picker.label.hasPrefix(name) { return }
-        // the open drawer covers the picker: close it (to a blank chat; picking a project then opens its inbox)
-        let new = element("drawerNewChat")
-        if new.exists {
-            new.tap()
-            try until(new, "exists == false", "the drawer to close")
-        }
+        if picker.label.hasPrefix(name) { return try closeDrawer() }
         picker.tap()
         let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
         try wait(item, "\(name) in the project picker")
         item.tap()
-        try until(picker, "label BEGINSWITH '\(name)'", "the picker to show \(name)")
+        try until(element("drawerNewChat"), "exists == false", "the drawer to close on \(name)'s inbox")
+        try until(element("screenTitle"), "label CONTAINS '\(name)'", "the title to show \(name)")
     }
 
     private func openDrawer() throws {
+        if element("drawerNewChat").exists { return }
         let button = element("drawerButton")
         try wait(button, "the drawer button")
         button.tap()
         try wait(element("drawerNewChat"), "the drawer")
+    }
+
+    /// A tap beside the open drawer closes it.
+    private func closeDrawer() throws {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        try until(element("drawerNewChat"), "exists == false", "the drawer to close")
+    }
+
+    /// Unfolds Earlier in the open drawer (folded at first, and kept as it was left).
+    private func showEarlier() throws {
+        let earlier = element("drawerEarlier")
+        try wait(earlier, "Earlier in the drawer")
+        if earlier.label.contains("folded") { earlier.tap() }
+        try until(earlier, "label CONTAINS 'open'", "Earlier to unfold")
     }
 
     /// Opens a session from the drawer of its project.
@@ -424,7 +438,7 @@ final class BlimpUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launch()
-        let home = element("projectPicker")
+        let home = element("drawerButton")
         let field = element("pairField")
         let unlock = app.buttons["Unlock"].firstMatch
         let end = Date().addingTimeInterval(30)
@@ -441,7 +455,7 @@ final class BlimpUITests: XCTestCase {
 
     /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking.
     private func unlockWithFace() throws {
-        let home = element("projectPicker")
+        let home = element("drawerButton")
         let unlock = app.buttons["Unlock"].firstMatch
         for _ in 0..<3 {
             allowFaceID()

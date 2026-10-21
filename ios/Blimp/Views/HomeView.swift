@@ -1,6 +1,6 @@
-// The app's one screen, as chat apps have it: a project's inbox or a chat, with the project picker above it and a
-// drawer from the left that lists the project's sessions, running and past, newest activity first. A project opens
-// to its inbox; a blank chat starts a session.
+// The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
+// anywhere, or its button) with the project picker and the project's sessions, running and past. A project opens to
+// its inbox; a blank chat starts a session.
 import BlimpKit
 import SwiftUI
 
@@ -27,17 +27,14 @@ struct HomeView: View {
                 .toolbar { toolbar }
                 .safeAreaInset(edge: .top, spacing: 0) { StatusBar(connection: store.connection) }
         }
-        // A swipe right from the left edge opens the drawer.
-        .overlay(alignment: .leading) {
-            if !drawer {
-                Color.clear
-                    .frame(width: 16)
-                    .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 10).onEnded { if $0.translation.width > 50 { drawer = true } })
+        // A swipe right anywhere opens the drawer: mostly sideways, so scrolling the chat never does.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20).onEnded { v in
+                if !drawer, v.translation.width > 60, abs(v.translation.height) < v.translation.width * 0.6 { drawer = true }
             }
-        }
+        )
         .overlay {
-            DrawerView(open: $drawer, title: store.dir.map(Drawer.name(of:)) ?? "Sessions", rows: rows, selected: selected,
+            DrawerView(open: $drawer, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
                        onPick: pick, onInbox: { show(.inbox) }, onNew: { show(.blank) }, onSettings: { drawer = false; showSettings = true })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
@@ -87,39 +84,22 @@ struct HomeView: View {
             .accessibilityLabel(badgeLabel.map { "Sessions, \($0)" } ?? "Sessions")
             .accessibilityIdentifier("drawerButton")
         }
-        ToolbarItem(placement: .principal) { picker }
+        ToolbarItem(placement: .principal) { title }
         ToolbarItem(placement: .topBarTrailing) {
             Button("New chat", systemImage: "square.and.pencil") { show(.blank) }
                 .accessibilityIdentifier("newChat")
         }
     }
 
-    /// The project's name with a chevron, and under it what the chat is; a tap lists the projects to pick from.
-    private var picker: some View {
-        Menu {
-            ForEach(projects) { p in
-                Button { pickProject(p.dir) } label: {
-                    if p.dir == store.dir { Label(p.name, systemImage: "checkmark") } else { Text(p.name) }
-                    switch p.mark {
-                    case .asking: Text("Asking you something")
-                    case .unread: Text("New reply")
-                    case .working, .none: Text(p.dir)
-                    }
-                }
-                .accessibilityIdentifier("project-" + p.name)
-            }
-        } label: {
-            VStack(spacing: 0) {
-                HStack(spacing: 4) {
-                    Text(store.dir.map(Drawer.name(of:)) ?? "blimp").font(.headline)
-                    Image(systemName: "chevron.down").font(.caption2.weight(.bold))
-                }
-                // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
-            }
-            .foregroundStyle(.primary)
+    /// What the chat is, and under it the project's name (the drawer has the picker).
+    private var title: some View {
+        VStack(spacing: 0) {
+            // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
+            Text(subtitle).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
+            Text(store.dir.map(Drawer.name(of:)) ?? "blimp").font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
-        .accessibilityIdentifier("projectPicker")
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("screenTitle")
     }
 
     @ViewBuilder private var badge: some View {
