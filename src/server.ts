@@ -262,7 +262,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const r = await upload(guardFile(q.get("path")), req.body, q.get("mode") ?? "new", Number(req.headers.get("content-length") ?? 0));
     return Response.json(r, { status: 201 });
   }
-  if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guard(await bodyPath(req))), { status: 201 });
+  if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/files" && get) {
     const root = guard(q.get("root"));

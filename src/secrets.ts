@@ -26,7 +26,8 @@ export function secretFile(name: unknown, dir = secretsDir()): string {
   return join(dir, name);
 }
 
-// Through a temp file (600, never there before) and a rename, so it's never half written.
+// Through a temp file (600, never there before) and a rename, so it's never half written; the temp
+// file is taken away if either fails.
 export function saveSecret(name: unknown, value: unknown, dir = secretsDir()) {
   const file = secretFile(name, dir);
   if (typeof value !== "string" || value.length < 1 || value.length > MAX_VALUE || value.includes("\0"))
@@ -34,8 +35,13 @@ export function saveSecret(name: unknown, value: unknown, dir = secretsDir()) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const tmp = join(dir, `.tmp-${randomBytes(6).toString("hex")}`);
-  writeFileSync(tmp, value, { mode: 0o600, flag: "wx" });
-  renameSync(tmp, file);
+  try {
+    writeFileSync(tmp, value, { mode: 0o600, flag: "wx" });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true }); // a failed save leaves no copy of the value behind
+    throw e;
+  }
 }
 
 export const removeSecret = (name: unknown, dir = secretsDir()) => rmSync(secretFile(name, dir), { force: true });
@@ -68,7 +74,8 @@ export function shellPath(file: string, home = homedir()): string {
 
 export const tellText = (name: string, path: string) =>
   `The secret ${name} is saved in ${path} (only you can read it). Read it from that file when you need it, ` +
-  `for example \`export ${name}="$(cat ${path})"\`. Never print it, echo it, or put it in a file, a commit or a message.`;
+  `for example \`export ${name}="$(cat ${path})" && your-command\`, in the same command: a variable set in one command is gone in the next. ` +
+  `Never print it, echo it, or put it in a file, a commit or a message.`;
 
 // Types the note into a session's Claude, with Enter. 404: no such secret or session; 400: Claude
 // isn't running there (the note would go to a shell); 409: Claude is asking something.

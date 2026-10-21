@@ -1833,7 +1833,8 @@ body.dragging-session * {
   flex: 0 0 90px;
 }
 
-.addserver input {
+.addserver input,
+.addserver textarea {
   font-size: 13px;
   color: var(--fg);
   background: var(--bg-input);
@@ -1843,8 +1844,16 @@ body.dragging-session * {
   outline: none;
 }
 
-.addserver input:focus {
+.addserver input:focus,
+.addserver textarea:focus {
   border-color: var(--focus);
+}
+
+/* Give a Secret's value: masked like a password field, but keeps line breaks (PEM, SSH keys). */
+.addserver textarea.secret-value {
+  -webkit-text-security: disc;
+  resize: none;
+  font-family: inherit;
 }
 
 .addserver .dialog-error {

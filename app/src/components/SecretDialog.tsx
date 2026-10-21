@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Api } from "../lib/api";
+import { type Api, ApiError } from "../lib/api";
 import { errorText } from "../lib/connection";
 import { secretStep } from "../lib/secrets";
 import { Dialog } from "./Dialog";
@@ -8,16 +8,23 @@ import { Dialog } from "./Dialog";
 // request body (PUT /secrets/<name>), and Claude is told where it is, not what it is. The value
 // lives only in this field: cleared once it's saved, never logged, never stored, never typed into
 // the terminal. A name already saved can be given to another session without typing it again.
+// The value is a masked textarea, not a password field: a password field drops line breaks, which
+// would quietly break a PEM or SSH key.
 export function SecretDialog(props: { api: Api; session: string; title: string; onClose: () => void }) {
   const [saved, setSaved] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // A blimpd from before secrets has no /secrets (404): nothing here would work.
+  const [old, setOld] = useState(false);
   useEffect(() => {
-    props.api.secrets().then((s) => setSaved(s.map((x) => x.name)), () => {});
+    props.api.secrets().then(
+      (s) => setSaved(s.map((x) => x.name)),
+      (e) => setOld(e instanceof ApiError && e.status === 404),
+    );
   }, [props.api]);
-  const step = secretStep(name, value, saved);
+  const step = old ? { label: "Save and Tell Claude", error: "This server's blimpd is too old for secrets. Update it first." } : secretStep(name, value, saved);
 
   const submit = async () => {
     if (!step.do || busy) return;
@@ -63,14 +70,24 @@ export function SecretDialog(props: { api: Api; session: string; title: string; 
         </label>
         <label>
           <span>Value</span>
-          <input
-            type="password"
+          <textarea
+            className="secret-value"
             aria-label="Value"
+            rows={3}
             value={value}
             onChange={(e) => setValue(e.target.value)}
+            // Enter sends, as it did in a one-line field; Shift+Enter starts a new line.
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
             placeholder={saved.includes(name.trim()) ? "Saved (paste to replace)" : "Paste it here"}
             spellCheck={false}
-            autoComplete="new-password"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
           />
         </label>
         {(step.error || error) && <p className="dialog-error">{step.error || error}</p>}

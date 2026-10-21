@@ -44,6 +44,13 @@ describe("saveSecret", () => {
     expect(status(() => saveSecret("V", "x".repeat(16384), dir))).toBe(0);
   });
 
+  test("a save that fails leaves no temp file with the value behind", () => {
+    const d = join(root, "blocked");
+    mkdirSync(join(d, "FOO"), { recursive: true }); // a folder where the file would go: the rename fails
+    expect(() => saveSecret("FOO", "sk-live-SECRET", d)).toThrow();
+    expect(readdirSync(d)).toEqual(["FOO"]);
+  });
+
   test("the folder is made 700 again if it was opened up", () => {
     const d = join(root, "loose");
     mkdirSync(d, { mode: 0o755 });
@@ -93,7 +100,7 @@ describe("the note Claude gets", () => {
     const text = tellText("GITHUB_TOKEN", "~/.blimp/secrets/GITHUB_TOKEN");
     expect(text).toBe(
       "The secret GITHUB_TOKEN is saved in ~/.blimp/secrets/GITHUB_TOKEN (only you can read it). Read it from that file when you need it, " +
-        'for example `export GITHUB_TOKEN="$(cat ~/.blimp/secrets/GITHUB_TOKEN)"`. Never print it, echo it, or put it in a file, a commit or a message.',
+        'for example `export GITHUB_TOKEN="$(cat ~/.blimp/secrets/GITHUB_TOKEN)" && your-command`, in the same command: a variable set in one command is gone in the next. Never print it, echo it, or put it in a file, a commit or a message.',
     );
   });
 

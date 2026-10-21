@@ -1668,6 +1668,8 @@ describe("secrets", () => {
           expect((await sApi(`/fs/upload?path=${q(target)}&mode=${mode}`, { method: "PUT", body: "mine" }, t)).status).toBe(403);
         }
         expect((await sApi(`/fs/file?path=${q(file)}`, { method: "PUT", body: "mine" }, t)).status).toBe(403);
+        for (const route of ["/fs/mkdir", "/fs/create"])
+          expect((await sApi(route, { method: "POST", body: JSON.stringify({ path: join(secrets, "PLANTED") }) }, t)).status).toBe(403);
       }
       expect(readFileSync(file, "utf8")).toBe(VALUE);
       expect(existsSync(join(secrets, "PLANTED"))).toBe(false);
@@ -1703,7 +1705,7 @@ describe("secrets", () => {
       const flat = () => v.text.replace(/\r\n/g, "");
       await until(() => flat().includes("Never print it, echo it, or put it in a file, a commit or a message."), "the note reached the session");
       expect(flat()).toContain("got:~[200~The secret GITHUB_TOKEN is saved in ~/.blimp/secrets/GITHUB_TOKEN (only you can read it).");
-      expect(flat()).toContain('export GITHUB_TOKEN="$(cat ~/.blimp/secrets/GITHUB_TOKEN)"');
+      expect(flat()).toContain('export GITHUB_TOKEN="$(cat ~/.blimp/secrets/GITHUB_TOKEN)" && your-command');
       expect(v.text).not.toContain(VALUE);
     } finally {
       v.ws.close();

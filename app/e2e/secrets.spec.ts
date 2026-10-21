@@ -9,7 +9,8 @@ import { expect, test } from "@playwright/test";
 import { e2e, fixtureDir, killSession, openSessionTab, screenText, sessionRow, startSession, zmxEnv } from "./helpers";
 
 const name = `blimpe2e-secret-${process.pid}`;
-const VALUE = "sk-e2e-do-not-show-0123456789";
+// Several lines, like a PEM or SSH key: a password field would join them into one.
+const VALUE = "-----BEGIN KEY-----\nsk-e2e-do-not-show-0123456789\n-----END KEY-----";
 
 test.afterAll(() => killSession(name));
 
@@ -38,18 +39,18 @@ test("Give a Secret saves the value on the server and tells Claude where it is, 
   await expect(dialog.getByText("A name is a letter, then letters, digits or _ (like API_KEY).")).toBeVisible();
   await dialog.getByLabel("Name").fill("API_KEY");
   await dialog.getByLabel("Value").fill(VALUE);
-  await expect(dialog.getByLabel("Value")).toHaveAttribute("type", "password");
+  await expect(dialog.getByLabel("Value")).toHaveCSS("-webkit-text-security", "disc"); // masked
   await send.click();
   await expect(dialog).toHaveCount(0);
 
   await expect.poll(() => screenText(term)).toContain("The secret API_KEY is saved in");
   expect(readFileSync(join(secrets, "API_KEY"), "utf8")).toBe(VALUE);
-  expect(await screenText(term)).not.toContain(VALUE);
-  expect(urls.filter((u) => u.includes(VALUE))).toEqual([]);
+  expect(await screenText(term)).not.toContain("sk-e2e-do-not-show");
+  expect(urls.filter((u) => u.includes("sk-e2e-do-not-show"))).toEqual([]);
   // Sent once, in the body of the PUT; the tell carries only the session.
-  expect(bodies.filter((b) => b.includes(VALUE))).toEqual([`PUT /secrets/API_KEY ${JSON.stringify({ value: VALUE })}`]);
+  expect(bodies.filter((b) => b.includes("sk-e2e-do-not-show"))).toEqual([`PUT /secrets/API_KEY ${JSON.stringify({ value: VALUE })}`]);
   expect(bodies.some((b) => b === `POST /secrets/API_KEY/tell ${JSON.stringify({ session: name })}`)).toBe(true);
-  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }))).not.toContain(VALUE);
+  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }))).not.toContain("sk-e2e-do-not-show");
 
   // Again: the saved name is offered, and with no value it only tells Claude.
   const notes = async () => (await screenText(term)).split("The secret API_KEY is saved in").length - 1;
@@ -70,5 +71,16 @@ test("Give a Secret saves the value on the server and tells Claude where it is, 
   await settings.getByRole("button", { name: "Remove API_KEY" }).click();
   await expect(settings.locator(".secrets")).toContainText("None yet");
   expect(existsSync(join(secrets, "API_KEY"))).toBe(false);
-  expect(await settings.innerText()).not.toContain(VALUE);
+  expect(await settings.innerText()).not.toContain("sk-e2e-do-not-show");
+  await page.keyboard.press("Escape");
+  await expect(settings).toHaveCount(0);
+
+  // A blimpd from before secrets (no /secrets: 404): the dialog says so instead of a bare "not found".
+  await page.route(/\/secrets$/, (r) => r.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not found" }) }));
+  await sessionRow(page, name).click({ button: "right" });
+  await page.getByRole("menu").getByRole("menuitem", { name: "Give a Secret…" }).click();
+  await expect(dialog.getByText("This server's blimpd is too old for secrets. Update it first.")).toBeVisible();
+  await dialog.getByLabel("Name").fill("API_KEY");
+  await dialog.getByLabel("Value").fill("sk-x");
+  await expect(dialog.getByRole("button", { name: "Save and Tell Claude" })).toBeDisabled();
 });
