@@ -141,6 +141,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: in a session, run or print an `https://` URL. Click it, then ⌘-click it.
   Expect: the plain click opens nothing. The ⌘-click opens it in your default browser (not in blimp). blimp stays as it was.
 
+- [ ] **A right-click on a terminal link offers the blimp browser.**
+  Do: right-click the same `https://` URL. Pick Open in Blimp Browser. Right-click it again and pick Copy Link, then paste somewhere. Right-click plain text in the terminal.
+  Expect: a menu with Open in Blimp Browser, Open in Default Browser and Copy Link. The first opens the page in a browser tab next to the file tabs. Copy Link copies the URL. On plain text you get the usual Mac menu, not this one.
+
 - [ ] **File paths in the terminal open in a tab.**
   Do: ask Claude to edit a file, then ⌘-click the path it prints (like `Update(src/app.ts)`). In a shell, run `echo src/app.ts:10` with a real file and ⌘-click it.
   Expect: the file opens in a tab. With `:10`, the cursor is on line 10. A path to a file that doesn't exist is not underlined.

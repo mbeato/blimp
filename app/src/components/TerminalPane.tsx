@@ -112,6 +112,7 @@ export function TerminalPane(props: {
   front: boolean;
   showList: boolean;
   onOpenPath: (path: string, line?: number, col?: number) => void;
+  onOpenUrl: (url: string) => void;
   onNotice: (msg: string) => void;
   onMoveOut: (names: string[], at?: { x: number; y: number }) => void;
   elsewhere: (name: string) => boolean;
@@ -590,6 +591,7 @@ export function TerminalPane(props: {
                   visible={i >= 0}
                   focused={props.front && i === p.focus}
                   onOpenPath={props.onOpenPath}
+                  onOpenUrl={props.onOpenUrl}
                   pastes={pastes}
                   onClose={() => {
                     setMounted((m) => m.filter((n) => n !== name));

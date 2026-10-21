@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal, type ILink, type ITheme } from "@xterm/xterm";
+import { Terminal, type IBufferRange, type ILink, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -8,7 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import { backoff, type ServerLink } from "../lib/connection";
 import { joinRows, type Row } from "../lib/copy";
 import { mapKey } from "../lib/keys";
-import { followsLink, openWebLink } from "../lib/links";
+import { followsLink, openWebLink, webUrl } from "../lib/links";
 import { ExistsCache, findPaths, resolveAgainst } from "../lib/pathlinks";
 import { isClaude } from "../lib/sessions";
 import { getSettings, onSettings, type Settings } from "../lib/settings";
@@ -49,7 +49,8 @@ type Phase = "connecting" | "live" | "reconnecting" | "ended" | "detached";
 // while it isn't in a split) so the scrollback survives switching.
 // dir: the session's folder, which relative paths in its output are read against.
 // visible: in a split. focused: the split with the keyboard, in the tab in front.
-// onOpenPath: ⌘-click on a file path. onClose: dismiss an ended or detached session.
+// onOpenPath: ⌘-click on a file path. onOpenUrl: a web link's right-click menu, Open in Blimp
+// Browser (⌘-click opens it in the system browser). onClose: dismiss an ended or detached session.
 export function TerminalView(props: {
   link: ServerLink;
   name: string;
@@ -57,6 +58,7 @@ export function TerminalView(props: {
   visible: boolean;
   focused: boolean;
   onOpenPath: (path: string, line?: number, col?: number) => void;
+  onOpenUrl: (url: string) => void;
   onClose: () => void;
   // Where this terminal puts its paste function (text typed in as a paste), by session.
   pastes: Map<string, (text: string) => void>;
@@ -65,6 +67,12 @@ export function TerminalView(props: {
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
   const [phase, setPhase] = useState<Phase>("connecting");
+  // The last web link the pointer was on (xterm says so on hover), with where it was and that
+  // stretch's text then, and its right-click menu. Not dropped on leave: xterm doesn't say hover
+  // again for the cell it left from, and the menu's scrim makes it leave.
+  const lastLink = useRef<{ url: string; range: IBufferRange; text: string } | null>(null);
+  const linkAtRef = useRef<(x: number, y: number) => string | null>(() => null);
+  const [menu, setMenu] = useState<{ url: string; x: number; y: number } | null>(null);
   // The link object is stable, but its connection changes when the tunnel is rebuilt.
   const linkRef = useRef(props.link);
   linkRef.current = props.link;
@@ -80,6 +88,27 @@ export function TerminalView(props: {
   claudeRef.current = !!session && isClaude(session);
 
   useEffect(() => {
+    const rows = (r: IBufferRange) => {
+      let s = "";
+      for (let y = r.start.y; y <= r.end.y; y++) s += t.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+      return s;
+    };
+    const onLink = (uri: string, range: IBufferRange) => {
+      const url = webUrl(uri);
+      lastLink.current = url ? { url, range, text: rows(range) } : null;
+    };
+    // The web link at a point of the screen, if that's where the last one was and its text is still there.
+    linkAtRef.current = (cx, cy) => {
+      const l = lastLink.current;
+      const el = box.current?.querySelector(".xterm-screen");
+      if (!l || !el) return null;
+      const b = el.getBoundingClientRect();
+      const x = Math.floor(((cx - b.left) / b.width) * t.cols) + 1;
+      const y = Math.floor(((cy - b.top) / b.height) * t.rows) + 1 + t.buffer.active.viewportY;
+      const { start: s, end: e } = l.range;
+      const inside = (y > s.y || (y === s.y && x >= s.x)) && (y < e.y || (y === e.y && x <= e.x));
+      return inside && rows(l.range) === l.text ? l.url : null;
+    };
     const t = new Terminal({
       ...termOptions(getSettings()),
       fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
@@ -94,6 +123,7 @@ export function TerminalView(props: {
         activate: (e, uri) => {
           if (followsLink(e)) openWebLink(uri);
         },
+        hover: (_e, uri, range) => onLink(uri, range),
       },
     });
     const f = new FitAddon();
@@ -103,9 +133,12 @@ export function TerminalView(props: {
     t.loadAddon(new Unicode11Addon());
     t.unicode.activeVersion = "11";
     t.loadAddon(
-      new WebLinksAddon((e, uri) => {
-        if (followsLink(e)) openWebLink(uri);
-      }),
+      new WebLinksAddon(
+        (e, uri) => {
+          if (followsLink(e)) openWebLink(uri);
+        },
+        { hover: (_e, uri, range) => onLink(uri, range) },
+      ),
     );
     // File paths: ⌘-click opens them in a file tab. A link shows only for a file that exists.
     const exists = new ExistsCache(() => linkRef.current.api);
@@ -279,7 +312,39 @@ export function TerminalView(props: {
 
   return (
     <div className="term" hidden={!props.visible}>
-      <div className="term-box" ref={box} />
+      <div
+        className="term-box"
+        ref={box}
+        onContextMenu={(e) => {
+          const url = linkAtRef.current(e.clientX, e.clientY);
+          if (!url) return; // off a link: the usual menu
+          e.preventDefault();
+          setMenu({ url, x: e.clientX, y: e.clientY });
+        }}
+      />
+      {menu && (
+        <>
+          <div
+            className="menu-scrim"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div className="menu context-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 240), top: Math.min(menu.y, innerHeight - 110) }} onKeyDown={(e) => e.key === "Escape" && setMenu(null)}>
+            <button role="menuitem" autoFocus onClick={() => (setMenu(null), props.onOpenUrl(menu.url))}>
+              Open in Blimp Browser
+            </button>
+            <button role="menuitem" onClick={() => (setMenu(null), openWebLink(menu.url))}>
+              Open in Default Browser
+            </button>
+            <button role="menuitem" onClick={() => (setMenu(null), void navigator.clipboard.writeText(menu.url).catch(() => {}))}>
+              Copy Link
+            </button>
+          </div>
+        </>
+      )}
       {(phase === "ended" || phase === "detached") && (
         <div className="term-banner">
           <span>{phase === "detached" ? "Detached" : "Session ended"}</span>

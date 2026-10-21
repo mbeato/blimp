@@ -243,7 +243,7 @@ In the terminal, keys work like the VS Code terminal on macOS:
 | ⌥← / ⌥→ | Go one word left or right (Esc b / Esc f). |
 | `ctrl+\` | Detach (zmx). The session keeps running. |
 
-A ⌘-click on a web link in the terminal opens it in your default browser, as in the VS Code terminal. A plain click does not, so you can select text near a link. Only `http` and `https` links open.
+A ⌘-click on a web link in the terminal opens it in your default browser, as in the VS Code terminal. A plain click does not, so you can select text near a link. Only `http` and `https` links open. Right-click a web link for **Open in Blimp Browser** (a browser tab in this folder), **Open in Default Browser** or **Copy Link**.
 
 ## Security in brief
 

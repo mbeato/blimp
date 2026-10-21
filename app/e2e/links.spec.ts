@@ -5,16 +5,18 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { fixtureDir, killSession, openSessionTab, startSession, startSessionPty } from "./helpers";
+import { fixtureDir, frontTab, killSession, openSessionTab, startSession, startSessionPty } from "./helpers";
 
 const term = `blimpe2e-linkterm-${process.pid}`;
 const md = `blimpe2e-linkmd-${process.pid}`;
 const osc = `blimpe2e-linkosc-${process.pid}`;
+const menuSess = `blimpe2e-linkmenu-${process.pid}`;
 
 test.afterAll(() => {
   killSession(term);
   killSession(md);
   killSession(osc);
+  killSession(menuSess);
 });
 
 async function recordOpens(page: Page) {
@@ -50,6 +52,43 @@ test("a terminal link opens on ⌘-click (Ctrl-click off the Mac), not on a plai
   // ControlOrMeta is ⌘ on a Mac and Ctrl elsewhere, matching the app's check.
   await screen.click({ position, modifiers: ["ControlOrMeta"] });
   await expect.poll(() => opened(page)).toEqual([URL_TEXT]);
+});
+
+test("a right-click on a terminal link offers the server's browser, the system browser and Copy Link", async ({ page }) => {
+  const dir = fixtureDir("linkmenu");
+  await startSessionPty(menuSess, dir, ["sh", "-c", `printf '${URL_TEXT}\\n'; exec cat`]);
+  await recordOpens(page);
+  const t = await openSessionTab(page, dir);
+  const text = t.locator(".xterm-rows span", { hasText: URL_TEXT }).first();
+  await expect(text).toBeVisible();
+  const screen = t.locator(".xterm-screen");
+  const [tb, sb] = [(await text.boundingBox())!, (await screen.boundingBox())!];
+  const position = { x: tb.x - sb.x + tb.width / 2, y: tb.y - sb.y + tb.height / 2 };
+  const menu = page.locator(".context-menu");
+
+  // Off the link: no menu of ours.
+  await screen.click({ position: { x: 5, y: sb.height - 5 }, button: "right" });
+  await expect(menu).toHaveCount(0);
+
+  await screen.hover({ position });
+  await expect(t.locator(".xterm-cursor-pointer")).toHaveCount(1);
+  await screen.click({ position, button: "right" });
+  await menu.getByRole("menuitem", { name: "Open in Default Browser" }).click();
+  await expect.poll(() => opened(page)).toEqual([URL_TEXT]);
+  await expect(menu).toHaveCount(0);
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await screen.hover({ position });
+  await screen.click({ position, button: "right" });
+  await menu.getByRole("menuitem", { name: "Copy Link" }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(URL_TEXT);
+
+  // A tab of the server's Chrome, in this folder, in front.
+  await screen.hover({ position });
+  await screen.click({ position, button: "right" });
+  await menu.getByRole("menuitem", { name: "Open in Blimp Browser" }).click();
+  await expect(frontTab(page).locator(".viewer:not([hidden])").getByLabel("Address")).toHaveValue(URL_TEXT, { timeout: 10_000 });
+  expect(await opened(page)).toEqual([URL_TEXT]);
 });
 
 test("an OSC 8 terminal link (hidden URL behind any text) follows the same rule", async ({ page }) => {

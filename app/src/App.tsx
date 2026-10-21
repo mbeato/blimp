@@ -607,6 +607,7 @@ export function App() {
                 hoverAt={hover && hoverHere(t) ? hover : null}
                 onTake={(n) => takeSession(`${t.server}/${n}`)}
                 onOpenPort={(p) => pageOpeners.get(key)?.current(p)}
+                onOpenUrl={(u) => pageOpeners.get(key)?.current(u)}
                 onModels={() => {
                   setSettingsAt("models");
                   setDialog("settings");
