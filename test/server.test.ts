@@ -105,6 +105,16 @@ exec cat
   chmodSync(join(fakeBin, cmd), 0o755);
 }
 
+// A stand-in gh: `gh pr list --head <branch> …` lists one pull request naming the folder it ran in and the branch.
+writeFileSync(
+  join(fakeBin, "gh"),
+  `#!/bin/sh
+[ "$1 $2 $3" = "pr list --head" ] || exit 1
+printf '[{"number":7,"title":"in %s for %s","state":"OPEN","url":"https://github.com/o/r/pull/7"}]\\n' "$(basename "$(pwd)")" "$4"
+`,
+);
+chmodSync(join(fakeBin, "gh"), 0o755);
+
 beforeAll(async () => {
   // No naming here: the stand-in claude above isn't one that answers with a name (see "names").
   writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false }));
@@ -392,6 +402,33 @@ describe("chat", () => {
     expect((await seen(sid)).status).toBe(204);
     expect((await listed()).unread).toBe(false);
     expect((await seen("not-an-id")).status).toBe(400);
+  });
+
+  test("two Claude sessions on the same branch that edited the same file each show the other, with the branch's pull requests", async () => {
+    const repo = join(realpathSync(tmp), "work-repo");
+    mkdirSync(repo);
+    const git = (...args: string[]) => Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo, stdout: "ignore", stderr: "ignore" }).exitCode;
+    expect(git("init", "-q", "-b", "feat")).toBe(0);
+    writeFileSync(join(repo, "a.ts"), "a");
+    git("add", ".");
+    expect(git("commit", "-q", "-m", "a")).toBe(0);
+    const edit = (id: string) => tline({ type: "assistant", cwd: repo, message: { role: "assistant", content: [{ type: "tool_use", id, name: "Edit", input: { file_path: join(repo, "a.ts") } }] } });
+    const a = await fakeClaude("work1", "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a", [user("u1", "fix a"), edit("t1")]);
+    const b = await fakeClaude("work2", "8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b", [user("u1", "also fix a"), edit("t2")]);
+    const listed = async (name: string) => (await (await api("/sessions")).json()).find((s: any) => s.name === name);
+    const work = await until(async () => {
+      const w = (await listed(a.name)).work;
+      return w?.prs && w.clash && w;
+    }, "the checkout, pull requests and clash", 10000);
+    expect(work).toEqual({
+      branch: "feat",
+      root: repo,
+      prs: [{ number: 7, title: "in work-repo for feat", state: "OPEN", url: "https://github.com/o/r/pull/7" }],
+      clash: [{ session: b.name, reason: "branch" }, { session: b.name, reason: "files", files: ["a.ts"] }],
+    });
+    expect((await listed(b.name)).work.clash).toEqual([{ session: a.name, reason: "branch" }, { session: a.name, reason: "files", files: ["a.ts"] }]);
+    // The files Claude edited stay on the server.
+    expect(JSON.stringify(await (await api("/sessions")).json())).not.toContain('"files":[{');
   });
 
   test("GET /conversations/<id>/messages: a past conversation's messages, without starting Claude", async () => {

@@ -29,6 +29,7 @@ import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
 import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
 import { readRun, type Run } from "./runs";
 import { isUnread, readSeen, type Seen } from "./seen";
+import { type Work, withWork } from "./work";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
 
@@ -62,6 +63,8 @@ export type Session = ZmxSession & {
   runnableAt?: number; // when that reply began (ms): a run started before it is for an older reply
   // A run's command, the Claude session it's for, and once it ended, when and its exit code (runs.ts).
   run?: Omit<Run, "dir">;
+  // Its checkout, branch, pull requests and clashes with other sessions (work.ts), when known.
+  work?: Work;
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -309,11 +312,12 @@ export function listSessions(
   seen: Seen = readSeen(),
   notes: Notes = shownNotes(),
   activity = true, // jobs, context and git: `blimpd sessions` without --json shows none of them
+  work = activity, // which session is on what (work.ts): `blimpd sessions --json` adds it itself, with withWorkNow
   handoffs: Handoffs = readHandoffs(),
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
-  return parseZmxList(zmxOut).map((z) => {
+  const rows: Session[] = parseZmxList(zmxOut).map((z) => {
     const info = readJson(join(dir, "sessions", `${z.pid}.json`));
     const hook = isSafeName(z.name) ? readJson(join(statusDir, `${z.name}.json`)) : {};
     const file = info.sessionId ? transcriptPath(dir, info.sessionId) : undefined;
@@ -350,6 +354,7 @@ export function listSessions(
       ...(run && runFields(run)),
     };
   });
+  return work ? withWork(rows) : rows;
 }
 
 function runFields({ dir, ...run }: Run) {

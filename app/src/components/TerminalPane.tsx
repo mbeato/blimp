@@ -17,6 +17,8 @@ import { JobsPopover } from "./JobsPopover";
 import { contextMeter, handoffNews, handoffWords } from "../lib/handoff";
 import { RunBar } from "./RunBar";
 import { runBar } from "../lib/runs";
+import { openWebLink } from "../lib/links";
+import { branchLine, clashLines } from "../lib/work";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
@@ -578,7 +580,7 @@ export function TerminalPane(props: {
           (link.status !== "connected" ? " stale" : "") +
           (drag?.s.name === s.name ? " dragging" : "")
         }
-        title={`${s.kind === "shell" ? "Shell" : sessionTitle(s)}${s.label ? ` · ${s.label}` : ""}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}${meter ? `\n${meter.label}` : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
+        title={`${s.kind === "shell" ? "Shell" : sessionTitle(s)}${s.label ? ` · ${s.label}` : ""}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}${branchLine(s) ? `\n${branchLine(s)}` : ""}${meter ? `\n${meter.label}` : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
         onContextMenu={(e) => openMenu(e, s.name)}
       >
         {confirm === s.name ? (
@@ -601,6 +603,7 @@ export function TerminalPane(props: {
             >
               <Mark s={s} />
               {num && <span className="split-num">{num}</span>}
+              <Clash s={s} all={link.sessions ?? []} />
               <span className="srow-title">
                 {s.parent && (
                   <span className="srow-parent" title={`Continued from ${parent ? sessionTitle(parent) : s.parent}`}>
@@ -903,6 +906,11 @@ export function TerminalPane(props: {
                 Send Result to Claude
               </button>
             )}
+            {sessionOf(ctx.name)?.work?.prs?.map((pr) => (
+              <button key={pr.number} role="menuitem" title={`${pr.title} (${pr.state.toLowerCase()})`} onClick={() => (setCtx(null), openWebLink(pr.url))}>
+                Open PR #{pr.number}
+              </button>
+            ))}
           </div>
         </>
       )}
@@ -948,6 +956,21 @@ function Doing(props: { s: Session; now?: number; onJobs?: (at: DOMRect) => void
       )}
       {words && s.label && <span aria-hidden> · </span>}
       {s.label && <span className="kind-label">{s.label}</span>}
+    </span>
+  );
+}
+
+// Another session may get in this one's way (the same branch, or the same files edited): a red
+// warning, not amber, which means "waiting for you". Its tooltip says with whom and why.
+function Clash(props: { s: Session; all: Session[] }) {
+  const lines = clashLines(props.s, props.all);
+  if (!lines.length) return null;
+  return (
+    <span className="srow-clash" title={lines.join("\n")} aria-label={lines.join(". ")}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+        <path d="M6 1.2L11 10.5H1z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+        <path d="M6 4.6v2.9M6 8.6v.6" stroke="currentColor" strokeLinecap="round" />
+      </svg>
     </span>
   );
 }

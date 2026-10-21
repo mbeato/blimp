@@ -50,7 +50,7 @@ export function Palette(props: { links: ServerLink[]; onPick: (link: ServerLink,
           >
             <span className="row-mark">{(i.s.state === "waiting" || i.s.unread) && <StateMark s={i.s} />}</span>
             <span className="list-main">{i.s.title}</span>
-            <span className="list-side">{i.folder}</span>
+            <span className="list-side">{i.s.work?.branch ? `${i.folder} · ${i.s.work.branch}` : i.folder}</span>
           </li>
         ))}
         {items.length === 0 && <li className="list-empty">{all.length ? "No session matches." : "No sessions running."}</li>}
