@@ -4,11 +4,12 @@
 # conversation's id after --resume, else a new one), then appends whatever it reads to $E2E_DIR/started.in.
 # blimpd's naming and noting calls (src/names.ts, src/notes.ts: claude -p, the conversation on stdin) aren't
 # sessions: naming gets a long-ish name for demo-quiz's conversation, to see how names fit on the phone, and
-# none for the others; noting gets an in-progress note for demo-chat's, and none for the others.
+# none for the others; noting gets a question note for demo-chat's (so the inbox lists it under Waiting on you, read or not),
+# and none for the others.
 if [ "$1" = -p ]; then
   in=$(cat)
   case "$in" in
-    *"Say where this Claude Code session stands"*"Add a dark mode toggle to settings"*) echo "PROGRESS | dark mode toggle half done" && exit 0 ;;
+    *"Say where this Claude Code session stands"*"Add a dark mode toggle to settings"*) echo "QUESTION | should the toggle follow the system setting?" && exit 0 ;;
     *"Say where this Claude Code session stands"*) exit 1 ;;
     *"Set up the test pipeline"*) echo "Configure Integration Test Pipeline Runs" && exit 0 ;;
   esac

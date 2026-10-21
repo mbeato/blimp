@@ -356,9 +356,9 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - The inbox
 
-    /// A project opens to its inbox: blimp-demo's demo-chat is in progress, in the words blimpd's note call got from
-    /// the stand-in claude, and a tap opens its chat. The drawer's Inbox goes back to it. (Last: it runs after
-    /// test1 has read demo-chat, which an in-progress note keeps listed.)
+    /// A project opens to its inbox: blimp-demo's demo-chat waits on you, in the words blimpd's note call got from
+    /// the stand-in claude (a question), and a tap opens its chat. The drawer's Inbox goes back to it. (Last: it runs
+    /// after test1 has read demo-chat, which a question note keeps listed.)
     func testInbox() throws {
         try launchPaired()
         try pickProject("blimp-demo")
@@ -367,7 +367,7 @@ final class BlimpUITests: XCTestCase {
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox")
         let line = element("inbox-session-demo-chat")
         try wait(line, "demo-chat in the inbox", timeout: 60)
-        try until(line, "label CONTAINS 'dark mode toggle half done'", "demo-chat's note", timeout: 60)
+        try until(line, "label CONTAINS 'follow the system setting'", "demo-chat's note", timeout: 60)
         shot("31-inbox")
         line.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the inbox")
