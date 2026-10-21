@@ -40,6 +40,13 @@ public struct Prompt: Codable, Sendable, Equatable {
     public let questions: [Question]?
     /// The folder a trust prompt asks about.
     public var folder: String?
+    /// A permission's command, file, address or search, so it can be judged away from the terminal (at most
+    /// 2000 characters, secrets taken out). Older blimpd: nil.
+    public var input: String? = nil
+    /// ExitPlanMode's plan, as Markdown (at most 8000 characters). Older blimpd: nil.
+    public var plan: String? = nil
+    /// The command pushes, deploys, deletes, forces or hard-resets: a Yes there is a careful one. Older blimpd: nil.
+    public var risky: Bool? = nil
 
     /// What the buttons say, in order; the index is what `answer` sends as `pick`.
     public var choices: [String] {
@@ -140,12 +147,187 @@ public struct Session: Codable, Sendable, Equatable, Identifiable {
     public var unread: Bool? = nil
     /// Haiku's note on its last turn (nil from an older blimpd, or with names off).
     public var note: Note? = nil
+    // blimpd 0.3's, each only when there is some (nil from an older blimpd). One that doesn't decode is
+    // nil, not a dropped session.
+    /// Background work Claude started: running, or finished in the last 30 minutes.
+    public var jobs: [Job]? = nil
+    /// How full Claude's context window is, in tokens.
+    public var context: ContextWindow? = nil
+    /// The folder of Claude's latest line, and the branch checked out there.
+    public var git: Git? = nil
+    /// On a session that handed off (Continue in new session): how that goes.
+    public var handoff: Handoff? = nil
+    /// On a session a handoff started: the zmx name of the one it came from.
+    public var parent: String? = nil
+    /// The commands in Claude's latest reply, newest first: what Run offers (RunnableCommand).
+    public var runnable: [String]? = nil
+    /// Milliseconds: when that reply began. A run started before it is for an older reply.
+    public var runnableAt: Double? = nil
+    /// On a run session (kind "run"): its command, the Claude session it's for, and how it ended.
+    public var run: Run? = nil
+    /// Its checkout, branch, pull requests, and clashes with other sessions.
+    public var work: Work? = nil
 
     public var id: String { name }
     /// blimpd can show a session as chat only when Claude Code runs in it.
     public var isClaude: Bool { sessionId != nil }
     /// Milliseconds: the latest thing that happened in it.
     public var activity: Double { max(updatedAt ?? 0, stateSince ?? 0, created * 1000) }
+}
+
+extension Session {
+    private enum CodingKeys: String, CodingKey {
+        case name, created, dir, kind, label, sessionId, title, updatedAt, state, stateSince, prompt, unread, note
+        case jobs, context, git, handoff, parent, runnable, runnableAt, run, work
+    }
+
+    // The fields before blimpd 0.3 as the synthesized decoding had them; the newer ones each on their own.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        created = try c.decode(Double.self, forKey: .created)
+        dir = try c.decode(String.self, forKey: .dir)
+        kind = try c.decode(String.self, forKey: .kind)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
+        title = try c.decode(String.self, forKey: .title)
+        updatedAt = try c.decodeIfPresent(Double.self, forKey: .updatedAt)
+        state = try c.decode(SessionState.self, forKey: .state)
+        stateSince = try c.decodeIfPresent(Double.self, forKey: .stateSince)
+        prompt = try c.decodeIfPresent(Prompt.self, forKey: .prompt)
+        unread = try c.decodeIfPresent(Bool.self, forKey: .unread)
+        note = try c.decodeIfPresent(Note.self, forKey: .note)
+        // A job this app can't read is left out, not all of them.
+        jobs = (try? c.decodeIfPresent([Each<Job>].self, forKey: .jobs))?.compactMap(\.value)
+        context = try? c.decodeIfPresent(ContextWindow.self, forKey: .context)
+        git = try? c.decodeIfPresent(Git.self, forKey: .git)
+        handoff = try? c.decodeIfPresent(Handoff.self, forKey: .handoff)
+        parent = try? c.decodeIfPresent(String.self, forKey: .parent)
+        runnable = try? c.decodeIfPresent([String].self, forKey: .runnable)
+        runnableAt = try? c.decodeIfPresent(Double.self, forKey: .runnableAt)
+        run = try? c.decodeIfPresent(Run.self, forKey: .run)
+        work = try? c.decodeIfPresent(Work.self, forKey: .work)
+    }
+}
+
+// One element of a list, nil when it doesn't decode.
+private struct Each<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+}
+
+public enum JobKind: String, Codable, Sendable, Equatable {
+    case bash, monitor, agent, workflow, other
+    public init(from decoder: Decoder) throws {
+        self = JobKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
+    }
+}
+
+public enum JobStatus: String, Codable, Sendable, Equatable {
+    case running, done, failed, stopped, unknown
+    public init(from decoder: Decoder) throws {
+        self = JobStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
+/// Background work Claude started (blimpd's activity.ts). Times in ms: the app works out how long it ran.
+public struct Job: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let kind: JobKind
+    /// What it does: the command's description, the Monitor's, the agent's or workflow's summary.
+    public let label: String
+    public let startedAt: Double
+    public let status: JobStatus
+    public var outputFile: String? = nil
+    public var endedAt: Double? = nil
+    public var exit: Int? = nil
+    /// A running command's or Monitor's last output line, at most 10 s old.
+    public var lastLine: String? = nil
+}
+
+public struct ContextWindow: Codable, Sendable, Equatable {
+    /// Tokens in Claude's context window now, and how many it holds.
+    public let used: Int
+    public let limit: Int
+}
+
+public struct Git: Codable, Sendable, Equatable {
+    public let cwd: String
+    public var branch: String? = nil
+}
+
+public enum HandoffState: String, Codable, Sendable, Equatable {
+    case writing, started, failed, unknown
+    public init(from decoder: Decoder) throws {
+        self = HandoffState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
+
+/// Continue in new session (blimpd's handoff.ts): Claude writes the handoff file, then a new session reads it.
+public struct Handoff: Codable, Sendable, Equatable {
+    public let state: HandoffState
+    /// Once started: the new session's zmx name, and the handoff file.
+    public var child: String? = nil
+    public var file: String? = nil
+    /// Once failed: why, in words for the user.
+    public var error: String? = nil
+}
+
+/// A command Claude handed over, run in a session of its own (blimpd's runs.ts). Times in ms.
+public struct Run: Codable, Sendable, Equatable {
+    public let command: String
+    /// The zmx name of the Claude session it's for.
+    public let parent: String
+    public var cwd: String? = nil
+    public let startedAt: Double
+    /// Both set once it ended.
+    public var endedAt: Double? = nil
+    public var exit: Int? = nil
+
+    public var ended: Bool { exit != nil }
+}
+
+public struct PullRequest: Codable, Sendable, Equatable {
+    public let number: Int
+    public let title: String
+    /// OPEN, MERGED, CLOSED, as gh says it.
+    public let state: String
+    /// Always http(s): blimpd drops any other.
+    public let url: String
+}
+
+public enum ClashReason: String, Codable, Sendable, Equatable {
+    case branch, files, other
+    public init(from decoder: Decoder) throws {
+        self = ClashReason(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
+    }
+}
+
+/// Another session that may get in this one's way: on the same branch, or it edited the same files.
+public struct Clash: Codable, Sendable, Equatable {
+    /// The other session's zmx name.
+    public let session: String
+    public let reason: ClashReason
+    /// For files: the files, from the checkout's root.
+    public var files: [String]? = nil
+}
+
+/// Which session is on what (blimpd's work.ts).
+public struct Work: Codable, Sendable, Equatable {
+    public var branch: String? = nil
+    public var root: String? = nil
+    /// The checkout is a linked worktree, not the repo's main folder.
+    public var worktree: Bool? = nil
+    public var prs: [PullRequest]? = nil
+    public var clash: [Clash]? = nil
+}
+
+/// The return card ("where was I?"), GET /sessions/<name>/recap. at: when it was written (ms).
+public struct Recap: Codable, Sendable, Equatable {
+    public let goal: String
+    public let done: [String]
+    public let open: [String]
+    public let at: Double
 }
 
 /// Where a Claude session stands after its last turn, in Haiku's words (blimpd's notes.ts).

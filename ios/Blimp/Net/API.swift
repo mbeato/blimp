@@ -50,6 +50,51 @@ struct API {
         _ = try await call("DELETE", "/sessions/" + name)
     }
 
+    /// Answers what the session asks without a chat open: a pick, every question, Esc, or no and why. blimpd
+    /// types it only while that prompt is still up; otherwise APIError.server says why ("the question changed").
+    func answer(name: String, _ request: AnswerRequest) async throws {
+        _ = try await call("POST", "/sessions/" + name + "/answer", body: JSONEncoder().encode(request))
+    }
+
+    /// Continue in new session: Claude writes a handoff, then a new session reads it. Returns the handoff as
+    /// it starts (writing); the session list follows it to started (with the new session) or failed.
+    /// An older blimpd: APIError.server("not found"), which HandoffText.failure turns into "update it".
+    func handoff(name: String) async throws -> Handoff {
+        try await decode(call("POST", "/sessions/" + name + "/handoff"))
+    }
+
+    /// Runs a command Claude handed over (one of Session.runnable) for that Claude session, in a run session
+    /// of its own; returns the run session's name.
+    func run(session: String, command: String) async throws -> String {
+        struct Body: Encodable { let session: String; let command: String }
+        let started: Started = try await decode(call("POST", "/runs", body: JSONEncoder().encode(Body(session: session, command: command))))
+        return started.name
+    }
+
+    /// Types an ended run's exit code and last output lines into its Claude session.
+    func sendRunResult(name: String) async throws {
+        _ = try await call("POST", "/runs/" + name + "/send")
+    }
+
+    /// Saves a secret blimpd keeps for sessions. The value goes only in this body, never in the chat.
+    func saveSecret(name: String, value: String) async throws {
+        struct Body: Encodable { let value: String }
+        _ = try await call("PUT", "/secrets/" + name, body: JSONEncoder().encode(Body(value: value)))
+    }
+
+    /// Tells Claude in that session where the secret is, without its value.
+    func tellSecret(name: String, session: String) async throws {
+        struct Body: Encodable { let session: String }
+        _ = try await call("POST", "/secrets/" + name + "/tell", body: JSONEncoder().encode(Body(session: session)))
+    }
+
+    /// The return card: what the session is for, what's done, what's open. min: only for a session with that
+    /// many prompts (RecapCard.autoMin when it shows by itself). On any error, show nothing.
+    func recap(name: String, min: Int? = nil) async throws -> Recap {
+        let query = min.map { [URLQueryItem(name: "min", value: String($0))] } ?? []
+        return try await decode(call("GET", "/sessions/" + name + "/recap", query: query))
+    }
+
     /// A WebSocket address on this server: ws for http, wss for https, the token in the query
     /// (a WebSocket handshake can't carry the Authorization header here).
     func socketURL(_ path: String) -> URL {
