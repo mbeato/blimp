@@ -145,6 +145,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
   - **Models and keys…** opens Settings at Models.
 
   A kind that can't start says why under its name. blimp looks for `claude` and `codex` the way your login shell does, so ones that nvm or `~/.local/bin` put on PATH are found.
+- **Background jobs.** Claude can start work that runs on while it talks: a command in the background, a Monitor, an agent or a workflow. The session's row counts the ones that still run, like "Working · 2 jobs". After the last one ends, it says "job done" for 30 minutes. Click those words to see each job: what it does, how long it has run (or how it ended, with the exit code), and a running command's last line of output. The output file itself is not shown: Claude keeps it in `/tmp` on the server, and blimp only reads files in your home folder.
 - **Earlier** lists this folder's past conversations that are not running, with how many there are. Click it to unfold or fold the list (blimp remembers which), and click a conversation to resume it in a new session.
 - Hover a session and click the trash icon to end it. An idle Claude session ends at once; its conversation is saved, so you can resume it from **Earlier**. A session that is working or waiting, or a shell, asks first.
 - blimp starts every session in the real folder on the server, the same as typing `claude` there. So Claude reads that project's CLAUDE.md and settings.
@@ -197,6 +198,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 **Notifications and Dock badge**
 
 - When a session starts waiting for you, blimp sends a Mac notification: "*title* is waiting for you", with the folder. It does not send one if a blimp window is in focus and shows that session. With several windows, you get one notification, not one per window.
+- When a background job of Claude's ends (see Background jobs above), blimp sends "*job* finished" (or "*job* failed, exit 1"), with the session's title and folder. It sends this also when the session is on screen, so you know the build is done. It does not send it while that session's job list is open in a window in focus. A job that Claude stopped gets no notification.
 - macOS asks for permission the first time blimp sends a notification.
 - The Dock icon shows how many sessions wait for you, on all servers.
 

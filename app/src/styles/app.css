@@ -745,6 +745,74 @@ body.dragging-session * {
   color: var(--waiting);
 }
 
+/* "2 jobs": background work Claude started. A click opens the jobs popover. Not amber even on a
+   waiting row: amber is only for waiting. */
+.srow-jobs {
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.srow-jobs:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+/* The jobs popover: one job a line, its last output line under it. */
+.menu.jobs-pop {
+  position: fixed;
+  top: auto;
+  width: 340px;
+  max-height: 50vh;
+  overflow-y: auto;
+  outline: none;
+}
+
+.job {
+  padding: 5px 8px;
+  border-radius: 5px;
+}
+
+.job-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-kind {
+  flex: none;
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+
+.job-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-state {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.job-failed .job-state {
+  color: var(--danger);
+}
+
+.job-line {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
 /* The kind's label, as words in the line rather than a tag. */
 .srow-doing .kind-label {
   padding: 0;
@@ -940,6 +1008,13 @@ body.dragging-session * {
 
 .srow:hover .srow-time {
   visibility: hidden;
+}
+
+/* On a row with "2 jobs" at the end of its second line, the trash button stays on the first (the
+   time's), so the two never overlap and a click on the trash never opens the jobs. */
+.srow:has(.srow-jobs) .srow-trash {
+  top: 1px;
+  height: 20px;
 }
 
 .srow-trash:hover {

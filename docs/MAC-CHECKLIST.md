@@ -187,6 +187,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: do the same, but keep blimp in focus with that session in the terminal.
   Expect: no banner. The session's row shows an amber dot.
 
+- [ ] **A background job finishes.**
+  Do: in a Claude session, ask Claude to run `sleep 60 && echo built` in the background. Keep blimp in focus with that session in the terminal. Click "1 job" in its row, read the popover, then press Esc. Wait for the minute to pass.
+  Expect: the row says "Working · 1 job" (or "Idle · 1 job"). The popover lists "Command", what the command does, and how long it has run. When it ends, a banner says "*what it does* finished" with the session's title and folder, even though you are looking at the session. The row then says "job done". With the popover open when the job ends, no banner shows. That holds with a second blimp window open too (⌘⇧N): no banner from either.
+
 - [ ] **Dock badge.**
   Do: get two sessions to wait for you at the same time. Then answer one, then the other.
   Expect: the Dock icon shows 2, then 1, then no badge.
