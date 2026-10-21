@@ -73,6 +73,8 @@ const SECRETS: [RegExp, string][] = [
   [/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})\b/g, "…"],
   [/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)[A-Za-z0-9_]*)(\s*=\s*)("[^"]*"|'[^']*'|\S+)/gi, "$1$2…"],
   [/(?<!\S)(--?[A-Za-z-]*(?:token|password|secret|api-key)[A-Za-z-]*)([= ])(?!-)("[^"]*"|'[^']*'|\S+)/gi, "$1$2…"],
+  // A header (`X-Api-Key: …`, `Authorization: token …`) or a JSON/YAML field (`"password": "…"`).
+  [/\b([A-Za-z0-9_-]*(?:key|token|secret|password|passwd|authorization|credentials?)[A-Za-z0-9_-]*)(["']?\s*:\s*)(?!(?:Bearer|Basic)\s)("[^"]*"|'[^']*'|(?:token\s+)?[^\s'",}]+)/gi, "$1$2…"],
 ];
 export const redact = (s: string) => SECRETS.reduce((t, [re, to]) => t.replace(re, to), s);
 

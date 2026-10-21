@@ -71,6 +71,8 @@ export async function answer(t: Typist, id: string, m: any): Promise<void> {
     // stopped asking. One write, so nothing else is typed in between.
     if (typeof m.text !== "string" || m.text.length > 100_000 || !cleanText(m.text).trim())
       throw new HttpError(400, "text must be some text, at most 100 000 characters");
+    // Without it, a waiting session with no prompt read yet would take the Esc.
+    if (typeof m.at !== "number") throw new HttpError(400, "a deny needs the prompt's at");
     const text = cleanText(m.text);
     return typed(t, id, async () => {
       await stillAsking(name, m.at);

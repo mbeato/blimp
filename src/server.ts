@@ -179,6 +179,8 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (!b || typeof b !== "object" || Array.isArray(b)) throw new HttpError(400, "expected an answer");
     if (b.id !== undefined && (typeof b.id !== "string" || !b.id || b.id.length > 100)) throw new HttpError(400, "id must be a string of 1 to 100 characters");
     if (!isSafeName(name)) throw new HttpError(404, `no session named ${name}`);
+    if (b.stop !== true && b.deny !== true && !Number.isInteger(b.pick) && !Array.isArray(b.answers))
+      throw new HttpError(400, "expected an answer: pick, answers, stop or deny");
     const id: string = b.id ?? randomUUID();
     await answerOnce(name, id, b.stop === true ? { type: "interrupt", at: b.at } : b.deny === true ? { type: "deny", at: b.at, text: b.text } : { ...b, type: "answer" });
     return Response.json({ id });

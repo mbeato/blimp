@@ -35,10 +35,11 @@ export function readableInput(tool: string, input: any): string {
 // A command that pushes, deploys, deletes, forces or hard-resets: the phone shows it in red, so a Yes
 // there is a careful one. Words, not a parse: a false alarm costs a second look.
 const RISKY = [/\bpush\b(?!\s*\()/i, /\bdeploy\b/i, /--force\b/i, /\breset\s+--hard\b/i, /\bdrop(?:db)?\b/i, /\bdelete\b/i, /\bbranch\s+-D\b/];
-// rm with both a recursive and a force flag, in any order or spelling (-rf, -fr, -r -f, -Rf).
+// rm with both a recursive and a force flag, in any order or spelling (-rf, -fr, -r -f, -Rf, --recursive -f;
+// --force alone is in RISKY).
 const rmRf = (c: string) =>
   [...c.matchAll(/\brm\b([^;&|\n]*)/g)].some(([, args]) => {
-    const flags = [...args.matchAll(/(?:^|\s)-([A-Za-z]+)\b/g)].map((m) => m[1]).join("");
+    const flags = [...args.matchAll(/(?:^|\s)-([A-Za-z]+)\b/g)].map((m) => m[1]).join("") + (/(?:^|\s)--recursive\b/.test(args) ? "r" : "");
     return /[rR]/.test(flags) && flags.includes("f");
   });
 export const riskyCommand = (command: string) => RISKY.some((re) => re.test(command)) || rmRf(command);
@@ -50,9 +51,11 @@ export function promptFromHook(ev: any): Prompt | undefined {
     const tool = str(ev.tool_name);
     const input = readableInput(tool, ev.tool_input);
     const plan = tool === "ExitPlanMode" ? shown(str(ev.tool_input?.plan), 8000) : "";
+    // The summary shows the command's start: secrets out before toolSummary cuts it.
+    const summary = toolSummary(tool, tool === "Bash" ? { command: redact(str(ev.tool_input?.command)) } : ev.tool_input, str(ev.cwd));
     // Without the screen: Yes is the first option, and Esc says no.
     return {
-      kind: "permission", tool, summary: toolSummary(tool, ev.tool_input, str(ev.cwd)), options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true,
+      kind: "permission", tool, summary, options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true,
       ...(input && { input }), ...(plan && { plan }), ...(tool === "Bash" && riskyCommand(str(ev.tool_input?.command)) && { risky: true }),
     };
   }

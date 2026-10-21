@@ -962,6 +962,8 @@ describe("chat", () => {
     expect([stale.status, await stale.json()]).toEqual([409, { error: "the question changed" }]);
     const empty = await answerOver(name, { deny: true, at, text: " \x1b " });
     expect([empty.status, await empty.json()]).toEqual([400, { error: "text must be some text, at most 100 000 characters" }]);
+    const noAt = await answerOver(name, { deny: true, text: "no" });
+    expect([noAt.status, await noAt.json()]).toEqual([400, { error: "a deny needs the prompt's at" }]);
     expect(readFileSync(cfg.keys, "utf8")).toBe("");
     const r = await answerOver(name, { deny: true, at, text: "use staging\x1b instead" });
     expect(r.status).toBe(200);
@@ -977,6 +979,11 @@ describe("chat", () => {
     const shell = await answerOver(name, { stop: true });
     expect([shell.status, await shell.json()]).toEqual([409, { error: "open this session on the Mac" }]);
     expect((await answerOver(name, [])).status).toBe(400);
+    // Not a pick, answers, stop or deny: a client's mistake, not a question that changed.
+    for (const body of [{}, { at: 1 }, { stop: "yes" }, { at: 1, pick: "0", label: "Yes" }, { foo: 1 }]) {
+      const r = await answerOver(name, body);
+      expect([body, r.status, await r.json()]).toEqual([body, 400, { error: "expected an answer: pick, answers, stop or deny" }]);
+    }
     expect((await answerOver(name, { id: 5, stop: true })).status).toBe(400);
   });
 });

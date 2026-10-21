@@ -447,6 +447,16 @@ test("a permission's input is at most 2000 characters, with what looks like a se
   expect(perm("Bash", { command: "curl -H 'Authorization: Bearer abcdef0123456789xyz' https://api.example.com" }).input).toBe("curl -H 'Authorization: Bearer …' https://api.example.com");
   expect(perm("Bash", { command: "API_TOKEN=hunter2hunter2 ./deploy.sh" }).input).toBe("API_TOKEN=… ./deploy.sh");
   expect(perm("WebFetch", { url: "https://me:pa55word@example.com/x" }).input).toBe("https://me:…@example.com/x");
+  // A header's or a JSON body's secret, by its name.
+  const c = perm("Bash", { command: `curl -H "X-Api-Key: abcdef123456" -H 'Authorization: token ghx0123' -d '{"password":"hunter2", "api_key": "k-998877"}' https://x.com` }).input;
+  for (const secret of ["abcdef123456", "ghx0123", "hunter2", "k-998877"]) expect(c).not.toContain(secret);
+  expect(c).toBe(`curl -H "X-Api-Key: …" -H 'Authorization: …' -d '{"password":…, "api_key": …}' https://x.com`);
+});
+
+test("a permission's summary has what looks like a secret taken out too, before it's cut", () => {
+  const p = perm("Bash", { command: "curl -H 'Authorization: Bearer abcdefghijklmnop' https://u:pw@x.com" });
+  expect(p.summary).toBe("Ran `curl -H 'Authorization: Bearer …' https://u:…@x.com`");
+  expect(perm("Bash", { command: "x".repeat(70) + " API_TOKEN=hunter2hunter2" }).summary).not.toContain("hunter");
 });
 
 test("plan approval carries the plan's text, at most 8000 characters, and no input", () => {
@@ -470,6 +480,8 @@ test("riskyCommand: pushes, deploys, rm -rf, force, reset --hard, drop and delet
     "rm -r -f dist",
     "rm -Rf ~/tmp/x",
     "rm --recursive --force out",
+    "rm --recursive -f build",
+    "rm -f --recursive build",
     "npm publish --force",
     "git push --force-with-lease",
     "git reset --hard HEAD~1",
