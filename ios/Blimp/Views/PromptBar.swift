@@ -12,6 +12,8 @@ struct PromptBar: View {
     var highlight: Int? = nil
     /// The tallest it gets before it scrolls: the chat screen passes most of its height.
     var maxHeight: CGFloat = 320
+    /// Esc, as on the Mac; nil for folder trust, where Esc would end Claude.
+    let onDismiss: (() -> Void)?
     /// The choice's index, and the prompt it was shown in: a permission, or one single-choice question.
     let onPick: (Int, Prompt) -> Void
     /// Every question's answer, for any other question dialog (or a typed answer to one question).
@@ -34,6 +36,16 @@ struct PromptBar: View {
             HStack(spacing: 6) {
                 Circle().fill(.orange).frame(width: 8, height: 8)
                 Text("Claude is waiting").font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+                if let onDismiss {
+                    Button("Dismiss", systemImage: "xmark", action: onDismiss)
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .font(.footnote)
+                        .disabled(busy)
+                        .accessibilityIdentifier("dismissPrompt")
+                }
             }
             if prompt.answerable && prompt.kind != .other {
                 answerable

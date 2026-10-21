@@ -293,7 +293,15 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       return send(ws, { type: "ack", id });
     }
     if (m.type === "interrupt") {
-      await typed(ws, id, async () => ["\x1b"]);
+      // With `at`, the phone dismisses that question: Esc only while it's still up. Otherwise the Esc would
+      // stop Claude's work, if it was answered on the Mac just before.
+      await typed(ws, id, async () => {
+        if (m.at !== undefined) {
+          const s = await find(d.name);
+          if (s?.state !== "waiting" || s.prompt?.at !== m.at) throw new Error("the question changed");
+        }
+        return ["\x1b"];
+      });
       return send(ws, { type: "ack", id });
     }
     fail("unknown message");

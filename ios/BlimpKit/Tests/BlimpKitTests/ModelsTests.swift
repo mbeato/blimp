@@ -84,6 +84,7 @@ let sessionJSON = """
     #expect(try s(.input(id: "m1", text: "hi")) == #"{"id":"m1","text":"hi","type":"input"}"#)
     #expect(try s(.answer(id: "a1", at: 5, pick: 2, label: "No")) == #"{"at":5,"id":"a1","label":"No","pick":2,"type":"answer"}"#)
     #expect(try s(.interrupt(id: "i1")) == #"{"id":"i1","type":"interrupt"}"#)
+    #expect(try s(.dismiss(id: "d1", at: 5)) == #"{"at":5,"id":"d1","type":"interrupt"}"#)
 }
 
 @Test func aMalformedSessionIsDroppedNotTheWholeList() {

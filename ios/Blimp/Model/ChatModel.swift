@@ -201,6 +201,23 @@ final class ChatModel {
         }
     }
 
+    /// Dismiss: Esc on the prompt that was on screen, as on the Mac (a question is declined, a permission
+    /// refused). blimpd presses it only while that prompt is still up, so it never stops Claude's work instead.
+    func dismiss(_ shown: Prompt) async {
+        guard stopId == nil, answerId == nil, !answered, prompt == shown else { return }
+        let id = UUID().uuidString
+        lastError = nil
+        stopId = id
+        defer { stopId = nil }
+        switch await request(.dismiss(id: id, at: shown.at), id: id) {
+        case .ack: answeredAt = shown.at
+        case .ended: break
+        case .failed(let error) where error == "the question changed": lastError = "That question isn't up anymore."
+        case .failed(let error): lastError = "Not sent: \(error)"
+        case .notSent, .timeout: lastError = Self.notSent
+        }
+    }
+
     /// Starts Claude again on this session's conversation; returns the new session's name.
     func resume() async -> String? {
         guard let s = session ?? lastSeen, let conversation = s.sessionId else { return nil }

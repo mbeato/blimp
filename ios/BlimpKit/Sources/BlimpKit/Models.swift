@@ -206,13 +206,15 @@ public enum ChatCommand: Encodable, Sendable, Equatable {
     /// `label` is the choice's text as shown at `pick`: blimpd refuses the answer if that's changed.
     case answer(id: String, at: Double, pick: Int, label: String)
     case interrupt(id: String)
+    /// Esc for the prompt that waited since `at`: blimpd presses it only while that prompt is still up.
+    case dismiss(id: String, at: Double)
     /// Every question of a dialog at once; `labels` are each question's picked options as shown.
     case answers(id: String, at: Double, answers: [QuestionAnswer], labels: [[String]])
 
     /// What blimpd's ack or error names.
     public var id: String {
         switch self {
-        case let .input(id, _), let .answer(id, _, _, _), let .interrupt(id), let .answers(id, _, _, _): id
+        case let .input(id, _), let .answer(id, _, _, _), let .interrupt(id), let .dismiss(id, _), let .answers(id, _, _, _): id
         }
     }
 
@@ -228,6 +230,8 @@ public enum ChatCommand: Encodable, Sendable, Equatable {
             try c.encode(label, forKey: .label)
         case let .interrupt(id):
             try c.encode("interrupt", forKey: .type); try c.encode(id, forKey: .id)
+        case let .dismiss(id, at):
+            try c.encode("interrupt", forKey: .type); try c.encode(id, forKey: .id); try c.encode(at, forKey: .at)
         case let .answers(id, at, answers, labels):
             try c.encode("answer", forKey: .type); try c.encode(id, forKey: .id); try c.encode(at, forKey: .at)
             try c.encode(answers, forKey: .answers); try c.encode(labels, forKey: .labels)

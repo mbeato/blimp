@@ -72,7 +72,7 @@ Items marked (phone) need a real iPhone: speech recognition may not run in the s
 - [ ] Permission denied. Deny the microphone or speech recognition when asked. The chat says where to turn them on: Settings > Apps > blimp. (phone)
 - [ ] Hold to talk. Hold the mic, speak, let go. Your words show in the box as you talk, and letting go sends them to Claude. (phone)
 - [ ] Tap to talk. Tap the mic, speak, tap it again. The words stay in the box, unsent; Send sends them. (phone)
-- [ ] Swipe up to keep. Hold the mic, speak, swipe up, let go. The words stay in the box, unsent, for you to edit. (phone)
+- [ ] Dismiss a question. While Claude asks something, tap Dismiss on the question. It goes away, and Claude says you declined and carries on. (phone)
 - [ ] A question while you talk. Start talking. Have Claude ask something before you finish. Nothing is sent. Your words stay in the box, and "Claude asked something. Nothing was sent." shows. (phone)
 - [ ] Typing while Claude asks. While a prompt is up, type something and tap Send. "Answer Claude's question first." shows in red, and your text stays.
 - [ ] Read aloud on and off. Tap the speaker button in the chat's top bar. Claude's replies are spoken. Tap it again. They are not.

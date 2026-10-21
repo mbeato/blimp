@@ -776,6 +776,24 @@ describe("chat", () => {
     viewer.ws.close();
   }, 20000);
 
+  test("interrupt with at dismisses that question with Esc, and only while it's up", async () => {
+    const { name, at, cfg } = await fakeAsk("ask4", "a8a8a8a8-a8a8-a8a8-a8a8-a8a8a8a8a8a8", [QS[0]]);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "d0", at: at - 1 }));
+    await until(() => c.messages.find((m) => m.id === "d0"), "reply");
+    expect(c.messages.find((m) => m.id === "d0")).toEqual({ type: "error", id: "d0", error: "the question changed" });
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "d1", at }));
+    await until(() => c.messages.find((m) => m.id === "d1"), "reply", 10000);
+    expect(c.messages.find((m) => m.id === "d1")).toEqual({ type: "ack", id: "d1" });
+    await until(() => zmx("history", name).stdout.toString().includes("User declined to answer questions"), "the dialog dismissed");
+    expect(readFileSync(cfg.keys, "utf8").replace("\x1b[200~\x1b[201~", "")).toBe("\x1b"); // a fresh client's Esc goes after an empty paste
+    c.ws.send(JSON.stringify({ type: "interrupt", id: "d2", at })); // dismissed already: no Esc for Claude's work
+    await until(() => c.messages.find((m) => m.id === "d2"), "reply");
+    expect(c.messages.find((m) => m.id === "d2")).toEqual({ type: "error", id: "d2", error: "the question changed" });
+    c.ws.close();
+  }, 20000);
+
   // A stand-in for Claude's folder trust question (ios/e2e/fake-trust.ts): Claude Code just started in a new
   // folder, with no status file yet. Yes makes it write one, as Claude does; No ends it.
   async function fakeTrust(suffix: string, sessionId: string) {

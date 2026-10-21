@@ -210,9 +210,10 @@ private struct ChatContent: View {
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 if let prompt = model.prompt {
-                    PromptBar(prompt: prompt, busy: model.answering || model.answered,
+                    PromptBar(prompt: prompt, busy: model.answering || model.answered || model.stopping,
                               highlight: guess?.prompt == prompt ? guess?.pick : nil,
-                              maxHeight: max(320, screenHeight * 0.6)) { pick, shown in
+                              maxHeight: max(320, screenHeight * 0.6),
+                              onDismiss: prompt.kind == .trust ? nil : { Task { await model.dismiss(prompt) } }) { pick, shown in
                         guess = nil
                         Task { await model.answer(pick, to: shown) }
                     } onAnswers: { draft, shown in
