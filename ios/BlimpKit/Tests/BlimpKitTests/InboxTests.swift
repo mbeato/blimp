@@ -65,8 +65,8 @@ private func lines(_ l: [InboxLine]) -> [String] { l.map { "\($0.title): \($0.wo
 @Test func newestFirstAndOnlyThisProjectAndNotAConversationARunningSessionHasOpen() {
     let other = Session(name: "elsewhere", created: 1, dir: "/q", kind: "claude", label: nil, sessionId: "x", title: "X", updatedAt: 2000,
                     state: .done, stateSince: nil, prompt: nil, unread: true)
-    let i = Inbox(dir: "/p", sessions: [s("old", updated: 100, unread: true), s("newer", updated: 900, unread: true), other],
-                  earlier: [c("mid", unread: true), c("newer-id", updated: 2000, unread: true)])
+    let i = Inbox(dir: "/p", sessions: [s("old", updated: 100_000, unread: true), s("newer", updated: 900_000, unread: true), other],
+                  earlier: [c("mid", updated: 500_000, unread: true), c("newer-id", updated: 2_000_000, unread: true)])
     #expect(i.done.map(\.id) == ["session-newer", "past-mid", "session-old"])
     #expect(!i.isEmpty)
     #expect(Inbox(dir: "/p", sessions: [s("read")], earlier: []).isEmpty)
