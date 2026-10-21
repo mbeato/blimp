@@ -904,6 +904,81 @@ describe("chat", () => {
   test("404 for an unknown session", async () => {
     expect((await api(`/sessions/${tag}-none/chat?token=${token}`)).status).toBe(404);
   });
+
+  // POST /sessions/<name>/answer: the chat socket's answer, interrupt and a deny with a reason, over HTTP.
+  const answerOver = (name: string, body: unknown) =>
+    api(`/sessions/${name}/answer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+  test("POST /answer presses a permission's key while that prompt is up, once per id; a stale at is 409 with the reason", async () => {
+    const sid = "f1f1f1f1-f1f1-f1f1-f1f1-f1f1f1f1f1f1";
+    const { name } = await fakeClaude("http1", sid, []);
+    const at = Date.now();
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "git push --force origin main" }, cwd: tmp });
+    writeFileSync(join(tmp, "status", `${name}.json`), JSON.stringify({ state: "waiting", at, sessionId: sid, event: "PermissionRequest", prompt }));
+    // The session list says what it would run, and that it's risky.
+    expect((await listed(name)).prompt).toMatchObject({ kind: "permission", input: "git push --force origin main", risky: true, options: ["Yes", "No"], at });
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    const stale = await answerOver(name, { at: at - 1, pick: 0, label: "Yes" });
+    expect([stale.status, await stale.json()]).toEqual([409, { error: "the question changed" }]);
+    const unlabeled = await answerOver(name, { at, pick: 0 });
+    expect([unlabeled.status, await unlabeled.json()]).toEqual([409, { error: "the question changed" }]);
+    const ok = await answerOver(name, { id: "h1", at, pick: 0, label: "Yes" });
+    expect([ok.status, await ok.json()]).toEqual([200, { id: "h1" }]);
+    await enterUntil(viewer, "got:1", "the digit reached the session");
+    // The same id again (a retry): answered, nothing typed, so the next line has no 1 in front.
+    expect((await answerOver(name, { id: "h1", at, pick: 0, label: "Yes" })).status).toBe(200);
+    type(viewer.ws, "x\r");
+    await until(() => /got:1?x/.test(viewer.text), "the viewer's line");
+    expect(viewer.text).toContain("got:x");
+    viewer.ws.close();
+  }, 20000);
+
+  test("POST /answer with answers types the same keys as the chat socket's answer", async () => {
+    const { name, at, cfg } = await fakeAsk("http2", "f2f2f2f2-f2f2-f2f2-f2f2-f2f2f2f2f2f2", QS);
+    const answers = [{ picks: [1] }, { picks: [0, 2], text: "smoke\x1b[A test" }];
+    const wrong = await answerOver(name, { at, answers, labels: [["Postgres"], ["Lint", "E2E"]] });
+    expect([wrong.status, await wrong.json()]).toEqual([409, { error: "the question changed" }]);
+    const r = await answerOver(name, { id: "h2", at, answers, labels: [["SQLite"], ["Lint", "E2E"]] });
+    expect([r.status, await r.json()]).toEqual([200, { id: "h2" }]);
+    await until(() => existsSync(cfg.answers), "the answers");
+    expect(JSON.parse(readFileSync(cfg.answers, "utf8"))).toEqual({ "Which database?": "SQLite", "Which checks should run?": "Lint, E2E, smoke[A test" });
+    expect(readFileSync(cfg.keys, "utf8")).toBe("2" + "1" + "3" + "\x1b[B".repeat(3) + "\x1b[200~smoke[A test\x1b[201~" + "\x1b[B" + "\r" + "1");
+  }, 20000);
+
+  test("POST /answer with stop: true sends Esc; with at, only while that prompt is up", async () => {
+    const { name, at, cfg } = await fakeAsk("http3", "f3f3f3f3-f3f3-f3f3-f3f3-f3f3f3f3f3f3", [QS[0]]);
+    const stale = await answerOver(name, { stop: true, at: at - 1 });
+    expect([stale.status, await stale.json()]).toEqual([409, { error: "the question changed" }]);
+    expect(readFileSync(cfg.keys, "utf8")).toBe("");
+    expect((await answerOver(name, { stop: true, at })).status).toBe(200);
+    await until(() => zmx("history", name).stdout.toString().includes("User declined to answer questions"), "the dialog dismissed");
+    expect(readFileSync(cfg.keys, "utf8").replace("\x1b[200~\x1b[201~", "")).toBe("\x1b");
+  }, 20000);
+
+  test("POST /answer with deny: Esc, then the reason typed as a message once Claude stops asking", async () => {
+    const { name, at, cfg } = await fakeAsk("http4", "f4f4f4f4-f4f4-f4f4-f4f4-f4f4f4f4f4f4", [QS[0]]);
+    const stale = await answerOver(name, { deny: true, at: at - 1, text: "no" });
+    expect([stale.status, await stale.json()]).toEqual([409, { error: "the question changed" }]);
+    const empty = await answerOver(name, { deny: true, at, text: " \x1b " });
+    expect([empty.status, await empty.json()]).toEqual([400, { error: "text must be some text, at most 100 000 characters" }]);
+    expect(readFileSync(cfg.keys, "utf8")).toBe("");
+    const r = await answerOver(name, { deny: true, at, text: "use staging\x1b instead" });
+    expect(r.status).toBe(200);
+    // The empty paste a fresh client sends before an Esc, the Esc, then the reason as a paste and Enter.
+    await until(() => readFileSync(cfg.keys, "utf8").endsWith("\r"), "the Enter");
+    expect(readFileSync(cfg.keys, "utf8")).toBe("\x1b[200~\x1b[201~" + "\x1b" + "\x1b[200~use staging instead\x1b[201~" + "\r");
+    expect((await listed(name)).state).not.toBe("waiting");
+  }, 20000);
+
+  test("POST /answer: 404 for an unknown session, 409 for one without Claude, 400 for a body that isn't an answer", async () => {
+    expect((await answerOver(`${tag}-none`, { stop: true })).status).toBe(404);
+    const name = await shSession("http5");
+    const shell = await answerOver(name, { stop: true });
+    expect([shell.status, await shell.json()]).toEqual([409, { error: "open this session on the Mac" }]);
+    expect((await answerOver(name, [])).status).toBe(400);
+    expect((await answerOver(name, { id: 5, stop: true })).status).toBe(400);
+  });
 });
 
 describe("starting sessions", () => {

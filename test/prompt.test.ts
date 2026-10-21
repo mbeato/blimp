@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { answerKeys, answerSteps, choiceLabel, parseDialog, parseScreenOptions, parseTrust, promptFromHook, screenMeets, trustPrompt, trustSteps, withScreenOptions } from "../src/prompt";
+import { answerKeys, answerSteps, choiceLabel, parseDialog, parseScreenOptions, parseTrust, promptFromHook, riskyCommand, screenMeets, trustPrompt, trustSteps, withScreenOptions } from "../src/prompt";
 
 // What Claude Code 2.1.300 drew for a Bash permission prompt (from the probe, 2026-10-19).
 const SCREEN = ` Bash command
@@ -24,7 +24,7 @@ test("parseScreenOptions reads the numbered options after the question", () => {
 
 test("promptFromHook", () => {
   const perm = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "git push" }, cwd: "/p" });
-  expect(perm).toEqual({ kind: "permission", tool: "Bash", summary: "Ran `git push`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true });
+  expect(perm).toEqual({ kind: "permission", tool: "Bash", summary: "Ran `git push`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true, input: "git push", risky: true });
 
   const one = { question: "Color?", header: "Color", multiSelect: false, options: [{ label: "Red", description: "r" }, { label: "Green" }] };
   expect(promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [one] } })).toEqual({
@@ -426,4 +426,67 @@ test("a trust prompt: Yes first, its label checked as a permission's; Yes is ↓
   expect(trustSteps(1)).toEqual([{ cursor: "no", keys: "\r" }]);
   expect(trustSteps(2)).toBeUndefined();
   expect(trustSteps(-1)).toBeUndefined();
+});
+
+const perm = (tool_name: string, tool_input: object) => promptFromHook({ hook_event_name: "PermissionRequest", tool_name, tool_input, cwd: "/p" }) as any;
+
+test("a permission says what it would run or touch: the whole command, the file, the address, the search", () => {
+  const cmd = "cd /srv/app &&\n  bun run build && ls dist";
+  expect(perm("Bash", { command: cmd, description: "Build" }).input).toBe(cmd);
+  for (const tool of ["Edit", "MultiEdit", "Write", "Read"]) expect(perm(tool, { file_path: "/p/src/a.ts", content: "x" }).input).toBe("/p/src/a.ts");
+  expect(perm("NotebookEdit", { notebook_path: "/p/n.ipynb" }).input).toBe("/p/n.ipynb");
+  expect(perm("WebFetch", { url: "https://example.com/docs", prompt: "read it" }).input).toBe("https://example.com/docs");
+  expect(perm("WebSearch", { query: "bun unix socket fetch" }).input).toBe("bun unix socket fetch");
+  // Another tool's input isn't shown: an MCP tool's JSON can hold a secret the redaction doesn't know.
+  expect(perm("mcp__slack__send", { channel: "x", text: "hi" }).input).toBeUndefined();
+  expect(perm("Bash", {}).input).toBeUndefined();
+});
+
+test("a permission's input is at most 2000 characters, with what looks like a secret taken out", () => {
+  expect(perm("Bash", { command: "echo " + "x".repeat(3000) }).input).toHaveLength(2000);
+  expect(perm("Bash", { command: "curl -H 'Authorization: Bearer abcdef0123456789xyz' https://api.example.com" }).input).toBe("curl -H 'Authorization: Bearer …' https://api.example.com");
+  expect(perm("Bash", { command: "API_TOKEN=hunter2hunter2 ./deploy.sh" }).input).toBe("API_TOKEN=… ./deploy.sh");
+  expect(perm("WebFetch", { url: "https://me:pa55word@example.com/x" }).input).toBe("https://me:…@example.com/x");
+});
+
+test("plan approval carries the plan's text, at most 8000 characters, and no input", () => {
+  const p = perm("ExitPlanMode", { plan: "## Plan\n\n1. Add the toggle\n2. Test it" });
+  expect(p).toMatchObject({ tool: "ExitPlanMode", plan: "## Plan\n\n1. Add the toggle\n2. Test it" });
+  expect(p.input).toBeUndefined();
+  expect(perm("ExitPlanMode", { plan: "y".repeat(9000) }).plan).toHaveLength(8000);
+  expect(perm("ExitPlanMode", {}).plan).toBeUndefined();
+  // Its screen options still come in over it, the plan kept.
+  expect(withScreenOptions(p, PLAN)).toMatchObject({ plan: p.plan, options: ["Yes, and use auto mode", "Yes, manually approve edits", "No, keep planning"] });
+});
+
+test("riskyCommand: pushes, deploys, rm -rf, force, reset --hard, drop and delete", () => {
+  for (const c of [
+    "git push origin main",
+    "git push -f",
+    "cd app && fly deploy",
+    "./scripts/deploy.sh prod",
+    "rm -rf build",
+    "rm -fr node_modules",
+    "rm -r -f dist",
+    "rm -Rf ~/tmp/x",
+    "rm --recursive --force out",
+    "npm publish --force",
+    "git push --force-with-lease",
+    "git reset --hard HEAD~1",
+    "psql -c 'DROP TABLE users'",
+    "dropdb staging",
+    "kubectl delete pod web-1",
+    "gh repo delete me/x --yes",
+    "find . -name '*.tmp' -delete",
+    "git branch -D feat-x",
+  ])
+    expect([c, riskyCommand(c)]).toEqual([c, true]);
+  for (const c of ["ls -la", "git status", "rm notes.txt", "rm -r build", "git log --oneline", "bun test src/deleteUser.test.ts", "echo deployment", "node -e 'a.push(1)'", "git reset HEAD~1", "grep -rf patterns.txt src"])
+    expect([c, riskyCommand(c)]).toEqual([c, false]);
+});
+
+test("risky is set on a Bash permission only, and only when the command is risky", () => {
+  expect(perm("Bash", { command: "rm -rf /tmp/x" }).risky).toBe(true);
+  expect(perm("Bash", { command: "ls" }).risky).toBeUndefined();
+  expect(perm("Write", { file_path: "/p/deploy.sh" }).risky).toBeUndefined();
 });
