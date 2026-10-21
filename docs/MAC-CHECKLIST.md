@@ -47,6 +47,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open two folders with ⌘O. Open a file in each, and type something in each one's terminal. Click between the tabs. Quit with ⌘Q and open blimp again.
   Expect: each folder is a tab at the top, with its own row of file tabs below. Switching back shows the same open file and the same terminal text. After the restart, the same tabs are open, with the same one in front.
 
+- [ ] **The inbox.**
+  Do: in a folder, ask Claude in one session to do something small and wait for it to finish, without looking at that session (keep another one on screen). Wait a few seconds more. Click its line in the inbox at the top of the session list. Then click the inbox's header.
+  Expect: the session is under Done with a few words on what it did (a little after the turn ends). The click shows that session, and its line leaves Done. The header folds the inbox to one line of counts, and it stays folded after a restart.
+
 - [ ] **Drag a session to split the terminal.**
   Do: in a folder with two sessions, drag the second one from the session list onto the right half of the terminal. Type in it. Drag it again onto the left half. Click × on its split. Start one more drag and press Esc before you let go.
   Expect: while you drag, a label follows the pointer and the half you're over is lit. The two terminals show side by side, and your typing goes to the one you dropped. The second drag moves it to the left, with its text still there. × closes the split, and the session stays in the list. Esc drops nothing.

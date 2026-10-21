@@ -9,6 +9,8 @@ import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
+import { InboxSummary } from "./InboxSummary";
+import { inbox } from "../lib/inbox";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
@@ -695,6 +697,7 @@ export function TerminalPane(props: {
           </div>
         </div>
         <div className="slist-scroll" ref={scroll}>
+          <InboxSummary inbox={inbox(listed, past)} disabled={busy || !api} onSession={(s) => showHere(s.name)} onPast={(c) => void start({ resume: c.sessionId })} />
           {/* Each row (a session, or a split group) is one data-item: a drag drops between them. */}
           {items.flatMap((it, n) => [
             drag?.gap === n ? <div key="drop" className="slist-drop" aria-hidden /> : null,

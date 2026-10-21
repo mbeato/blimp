@@ -1001,6 +1001,47 @@ body.dragging-session * {
   margin-left: -2px;
 }
 
+/* The project's inbox, above the sessions: a line per session to look at, each opening it. */
+.inbox {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inbox-head {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.inbox-waiting .inbox-head {
+  color: var(--waiting);
+}
+
+.inbox-line {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 3px 12px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.inbox-line:hover {
+  background: var(--hover);
+}
+
+.inbox-title,
+.inbox-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-words {
+  color: var(--fg-dim);
+}
+
 .slist-note {
   margin: 6px 12px;
   font-size: 12px;

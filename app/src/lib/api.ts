@@ -29,10 +29,14 @@ export type Session = {
   state: SessionState;
   stateSince?: number; // ms
   unread?: boolean; // Claude replied since this app or the phone last had it on screen (older blimpd: absent)
+  prompt?: { kind: string; summary?: string; questions?: { question: string }[] }; // what a waiting Claude asks
+  note?: Note; // Haiku's note on its last turn (older blimpd, or names off: absent)
 };
 
 export type RecentFolder = { dir: string; lastUsed: number };
-export type Conversation = { sessionId: string; title: string; updatedAt: number; unread?: boolean };
+// Haiku's note on a Claude session's last turn: done, still going, or asking you something.
+export type Note = { status: "done" | "progress" | "question"; text: string; at: number };
+export type Conversation = { sessionId: string; title: string; updatedAt: number; unread?: boolean; note?: Note };
 export type DirEntry = { name: string; kind: "file" | "dir"; size: number; mtime: number };
 export type DirListing = { path: string; entries: DirEntry[] };
 export type FileBody = { bytes: Uint8Array<ArrayBuffer>; mtime: number; contentType: string };
