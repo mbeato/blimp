@@ -11,8 +11,10 @@ final class RowActions {
 
     /// Each row answer, by session and prompt: on its way, or blimpd typed it (until that prompt goes).
     private(set) var phases: [String: Phase] = [:]
-    /// Why a row's answer didn't go, by session, until its next try.
+    /// Why a row's answer didn't go, by session and prompt (a later prompt starts clean), until its next try.
     private(set) var failures: [String: String] = [:]
+    /// Counts the marks read that went through, so the past conversations are fetched again (their dots go).
+    private(set) var reads = 0
     /// What a row couldn't do (Stop, Mark read, Resume, Continue in new session), for an alert.
     var failure: String?
     /// A session asked to end from a row: "End this session?" first.
@@ -23,13 +25,15 @@ final class RowActions {
 
     func phase(_ name: String, _ p: Prompt) -> Phase? { phases[Self.key(name, p)] }
 
+    func failed(_ name: String, _ p: Prompt) -> String? { failures[Self.key(name, p)] }
+
     /// Answers the prompt that was on screen; blimpd types it only while that prompt is still up.
     func answer(_ name: String, _ p: Prompt, _ answer: PromptAnswer, api: API?) async {
         let key = Self.key(name, p)
         guard phases[key] == nil else { return }
-        failures[name] = nil
+        failures[key] = nil
         guard let api else {
-            failures[name] = Store.words(for: APIError.offline)
+            failures[key] = Store.words(for: APIError.offline)
             return
         }
         phases[key] = .sending
@@ -38,7 +42,7 @@ final class RowActions {
             phases[key] = .answered
         } catch {
             phases[key] = nil
-            failures[name] = Self.words(error)
+            failures[key] = Self.words(error)
         }
     }
 
@@ -57,13 +61,18 @@ final class RowActions {
     /// Stop: Esc, as the chat's Stop does.
     func stop(_ s: Session, api: API?) async {
         guard let api else { return offline() }
-        do { try await api.answer(name: s.name, AnswerRequest(answer: .stop(at: nil))) } catch { failure = "Couldn't stop it. " + Store.words(for: error) }
+        do { try await api.answer(name: s.name, AnswerRequest(answer: .stop(at: nil))) } catch { failure = "Couldn't stop it. " + Self.words(error) }
     }
 
     /// Its replies so far count as read, here and on the Mac.
     func markRead(_ conversation: String, api: API?) async {
         guard let api else { return offline() }
-        do { try await api.seen(conversation) } catch { failure = "Couldn't mark it read. " + Store.words(for: error) }
+        do {
+            try await api.seen(conversation)
+            reads += 1
+        } catch {
+            failure = "Couldn't mark it read. " + Store.words(for: error)
+        }
     }
 
     /// Starts Claude again on a past conversation, with no first message; returns the new session's name.

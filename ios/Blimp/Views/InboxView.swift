@@ -35,7 +35,7 @@ struct InboxView: View {
     private func list(now: Double) -> some View {
         let shown = onlyChanged ? left.map { inbox.changed(since: $0) } ?? inbox : inbox
         return List {
-            if let left, let words = InboxText.since(left, sessions: sessions) {
+            if let left, let words = InboxText.since(left, inbox: inbox, needs: needs) {
                 Section { since(left, words) }
             }
             if let digest {
@@ -317,7 +317,7 @@ private struct NeedsRow: View {
             Label("Answered", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
         } else if phase == .sending {
             Text("Sent…").font(.caption).foregroundStyle(.secondary)
-        } else if let failure = actions.failures[s.name] {
+        } else if let failure = actions.failed(s.name, p) {
             Text(failure).font(.caption).foregroundStyle(.red)
         }
     }

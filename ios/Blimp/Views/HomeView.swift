@@ -88,10 +88,10 @@ struct HomeView: View {
             folders = (try? await api.folders()) ?? []
             if store.dir == nil { store.dir = projects.first?.dir }
         }
-        // The project's past conversations: again when the inbox opens, and as its sessions start and end. The
-        // drawer shows the ones kept meanwhile, so its rows are there as it opens.
-        .task(id: EarlierKey(dir: store.dir, inbox: opened == .inbox, online: store.connection == .online,
-                             running: Set(store.sessions.filter { $0.dir == store.dir }.map(\.name)))) {
+        // The project's past conversations: again when the drawer or the inbox opens, as its sessions start and end,
+        // and after a Mark read here. The ones kept meanwhile show, so the drawer's rows are there as it opens.
+        .task(id: EarlierKey(dir: store.dir, drawer: drawer, inbox: opened == .inbox, online: store.connection == .online,
+                             running: Set(store.sessions.filter { $0.dir == store.dir }.map(\.name)), reads: actions.reads)) {
             guard let dir = store.dir, let api = store.api else { return }
             if let list = try? await api.conversations(dir: dir) { earlierBy[dir] = list }
         }
@@ -163,8 +163,11 @@ struct HomeView: View {
         .accessibilityIdentifier("screenTitle")
     }
 
+    /// Needs you's rule (Drawer.badge), so the badge and the band agree.
+    private var mark: Mark { Drawer.badge(store.sessions, needs: needs, onScreen: onScreen) }
+
     @ViewBuilder private var badge: some View {
-        switch Drawer.others(store.sessions, onScreen: onScreen) {
+        switch mark {
         case .asking: Image(systemName: "questionmark").font(.system(size: 9, weight: .heavy)).foregroundStyle(.orange)
         case .unread: Circle().fill(.blue).frame(width: 8, height: 8)
         case .working, .none: EmptyView()
@@ -172,7 +175,7 @@ struct HomeView: View {
     }
 
     private var badgeLabel: String? {
-        switch Drawer.others(store.sessions, onScreen: onScreen) {
+        switch mark {
         case .asking: "one is asking you something"
         case .unread: "new replies"
         case .working, .none: nil
@@ -262,9 +265,11 @@ struct HomeView: View {
 
 private struct EarlierKey: Equatable {
     let dir: String?
+    let drawer: Bool
     let inbox: Bool
     let online: Bool
     let running: Set<String>
+    let reads: Int
 }
 
 private struct StatusBar: View {

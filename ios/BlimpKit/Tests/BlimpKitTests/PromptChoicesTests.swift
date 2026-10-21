@@ -60,6 +60,8 @@ private func question(_ qs: [Question]) -> Prompt {
 
 @Test func blimpdsRefusalsReadAsWhatToDo() {
     #expect(PromptChoices.failure("the question changed") == "The question changed. Open it to answer.")
+    // a blimpd older than 0.3 has no answer route
+    #expect(PromptChoices.failure("not found") == "This server's blimpd is too old to answer from here. Update it, or open the chat.")
     #expect(PromptChoices.failure("stopped: Claude's screen didn't show the review. Finish it on the Mac.") == "Stopped part way. Open it to answer again.")
     #expect(PromptChoices.failure("Claude is asking something. Answer it first.") == "Not sent: Claude is asking something. Answer it first.")
 }

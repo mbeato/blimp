@@ -41,8 +41,26 @@ private let minute = 60_000.0
     #expect(i.waiting.map(\.id) == ["session-w"])
     #expect(i.done.map(\.id) == ["session-new"])
     #expect(i.working.map(\.id) == ["session-run"])
-    #expect(InboxText.since(5000, sessions: sessions) == "1 finished, 1 asking, 1 working")
-    #expect(InboxText.since(5000, sessions: [live("old", since: 2000)]) == nil)
+}
+
+@Test func theSinceLineCountsWhatShowTheseShows() {
+    // finished: this project's unread ones since then (not read, not another project's); asking: Needs you
+    var read = live("read", since: 9000)
+    read.unread = false
+    var far = live("far", dir: "/q", since: 9000)
+    far.unread = true
+    var old = live("old", since: 2000)
+    old.unread = true
+    var new = live("new", since: 9000)
+    new.unread = true
+    let sessions = [live("w", dir: "/q", state: .waiting, since: 2000, prompt: yesNo), old, new, read, far,
+                    live("run", state: .working, since: 9500)]
+    let earlier = [Conversation(sessionId: "c1", title: "PAST", updatedAt: 8000, unread: true, note: nil)]
+    let inbox = Inbox(dir: "/p", sessions: sessions, earlier: earlier)
+    let needs = Inbox.needsYou(sessions: sessions, dir: "/p", earlier: earlier)
+    #expect(InboxText.since(5000, inbox: inbox, needs: needs) == "2 finished, 1 asking, 1 working")
+    #expect(inbox.changed(since: 5000).done.count == 2)
+    #expect(InboxText.since(5000, inbox: Inbox(dir: "/p", sessions: [old], earlier: []), needs: []) == nil)
 }
 
 @Test func agesReadShortAndJustNowUnderAMinute() {
@@ -61,6 +79,23 @@ private let minute = 60_000.0
     let d = Digest(text: "[A](1) is going.", sessions: ["a"], at: 5000)
     #expect(!InboxText.stale(d, sessions: [live("a", since: 4000), live("b", since: 9000)]))
     #expect(InboxText.stale(d, sessions: [live("a", since: 6000)]))
+}
+
+@Test func theDrawerButtonSaysAskingWhenNeedsYouHasALineNotOnScreen() {
+    // a done session whose note is a question is in Needs you, so the badge asks too
+    var asks = live("asks", since: 5000, note: Note(status: .question, text: "ship it?", at: 1))
+    asks.unread = true
+    let needs = Inbox.needsYou(sessions: [asks], dir: "/p", earlier: [])
+    #expect(Drawer.others([asks], onScreen: nil) == .unread)
+    #expect(Drawer.badge([asks], needs: needs, onScreen: nil) == .asking)
+    #expect(Drawer.badge([asks], needs: needs, onScreen: "asks") == .none)
+    // a past question counts wherever you are
+    let past = Conversation(sessionId: "c1", title: "Q", updatedAt: 1, unread: true, note: Note(status: .question, text: "which?", at: 1))
+    #expect(Drawer.badge([asks], needs: Inbox.needsYou(sessions: [], dir: "/p", earlier: [past]), onScreen: "asks") == .asking)
+    // nothing in Needs you: the unread rule
+    var done = live("done", since: 5000)
+    done.unread = true
+    #expect(Drawer.badge([done], needs: [], onScreen: nil) == .unread)
 }
 
 @Test func aRowsCaptionHasTheHandoffTheBranchAndTheJobsAndItsClashesAndParent() throws {

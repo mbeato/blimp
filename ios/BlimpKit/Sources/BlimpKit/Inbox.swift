@@ -151,12 +151,14 @@ public enum InboxText {
         sessions.contains { s in d.sessions.contains(s.name) && (s.stateSince ?? 0) > d.at }
     }
 
-    /// Coming back after a while: "4 finished, 1 asking, 2 working" (finished since then; asking and working
-    /// now), leaving out a count of none. nil: nothing to say.
-    public static func since(_ since: Double, sessions: [Session]) -> String? {
-        let finished = sessions.filter { $0.state == .done && ($0.stateSince ?? 0) >= since }.count
-        let asking = sessions.filter { $0.state == .waiting }.count
-        let working = sessions.filter { $0.state == .working }.count
+    /// Coming back after a while: "4 finished, 1 asking, 2 working", leaving out a count of none. The rows that
+    /// "Show these" shows (inbox.changed(since:)): the project's finished and working since then, and Needs you
+    /// (every project's), so the counts and the list agree. nil: nothing to say.
+    public static func since(_ since: Double, inbox: Inbox, needs: [InboxLine]) -> String? {
+        let shown = inbox.changed(since: since)
+        let finished = shown.done.count
+        let asking = needs.count
+        let working = shown.working.count
         let parts = [(finished, "finished"), (asking, "asking"), (working, "working")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
         return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }

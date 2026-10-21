@@ -43,6 +43,8 @@ public enum PromptChoices {
         switch message {
         case "the question changed": "The question changed. Open it to answer."
         case "the session ended": "That session ended."
+        // a blimpd older than 0.3 has no answer route
+        case "not found": "This server's blimpd is too old to answer from here. Update it, or open the chat."
         default: message.hasPrefix("stopped:") ? "Stopped part way. Open it to answer again." : "Not sent: \(message)"
         }
     }

@@ -75,6 +75,14 @@ public enum Drawer {
         Mark.top(sessions.filter { $0.name != onScreen }.map(\.mark))
     }
 
+    /// The drawer button's badge, by Needs you's rule so the two agree: asking while Needs you has a line that
+    /// isn't the session on screen (a past question, or a finished turn that ends in a question, counts), else
+    /// a reply you haven't seen.
+    public static func badge(_ sessions: [Session], needs: [InboxLine], onScreen: String?) -> Mark {
+        if needs.contains(where: { $0.session.map { $0.name != onScreen } ?? true }) { return .asking }
+        return others(sessions, onScreen: onScreen)
+    }
+
     /// "/" has no last component, so it shows whole.
     public static func name(of dir: String) -> String {
         dir.split(separator: "/").last.map(String.init) ?? dir
