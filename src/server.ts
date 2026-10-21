@@ -15,6 +15,7 @@ import { createFile, download, guard, guardFile, HttpError, listDir, listFiles, 
 import { conversations, projectFolderName, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { startNaming } from "./names";
+import { startNotes } from "./notes";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
 import { markSeen, startSeen } from "./seen";
@@ -344,6 +345,7 @@ export function serve(): Server {
   // Without it, sessions just don't get the browser.
   startBrowserGate().catch((e) => console.log(`browser: ${(e as Error).message}`));
   startNaming(); // off with {"names": false} in <socket dir>/config.json
+  startNotes(); // the same switch
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

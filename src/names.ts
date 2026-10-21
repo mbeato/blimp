@@ -57,7 +57,7 @@ export function saveName(id: string, n: Name, file = namesFile()) {
 
 // What a transcript has said so far, kept up to date as it grows (chat.ts reads it).
 export type Summary = { scan: ChatScan; prompts: number; replies: number; first?: string; last: string[]; reply?: string };
-const newSummary = (): Summary => ({ scan: newScan(""), prompts: 0, replies: 0, last: [] });
+export const newSummary = (): Summary => ({ scan: newScan(""), prompts: 0, replies: 0, last: [] });
 
 export function addMessage(s: Summary, m: ChatMessage) {
   if (m.role === "user") {
@@ -71,7 +71,7 @@ export function addMessage(s: Summary, m: ChatMessage) {
 }
 
 // Read in chunks with a turn of the event loop between them, like chat.ts readLast.
-async function follow(file: string, s: Summary) {
+export async function follow(file: string, s: Summary) {
   for (;;) {
     if (statSync(file).size < s.scan.offset) Object.assign(s, newSummary()); // rewritten shorter
     const from = s.scan.offset;
@@ -100,7 +100,7 @@ export function wantsName(
   return sum.prompts - had.prompts >= 3 && now - had.at >= 20 * MIN;
 }
 
-const clip = (s: string, n = 300) => {
+export const clip = (s: string, n = 300) => {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > n ? t.slice(0, /[\ud800-\udbff]/.test(t[n - 1]) ? n - 1 : n) + "…" : t;
 };

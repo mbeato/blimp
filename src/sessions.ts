@@ -23,6 +23,7 @@ import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
+import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
 import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
 import { isUnread, readSeen, type Seen } from "./seen";
 
@@ -42,6 +43,7 @@ export type Session = ZmxSession & {
   stateSince?: number; // ms
   prompt?: Prompt & { at: number }; // what a waiting Claude asks (prompt.ts), and when the wait started
   unread: boolean; // Claude replied since either app last had it on screen (seen.ts)
+  note?: ShownNote; // Haiku's note on its last turn (notes.ts)
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -287,6 +289,7 @@ export function listSessions(
   memoFile = kindsMemoFile(),
   names: Names = shownNames(),
   seen: Seen = readSeen(),
+  notes: Notes = shownNotes(),
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
@@ -318,6 +321,7 @@ export function listSessions(
       ...st,
       ...(prompt && { prompt }),
       unread: isUnread(seen, info.sessionId, scan?.replied),
+      ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
     };
   });
 }

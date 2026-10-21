@@ -5,6 +5,7 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { shownNames } from "./names";
+import { shownNote, shownNotes } from "./notes";
 import { isUnread, readSeen } from "./seen";
 import { claudeDir, pickTitle, realDir, transcriptTitles } from "./sessions";
 
@@ -94,13 +95,13 @@ export const projectFolderName = (dir: string) => dir.replace(/[^A-Za-z0-9]/g, "
 
 // Claude names the folder after the real path, so /home/u/x (with /home/u a symlink) has to be resolved first.
 // blimp's name for one (names.ts) comes after your /rename, as in the session list.
-export function conversations(cwd: string, dir = claudeDir(), names = shownNames(), seen = readSeen()) {
+export function conversations(cwd: string, dir = claudeDir(), names = shownNames(), seen = readSeen(), notes = shownNotes()) {
   return transcripts(join(dir, "projects", projectFolderName(realDir(cwd))))
     .slice(0, 50)
     .map(({ file, mtime }) => {
       const sessionId = basename(file, ".jsonl");
       const scan = transcriptTitles(file);
-      return { sessionId, title: pickTitle(scan, names[sessionId]?.name), updatedAt: mtime, unread: isUnread(seen, sessionId, scan?.replied) };
+      return { sessionId, title: pickTitle(scan, names[sessionId]?.name), updatedAt: mtime, unread: isUnread(seen, sessionId, scan?.replied), note: shownNote(notes[sessionId]) };
     });
 }
 
