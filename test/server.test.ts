@@ -1990,6 +1990,9 @@ describe("secrets", () => {
         expect((await sApi(`/fs/file?path=${q(file)}`, { method: "PUT", body: "mine" }, t)).status).toBe(403);
         for (const route of ["/fs/mkdir", "/fs/create"])
           expect((await sApi(route, { method: "POST", body: JSON.stringify({ path: join(secrets, "PLANTED") }) }, t)).status).toBe(403);
+        // Nor lists its names.
+        expect((await sApi(`/fs/list?path=${q(secrets)}`, {}, t)).status).toBe(403);
+        expect((await sApi(`/fs/files?root=${q(secrets)}`, {}, t)).status).toBe(403);
       }
       expect(readFileSync(file, "utf8")).toBe(VALUE);
       expect(existsSync(join(secrets, "PLANTED"))).toBe(false);

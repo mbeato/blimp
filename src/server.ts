@@ -12,7 +12,7 @@ import { newScan, readLast } from "./chat";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
-import { createFile, download, guard, guardFile, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
+import { createFile, download, guard, guardFile, guardList, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, projectFolderName, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { askHandoff, startHandoffs } from "./handoff";
@@ -301,7 +301,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
 
   if (path === "/fs/list" && get) {
     const p = q.get("path");
-    return Response.json({ ...listDir(guard(p)), path: resolve(p!) });
+    return Response.json({ ...listDir(guardList(p)), path: resolve(p!) });
   }
   if (path === "/fs/file" && get) return readFile(guardFile(q.get("path")));
   if (path === "/fs/file" && req.method === "PUT") {
@@ -319,7 +319,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/files" && get) {
-    const root = guard(q.get("root"));
+    const root = guardList(q.get("root"));
     if (!isDir(root)) throw new HttpError(400, "root must be a folder");
     return Response.json(await listFiles(root));
   }

@@ -107,6 +107,15 @@ export function guardFile(path: string | null, home = realHome(), dir = socketDi
   return real;
 }
 
+// guard() for the routes that list a folder (/fs/list, /fs/files): not the secrets folder nor one in
+// it, so a secret's name isn't listed through them either. A folder that holds it still lists.
+export function guardList(path: string | null, home = realHome(), dir = socketDir()): string {
+  const real = guard(path, home);
+  const secrets = realPath(join(dir, "secrets"));
+  if (real === secrets || real.startsWith(secrets + "/")) throw new HttpError(403, "that's one of blimp's own files");
+  return real;
+}
+
 const ms = (t: number) => Math.floor(t);
 
 export type Entry = { name: string; kind: "file" | "dir"; size: number; mtime: number };

@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { guard, guardFile, HttpError, listDir, listFiles, secretPaths, socketDir, writeFile } from "../src/files";
+import { guard, guardFile, guardList, HttpError, listDir, listFiles, secretPaths, socketDir, writeFile } from "../src/files";
 import { socketPath } from "../src/sessions";
 
 // A fake home with a sibling folder outside it.
@@ -128,6 +128,13 @@ describe("guardFile", () => {
     for (const p of [join(blimp, "secrets"), join(blimp, "secrets", "API_KEY"), join(blimp, "secrets", "NEW"), join(home, "key-link")])
       expect(status(() => guardFile(p, home, blimp))).toBe(403);
     expect(guardFile(join(blimp, "secrets-notes.txt"), home, blimp)).toBe(join(blimp, "secrets-notes.txt"));
+  });
+
+  test("the folder routes don't list the secrets folder or one in it; the folder that holds it still lists", () => {
+    mkdirSync(join(blimp, "secrets", "sub"), { recursive: true });
+    for (const p of [join(blimp, "secrets"), join(blimp, "secrets", "sub")]) expect(status(() => guardList(p, home, blimp))).toBe(403);
+    expect(guardList(blimp, home, blimp)).toBe(blimp);
+    expect(guardList(join(blimp, "secrets-notes"), home, blimp)).toBe(join(blimp, "secrets-notes"));
   });
 });
 
