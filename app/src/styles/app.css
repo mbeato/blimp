@@ -745,6 +745,77 @@ body.dragging-session * {
   color: var(--waiting);
 }
 
+/* "2 jobs": background work Claude started. A click opens the jobs popover. Not amber even on a
+   waiting row: amber is only for waiting. Over the hovered row's trash button, which reaches down
+   into this line at the right end, where this sits. */
+.srow-jobs {
+  position: relative;
+  z-index: 1;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.srow-jobs:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+/* The jobs popover: one job a line, its last output line under it. */
+.menu.jobs-pop {
+  position: fixed;
+  top: auto;
+  width: 340px;
+  max-height: 50vh;
+  overflow-y: auto;
+  outline: none;
+}
+
+.job {
+  padding: 5px 8px;
+  border-radius: 5px;
+}
+
+.job-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-kind {
+  flex: none;
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+
+.job-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-state {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.job-failed .job-state {
+  color: var(--danger);
+}
+
+.job-line {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
 /* The kind's label, as words in the line rather than a tag. */
 .srow-doing .kind-label {
   padding: 0;

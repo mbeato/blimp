@@ -11,6 +11,8 @@ import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
 import { InboxSummary } from "./InboxSummary";
 import { inbox } from "../lib/inbox";
+import { jobsOpen, jobsWords } from "../lib/jobs";
+import { JobsPopover } from "./JobsPopover";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
@@ -144,6 +146,8 @@ export function TerminalPane(props: {
   const [drag, setDrag] = useState<Drag | null>(null);
   // Right-click menu on a session (its row or its split's header), at the pointer.
   const [ctx, setCtx] = useState<{ name: string; x: number; y: number } | null>(null);
+  // A session's jobs popover, under (or over) its row's "2 jobs".
+  const [jobsAt, setJobsAt] = useState<{ name: string; at: DOMRect } | null>(null);
   const [listWidth, setListWidth] = useState(230);
   const box = useRef<HTMLDivElement>(null);
   // Moved to another window: not picked to fill an empty terminal here (the user can still
@@ -458,6 +462,13 @@ export function TerminalPane(props: {
 
   const split = p.panes.length > 1;
   const sessionOf = (name: string) => running.find((x) => x.name === name);
+  // The popover goes when the session's jobs do. While it's open, jobs there finishing don't notify.
+  const popJobs = jobsAt ? sessionOf(jobsAt.name)?.jobs : undefined;
+  const jobsKey = jobsAt && popJobs?.length ? `${link.key}/${jobsAt.name}` : null;
+  useEffect(() => {
+    jobsOpen.current = jobsKey;
+    return () => void (jobsOpen.current === jobsKey && (jobsOpen.current = null));
+  }, [jobsKey]);
   const openMenu = (e: ReactMouseEvent, name: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -523,7 +534,7 @@ export function TerminalPane(props: {
               <span className="srow-title">{sessionTitle(s)}</span>
               <span className="srow-side">
                 <span className="srow-time">{relTime(lastActivity(s), now)}</span>
-                <Doing s={s} />
+                <Doing s={s} now={now} onJobs={(at) => setJobsAt({ name: s.name, at })} />
               </span>
             </button>
             <button className="srow-trash" title="End session" aria-label={`End ${sessionTitle(s)}`} onClick={() => trash(s)}>
@@ -753,6 +764,7 @@ export function TerminalPane(props: {
         </div>
       </nav>
       {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} h={drag.h} tall={drag.row} />}
+      {jobsAt && jobsKey && <JobsPopover jobs={popJobs!} at={jobsAt.at} now={now} onClose={() => setJobsAt(null)} />}
       {ctx && (
         <>
           <div
@@ -804,12 +816,27 @@ export function DragGhost(props: { s?: Session; label: string; x: number; y: num
   );
 }
 
-function Doing(props: { s: Session }) {
-  const { s } = props;
+// jobs: "2 jobs" (or "job done") before the kind's label, so a narrow list cuts the label first. A
+// click on it opens the jobs popover (onJobs, with where it is), not the session.
+function Doing(props: { s: Session; now?: number; onJobs?: (at: DOMRect) => void }) {
+  const { s, onJobs } = props;
   const words = doing(s);
+  const jobs = jobsWords(s.jobs, props.now);
   return (
     <span className={"srow-doing state-" + s.state}>
       {words}
+      {words && jobs && <span aria-hidden> · </span>}
+      {jobs && (
+        <span
+          className="srow-jobs"
+          role="button"
+          title="Background jobs Claude started: click for each one"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => (e.stopPropagation(), onJobs?.(e.currentTarget.getBoundingClientRect()))}
+        >
+          {jobs}
+        </span>
+      )}
       {words && s.label && <span aria-hidden> · </span>}
       {s.label && <span className="kind-label">{s.label}</span>}
     </span>

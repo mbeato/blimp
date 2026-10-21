@@ -43,6 +43,7 @@ import { closeTab, dropHomeTabs, homeTab, keepServers, moveTab, newLayout, openT
 import { startReorder } from "./lib/reorder";
 import { getSettings, startSettings, useSettings } from "./lib/settings";
 import { notify, setBadge, toMarkSeen, WaitWatcher } from "./lib/waiting";
+import { jobsOpen, JobWatcher } from "./lib/jobs";
 
 type DialogKind = "palette" | "open" | "add" | "settings" | null;
 
@@ -77,6 +78,12 @@ export function App() {
     (title, body, id) => getSettings().notifications && notify(title, body, id),
     () => ({ focused: document.hasFocus(), viewing: viewingRef.current }),
   );
+  // A background job that finished: announced even for a session on screen, not while its jobs popover is.
+  const jobWatcher = useRef<JobWatcher | null>(null);
+  jobWatcher.current ??= new JobWatcher(
+    (title, body, id) => getSettings().notifications && notify(title, body, id),
+    (session) => document.hasFocus() && jobsOpen.current === session,
+  );
   const settings = useSettings();
   // The sessions on screen in this window while it has focus are read, here and on the phone.
   const seenSent = useRef(new Map<string, number>()).current;
@@ -88,6 +95,7 @@ export function App() {
   };
   const onLinkChange = useRef((l: ServerLink) => {
     if (l.status === "connected" && l.sessions) watcher.current!.update(l.key, l.home, l.sessions);
+    if (l.status === "connected" && l.sessions) jobWatcher.current!.update(l.key, l.home, l.sessions);
     markSeen(l);
     rerender();
   }).current;
