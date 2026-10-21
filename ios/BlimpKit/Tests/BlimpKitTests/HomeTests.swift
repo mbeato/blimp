@@ -40,7 +40,7 @@ func conversation(_ id: String, updated: Double, unread: Bool? = nil) -> Convers
         session("a2", dir: "/h/alpha", created: 2, state: .working, updated: 1_000),
         session("b1", dir: "/h/beta", created: 3, updated: 2_000),
     ]
-    let recent = [RecentFolder(dir: "/h/alpha", lastUsed: 99_000), RecentFolder(dir: "/h/gamma", lastUsed: 3_000)]
+    let recent = [RecentFolder(dir: "/h/alpha", lastUsed: 99_000), RecentFolder(dir: "/h/gamma", lastUsed: 4_000)]
     let projects = Drawer.projects(sessions: sessions, recent: recent)
     #expect(projects.map(\.name) == ["alpha", "gamma", "beta"])
     #expect(projects.map(\.mark) == [.unread, .none, .none])
