@@ -13,6 +13,7 @@ enum Opened: Equatable {
 
 struct HomeView: View {
     @Environment(Store.self) private var store
+    @Environment(\.covered) private var covered
     @State private var opened: Opened = .inbox
     @State private var drawer = false
     /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
@@ -54,7 +55,7 @@ struct HomeView: View {
                        onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
-        .modifier(KeepsPlace(opened: $opened))
+        .modifier(KeepsPlace(opened: $opened, drawer: drawer))
         .task(id: store.connection == .online) {
             guard let api = store.api else { return }
             folders = (try? await api.folders()) ?? []
@@ -98,6 +99,7 @@ struct HomeView: View {
             }
             .accessibilityLabel(badgeLabel.map { "Sessions, \($0)" } ?? "Sessions")
             .accessibilityIdentifier("drawerButton")
+            .accessibilityHidden(covered)
         }
         ToolbarItem(placement: .principal) { title }
         // In a session, its own toolbar has Inbox, after the speaker.
@@ -115,6 +117,7 @@ struct HomeView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("screenTitle")
+        .accessibilityHidden(covered)
     }
 
     @ViewBuilder private var badge: some View {

@@ -15,6 +15,9 @@ enum SocketState: Equatable, Sendable {
 enum SocketError: Error, Equatable {
     /// There is no link to blimpd right now (between reconnects, or after stop()).
     case notConnected
+    /// The frame was written, but blimpd wasn't heard from within 3 s, so the link was dropped. blimpd may
+    /// still have it: send it again with the same id, which blimpd types only once.
+    case unconfirmed
 }
 
 @MainActor
@@ -89,14 +92,15 @@ final class Socket {
 
     /// Sends one text frame (blimpd reads JSON from text frames only). A dead link takes a frame without a
     /// word, so it also waits to hear from blimpd (a pong, the ack, any frame): nothing within 3 s drops the
-    /// link and throws, so the sender can say "Not sent" now instead of after its own timeouts.
+    /// link and throws `unconfirmed`, so the sender can try again on the new link now instead of after its own
+    /// timeouts.
     func send(_ data: Data) async throws {
         guard let task else { throw SocketError.notConnected }
         let since = ContinuousClock.now
         try await task.send(.string(String(decoding: data, as: UTF8.self)))
         guard await heard(on: task, since: since) else {
             if self.task === task { restart() }
-            throw SocketError.notConnected
+            throw SocketError.unconfirmed
         }
     }
 

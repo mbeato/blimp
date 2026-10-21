@@ -1,6 +1,15 @@
 import Foundation
 
-public enum AnswerMatch: Equatable, Sendable { case clear(Int), guess(Int), none }
+public enum AnswerMatch: Equatable, Sendable {
+    case clear(Int), guess(Int), none
+
+    /// A risky command (push, deploy, delete) is never answered by voice alone: a clear match only marks
+    /// the choice, which then waits for a tap like a guess.
+    public func needingTap(risky: Bool) -> AnswerMatch {
+        if risky, case .clear(let i) = self { return .guess(i) }
+        return self
+    }
+}
 
 /// Works out which button a spoken answer means. It never picks silently when unsure:
 /// `.guess` waits for a tap, `.none` asks again.

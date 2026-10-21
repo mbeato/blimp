@@ -489,24 +489,27 @@ final class BlimpUITests: XCTestCase {
             field.tap()
             field.typeText(try pairLink())
             app.buttons["connectButton"].tap()
-        } else if !home.exists {
+        } else if unlock.exists || !home.exists {
+            // Home lives on under the lock cover, so the lock is what says whether to unlock
             try unlockWithFace()
         }
         try wait(home, "Home")
     }
 
-    /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking.
+    /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking. Unlocked
+    /// means the cover went: Home is there under it all along.
     private func unlockWithFace() throws {
         let home = element("drawerButton")
         let unlock = app.buttons["Unlock"].firstMatch
         for _ in 0..<3 {
             allowFaceID()
             try signal("faceid-match")
-            if home.waitForExistence(timeout: 10) { return }
+            if unlock.waitForNonExistence(timeout: 10), home.waitForExistence(timeout: 5) { return }
             screen("still-locked")
             // the ask ended (or never started): Unlock asks again
             if unlock.exists && unlock.isHittable { unlock.tap() }
         }
+        try until(unlock, "exists == false", "the lock to go after Face ID")
         try wait(home, "Home after Face ID")
     }
 

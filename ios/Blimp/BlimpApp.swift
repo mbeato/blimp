@@ -29,8 +29,9 @@ private struct Root: View {
                 PairView()
             } else {
                 // Kept alive under the lock, so unlocking lands on the same chat, scrolled where it was, with the
-                // words still in the box. Hidden from VoiceOver (and the UI tests) while covered.
-                HomeView().accessibilityHidden(covered)
+                // words still in the box. Hidden from VoiceOver (and the UI tests) while covered: the bar's buttons
+                // too (they live outside this view in UIKit's navigation bar, so they read `covered` themselves).
+                HomeView().accessibilityHidden(covered).environment(\.covered, covered)
             }
         }
         .overlay { if covered { LockedView() } }
@@ -53,6 +54,11 @@ private struct Root: View {
     private var covered: Bool {
         store.server != nil && !store.waitingForKeychain && (lock.locked || scenePhase == .background)
     }
+}
+
+extension EnvironmentValues {
+    /// The lock cover is up: what's under it stays alive, but is hidden from VoiceOver and marks nothing read.
+    @Entry var covered = false
 }
 
 extension View {
@@ -82,9 +88,10 @@ private struct ReturnFromBackground: ViewModifier {
 
 /// Where you were, for a cold launch: the open chat, saved as you open it and as the app leaves. A cold
 /// launch reopens it with the first session list, if it was used in the last hour and still runs, and
-/// nothing else was opened first.
+/// nothing else was opened first (nor the drawer: tapping Inbox or the project already showing opens nothing new).
 struct KeepsPlace: ViewModifier {
     @Binding var opened: Opened
+    let drawer: Bool
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var tried = false
@@ -107,6 +114,7 @@ struct KeepsPlace: ViewModifier {
             }
             // A project picked before the list came: that's where you want to be.
             .onChange(of: store.dir) { tried = true }
+            .onChange(of: drawer) { tried = true }
             .onChange(of: scenePhase) { _, phase in if phase == .background { Self.save(opened) } }
     }
 

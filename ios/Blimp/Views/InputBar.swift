@@ -54,6 +54,10 @@ struct InputBar: View {
             if !chips.isEmpty, !listening, !sending { chipRow }
             box
         }
+        // A tapped chip is sent only from the row it was tapped on: text in the box, a prompt or a new reply
+        // changes the chips, and the mic or a send hides them; each cancels it, so it isn't sent when the row comes back.
+        .onChange(of: chips) { pendingChip = nil }
+        .onChange(of: listening || sending) { _, busy in if busy { pendingChip = nil } }
         .onAppear {
             guard onMicDown != nil, !warmed else { return }
             warmed = true
@@ -187,7 +191,7 @@ struct InputBar: View {
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .fixedSize(horizontal: false, vertical: true)
-        // Sent once the Undo time has passed; Undo, typing, a prompt or leaving the chat (the row goes) cancels it.
+        // Sent once the Undo time has passed; Undo, typing, a prompt or leaving the chat cancels it (see body).
         .task(id: pendingChip) {
             guard let chip = pendingChip else { return }
             try? await Task.sleep(for: Self.undoTime)

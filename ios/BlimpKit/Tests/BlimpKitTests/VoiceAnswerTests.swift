@@ -58,3 +58,10 @@ private func isClear(_ m: AnswerMatch) -> Bool { if case .clear = m { return tru
     #expect(VoiceAnswer.match("yes wait", choices: perm) == .guess(0))
     #expect(VoiceAnswer.match("no wait", choices: perm) == .guess(3))
 }
+
+@Test func aSpokenAnswerToARiskyCommandOnlyMarksTheChoiceForATap() {
+    #expect(VoiceAnswer.match("yes", choices: perm).needingTap(risky: true) == .guess(0))
+    #expect(VoiceAnswer.match("yes", choices: perm).needingTap(risky: false) == .clear(0))
+    #expect(VoiceAnswer.match("yes wait", choices: perm).needingTap(risky: true) == .guess(0))
+    #expect(VoiceAnswer.match("purple", choices: perm).needingTap(risky: true) == .none)
+}

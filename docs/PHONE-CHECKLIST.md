@@ -13,7 +13,7 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] Keychain in a normal Xcode run. Press Run, pair, stop the app, press Run again. It opens on Home without asking to pair. Sign out in Settings. The next run asks to pair.
 - [ ] Face ID. First, in the Simulator menu choose Features, Face ID, Enrolled. Then quit and reopen the app. It shows a blank screen with "Unlock", no session names. Features, Face ID, Matching Face unlocks it. (The very first launch, before pairing, doesn't ask.)
 - [ ] Face ID fails, passcode works. Choose Non-matching Face. Then use the passcode when asked. It unlocks. (Needs a device with a passcode set: a real phone.)
-- [ ] App switcher. Swipe up to the app switcher. blimp's card is blank, with no session names.
+- [ ] App switcher. Leave blimp for the Home Screen, then swipe up to the app switcher. blimp's card is blank, with no session names. (Swiping up from inside blimp shows the chat as it is: blimp is only paused then, and the lock only hides it after 5 minutes away or at launch.)
 - [ ] Cancelling does not nag. Cancel the Face ID sheet. It stays on "Unlock" and does not ask again until you tap Unlock.
 - [ ] Lock after 5 minutes. Go to the Home Screen, wait more than 5 minutes, come back. It is locked again. Within 5 minutes it is not. Signed out (nothing paired), it never locks.
 - [ ] Unlocking keeps your place. Open a chat, scroll up a little, type a few words and don't send them. Lock (wait 5 minutes in the background). Unlock: the same chat, scrolled where you left it, the words still in the box. The chat does not reload.
@@ -56,7 +56,7 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] A past conversation. Tap one in the drawer: it opens to read, and nothing starts (the Mac lists no new session). Send something: it resumes with that message.
 - [ ] End a session. Press and hold its row in the drawer, End session, confirm. It leaves the drawer.
 - [ ] Links. A link to a web page opens in Safari when tapped. A link with another kind of address (for example `file:` or `tel:`) is not tappable.
-- [ ] One-tap replies. In a chat with an empty box and nothing asked, "go", "continue", "yes go ahead" and "status?" sit above the box. Tap one: "Sending “go”… Undo" shows for 2 seconds (a light tap you can feel), then it's sent. Tap Undo before that: nothing is sent. Long-press one: its words go in the box, unsent. Type a letter, or let Claude ask something: the chips go.
+- [ ] One-tap replies. In a chat with an empty box and nothing asked, "go", "continue", "yes go ahead" and "status?" sit above the box. Tap one: "Sending “go”… Undo" shows for 2 seconds (a light tap you can feel), then it's sent. Tap Undo before that: nothing is sent. Long-press one: its words go in the box, unsent. Type a letter, or let Claude ask something: the chips go. Tap one, then within 2 seconds type a letter and delete it: the chips come back and nothing is sent.
 - [ ] Number picks. Ask Claude for three options as a numbered list. The chips become 1, 2, 3 and all. Tap 2: Claude gets "2".
 - [ ] Scrolling. A long chat opens at the bottom. A new message follows only when you are already at the bottom. If you scrolled up, a "New" pill shows. Tapping it scrolls down.
 - [ ] The prompt bar does not jump. When a permission appears, the bar slides in without flicker on its first frame.
@@ -73,7 +73,7 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] A quiet connection counts as connected. Open a session that is idle. The "Reconnecting…" bar goes away on its own after a moment.
 - [ ] Coming back from the background. Go to the Home Screen for a minute, then return (unlock if asked). A link that still works is kept: the chat does not flash "Reconnecting…" or reload. After a longer time away, with the link dead, both Home and the open chat are back within about 3 seconds.
 - [ ] A new network. With a chat open, turn Wi-Fi off (cellular takes over), then on again; or join a hotspot. The chat comes back within a few seconds each time, not after 20 to 40.
-- [ ] A send on a dead link. Turn on Airplane Mode, then at once send a message. Within about 3 seconds "Not sent. Check the connection." shows, and your text stays in the box. (phone)
+- [ ] A send on a dead link. Turn on Airplane Mode, then at once send a message. Within about 3 to 6 seconds "Not sent. Check the connection." shows, and your text stays in the box. (A link that was only slow gets the message once more on a new link, and Claude gets it once.) (phone)
 - [ ] Tailscale off. With the phone paired over Tailscale, turn the Tailscale VPN off in its app. The top bar says "Tailscale looks off" with "Open Tailscale". Tap it: the Tailscale app opens (if its link doesn't work, the App Store's Tailscale page opens; note which). Turn the VPN on: the bar goes within a few seconds. Paired over another address (the simulator's 127.0.0.1), it says "Can't reach the server" instead. (phone)
 
 ## Voice
@@ -96,7 +96,7 @@ Items marked (phone) need a real iPhone: speech recognition may not run in the s
 - [ ] A question read aloud. With read-aloud on, make Claude ask for a permission. The question and its choices are read.
 - [ ] Starting the mic stops speech. While a reply is read, tap the mic. The reading stops. (phone)
 - [ ] A reply that arrives while the mic is on is not read. (phone)
-- [ ] A permission answered by voice. Say "yes". The permission is answered. (phone)
+- [ ] A permission answered by voice. Say "yes". The permission is answered. For a risky command (a push, a deploy, rm -rf), saying "yes" only marks Yes; tap it to answer. (phone)
 - [ ] An unclear answer is highlighted, not sent. Say something that is not yes or no. It shows highlighted and waits for a tap. (phone)
 - [ ] Another session. With a chat open, make another session start waiting, or finish. A banner slides in at the top, with a sound. Tapping it opens that session.
 - [ ] A whole conversation by voice. With read-aloud on: ask by voice, hear the reply, answer a permission by voice. No typing. (phone)

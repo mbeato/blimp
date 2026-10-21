@@ -43,12 +43,14 @@ struct StartView: View {
                 .background(.bar)
             }
             .task { await load() }
-            .keepsDraft($draft, key: past.map { "past:" + $0.sessionId } ?? "inbox:" + dir)
+            .keepsDraft($draft, key: draftKey)
             .onChange(of: dictation.live) { _, live in if dictation.on { draft = live } }
             // Leaving the screen or the app stops the mic; the words stay in the box.
             .onDisappear { micUp() }
             .onChange(of: scenePhase) { _, phase in if phase == .background { micUp() } }
     }
+
+    private var draftKey: String { past.map { "past:" + $0.sessionId } ?? "inbox:" + dir }
 
     private var vocabulary: [String] {
         [Drawer.name(of: dir)] + store.sessions.map(\.title)
@@ -111,7 +113,10 @@ struct StartView: View {
             defer { starting = false }
             do {
                 let name = try await store.start(dir: dir, resume: past?.sessionId, prompt: text)
-                draft = DraftText.afterSend(draft, sent: sent)
+                let left = DraftText.afterSend(draft, sent: sent)
+                draft = left
+                // Saved here: the chat becomes the new session at once, so keepsDraft never sees the box empty.
+                DraftBox.set(left, for: draftKey)
                 onStarted(name)
             } catch {
                 failure = Store.words(for: error)

@@ -309,7 +309,8 @@ final class ChatModel {
             replies[id] = c
             Task { [weak self] in
                 guard let socket = self?.socket else { self?.reply(id, .notSent); return }
-                do { try await socket.send(data) } catch { self?.reply(id, .notSent) }
+                // Written but unheard: like a lost ack, so request() sends the same id again on the new link.
+                do { try await socket.send(data) } catch { self?.reply(id, (error as? SocketError) == .unconfirmed ? .timeout : .notSent) }
             }
             timers[id] = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(10))
