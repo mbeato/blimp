@@ -56,7 +56,6 @@ struct InboxView: View {
             } header: {
                 Text(title).foregroundStyle(color)
             }
-            .accessibilityIdentifier("inbox-heading-" + title)
         }
     }
 }
