@@ -45,6 +45,14 @@ export function removePane(p: Panes, i: number): Panes {
   return at(p, panes, p.focus > i ? p.focus - 1 : p.focus);
 }
 
+// Unsplit, from a session's right-click: its split's sessions are each on their own again. The
+// split on screen leaves `name` there alone; a kept group just comes apart.
+export function unsplit(p: Panes, name: string): Panes {
+  if (p.panes.length > 1 && p.panes.includes(name)) return at(p, [name], 0);
+  const g = p.groups.find((x) => x.includes(name));
+  return g ? at(p, p.panes, p.focus, p.groups.filter((x) => x !== g)) : p;
+}
+
 // Sessions gone from this window (moved to another): out of the splits and the kept groups.
 export function forget(p: Panes, names: string[]): Panes {
   if (!p.panes.some((n) => names.includes(n)) && !p.groups.some((g) => g.some((n) => names.includes(n)))) return p;

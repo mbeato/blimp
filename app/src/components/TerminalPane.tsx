@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { Conversation, Kind, Port, Session } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
-import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, type Panes, type Side } from "../lib/panes";
+import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, unsplit, type Panes, type Side } from "../lib/panes";
 import { freeName, pastedImages, plainName, upload, type Item } from "../lib/transfers";
 import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, moveItem, pickSession, sessionTitle } from "../lib/sessions";
 import { dragHover } from "../lib/place";
@@ -763,13 +763,18 @@ export function TerminalPane(props: {
               setCtx(null);
             }}
           />
-          <div className="menu context-menu" role="menu" style={{ left: Math.min(ctx.x, innerWidth - 240), top: Math.min(ctx.y, innerHeight - 90) }} onKeyDown={(e) => e.key === "Escape" && setCtx(null)}>
+          <div className="menu context-menu" role="menu" style={{ left: Math.min(ctx.x, innerWidth - 240), top: Math.min(ctx.y, innerHeight - 120) }} onKeyDown={(e) => e.key === "Escape" && setCtx(null)}>
             <button role="menuitem" autoFocus onClick={() => moveOut([ctx.name])}>
               Open in New Window
             </button>
             {split && p.panes.includes(ctx.name) && (
               <button role="menuitem" onClick={() => moveOut(p.panes)}>
                 Open All Splits in New Window
+              </button>
+            )}
+            {((split && p.panes.includes(ctx.name)) || p.groups.some((g) => g.includes(ctx.name))) && (
+              <button role="menuitem" onClick={() => (setCtx(null), onPanes((q) => unsplit(q, ctx.name)))}>
+                Unsplit
               </button>
             )}
           </div>

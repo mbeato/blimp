@@ -13,8 +13,9 @@ const left = `blimpe2e-splitl-${pid}`;
 const right = `blimpe2e-splitr-${pid}`;
 const toggled = `blimpe2e-toggle-${pid}`;
 const ordered = `blimpe2e-order-${pid}`;
+const third = `blimpe2e-third-${pid}`;
 
-test.afterAll(() => [tabA, tabB, left, right, toggled, ...[0, 1, 2].map((i) => `${ordered}-${i}`)].forEach(killSession));
+test.afterAll(() => [tabA, tabB, left, right, toggled, third, ...[0, 1, 2].map((i) => `${ordered}-${i}`)].forEach(killSession));
 
 const jump = async (page: Page, name: string) => {
   await page.keyboard.press("Meta+k");
@@ -225,7 +226,7 @@ test("right-click a session: Open in New Window moves it to a new window; Open A
 
   await sessionRow(page, right).click({ button: "right" });
   const menu = page.getByRole("menu");
-  await expect(menu.getByRole("menuitem")).toHaveText(["Open in New Window", "Open All Splits in New Window"]);
+  await expect(menu.getByRole("menuitem")).toHaveText(["Open in New Window", "Open All Splits in New Window", "Unsplit"]);
   const popup = context.waitForEvent("page");
   await menu.getByRole("menuitem", { name: "Open in New Window" }).click();
   const win = await popup;
@@ -249,6 +250,38 @@ test("right-click a session: Open in New Window moves it to a new window; Open A
   await expect.poll(() => layoutOf(page).tabs[1].panes).toEqual([]);
   await expect(frontTab(page).locator(".tpane-terms")).toContainText("Pick a session on the right");
   await win2.close();
+});
+
+// Unsplit, from a session's right-click: the split on screen leaves that session there alone; a
+// kept split group (another session on screen) comes apart. A session in no split has no Unsplit.
+test("right-click Unsplit: a split's sessions are each on their own again", async ({ page }) => {
+  const dir = fixtureDir("tabs-split");
+  startSession(left, dir);
+  startSession(right, dir);
+  startSession(third, dir);
+  try {
+    const layout = () => layoutOf(page).tabs[1];
+    await splitTwo(page, dir);
+
+    await sessionRow(page, right).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Unsplit" }).click();
+    await expect.poll(() => layout().panes).toEqual([right]);
+    expect(layout().groups).toEqual([]);
+    await sessionRow(page, third).click({ button: "right" });
+    await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in New Window"]);
+    await page.keyboard.press("Escape");
+
+    // Split again, then another session on screen: the split is kept as a group, and comes apart too.
+    await splitTwo(page, dir);
+    await sessionRow(page, third).click();
+    await expect.poll(() => layout().groups).toEqual([[left, right]]);
+    await sessionRow(page, left).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Unsplit" }).click();
+    await expect.poll(() => layout().groups).toEqual([]);
+    expect(layout().panes).toEqual([third]);
+  } finally {
+    killSession(third);
+  }
 });
 
 test("a session dragged out of the window opens in a new window", async ({ page, context }) => {

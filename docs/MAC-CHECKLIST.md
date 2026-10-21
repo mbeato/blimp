@@ -66,6 +66,8 @@ Each item says what to do, and what should happen. If the result is different, w
 - [ ] **Right-click a session.**
   Do: right-click a session in the list, and the name on top of a split.
   Expect: a small menu with Open in New Window (and on a split, Open All Splits in New Window), not the system's Reload / Inspect menu. Each opens a new window with the session (or all the splits, side by side), and this window stops showing them.
+  Then: split two sessions, right-click one of them and pick Unsplit. Split them again, click a third session (the split is kept), right-click one of the two and pick Unsplit.
+  Expect: the first Unsplit leaves the one you right-clicked on screen alone, and the other is its own row again. The second leaves the third session on screen, and the two are no longer joined in the list; clicking one shows it alone.
 
 - [ ] **Widths.**
   Do: drag the line right of the files, the line left of the session list, and the line between two splits.

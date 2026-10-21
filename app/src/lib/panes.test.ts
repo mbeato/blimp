@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show } from "./panes";
+import { dropAt, dropTarget, equalShares, forget, moveDivider, prune, removePane, show, unsplit } from "./panes";
 
 const P = (panes: string[], focus = 0, groups: string[][] = []) => ({ panes, focus, groups });
 
@@ -60,6 +60,20 @@ describe("removePane", () => {
     expect(removePane(P(["a", "b", "c"], 1), 1)).toEqual(P(["a", "c"], 1));
     expect(removePane(P(["a", "b"], 1), 1)).toEqual(P(["a"], 0));
     expect(removePane(P(["a"], 0), 0)).toEqual(P([], 0));
+  });
+});
+
+describe("unsplit", () => {
+  test("the split on screen comes apart: the session right-clicked stays on screen, on its own", () => {
+    expect(unsplit(P(["a", "b", "c"], 0, [["d", "e"]]), "b")).toEqual(P(["b"], 0, [["d", "e"]]));
+  });
+  test("a kept split group comes apart; what's on screen stays", () => {
+    expect(unsplit(P(["a", "b"], 1, [["c", "d"], ["e", "f"]]), "d")).toEqual(P(["a", "b"], 1, [["e", "f"]]));
+  });
+  test("a session in no split: nothing changes", () => {
+    const p = P(["a"], 0, [["c", "d"]]);
+    expect(unsplit(p, "a")).toBe(p);
+    expect(unsplit(p, "x")).toBe(p);
   });
 });
 
