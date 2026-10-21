@@ -20,21 +20,25 @@ struct DrawerView: View {
     var body: some View {
         GeometryReader { geo in
             let width = min(geo.size.width * 0.84, 340)
+            // Closed, it isn't there at all, not only off screen: VoiceOver and the tests would still find it.
             ZStack(alignment: .leading) {
-                Color.black.opacity(open ? 0.3 : 0)
-                    .ignoresSafeArea()
-                    .onTapGesture { open = false }
-                    .allowsHitTesting(open)
-                    .accessibilityHidden(true)
-                panel
-                    .frame(width: width)
-                    .background(Color(.systemBackground).ignoresSafeArea())
-                    .offset(x: open ? min(0, drag) : -width - 24)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 20)
-                            .updating($drag) { v, state, _ in if abs(v.translation.width) > abs(v.translation.height) { state = v.translation.width } }
-                            .onEnded { v in if v.translation.width < -60, abs(v.translation.width) > abs(v.translation.height) { open = false } }
-                    )
+                if open {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { open = false }
+                        .accessibilityHidden(true)
+                        .transition(.opacity)
+                    panel
+                        .frame(width: width)
+                        .background(Color(.systemBackground).ignoresSafeArea())
+                        .offset(x: min(0, drag))
+                        .transition(.move(edge: .leading))
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 20)
+                                .updating($drag) { v, state, _ in if abs(v.translation.width) > abs(v.translation.height) { state = v.translation.width } }
+                                .onEnded { v in if v.translation.width < -60, abs(v.translation.width) > abs(v.translation.height) { open = false } }
+                        )
+                }
             }
             .animation(.snappy, value: open)
             .animation(.interactiveSpring, value: drag)
@@ -76,7 +80,6 @@ struct DrawerView: View {
             .accessibilityIdentifier("settingsButton")
         }
         .accessibilityAddTraits(.isModal)
-        .accessibilityHidden(!open)
     }
 }
 
