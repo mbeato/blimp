@@ -1,16 +1,18 @@
 // What a Claude session is doing besides talking, read from its transcript (Claude Code's internal
 // format, so every parser here is checked against captured real lines in test/activity.test.ts):
 //   jobs     background work Claude started: Bash commands run (or moved) in the background, Monitors,
-//            async agents and workflows. Each ends with a <task-notification>, or a TaskStop.
+//            async agents and workflows. Each ends with a <task-notification>, or a TaskStop, or with
+//            the Claude process that started it.
 //   context  how full Claude's context window is: the latest reply's input tokens.
-//   git      the folder and branch of the latest line (they follow a `cd` into a worktree).
+//   git      the folder of the latest line (it follows a `cd` into a worktree), and the branch checked
+//            out there, read from git's own files: a line's gitBranch is the start folder's branch.
 //   files    the files Claude edited, newest first. Kept on the server, not sent to clients.
 // Like transcriptTitles (sessions.ts), each transcript is read once, then only the lines added since:
 // the session list is rebuilt every second and transcripts run to 100 MB, most of it api-request lines.
 
-import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 export type JobKind = "bash" | "monitor" | "agent" | "workflow";
 export type JobStatus = "running" | "done" | "failed" | "stopped";
@@ -24,15 +26,16 @@ export type Git = { cwd: string; branch?: string };
 export type ActivityEvent =
   | { type: "call"; id: string; name: string; label?: string } // a Bash or Monitor call: its result names the job
   | { type: "start"; at: number; id: string; kind: JobKind; call?: string; label?: string; outputFile?: string }
-  | { type: "end"; at: number; ids: string[]; status: Exclude<JobStatus, "running">; summary: string; exit?: number; outputFile?: string }
+  // status running: an agent waiting on background work of its own, so not done after all.
+  | { type: "end"; at: number; ids: string[]; status: JobStatus; summary: string; result?: string; exit?: number; outputFile?: string }
   | { type: "stop"; at: number; id: string }
   | { type: "usage"; at: number; used: number; model?: string }
   | { type: "compact"; at: number; used?: number }
-  | { type: "where"; cwd: string; branch?: string }
+  | { type: "where"; cwd: string }
   | { type: "edit"; at: number; path: string };
 
-// end: the status and summary of the notification that set it, so a repeat of it changes nothing.
-type JobRecord = Job & { end?: string };
+// seen: the notifications already counted (status, summary, result), so a copy of one changes nothing.
+type JobRecord = Job & { seen?: string[] };
 // calls: tool_use id -> label, for the newest Bash/Monitor calls. tasks: the folder the jobs' output
 // files are in, as Claude named it. file: the transcript, for when Claude hasn't named that folder yet.
 export type Activity = {
@@ -42,7 +45,7 @@ export type Activity = {
   calls: Map<string, string>;
   jobs: Map<string, JobRecord>;
   context?: { used: number; model?: string };
-  git?: Git;
+  cwd?: string;
   files: EditedFile[];
   tasks?: string;
 };
@@ -53,12 +56,25 @@ const KEEP_DONE = 30 * 60_000; // a finished job is shown this long, so the apps
 const MAX_JOBS = 100;
 const MAX_CALLS = 50;
 const MAX_FILES = 200;
+const MAX_SEEN = 20;
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const cut = (s: string, n: number) => Array.from(s).slice(0, n).join("");
-const label = (s: string) => cut(s.replace(/\s+/g, " ").trim(), 120);
+const label = (s: string) => cut(redact(s.replace(/\s+/g, " ").trim()), 120);
 const time = (r: any) => Date.parse(r?.timestamp) || 0;
 const tag = (text: string, name: string) => text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1];
+
+// What looks like a secret in a label or an output line, taken out: the session list goes to every app.
+// NAME=value where the name says key/token/secret/password, --token value, Bearer/Basic credentials,
+// a password in a URL, and the shapes of common API keys.
+const SECRETS: [RegExp, string][] = [
+  [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{8,}/gi, "$1 …"],
+  [/(:\/\/[^\s:@\/]+):[^\s@\/]+@/g, "$1:…@"],
+  [/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})\b/g, "…"],
+  [/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)[A-Za-z0-9_]*)(\s*=\s*)("[^"]*"|'[^']*'|\S+)/gi, "$1$2…"],
+  [/(?<!\S)(--?[A-Za-z-]*(?:token|password|secret|api-key)[A-Za-z-]*)([= ])(?!-)("[^"]*"|'[^']*'|\S+)/gi, "$1$2…"],
+];
+export const redact = (s: string) => SECRETS.reduce((t, [re, to]) => t.replace(re, to), s);
 
 // Only a job's own output file, in a tasks folder: the path comes from text in the transcript.
 const outputOf = (path: string | undefined, id: string) =>
@@ -66,6 +82,8 @@ const outputOf = (path: string | undefined, id: string) =>
 
 // A <task-notification> that says a job ended (other Monitor events have no status: the Monitor goes on).
 // One can name several jobs; Claude Code adds a pseudo id ("__orphan_summary__:shell") that isn't one.
+// An agent that stopped while background work of its own runs says "completed", but "is waiting on its
+// own background work": it goes on when that work reports, and notifies again.
 const STATUS: Record<string, Exclude<JobStatus, "running">> = { completed: "done", failed: "failed", killed: "stopped", stopped: "stopped" };
 function ending(text: string, at: number): ActivityEvent[] {
   if (!text.trimStart().startsWith("<task-notification>")) return [];
@@ -75,10 +93,12 @@ function ending(text: string, at: number): ActivityEvent[] {
   const ids = [...text.matchAll(/<task-id>([A-Za-z0-9_-]+)<\/task-id>/g)].map((m) => m[1]);
   if (!status || !ids.length) return [];
   const summary = expired ? "expired" : (tag(text, "summary") ?? "").trim();
+  const result = cut((tag(text, "result") ?? "").trim(), 200);
+  const waiting = status === "done" && /\bis waiting on its own background work\b/.test(summary);
   // The last one: a command's own description may say "exit 3" too.
   const exit = [...summary.matchAll(/\bexit(?: code)? (-?\d+)/g)].at(-1)?.[1];
   const outputFile = ids.length === 1 ? outputOf(tag(text, "output-file")?.trim(), ids[0]) : undefined;
-  return [{ type: "end", at, ids, status, summary, ...(exit !== undefined && { exit: Number(exit) }), ...(outputFile && { outputFile }) }];
+  return [{ type: "end", at, ids, status: waiting ? "running" : status, summary, ...(result && { result }), ...(exit !== undefined && !waiting && { exit: Number(exit) }), ...(outputFile && { outputFile }) }];
 }
 
 // A tool result that started background work. Which kind it is shows in its toolUseResult.
@@ -111,7 +131,7 @@ export function recordEvents(r: any): ActivityEvent[] {
   if (r.type === "queue-operation") return r.operation === "enqueue" ? ending(str(r.content), at) : [];
   if (r.type === "attachment") return r.attachment?.type === "queued_command" ? ending(str(r.attachment.prompt), at) : [];
   const out: ActivityEvent[] = [];
-  const where = (): ActivityEvent[] => (typeof r.cwd === "string" && r.cwd ? [{ type: "where", cwd: r.cwd, ...(typeof r.gitBranch === "string" && r.gitBranch && { branch: r.gitBranch }) }] : []);
+  const where = (): ActivityEvent[] => (typeof r.cwd === "string" && r.cwd ? [{ type: "where", cwd: r.cwd }] : []);
   if (r.type === "system") return r.subtype === "compact_boundary" ? [...where(), { type: "compact", at, ...(typeof r.compactMetadata?.postTokens === "number" && { used: r.compactMetadata.postTokens }) }] : [];
   const c = r.message?.content;
   if (r.type === "assistant") {
@@ -177,25 +197,26 @@ export function fold(a: Activity, events: ActivityEvent[]) {
       prune(a, e.at);
     } else if (e.type === "end") {
       // The same notification comes as a queue entry and again as a user line or attachment, minutes
-      // later if Claude was busy: the first one says when it ended. A new status or summary for the
-      // same id (an agent that was sent another message) replaces it.
-      const key = `${e.status}\0${e.summary}`;
+      // later if Claude was busy, after newer ones: the first one says when it ended. A new one for the
+      // same id (an agent waiting on its own work, or sent another message) replaces it.
+      const key = `${e.status}\0${e.summary}\0${e.result ?? ""}`;
       for (const id of e.ids) {
         const j = a.jobs.get(id);
-        if (!j || j.end === key) continue;
+        if (!j || j.seen?.includes(key)) continue;
+        j.seen = [...(j.seen ?? []), key].slice(-MAX_SEEN);
         j.status = e.status;
-        j.endedAt = e.at;
-        j.end = key;
+        if (e.status === "running") delete j.endedAt;
+        else j.endedAt = e.at;
         if (e.exit !== undefined) j.exit = e.exit;
         else delete j.exit;
         if (e.outputFile) j.outputFile = e.outputFile;
       }
     } else if (e.type === "stop") {
       const j = a.jobs.get(e.id);
-      if (j?.status === "running") Object.assign(j, { status: "stopped", endedAt: e.at, end: "stopped\0TaskStop" });
+      if (j?.status === "running") Object.assign(j, { status: "stopped", endedAt: e.at });
     } else if (e.type === "usage") a.context = { used: e.used, model: e.model ?? a.context?.model };
     else if (e.type === "compact") a.context = { used: e.used ?? 0, model: a.context?.model };
-    else if (e.type === "where") a.git = { cwd: e.cwd, ...(e.branch && e.branch !== "HEAD" && { branch: e.branch }) }; // HEAD: detached, no branch
+    else if (e.type === "where") a.cwd = e.cwd;
     else if (e.type === "edit" && e.path.startsWith("/")) {
       a.files = [{ path: e.path, at: e.at }, ...a.files.filter((f) => f.path !== e.path)].slice(0, MAX_FILES);
     }
@@ -228,7 +249,7 @@ export function lastLine(text: string): string | undefined {
   for (let i = lines.length - 1; i >= 0; i--) {
     const parts = lines[i].split("\r").filter((p) => p.trim());
     const l = (parts.at(-1) ?? "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "").trim();
-    if (l) return cut(l, 160);
+    if (l) return cut(redact(l), 160);
   }
 }
 
@@ -270,7 +291,7 @@ export function shownJobs(a: Activity, now = Date.now()): Job[] {
   if (a.jobs.size > MAX_JOBS / 2) prune(a, now);
   const tasks = a.tasks ?? (a.file && guessTasks(a.file));
   const out: Job[] = [];
-  for (const { end, ...j } of a.jobs.values()) {
+  for (const { seen, ...j } of a.jobs.values()) {
     if (j.status !== "running" && (j.endedAt ?? 0) < now - KEEP_DONE) continue;
     if (!j.outputFile && j.kind === "monitor" && tasks) j.outputFile = join(tasks, `${j.id}.output`);
     if (j.status === "running" && (j.kind === "bash" || j.kind === "monitor") && j.outputFile) {
@@ -331,17 +352,57 @@ export function transcriptActivity(file: string, chunk = CHUNK): Activity | unde
   }
 }
 
+// The branch checked out in a folder: its repo's HEAD (a worktree's .git file names its own folder in the
+// repo's .git). Detached, not a repo, or gone: none. Read at most every 10 s per folder.
+const heads = new Map<string, { read: number; branch?: string }>();
+export function branchOf(cwd: string, now = Date.now()): string | undefined {
+  const h = heads.get(cwd);
+  if (h && now - h.read < 10_000) return h.branch;
+  const branch = readBranch(cwd);
+  if (heads.size > 500) heads.clear();
+  heads.set(cwd, { read: now, branch });
+  return branch;
+}
+
+function readBranch(cwd: string): string | undefined {
+  try {
+    if (!statSync(cwd).isDirectory()) return;
+  } catch {
+    return;
+  }
+  for (let d = cwd; ; d = dirname(d)) {
+    const dotgit = join(d, ".git");
+    let isDir: boolean;
+    try {
+      isDir = statSync(dotgit).isDirectory();
+    } catch {
+      if (dirname(d) === d) return;
+      continue;
+    }
+    try {
+      const gitdir = isDir ? dotgit : resolve(d, readFileSync(dotgit, "utf8").match(/^gitdir: (.+)$/m)?.[1]?.trim() ?? "");
+      return readFileSync(join(gitdir, "HEAD"), "utf8").match(/^ref: refs\/heads\/(.+)$/m)?.[1]?.trim();
+    } catch {
+      return;
+    }
+  }
+}
+
 // The files a session's Claude edited (absolute, newest first, at most 200), for the server only.
 export const editedFiles = (file: string): EditedFile[] => transcriptActivity(file)?.files ?? [];
 
-// What the session list shows of a transcript (sessions.ts): only what there is.
-export function sessionActivity(file: string, kind: string, now = Date.now()): { jobs?: Job[]; context?: { used: number; limit: number }; git?: Git } {
+// What the session list shows of a transcript (sessions.ts): only what there is. processStart: when the
+// Claude process now on it started (ms). Background work dies with the process that started it, and a
+// process that exits writes nothing to say so, so what still runs from before a resume has stopped.
+export function sessionActivity(file: string, kind: string, now = Date.now(), processStart?: number): { jobs?: Job[]; context?: { used: number; limit: number }; git?: Git } {
   const a = transcriptActivity(file);
   if (!a) return {};
+  if (processStart) for (const j of a.jobs.values()) if (j.status === "running" && j.startedAt < processStart) Object.assign(j, { status: "stopped", endedAt: processStart });
   const jobs = shownJobs(a, now);
+  const branch = a.cwd && branchOf(a.cwd, now);
   return {
     ...(jobs.length && { jobs }),
     ...(a.context && { context: { used: a.context.used, limit: contextLimit(a.context.model, kind) } }),
-    ...(a.git && { git: a.git }),
+    ...(a.cwd && { git: { cwd: a.cwd, ...(branch && { branch }) } }),
   };
 }

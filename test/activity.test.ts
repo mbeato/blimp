@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type ActivityEvent,
+  branchOf,
   contextLimit,
   editedFiles,
   fold,
@@ -11,6 +12,8 @@ import {
   lineEvents,
   newActivity,
   outputTail,
+  redact,
+  sessionActivity,
   shownJobs,
   transcriptActivity,
 } from "../src/activity";
@@ -37,14 +40,14 @@ describe("lineEvents", () => {
   test("a background Bash call gives its label, its usage and where Claude is", () => {
     expect(lineEvents(R.bashCall)).toEqual([
       { type: "usage", at: tsOf("bashCall"), used: 2 + 791 + 91091, model: "claude-opus-5-5" },
-      { type: "where", cwd: "/Users/u/blimp", branch: "main" },
+      { type: "where", cwd: "/Users/u/blimp" },
       { type: "call", id: "toolu_01AaG27JCpFFhiJQKMrrkAKW", name: "Bash", label: "Run isolated blimpd benchmark" },
     ]);
   });
 
   test("its result starts a bash job, with the output file the result names", () => {
     expect(lineEvents(R.bashStarted)).toEqual([
-      { type: "where", cwd: "/Users/u/blimp", branch: "main" },
+      { type: "where", cwd: "/Users/u/blimp" },
       { type: "start", at: tsOf("bashStarted"), id: "b1lysb74d", kind: "bash", call: "toolu_01AaG27JCpFFhiJQKMrrkAKW", outputFile: `${tasks}/b1lysb74d.output` },
     ]);
   });
@@ -132,11 +135,33 @@ describe("fold", () => {
   test("the same id notifying again with something new: the latest wins", () => {
     const a = newActivity();
     fold(a, [{ type: "start", at: 1000, id: "a1", kind: "agent", label: "Review" }]);
-    fold(a, [{ type: "end", at: 2000, ids: ["a1"], status: "done", summary: 'Agent "Review" is waiting on its own background work' }]);
-    fold(a, [{ type: "end", at: 2500, ids: ["a1"], status: "done", summary: 'Agent "Review" is waiting on its own background work' }]);
+    fold(a, [{ type: "end", at: 2000, ids: ["a1"], status: "done", summary: 'Agent "Review" finished' }]);
+    fold(a, [{ type: "end", at: 2500, ids: ["a1"], status: "done", summary: 'Agent "Review" finished' }]);
     expect(job(a, "a1")).toMatchObject({ status: "done", endedAt: 2000 });
     fold(a, [{ type: "end", at: 3000, ids: ["a1"], status: "failed", summary: 'Agent "Review" failed' }]);
     expect(job(a, "a1")).toMatchObject({ status: "failed", endedAt: 3000 });
+  });
+
+  test("an agent waiting on its own background work is still running; done when it finishes; a late copy changes nothing", () => {
+    const id = "a053cf9c336268644";
+    const a = newActivity();
+    fold(a, [{ type: "start", at: 1, id, kind: "agent", label: "Run Haiku researcher A/B wave" }]);
+    fold(a, lineEvents(R.agentWaitingQueued));
+    expect(job(a, id)).toMatchObject({ status: "running" });
+    expect(job(a, id)).not.toHaveProperty("endedAt");
+    fold(a, lineEvents(R.agentWaitingFinished));
+    expect(job(a, id)).toMatchObject({ status: "done", endedAt: tsOf("agentWaitingFinished") });
+    // Both come again as attachments once Claude is free, in the order they were queued.
+    const attached = (n: string) => JSON.stringify({ type: "attachment", attachment: { type: "queued_command", prompt: JSON.parse(R[n]).content }, timestamp: JSON.parse(R[n]).timestamp });
+    fold(a, lineEvents(attached("agentWaitingQueued")));
+    fold(a, lineEvents(attached("agentWaitingFinished")));
+    expect(job(a, id)).toMatchObject({ status: "done", endedAt: tsOf("agentWaitingFinished") });
+    // Sent another message, it starts background work again: running, until it finishes again.
+    const again = JSON.parse(R.agentWaitingQueued);
+    again.content = again.content.replace(/<result>[\s\S]*<\/result>/, "<result>Re-running the low arm.</result>");
+    fold(a, lineEvents(JSON.stringify(again)));
+    expect(job(a, id)).toMatchObject({ status: "running" });
+    expect(job(a, id)).not.toHaveProperty("endedAt");
   });
 
   test("one notification can end several jobs; ids that never started are ignored", () => {
@@ -151,6 +176,18 @@ describe("fold", () => {
     const a = newActivity();
     fold(a, [{ type: "start", at: 1, id: "b1", kind: "bash", label: "x" }, { type: "end", at: 2, ids: ["b1"], status: "done", summary: "s", exit: 0 }, { type: "stop", at: 3, id: "b1" }]);
     expect(job(a, "b1")).toMatchObject({ status: "done", endedAt: 2, exit: 0 });
+  });
+
+  test("a label and a last output line have what looks like a secret taken out", () => {
+    const call = JSON.parse(R.bashCall);
+    delete call.message.content[0].input.description;
+    call.message.content[0].input.command = 'API_KEY=sk-live-abcdefghijklmnop123 curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc" https://bob:hunter22@example.com/x --token s3cr3tvalue';
+    const l = (lineEvents(JSON.stringify(call)).find((e) => e.type === "call") as any).label as string;
+    for (const secret of ["sk-live", "eyJhbGci", "hunter22", "s3cr3tvalue"]) expect(l).not.toContain(secret);
+    expect(l).toStartWith("API_KEY=… curl");
+    expect(lastLine("export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123\n")).toBe("export GITHUB_TOKEN=…");
+    expect(lastLine("aws AKIAABCDEFGHIJKLMNOP ok\n")).toBe("aws … ok");
+    for (const plain of ["12 tests passed, key lookups fine", "Query production run-token totals"]) expect(redact(plain)).toBe(plain);
   });
 
   test("a label is one line of at most 120 characters, the command when there's no description", () => {
@@ -176,11 +213,11 @@ describe("fold", () => {
     expect(a.context!.used).toBe(0);
   });
 
-  test("git: the latest line's folder and branch; a detached HEAD is no branch", () => {
+  test("cwd: the latest line's folder", () => {
     const a = run("bashCall", "edit");
-    expect(a.git).toEqual({ cwd: "/Users/u/blimp/app", branch: "main" });
-    fold(a, [{ type: "where", cwd: "/w", branch: "HEAD" }]);
-    expect(a.git).toEqual({ cwd: "/w" });
+    expect(a.cwd).toBe("/Users/u/blimp/app");
+    fold(a, [{ type: "where", cwd: "/w" }]);
+    expect(a.cwd).toBe("/w");
   });
 
   test("files: absolute paths, newest first, each once, at most 200", () => {
@@ -191,6 +228,30 @@ describe("fold", () => {
     fold(a, Array.from({ length: 300 }, (_, i) => e(`/f${i}`, 10 + i)));
     expect(a.files).toHaveLength(200);
     expect(a.files[0].path).toBe("/f299");
+  });
+});
+
+describe("branchOf", () => {
+  test("the branch checked out in a folder, read from git's files: a repo, a folder in it, a worktree; detached or none is no branch", () => {
+    const repo = join(tmp, "repo");
+    mkdirSync(join(repo, ".git", "worktrees", "wt-549"), { recursive: true });
+    mkdirSync(join(repo, "src"));
+    writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(repo, ".git", "worktrees", "wt-549", "HEAD"), "ref: refs/heads/eng-549-portal-css\n");
+    const wt = join(tmp, "wt-549");
+    mkdirSync(join(wt, "app"), { recursive: true });
+    writeFileSync(join(wt, ".git"), `gitdir: ${join(repo, ".git", "worktrees", "wt-549")}\n`);
+    const plain = join(tmp, "plain");
+    mkdirSync(plain);
+    expect(branchOf(repo, 0)).toBe("main");
+    expect(branchOf(join(repo, "src"), 0)).toBe("main");
+    expect(branchOf(join(wt, "app"), 0)).toBe("eng-549-portal-css");
+    expect(branchOf(plain, 0)).toBeUndefined();
+    expect(branchOf(join(tmp, "gone"), 0)).toBeUndefined();
+    // Read again at most every 10 s.
+    writeFileSync(join(repo, ".git", "HEAD"), "4f1c9e0d2b7a6c5e8f3a1b0c9d8e7f6a5b4c3d2e\n");
+    expect(branchOf(repo, 9_000)).toBe("main");
+    expect(branchOf(repo, 10_000)).toBeUndefined();
   });
 });
 
@@ -271,6 +332,27 @@ describe("shownJobs", () => {
     shownJobs(a, 1);
     await Bun.sleep(30);
     expect(shownJobs(a, 1)[0].lastLine).toBe("12 tests passed");
+  });
+});
+
+describe("sessionActivity", () => {
+  test("the branch comes from the folder Claude is in, not the one its session started in", () => {
+    const repo = join(tmp, "repo2");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    writeFileSync(join(repo, ".git", "HEAD"), "ref: refs/heads/feat-x\n");
+    const line = JSON.parse(R.bashCall);
+    line.cwd = repo; // gitBranch still says "main", the start folder's branch
+    const f = join(tmp, "where.jsonl");
+    writeFileSync(f, JSON.stringify(line) + "\n");
+    expect(sessionActivity(f, "claude").git).toEqual({ cwd: repo, branch: "feat-x" });
+  });
+
+  test("a job still running from before Claude's process started is stopped: it ended with that process", () => {
+    const f = join(tmp, "resumed.jsonl");
+    writeFileSync(f, R.failedCall + "\n" + R.failedStarted + "\n");
+    const started = tsOf("failedStarted");
+    expect(sessionActivity(f, "claude", started + 1000, started - 1).jobs).toMatchObject([{ id: "b5bbkbpfm", status: "running" }]);
+    expect(sessionActivity(f, "claude", started + 1000, started + 500).jobs).toMatchObject([{ id: "b5bbkbpfm", status: "stopped", endedAt: started + 500 }]);
   });
 });
 

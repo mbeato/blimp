@@ -35,8 +35,9 @@ function codexHooks(f: () => void) {
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "sessions") {
-  const rows = listSessions();
-  if (args.includes("--json")) console.log(JSON.stringify(rows, null, 2));
+  const json = args.includes("--json");
+  const rows = listSessions(undefined, undefined, undefined, undefined, undefined, undefined, undefined, json);
+  if (json) console.log(JSON.stringify(rows, null, 2));
   else console.log(rows.length ? formatList(rows) : "no running sessions");
 } else if (cmd === "serve") {
   try {

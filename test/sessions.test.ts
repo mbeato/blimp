@@ -179,10 +179,18 @@ test("listSessions adds a Claude session's background jobs, context and git fold
     { id: "b5bbkbpfm", kind: "bash", label: "Watch the phone run for the fix", startedAt: started, status: "running", outputFile: expect.stringMatching(/\/tasks\/b5bbkbpfm\.output$/) },
   ]);
   expect(s.context).toEqual({ used: 531 + 148928, limit: 1048576 }); // the workflow call, a GLM reply
-  expect(s.git).toEqual({ cwd: "/Users/u/blimp", branch: "main" });
+  expect(s.git).toEqual({ cwd: "/Users/u/blimp" }); // no such folder here, so no branch
   expect(s).not.toHaveProperty("files");
   expect(t).not.toHaveProperty("jobs");
   expect(t.context).toEqual({ used: 2 + 791 + 91091, limit: 1_000_000 });
+  // `blimpd sessions` without --json shows none of it, so it doesn't read it.
+  const bare = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} }, {}, false)[0];
+  for (const k of ["jobs", "context", "git"]) expect(bare).not.toHaveProperty(k);
+  // Claude started again on this transcript (a resume): the job didn't survive the old process.
+  writeFileSync(join(home, "sessions", "42.json"), JSON.stringify({ sessionId: "s1", cwd: "/home/u/web", status: "busy", startedAt: Date.now() - 1000 }));
+  const [r] = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} });
+  expect(r.jobs).toMatchObject([{ id: "b5bbkbpfm", status: "stopped" }]);
+  expect(r.jobs![0].endedAt).toBeGreaterThan(started);
   rmSync(home, { recursive: true, force: true });
 });
 

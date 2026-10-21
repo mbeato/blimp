@@ -297,6 +297,7 @@ export function listSessions(
   names: Names = shownNames(),
   seen: Seen = readSeen(),
   notes: Notes = shownNotes(),
+  activity = true, // jobs, context and git: `blimpd sessions` without --json shows none of them
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
@@ -330,7 +331,7 @@ export function listSessions(
       ...(prompt && { prompt }),
       unread: isUnread(seen, info.sessionId, scan?.replied),
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
-      ...(file && sessionActivity(file, kind)),
+      ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
     };
   });
 }
