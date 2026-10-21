@@ -1,6 +1,6 @@
 # Phone as a chat app, and unread shared between Mac and phone
 
-Date: 2026-10-21. Status: design, waiting for Max's OK.
+Date: 2026-10-21. Status: built (server and Mac: branch `unread`; phone: branch `phone-layout`). Voice in a blank chat is left for later: its box has no mic yet.
 
 ## What Max asked for
 
@@ -60,7 +60,7 @@ A question beats unread: a session that asks and has a new reply shows the quest
 ("Ask Claude in api-server…"). Send starts a session there with that message, and the screen becomes its chat.
 
 **Top bar:**
-- Left: the drawer button. It has a blue dot or an amber question mark when any session in another project needs you.
+- Left: the drawer button. It has a blue dot or an amber question mark when any session but the one on screen needs you.
 - Middle: the project picker. It shows this project's name; tap for a list of projects (running ones and
   recent folders), each with its mark. Picking one gives a blank chat there.
 - Right: a "new chat" button. Gives a blank chat in this project.
@@ -69,7 +69,7 @@ A question beats unread: a session that asks and has a new reply shows the quest
 - This project's sessions, running and past together, the one with the newest message on top.
   The order is the same rule as ChatGPT and Claude: newest activity first.
 - Each row: its mark, its name, how long ago. No previews.
-- Swipe a running session's row to End it, as now.
+- Press and hold a running session's row to End it (a swipe left closes the drawer, so it can't also end a session).
 - Settings at the bottom of the drawer.
 
 **A past conversation:** opens as a chat you can scroll, with the box at the bottom. Sending a message resumes

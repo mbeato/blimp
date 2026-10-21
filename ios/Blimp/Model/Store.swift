@@ -13,8 +13,11 @@ enum Connection: Equatable, Sendable {
 final class Store {
     var server: ServerLink?
     var sessions: [Session] = []
-    var home = HomeList.make([])
     var connection: Connection = .connecting
+    /// The project the chat is in, kept for the next launch.
+    var dir: String? = UserDefaults.standard.string(forKey: "project") {
+        didSet { UserDefaults.standard.set(dir, forKey: "project") }
+    }
 
     @ObservationIgnored private var events: Socket?
 
@@ -60,7 +63,6 @@ final class Store {
             onMessage: { [weak self] data in
                 guard let self, case .sessions(let list) = EventsMessage.decode(data) else { return }
                 self.sessions = list
-                self.home = HomeList.make(list)
             },
             onState: { [weak self] state in self?.update(state) })
         events = socket
@@ -78,14 +80,13 @@ final class Store {
         Keychain.clear()
         server = nil
         sessions = []
-        home = HomeList.make([])
         connection = .connecting
     }
 
-    /// Starts (or resumes) Claude Code in `dir`; returns the new session's name.
-    func start(dir: String, resume: String?) async throws -> String {
+    /// Starts (or resumes) Claude Code in `dir`, with `prompt` as its first message if given; returns the new session's name.
+    func start(dir: String, resume: String?, prompt: String? = nil) async throws -> String {
         guard let api else { throw APIError.offline }
-        return try await api.start(dir: dir, resume: resume)
+        return try await api.start(dir: dir, resume: resume, prompt: prompt)
     }
 
     func end(name: String) async throws {

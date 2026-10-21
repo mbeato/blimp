@@ -1,18 +1,16 @@
 // How each chat message looks: your prompts as bubbles, Claude's replies as native Markdown (a long
-// one folded, with Show more), tools as one grey line that opens to show what went in and came out.
+// one folded, with Show more). Tool steps aren't shown; the working row says the latest one.
 import BlimpKit
 import SwiftUI
 
 struct MessageRow: View {
     let message: ChatMessage
-    let expanded: Bool
-    let onToggle: () -> Void
 
     var body: some View {
         switch message.role {
         case .user: UserBubble(text: message.text ?? "")
         case .assistant: AssistantText(text: message.text ?? "")
-        case .tool: ToolLine(message: message, expanded: expanded, onToggle: onToggle)
+        case .tool: EmptyView()
         }
     }
 }
@@ -146,55 +144,11 @@ struct CodeBox<Content: View>: View {
     }
 }
 
-struct ToolLine: View {
-    let message: ChatMessage
-    let expanded: Bool
-    let onToggle: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button(action: onToggle) {
-                HStack(spacing: 6) {
-                    Image(systemName: Self.symbol(message.name))
-                    Text(Inline.summary(message.summary ?? message.name ?? "Tool")).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-                .font(.footnote)
-                .foregroundStyle(message.error == true ? Color.red : Color.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if expanded { box }
-        }
-    }
-
-    @ViewBuilder private var box: some View {
-        let input = message.input.flatMap { $0.isEmpty ? nil : $0 }
-        let output = message.output.flatMap { $0.isEmpty ? nil : $0 }
-        if input != nil || output != nil {
-            CodeBox {
-                if let input { Text(input) }
-                if input != nil, output != nil { Divider() }
-                if let output { Text(output).foregroundStyle(message.error == true ? .red : .primary) }
-            }
-        }
-    }
-
-    static func symbol(_ tool: String?) -> String {
-        switch tool {
-        case "Bash": "terminal"
-        case "Edit", "Write": "pencil"
-        case "Read": "doc.text"
-        case "Grep", "Glob": "magnifyingglass"
-        case "Task", "Agent": "person.2"
-        default: "wrench"
-        }
-    }
-}
-
 /// The end of the chat while Claude works, or waits on something only the Mac can answer: Stop presses Esc.
 struct WorkingRow: View {
     let waiting: Bool
+    /// The newest tool step, said after "working…".
+    let step: ChatMessage?
     let stopping: Bool
     /// nil where the phone can't type into the session (Open on Mac): no Stop.
     let onStop: (() -> Void)?
@@ -207,6 +161,11 @@ struct WorkingRow: View {
                 ProgressView().controlSize(.small)
             }
             Text(waiting ? "waiting…" : "working…").foregroundStyle(.secondary)
+            if !waiting, let step {
+                Text(Inline.summary(step.summary ?? step.name ?? "Tool"))
+                    .foregroundStyle(step.error == true ? Color.red : Color.secondary)
+                    .lineLimit(1)
+            }
             if let onStop {
                 Button("Stop", systemImage: "stop.fill", action: onStop)
                     .buttonStyle(.bordered)
@@ -214,6 +173,7 @@ struct WorkingRow: View {
                     .controlSize(.small)
                     .tint(.red)
                     .disabled(stopping)
+                    .fixedSize()
             }
         }
         .font(.footnote)

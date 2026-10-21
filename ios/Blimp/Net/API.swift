@@ -26,11 +26,24 @@ struct API {
         try await decode(call("GET", "/conversations", query: [URLQueryItem(name: "dir", value: dir)]))
     }
 
-    /// Starts Claude Code in `dir` (resuming a conversation if given); returns the new session's name.
-    func start(dir: String, resume: String?) async throws -> String {
-        struct Body: Encodable { let dir: String; let resume: String? }
-        let started: Started = try await decode(call("POST", "/sessions", body: JSONEncoder().encode(Body(dir: dir, resume: resume))))
+    /// Starts Claude Code in `dir` (resuming a conversation if given, with `prompt` as Claude's first
+    /// message if given); returns the new session's name.
+    func start(dir: String, resume: String?, prompt: String? = nil) async throws -> String {
+        struct Body: Encodable { let dir: String; let resume: String?; let prompt: String? }
+        let body = try JSONEncoder().encode(Body(dir: dir, resume: resume, prompt: prompt))
+        let started: Started = try await decode(call("POST", "/sessions", body: body))
         return started.name
+    }
+
+    /// A past conversation's last messages, read without starting Claude.
+    func messages(dir: String, conversation: String) async throws -> [ChatMessage] {
+        try await decode(call("GET", "/conversations/\(conversation)/messages", query: [URLQueryItem(name: "dir", value: dir)]))
+    }
+
+    /// The conversation is on screen: its replies so far are read, here and on the Mac.
+    func seen(_ conversation: String) async throws {
+        struct Body: Encodable { let sessionId: String }
+        _ = try await call("POST", "/seen", body: JSONEncoder().encode(Body(sessionId: conversation)))
     }
 
     func end(name: String) async throws {

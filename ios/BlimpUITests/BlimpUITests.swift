@@ -1,8 +1,9 @@
 // The app end to end, in the simulator, against a real blimpd with stand-in Claude sessions (the
 // app-e2e job in .github/workflows/ios.yml; ios/e2e/setup.ts makes the sessions and the texts looked
-// for here). Pair, see the session list, read a chat, hide the keyboard, send a message, answer a permission
-// prompt; Stop and a folded long reply; start, end and resume sessions; blimpd restarting; the Face ID
-// lock; two questions at once. What reached the sessions is checked by the job afterwards. Screenshots
+// for here). Pair, pick a project, open sessions from the drawer, read a chat, hide the keyboard, send a
+// message, answer a permission prompt; Stop and a folded long reply; start a session from a blank chat and
+// end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock; two questions
+// at once; unread and asking marks. What reached the sessions is checked by the job afterwards. Screenshots
 // stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
@@ -30,20 +31,26 @@ final class BlimpUITests: XCTestCase {
         try wait(connect, "Connect")
         connect.tap()
 
-        // Home: the stand-in's project, and its session by title
-        try wait(element("project-blimp-demo"), "the blimp-demo project")
+        // A blank chat in a project; the drawer lists blimp-demo's session by title, with a reply not seen yet
+        // (the stand-ins' replies came after blimpd started)
+        try wait(element("projectPicker"), "the project picker")
+        shot("1-blank")
+        try pickProject("blimp-demo")
+        try openDrawer()
         let chatRow = element("session-demo-chat")
         try wait(chatRow, "the demo-chat row")
         try until(chatRow, "label CONTAINS 'Add a dark mode toggle to settings'", "the demo-chat row's title")
-        try wait(element("session-demo-ask"), "the demo-ask row")
-        shot("1-home")
+        try until(chatRow, "label CONTAINS 'New reply'", "demo-chat's reply to be unread")
+        try wait(labeled("Fix the login redirect"), "the past conversation in the drawer")
+        shot("1-drawer")
 
         // The chat: the transcript's prompt and reply
         chatRow.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "the user message")
         try wait(message("message.assistant", "under Appearance"), "the assistant reply")
-        // The tool call as one line, its command without the summary's backticks
-        try wait(labeled("Ran swift test"), "the tool line")
+        // Tool steps aren't shown: the reply before the tool call is, the tool call isn't
+        try wait(message("message.assistant", "then run the tests"), "the reply before the tool call")
+        if labeled("Ran swift test").exists { throw failed("no tool line in the chat") }
         // The empty box: the mic inside it, no Send
         let mic = app.buttons["Talk"]
         try wait(mic, "the mic in the empty box")
@@ -56,6 +63,7 @@ final class BlimpUITests: XCTestCase {
         let keyboard = app.keyboards.firstMatch
         try focus(input)
         try wait(keyboard, "the keyboard after tapping the message field")
+        try above(input, keyboard)
         shot("2a-keyboard")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
             .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
@@ -80,10 +88,16 @@ final class BlimpUITests: XCTestCase {
         try wait(message("message.assistant", "Shipped: Thanks, ship it"), "the reply to it")
         shot("3-sent")
 
-        // The waiting session: its permission prompt as buttons
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // Read now: its row has no blue dot any more
+        try openDrawer()
+        try until(chatRow, "NOT (label CONTAINS 'New reply')", "demo-chat to be read once open")
+
+        // The waiting session, marked as asking: its permission prompt as buttons
+        try pickProject("api-server")
+        try openDrawer()
         let askRow = element("session-demo-ask")
         try wait(askRow, "the demo-ask row")
+        try until(askRow, "label CONTAINS 'Asking you something'", "demo-ask's asking mark")
         askRow.tap()
         let yes = app.buttons["choice-Yes"]
         try wait(yes, "the Yes button")
@@ -105,7 +119,7 @@ final class BlimpUITests: XCTestCase {
         app = XCUIApplication()
         app.launch()
         let unlock = app.buttons["Unlock"].firstMatch
-        let home = element("project-blimp-demo")
+        let home = element("projectPicker")
         try wait(unlock, "the lock screen")
         if home.exists { throw failed("Home showing behind the lock") }
         allowFaceID()
@@ -118,9 +132,7 @@ final class BlimpUITests: XCTestCase {
 
     func test3Stop() throws {
         try launchPaired()
-        let row = element("session-demo-busy")
-        try wait(row, "the demo-busy row")
-        row.tap()
+        try openSession("demo-busy", in: "api-server")
         // A long chat opens at its newest message
         let newest = message("message.assistant", "Working through the routes now.")
         try wait(newest, "demo-busy's newest message")
@@ -130,6 +142,8 @@ final class BlimpUITests: XCTestCase {
         let working = labeled("working…")
         try wait(stop, "the Stop button")
         try wait(working, "the working row")
+        // with Claude's latest step, its command without the summary's backticks
+        try wait(labeled("Ran npm run lint"), "the latest step on the working row")
         try wait(app.buttons["Talk"], "the mic in the empty box")
         if app.buttons["sendButton"].exists { throw failed("no Send while working with an empty box") }
         // The long reply above the newest is folded
@@ -152,65 +166,75 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - Start and end a session
 
+    /// A blank chat: Send starts Claude in the project with the message as its first prompt (the job checks
+    /// its arguments). Press and hold its row in the drawer to end it.
     func test4StartAndEnd() throws {
         try launchPaired()
+        try pickProject("blimp-demo")
+        try openDrawer()
         let before = Set(newRows().map(\.identifier))
-        element("project-blimp-demo").tap()
-        let plus = app.buttons["New session"]
-        try wait(plus, "the + button")
-        shot("10-project")
-        plus.tap()
-        // The app opens the new session: a chat with nothing in it yet, ready to type into
-        try wait(labeled("No messages yet"), "the new session's empty chat", timeout: 40)
-        try wait(element("messageField"), "the new session's message field")
+        element("drawerNewChat").tap()
+        try wait(labeled("What should Claude do here?"), "the blank chat")
+        if app.buttons["Talk"].exists { throw failed("no mic in a blank chat") }
+        shot("10-blank")
+        let input = element("messageField")
+        try type("Write the changelog", into: input)
+        let send = app.buttons["sendButton"]
+        try until(send, "isEnabled == true", "Send to be enabled")
+        send.tap()
+        // The chat becomes the new session: nothing in it yet, ready to type into
+        try wait(labeled("No messages yet"), "the new session's chat", timeout: 40)
+        try wait(app.buttons["Talk"], "the new session's mic")
         shot("11-started")
-        back()
-        back()
-        // Home lists it in its project
+        // The drawer lists it
+        try openDrawer()
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'session-blimp-demo-' AND NOT (identifier IN %@)", Array(before) as NSArray)).firstMatch
-        try wait(row, "the new session on Home")
+        try wait(row, "the new session in the drawer")
         let id = row.identifier
-        shot("12-home-started")
+        shot("12-drawer-started")
 
-        // End it: swipe, End, confirm
-        row.swipeLeft()
-        let end = app.buttons["End"]
-        try wait(end, "the swipe's End")
+        // End it: press and hold, End session, confirm
+        row.press(forDuration: 1.2)
+        let end = app.buttons["End session"]
+        try wait(end, "End session on the row's menu")
         end.tap()
         try wait(labeled("End this session?"), "the end question")
         shot("13-end-confirm")
         try confirmEnd()
-        let gone = element(id)
-        try until(gone, "exists == false", "the ended session to leave Home")
+        try until(element(id), "exists == false", "the ended session to leave the drawer")
         shot("14-ended")
     }
 
     // MARK: - Resume
 
+    /// A past conversation opens to read with nothing started; Send resumes it with the message (the job checks
+    /// `--resume <id> -- <message>`).
     func test5Resume() throws {
         try launchPaired()
-        element("project-blimp-demo").tap()
-        let earlier = labeled("Fix the login redirect")
-        try wait(earlier, "the past conversation under Earlier")
-        shot("15-earlier")
-        // The new session runs `claude --resume <id>` (checked by the job); its chat is that conversation.
-        // Again only while nothing started: the row is still there and enabled (not starting) and the
-        // stand-in claude never ran with --resume.
-        let resumed = message("message.assistant", "the page you came from")
-        try tap(earlier, until: "exists == true", on: resumed, "the resumed conversation's chat", timeout: 40) {
-            earlier.exists && earlier.isEnabled && !self.hostFile("claude.args").contains("--resume")
-        }
-        try wait(element("messageField"), "the resumed session's message field")
-        shot("16-resumed")
+        try pickProject("blimp-demo")
+        try openDrawer()
+        let past = element("past-e2e00000-0000-0000-0000-000000000004")
+        try wait(past, "the past conversation in the drawer")
+        shot("15-drawer-past")
+        past.tap()
+        try wait(message("message.assistant", "the page you came from"), "the past conversation's messages")
+        if hostFile("claude.args").contains("--resume") { throw failed("nothing started before Send") }
+        shot("16-past")
+        try type("Pick it up again", into: element("messageField"))
+        let send = app.buttons["sendButton"]
+        try until(send, "isEnabled == true", "Send to be enabled")
+        send.tap()
+        // The chat is the resumed session now: its mic, and the conversation's history
+        try wait(app.buttons["Talk"], "the resumed session's chat", timeout: 40)
+        try wait(message("message.assistant", "the page you came from"), "the resumed conversation's history")
+        shot("16a-resumed")
     }
 
     // MARK: - blimpd restarts
 
     func test6Reconnect() throws {
         try launchPaired()
-        let row = element("session-demo-chat")
-        try wait(row, "the demo-chat row")
-        row.tap()
+        try openSession("demo-chat", in: "blimp-demo")
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat")
         try signal("restart", wait: false)
         let bar = labeled("Reconnecting…")
@@ -227,12 +251,12 @@ final class BlimpUITests: XCTestCase {
         send.tap()
         try wait(message("message.assistant", "Shipped: After the restart"), "the reply after the restart")
         shot("18-reconnected")
-        back()
-        // Home: the list is back and online
-        try wait(element("session-demo-ask"), "the session list after the restart")
-        try until(labeled("Can't reach the server"), "exists == false", "Home to be online")
-        try until(labeled("Reconnecting…"), "exists == false", "Home to be online")
-        shot("19-home-after-restart")
+        // The drawer: the list is back and online
+        try openDrawer()
+        try wait(element("session-demo-chat"), "the session list after the restart")
+        try until(labeled("Can't reach the server"), "exists == false", "the app to be online")
+        try until(labeled("Reconnecting…"), "exists == false", "the app to be online")
+        shot("19-drawer-after-restart")
     }
 
     // MARK: - Several questions at once
@@ -241,9 +265,7 @@ final class BlimpUITests: XCTestCase {
     /// Submit. The job checks the keys the stand-in got are the ones real Claude needs.
     func test7AnswerQuestions() throws {
         try launchPaired()
-        let row = element("session-demo-quiz")
-        try wait(row, "the demo-quiz row")
-        row.tap()
+        try openSession("demo-quiz", in: "api-server")
         try wait(labeled("1 of 2"), "the first of two questions")
         try wait(labeled("Which database should the tests use?"), "the first question")
         let sqlite = app.buttons["choice-SQLite"]
@@ -282,12 +304,15 @@ final class BlimpUITests: XCTestCase {
     // MARK: - Folder trust
 
     /// demo-trust is Claude Code asking whether to trust its folder, before anything else (no hook, no status
-    /// file): blimpd reads it off the screen. It waits on Home; Yes in the chat, and Claude starts.
+    /// file): blimpd reads it off the screen. It's marked as asking in the drawer; Yes in the chat, and Claude starts.
     func test8TrustFolder() throws {
         try launchPaired()
+        try pickProject("api-server")
+        try openDrawer()
         let row = element("session-demo-trust")
         try wait(row, "the demo-trust row")
-        shot("24-home-trust")
+        try until(row, "label CONTAINS 'Asking you something'", "demo-trust's asking mark")
+        shot("24-drawer-trust")
         row.tap()
         let yes = app.buttons["choice-Yes, I trust this folder"]
         try wait(yes, "Yes, I trust this folder")
@@ -300,27 +325,84 @@ final class BlimpUITests: XCTestCase {
         try wait(labeled("No messages yet"), "the new conversation's empty chat")
         try wait(element("messageField"), "the message field")
         shot("26-trusted")
-        // The names on Home and in a project (demo-quiz's is blimpd's, a long-ish one)
-        back()
-        try wait(labeled("Configure Integration Test Pipeline Runs"), "demo-quiz's name on Home")
-        shot("27-home-names")
-        element("project-api-server").tap()
-        try wait(labeled("Configure Integration Test Pipeline Runs"), "demo-quiz's name in its project")
-        shot("28-project-names")
-        // and as its chat's title
-        labeled("Configure Integration Test Pipeline Runs").tap()
+        // The names in the drawer (demo-quiz's is blimpd's, a long-ish one), and as its chat's title
+        try openDrawer()
+        let quiz = labeled("Configure Integration Test Pipeline Runs")
+        try wait(quiz, "demo-quiz's name in the drawer")
+        shot("27-drawer-names")
+        quiz.tap()
         try wait(message("message.user", "Set up the test pipeline"), "demo-quiz's chat")
+        try wait(labeled("Configure Integration Test Pipeline Runs"), "demo-quiz's name above its chat")
         shot("29-chat-name")
     }
 
+    // MARK: - The drawer from the edge
+
+    /// A swipe right from the left edge opens the drawer; a swipe left closes it.
+    func test9DrawerFromTheEdge() throws {
+        try launchPaired()
+        let new = element("drawerNewChat")
+        if new.exists { throw failed("the drawer closed at launch") }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5)))
+        try wait(new, "the drawer after a swipe from the edge")
+        shot("30-drawer-edge")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
+        try until(new, "exists == false", "the drawer to close on a swipe left")
+    }
+
     // MARK: - Helpers
+
+    /// Picks a project from the picker above the chat, unless it's the one showing; the chat is then a blank one.
+    private func pickProject(_ name: String) throws {
+        let picker = element("projectPicker")
+        try wait(picker, "the project picker")
+        if picker.label.hasPrefix(name) { return }
+        // the open drawer covers the picker: close it (to a blank chat, as picking a project gives anyway)
+        let new = element("drawerNewChat")
+        if new.exists {
+            new.tap()
+            try until(new, "exists == false", "the drawer to close")
+        }
+        picker.tap()
+        let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        try wait(item, "\(name) in the project picker")
+        item.tap()
+        try until(picker, "label BEGINSWITH '\(name)'", "the picker to show \(name)")
+    }
+
+    private func openDrawer() throws {
+        let button = element("drawerButton")
+        try wait(button, "the drawer button")
+        button.tap()
+        try wait(element("drawerNewChat"), "the drawer")
+    }
+
+    /// Opens a session from the drawer of its project.
+    private func openSession(_ name: String, in project: String) throws {
+        try pickProject(project)
+        try openDrawer()
+        let row = element("session-" + name)
+        try wait(row, "the \(name) row in the drawer")
+        row.tap()
+    }
+
+    /// The field stays in sight above the keyboard (once the keyboard has slid in).
+    private func above(_ field: XCUIElement, _ keyboard: XCUIElement) throws {
+        let end = Date().addingTimeInterval(5)
+        while field.frame.maxY > keyboard.frame.minY + 1 {
+            if Date() > end { throw failed("the message field above the keyboard") }
+            _ = field.waitForExistence(timeout: 0.2)
+        }
+    }
 
     /// Launches the app and waits for Home, pairing first if it isn't (test1 failed before pairing).
     private func launchPaired() throws {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launch()
-        let home = element("project-blimp-demo")
+        let home = element("projectPicker")
         let field = element("pairField")
         let unlock = app.buttons["Unlock"].firstMatch
         let end = Date().addingTimeInterval(30)
@@ -337,7 +419,7 @@ final class BlimpUITests: XCTestCase {
 
     /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking.
     private func unlockWithFace() throws {
-        let home = element("project-blimp-demo")
+        let home = element("projectPicker")
         let unlock = app.buttons["Unlock"].firstMatch
         for _ in 0..<3 {
             allowFaceID()
@@ -350,16 +432,12 @@ final class BlimpUITests: XCTestCase {
         try wait(home, "Home after Face ID")
     }
 
-    /// Rows of sessions the app started in blimp-demo (named blimp-demo-<time>).
+    /// Rows of sessions the app started in blimp-demo (named blimp-demo-<time>), in the open drawer.
     private func newRows() -> [XCUIElement] {
         app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'session-blimp-demo-'")).allElementsBoundByIndex
     }
 
-    private func back() {
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-    }
-
-    /// The question's own End (the swipe's End is a button too).
+    /// The question's own End.
     private func confirmEnd() throws {
         let inSheet = app.sheets.buttons["End"]
         if inSheet.waitForExistence(timeout: 3) { inSheet.tap(); return }
