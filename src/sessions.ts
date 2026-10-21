@@ -27,6 +27,7 @@ import { type Names, shownNames } from "./names";
 import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
 import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
 import { isUnread, readSeen, type Seen } from "./seen";
+import { type Work, withWork } from "./work";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
 
@@ -51,6 +52,8 @@ export type Session = ZmxSession & {
   jobs?: Job[];
   context?: { used: number; limit: number };
   git?: Git;
+  // Its checkout, branch, pull requests and clashes with other sessions (work.ts), when known.
+  work?: Work;
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -301,7 +304,7 @@ export function listSessions(
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
-  return parseZmxList(zmxOut).map((z) => {
+  const rows: Session[] = parseZmxList(zmxOut).map((z) => {
     const info = readJson(join(dir, "sessions", `${z.pid}.json`));
     const hook = isSafeName(z.name) ? readJson(join(statusDir, `${z.name}.json`)) : {};
     const file = info.sessionId ? transcriptPath(dir, info.sessionId) : undefined;
@@ -334,6 +337,7 @@ export function listSessions(
       ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
     };
   });
+  return activity ? withWork(rows) : rows;
 }
 
 function runZmxList(): string {
