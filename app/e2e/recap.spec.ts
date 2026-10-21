@@ -11,11 +11,12 @@ import { fixtureDir, frontTab, killSession, openApp, sessionRow, startSession, z
 const name = `blimpe2e-recap-${process.pid}`;
 const bare = `blimpe2e-recapb-${process.pid}`;
 const failing = `blimpe2e-recapf-${process.pid}`;
+const withRun = `blimpe2e-recapr-${process.pid}`;
 
-test.afterAll(() => (killSession(name), killSession(bare), killSession(failing)));
+test.afterAll(() => (killSession(name), killSession(bare), killSession(failing), killSession(withRun)));
 
 // A session that looks like Claude to blimpd, with 3 prompts and replies.
-function fakeClaude(session: string, dir: string) {
+function fakeClaude(session: string, dir: string, last = "Shipped.") {
   const claude = process.env.BLIMP_E2E_CLAUDE!;
   startSession(session, dir);
   const pid = execFileSync("zmx", ["list"], { env: zmxEnv(), encoding: "utf8" }).match(new RegExp(`name=${session}\\tpid=(\\d+)`))![1];
@@ -24,7 +25,7 @@ function fakeClaude(session: string, dir: string) {
   mkdirSync(join(claude, "projects", "fake"), { recursive: true });
   writeFileSync(join(claude, "sessions", `${pid}.json`), JSON.stringify({ sessionId: sid, status: "idle" }));
   const line = (type: string, text: string) => JSON.stringify({ type, timestamp: new Date().toISOString(), message: { role: type, content: type === "user" ? text : [{ type: "text", text }] } });
-  const lines = ["fix the login", "Fixed.", "add tests", "Added.", "ship it", "Shipped."].map((t, i) => line(i % 2 ? "assistant" : "user", t));
+  const lines = ["fix the login", "Fixed.", "add tests", "Added.", "ship it", last].map((t, i) => line(i % 2 ? "assistant" : "user", t));
   writeFileSync(join(claude, "projects", "fake", `${sid}.jsonl`), lines.join("\n") + "\n");
 }
 
@@ -108,4 +109,21 @@ test("a Recap that fails leaves the card already showing", async ({ page }) => {
   await expect.poll(() => asked.length).toBe(2);
   await page.waitForTimeout(500);
   await expect(card(page, failing).locator(".recap-goal")).toHaveText(CARD.goal);
+});
+
+test("with a Run bar over the terminal, the card shows under it, and its × still works", async ({ page }) => {
+  const dir = fixtureDir("recapr");
+  fakeClaude(withRun, dir, "Run it:\n```bash\nbun test\n```");
+  await stubRecap(page, withRun, CARD);
+  await openApp(page, { dir, session: withRun });
+  await page.bringToFront();
+  const split = frontTab(page).locator(`.tsplit[data-split="${withRun}"]`);
+  const bar = split.locator(".runbar");
+  const c = card(page, withRun);
+  await expect(bar).toBeVisible({ timeout: 10_000 });
+  await expect(c).toBeVisible({ timeout: 10_000 });
+  const [b, k] = [(await bar.boundingBox())!, (await c.boundingBox())!];
+  expect(k.y).toBeGreaterThanOrEqual(b.y + b.height);
+  await c.getByRole("button", { name: "Dismiss recap" }).click();
+  await expect(c).toHaveCount(0);
 });
