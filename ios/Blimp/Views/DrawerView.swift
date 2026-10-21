@@ -66,18 +66,20 @@ struct DrawerView: View {
                 }
                 if !past.isEmpty {
                     Section {
-                        if earlierOpen { ForEach(past) { rowButton($0) } }
-                    } header: {
+                        // A row, not the section's header: a header doesn't reliably take taps.
                         Button { earlierOpen.toggle() } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: "chevron.right").font(.caption2.weight(.bold)).rotationEffect(.degrees(earlierOpen ? 90 : 0))
                                 Text("Earlier")
                                 Text("\(past.count)").foregroundStyle(.tertiary)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
                         .accessibilityLabel(earlierOpen ? "Earlier, \(past.count), open" : "Earlier, \(past.count), folded")
                         .accessibilityIdentifier("drawerEarlier")
+                        if earlierOpen { ForEach(past) { rowButton($0) } }
                     }
                 }
             }
@@ -131,6 +133,7 @@ struct DrawerView: View {
             }
             .foregroundStyle(.primary)
         }
+        .tint(.primary)
         .accessibilityIdentifier("projectPicker")
     }
 }
