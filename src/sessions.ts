@@ -35,6 +35,7 @@ export type Session = ZmxSession & {
   kind: string;
   label?: string; // the small label for kinds other than Claude Code and a shell: GLM, Codex…
   sessionId?: string;
+  transcript?: string; // its conversation's file, for another session to read
   title: string;
   status: string; // busy | idle | waiting | shell, or "" when Claude isn't running
   waitingFor?: string;
@@ -314,6 +315,7 @@ export function listSessions(
       label: kindLabel(kind, custom),
       dir: realDir(info.cwd || z.dir || "/"),
       sessionId: info.sessionId,
+      ...(file && { transcript: file }),
       title: pickTitle(scan, names[info.sessionId]?.name),
       status: info.status ?? "",
       waitingFor: info.waitingFor,

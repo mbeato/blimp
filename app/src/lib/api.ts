@@ -22,6 +22,7 @@ export type Session = {
   dir: string;
   cmd: string;
   sessionId?: string;
+  transcript?: string; // its conversation's file on the server (older blimpd: absent)
   title: string;
   status: string;
   waitingFor?: string;

@@ -15,6 +15,15 @@ export const hasState = (s: Pick<Session, "kind">) => isClaude(s) || s.kind === 
 // What a row shows: Claude's conversation title, or the zmx name for anything else.
 export const sessionTitle = (s: Session) => (isClaude(s) ? s.title : s.name);
 
+// What Copy Reference puts on the clipboard: pasted into another session, enough for its Claude
+// to read this one's conversation and, for Claude Code, send it a message (blimpd send).
+export function sessionReference(s: Session): string {
+  const lines = [`Another blimp session: ${isClaude(s) ? `"${s.title}" (${s.name})` : s.name}, in ${s.dir}.`];
+  if (s.transcript) lines.push(`Its conversation so far (JSONL): ${s.transcript}`);
+  if (s.sessionId) lines.push(`To send it a message: blimpd send ${s.name} "<message>"`);
+  return lines.join("\n");
+}
+
 export const lastActivity = (s: Session) => s.updatedAt ?? s.stateSince ?? s.created * 1000;
 
 // Sessions started in exactly this folder, newest first, so a new one lands on top and rows

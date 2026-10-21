@@ -523,6 +523,33 @@ describe("chat", () => {
     viewer.ws.close();
   });
 
+  test("blimpd send types a message into another session, saying which one it's from; not while it's asking", async () => {
+    const sid = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+    const { name, transcript } = await fakeClaude("send1", sid, []);
+    // The list says where its conversation is, for another session to read.
+    expect((await (await api("/sessions")).json()).find((s: any) => s.name === name).transcript).toBe(transcript);
+    const viewer = await socket(`/sessions/${name}/attach?cols=200&rows=24`);
+    const send = async (args: string[], from?: string) => {
+      const p = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "main.ts"), "send", ...args], { env: { ...env, ZMX_SESSION: from }, stdout: "pipe", stderr: "pipe" });
+      return { code: await p.exited, out: await new Response(p.stdout).text(), err: await new Response(p.stderr).text() };
+    };
+    const ok = await send([name, "hello", "there"], "blimp-other");
+    expect([ok.code, ok.out.trim()]).toEqual([0, `sent to ${name}`]);
+    await enterUntil(viewer, "hello there", "the message reached the session");
+    expect(viewer.text).toContain(`[from blimp session blimp-other; reply with: blimpd send blimp-other "<message>"]`);
+    // Not while Claude asks something, as from the phone.
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${name}.json`);
+    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest",
+      prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }));
+    const busy = await send([name, "not now"]);
+    expect([busy.code, busy.err.trim()]).toEqual([1, "blimpd send: Claude is asking something. Answer it first."]);
+    rmSync(status);
+    const none = await send([`${tag}-nope`, "hi"]);
+    expect([none.code, none.err.trim()]).toEqual([1, `blimpd send: no session named ${tag}-nope`]);
+    viewer.ws.close();
+  });
+
   test("input whose paste starts a question gets no Enter", async () => {
     // The stand-in starts waiting as soon as it reads the paste's first line: the check before the
     // paste passes, the one before Enter doesn't.

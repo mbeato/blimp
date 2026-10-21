@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Session } from "./api";
-import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, moveItem, pickSession, sessionTitle, tildify } from "./sessions";
+import { earlier, folderSessions, hasState, isClaude, lastActivity, listItems, moveItem, pickSession, sessionReference, sessionTitle, tildify } from "./sessions";
 
 const s = (name: string, dir: string, created: number, extra: Partial<Session> = {}): Session => ({
   name,
@@ -14,6 +14,19 @@ const s = (name: string, dir: string, created: number, extra: Partial<Session> =
   status: "idle",
   state: "done",
   ...extra,
+});
+
+// Pasted into another session, its Claude can read this one's conversation and message it.
+test("sessionReference", () => {
+  const claude = s("blimp-3f2a", "/home/u/blimp", 1, { title: "Fix scroll lag", sessionId: "abc", transcript: "/home/u/.claude/projects/-home-u-blimp/abc.jsonl" });
+  expect(sessionReference(claude)).toBe(
+    'Another blimp session: "Fix scroll lag" (blimp-3f2a), in /home/u/blimp.\n' +
+      "Its conversation so far (JSONL): /home/u/.claude/projects/-home-u-blimp/abc.jsonl\n" +
+      'To send it a message: blimpd send blimp-3f2a "<message>"',
+  );
+  // Before its first message: no transcript yet, but it takes messages.
+  expect(sessionReference({ ...claude, transcript: undefined })).toBe('Another blimp session: "Fix scroll lag" (blimp-3f2a), in /home/u/blimp.\nTo send it a message: blimpd send blimp-3f2a "<message>"');
+  expect(sessionReference(s("blimp-sh", "/srv/x", 1, { kind: "shell" }))).toBe("Another blimp session: blimp-sh, in /srv/x.");
 });
 
 test("tildify", () => {

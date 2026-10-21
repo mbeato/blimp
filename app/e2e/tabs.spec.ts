@@ -226,7 +226,7 @@ test("right-click a session: Open in New Window moves it to a new window; Open A
 
   await sessionRow(page, right).click({ button: "right" });
   const menu = page.getByRole("menu");
-  await expect(menu.getByRole("menuitem")).toHaveText(["Open in New Window", "Open All Splits in New Window", "Unsplit"]);
+  await expect(menu.getByRole("menuitem")).toHaveText(["Open in New Window", "Open All Splits in New Window", "Unsplit", "Copy Reference"]);
   const popup = context.waitForEvent("page");
   await menu.getByRole("menuitem", { name: "Open in New Window" }).click();
   const win = await popup;
@@ -268,8 +268,11 @@ test("right-click Unsplit: a split's sessions are each on their own again", asyn
     await expect.poll(() => layout().panes).toEqual([right]);
     expect(layout().groups).toEqual([]);
     await sessionRow(page, third).click({ button: "right" });
-    await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in New Window"]);
-    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu").getByRole("menuitem")).toHaveText(["Open in New Window", "Copy Reference"]);
+    // Copy Reference: what another session's Claude needs to find this one (a shell: its name and folder).
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByRole("menuitem", { name: "Copy Reference" }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`^Another blimp session: ${third}, in /.+\\.$`));
 
     // Split again, then another session on screen: the split is kept as a group, and comes apart too.
     await splitTwo(page, dir);

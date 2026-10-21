@@ -68,6 +68,7 @@ type Session = {
   kind: string;          // the kind it was started with (see Kinds); else claude if Claude's status file was found or cmd mentions claude, else shell
   label?: string;        // short label for kinds other than claude and shell: GLM, Codex, Codex sign-in, a custom kind's label
   sessionId?: string;    // Claude's conversation id
+  transcript?: string;   // the conversation's file, once Claude has written one: another session can read it (Copy Reference)
   title: string;         // /rename title, else blimp's name (see Names), else AI title, else first prompt, else "(new session)"
   status: string;        // raw Claude status: busy | idle | waiting | shell | ""
   waitingFor?: string;   // raw Claude field
@@ -196,6 +197,10 @@ What Claude Code 2.1.300 needs (probed with one attached client; the phone spec,
 - Esc cancels the whole dialog from anywhere ("User declined to answer questions"); blimpd never sends it in an answer.
 
 blimpd builds those keys from the validated indexes only: digits, ↓ (`\x1b[B`), Enter and the paste of the cleaned text. Before each step it reads the screen (`zmx history`, the last 120 lines) and waits up to 3 s for the last tab bar to show that question's text with the cursor where the step expects it, exactly the expected boxes ticked, the typed text in its row, or the review screen. Otherwise it stops there, types nothing more, and replies "stopped: Claude's screen didn't show question N as expected. Finish it on the Mac." The tool's result in the transcript (the chat's tool output) lists the answers: `"Which color?"="Green", "Which size?"="Small"`; multi-choice answers are the labels and the typed text joined with ", ".
+
+### Sending between sessions
+
+`blimpd send <session> <message…>` (`src/send.ts`) types a message into another session's Claude, so sessions can read and message each other. The words after the name are the message (none: stdin). It reads the Mac's `token` next to the socket, checks `GET /sessions` (no such session, or one without a Claude `sessionId`: exit 1 with that), then sends the chat socket's `input` (see Chat) and waits for its ack. So the phone's rules hold: refused while Claude asks something ("Claude is asking something. Answer it first."), control characters taken out, a paste then Enter. Run inside a blimp session (`ZMX_SESSION`), the message starts with `[from blimp session <name>; reply with: blimpd send <name> "<message>"]` on its own line. Prints `sent to <session>` and exits 0 once typed; errors go to stderr as `blimpd send: <error>`, exit 1. No session uses it unless told to: the Mac's Copy Reference (a session's right-click) puts the command on the clipboard to paste into another session.
 
 ### Files
 
