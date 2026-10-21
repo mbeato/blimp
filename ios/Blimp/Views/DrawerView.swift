@@ -1,11 +1,15 @@
 // The drawer from the left: the project picker, the project's inbox (where a new chat starts), its running sessions, then its past
 // conversations folded under Earlier (each newest activity first, with its mark), and Settings. A tap opens one;
-// press and hold a running one to end it. A swipe left, or a tap beside it, closes the drawer.
+// press and hold a running one to end it. It follows the finger: a swipe right in the chat pulls it out (HomeView's
+// `pull`), a swipe left on it or beside it pushes it back, and letting go settles it open or closed by where it is
+// and how fast it went. A tap beside it closes it too.
 import BlimpKit
 import SwiftUI
 
 struct DrawerView: View {
     @Binding var open: Bool
+    /// How far a swipe in the chat that's opening it has gone (HomeView), nil while there's none.
+    let pull: CGFloat?
     /// The project shown, and the ones the picker lists.
     let dir: String?
     let projects: [ProjectChoice]
@@ -20,35 +24,53 @@ struct DrawerView: View {
     @State private var pendingEnd: Session?
     /// Earlier folds away (folded at first), as on the Mac; kept on this phone.
     @AppStorage("drawerEarlierOpen") private var earlierOpen = false
-    @GestureState private var drag: CGFloat = 0
+    /// A swipe left that's pushing it back: how far it has gone (at most 0), nil while there's none.
+    @State private var push: CGFloat?
+    /// Whether the swipe going on is sideways (decided once, at its start), so scrolling the list never moves it.
+    @State private var sideways: Bool?
 
     var body: some View {
         GeometryReader { geo in
             let width = min(geo.size.width * 0.84, 340)
-            // Closed, it isn't there at all, not only off screen: VoiceOver and the tests would still find it.
+            // How far out it is, 0 (closed) to width (open): where the finger has it while one moves it.
+            let out = pull.map { min(width, max(0, $0)) } ?? (open ? min(width, max(0, width + (push ?? 0))) : 0)
+            let still = pull == nil && push == nil
             ZStack(alignment: .leading) {
-                if open {
-                    Color.black.opacity(0.3)
-                        .ignoresSafeArea()
-                        .onTapGesture { open = false }
-                        .accessibilityHidden(true)
-                        .transition(.opacity)
-                    panel
-                        .frame(width: width)
-                        .background(Color(.systemBackground).ignoresSafeArea())
-                        .offset(x: min(0, drag))
-                        .transition(.move(edge: .leading))
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 20)
-                                .updating($drag) { v, state, _ in if abs(v.translation.width) > abs(v.translation.height) { state = v.translation.width } }
-                                .onEnded { v in if v.translation.width < -60, abs(v.translation.width) > abs(v.translation.height) { open = false } }
-                        )
-                }
+                Color.black.opacity(0.3 * out / width)
+                    .ignoresSafeArea()
+                    .onTapGesture { open = false }
+                    .accessibilityHidden(true)
+                panel
+                    .frame(width: width)
+                    .background(Color(.systemBackground).ignoresSafeArea())
+                    .offset(x: out - width)
             }
+            .simultaneousGesture(closing(width: width), including: open ? .all : .none)
+            // Closed, it's off screen, and VoiceOver, the tests and taps don't find it there.
+            .allowsHitTesting(open)
+            .accessibilityHidden(!open && pull == nil)
             .animation(.snappy, value: open)
-            .animation(.interactiveSpring, value: drag)
+            .animation(.snappy, value: still)
         }
         .endConfirmation($pendingEnd, store: store)
+    }
+
+    private func closing(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { v in
+                if sideways == nil { sideways = abs(v.translation.width) > abs(v.translation.height) }
+                if sideways == true { push = min(0, v.translation.width) }
+            }
+            .onEnded { v in
+                defer { sideways = nil }
+                guard sideways == true else { return }
+                // Let go past a third of the way, or flung left: it closes; else back open.
+                let close = v.translation.width < -width / 3 || v.predictedEndTranslation.width < -width * 0.6
+                withAnimation(.snappy) {
+                    if close { open = false }
+                    push = nil
+                }
+            }
     }
 
     private var panel: some View {

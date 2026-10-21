@@ -15,6 +15,10 @@ struct HomeView: View {
     @Environment(Store.self) private var store
     @State private var opened: Opened = .inbox
     @State private var drawer = false
+    /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
+    @State private var pull: CGFloat?
+    /// Whether the swipe going on pulls the drawer (sideways and right, decided once at its start).
+    @State private var pulling: Bool?
     @State private var folders: [RecentFolder] = []
     @State private var earlier: [Conversation] = []
     @State private var showSettings = false
@@ -26,14 +30,27 @@ struct HomeView: View {
                 .toolbar { toolbar }
                 .safeAreaInset(edge: .top, spacing: 0) { StatusBar(connection: store.connection) }
         }
-        // A swipe right anywhere opens the drawer: mostly sideways, so scrolling the chat never does.
+        // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
+        // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed.
         .simultaneousGesture(
-            DragGesture(minimumDistance: 20).onEnded { v in
-                if !drawer, v.translation.width > 60, abs(v.translation.height) < v.translation.width * 0.6 { drawer = true }
-            }
+            DragGesture(minimumDistance: 10)
+                .onChanged { v in
+                    if drawer { return }
+                    if pulling == nil { pulling = v.translation.width > 0 && abs(v.translation.width) > abs(v.translation.height) * 1.5 }
+                    if pulling == true { pull = max(0, v.translation.width) }
+                }
+                .onEnded { v in
+                    defer { pulling = nil }
+                    guard pulling == true, !drawer else { return }
+                    let open = v.translation.width > 120 || v.predictedEndTranslation.width > 260
+                    withAnimation(.snappy) {
+                        if open { drawer = true }
+                        pull = nil
+                    }
+                }
         )
         .overlay {
-            DrawerView(open: $drawer, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
+            DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
                        onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
