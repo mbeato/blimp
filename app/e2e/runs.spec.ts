@@ -1,4 +1,4 @@
-// The Run bar: commands from Claude's latest reply over the top of its terminal. Run opens the command in a split to
+// The Run bar: commands from Claude's latest reply above its terminal. Run opens the command in a split to
 // the right; once it ended, its exit code and Send result to Claude, which types the result into Claude
 // (refused, with a notice, while Claude asks something).
 
@@ -39,6 +39,9 @@ test("Run opens a command from Claude's reply in a split to its right; Send resu
   await expect(bar.locator(".runbar-run")).toHaveText(["echo e2e-$((6*7))", "node -e 1", "bash -c 'exit 4'"], { timeout: 5000 });
   await expect(bar.locator(".runbar-run").first()).toHaveAttribute("title", "Run in a new split:\necho e2e-$((6*7))");
   await expect(bar.locator(".runbar-more")).toHaveText("+1");
+  // Above Claude's terminal, not over it: its first row isn't hidden.
+  const term = frontTab(page).locator(`.tsplit[data-split="${name}"] .term`);
+  expect((await term.boundingBox())!.y).toBeGreaterThanOrEqual((await bar.boundingBox())!.y + (await bar.boundingBox())!.height - 1);
 
   await bar.locator(".runbar-run").first().click();
   // A second split, to the right of Claude's, running the command.
@@ -53,6 +56,17 @@ test("Run opens a command from Claude's reply in a split to its right; Send resu
 
   // Ended: its exit code, and the result can go to Claude. Not while Claude asks something.
   await expect(bar.locator(".runbar-status").first()).toHaveText("exit 0", { timeout: 5000 });
+  // In a half-width split, the commands that don't fit go to +N: none is cut off or hidden. The one that
+  // ran stays, with its exit code and Send.
+  for (const width of [1400, 1100]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(() => bar.locator(".runbar-items").evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    const fit = await bar.locator(".runbar-run").count();
+    await expect(bar.locator(".runbar-more")).toHaveText(`+${4 - fit}`);
+    await expect(bar.locator(".runbar-run").first()).toContainText("echo e2e");
+    if (width === 1100) expect(fit).toBe(1);
+  }
+  await page.setViewportSize({ width: 1400, height: 900 });
   const status = join(e2e().statusDir, `${name}.json`);
   mkdirSync(e2e().statusDir, { recursive: true });
   writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), event: "Notification" }));
@@ -65,13 +79,12 @@ test("Run opens a command from Claude's reply in a split to its right; Send resu
   await expect.poll(() => screenText(splitTerm(page, name)), { timeout: 10_000 }).toContain("[blimp run]");
   expect(await screenText(splitTerm(page, name))).toContain("e2e-42");
 
-  // × hides the bar for this reply. The bar lies over the terminal: coming and going, it doesn't resize
-  // Claude's terminal (each resize makes Claude Code redraw).
-  const body = frontTab(page).locator(`.tsplit[data-split="${name}"] .tsplit-body`);
-  const height = (await body.boundingBox())!.height;
+  // × hides the bar for this reply. Its place stays: coming and going, the bar doesn't resize Claude's
+  // terminal (each resize makes Claude Code redraw).
+  const box = (await term.boundingBox())!;
   await bar.locator(".runbar-hide").click();
   await expect(bar).toHaveCount(0);
-  expect((await body.boundingBox())!.height).toBe(height);
+  expect(await term.boundingBox()).toEqual(box);
 
   // With the bar gone (as at your next prompt), the run's own menu still sends its result.
   await frontTab(page).locator(`.tsplit[data-split="${run}"] .tsplit-head`).click({ button: "right" });

@@ -15,7 +15,7 @@ import { SecretDialog } from "./SecretDialog";
 import { inbox } from "../lib/inbox";
 import { jobsOpen, jobsWords } from "../lib/jobs";
 import { JobsPopover } from "./JobsPopover";
-import { contextMeter, handoffNews, handoffWords } from "../lib/handoff";
+import { contextMeter, handoffError, handoffNews, handoffWords } from "../lib/handoff";
 import { RunBar } from "./RunBar";
 import { runBar } from "../lib/runs";
 import { openWebLink } from "../lib/links";
@@ -305,7 +305,7 @@ export function TerminalPane(props: {
       await api.handoff(s.name);
     } catch (e) {
       handing.delete(s.name);
-      props.onNotice(`Couldn't continue in a new session: ${errorText(e)}`);
+      props.onNotice(handoffError(e));
     }
   };
   const handoffs = (link.sessions ?? []).map((s) => (s.handoff ? `${s.name}:${s.handoff.state}` : "")).join(",");
@@ -569,6 +569,8 @@ export function TerminalPane(props: {
   itemsRef.current = items;
   // The row being dragged within the list (with its whole group).
   const moving = drag && drag.gap !== null ? itemOf(drag.s.name) : -1;
+  // While any row has a clash warning, every row keeps its place empty: titles then start at the same x.
+  const clashSlot = listed.some((x) => clashLines(x, link.sessions ?? []).length > 0);
   const row = (s: Session, num?: number, item?: number) => {
     const meter = contextMeter(s.context);
     const parent = s.parent ? link.sessions?.find((x) => x.name === s.parent) : undefined;
@@ -606,7 +608,7 @@ export function TerminalPane(props: {
             >
               <Mark s={s} />
               {num && <span className="split-num">{num}</span>}
-              <Clash s={s} all={link.sessions ?? []} />
+              <Clash s={s} all={link.sessions ?? []} slot={clashSlot} />
               <span className="srow-title">
                 {s.parent && (
                   <span className="srow-parent" title={`Continued from ${parent ? sessionTitle(parent) : s.parent}`}>
@@ -670,7 +672,9 @@ export function TerminalPane(props: {
                 </div>
               )}
               <div
-                className="tsplit-body"
+                // A Claude session's terminal starts below the Run bar's place, bar or not: the bar comes and
+                // goes without resizing Claude's terminal, and covers none of its rows.
+                className={"tsplit-body" + (sessionOf(name) && isClaude(sessionOf(name)!) ? " runbar-slot" : "")}
                 // A screenshot on the clipboard goes up like a dropped file, its path typed in. Caught
                 // before xterm's own paste, which would type nothing for an image.
                 onPasteCapture={(e) => {
@@ -681,7 +685,7 @@ export function TerminalPane(props: {
                   void uploadInto(name, items);
                 }}
               >
-                {/* Over the terminal's top, not above it: coming and going, it doesn't resize Claude's terminal. */}
+                {/* In its place above the terminal (runbar-slot). */}
                 {bar && (
                   <RunBar
                     bar={bar}
@@ -972,9 +976,10 @@ function Doing(props: { s: Session; now?: number; onJobs?: (at: DOMRect) => void
 
 // Another session may get in this one's way (the same branch, or the same files edited): a red
 // warning, not amber, which means "waiting for you". Its tooltip says with whom and why.
-function Clash(props: { s: Session; all: Session[] }) {
+// slot: another row has one, so an empty place keeps this row's title in line with that row's.
+function Clash(props: { s: Session; all: Session[]; slot?: boolean }) {
   const lines = clashLines(props.s, props.all);
-  if (!lines.length) return null;
+  if (!lines.length) return props.slot ? <span className="srow-clash none" aria-hidden /> : null;
   return (
     <span className="srow-clash" title={lines.join("\n")} aria-label={lines.join(". ")}>
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>

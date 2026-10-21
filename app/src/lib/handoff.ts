@@ -3,7 +3,7 @@
 // Here: what a row says while that happens, when the new session is ready to show, and how full a
 // session's context window is.
 
-import type { Session } from "./api";
+import { ApiError, type Session } from "./api";
 
 // 950, 620k, 1M, 1.5M.
 export function tokens(n: number): string {
@@ -22,11 +22,12 @@ export function contextMeter(c: Session["context"]): { width: number; high: bool
   return { width: Math.min(100, percent), high: percent >= 80, label: `Context ${percent}% (${tokens(c.used)} of ${tokens(c.limit)} tokens)` };
 }
 
-// What the row says instead of its state: "Writing handoff…" while Claude writes it, "Handed off" once
-// the new session started and this one is idle. A question for you still says so.
+// What the row says instead of its state: "Writing handoff" while Claude writes it, "Handed off" once
+// the new session started and this one is idle. A question for you still says so. No "…": with it, the
+// words were cut at the default list width (the right column is at most 45% of the row).
 export function handoffWords(s: Session): string | undefined {
   if (!s.handoff || s.state === "waiting") return;
-  if (s.handoff.state === "writing") return "Writing handoff…";
+  if (s.handoff.state === "writing") return "Writing handoff";
   if (s.handoff.state === "started" && s.state !== "working") return "Handed off";
 }
 
@@ -44,4 +45,11 @@ export function handoffNews(watching: Map<string, boolean>, sessions: Session[])
   }
   for (const n of out) watching.delete(n.parent);
   return out;
+}
+
+// The notice when a handoff couldn't start. A blimpd from before handoffs answers its route with the
+// generic "not found" (a missing session says "no session named …"): it needs an update.
+export function handoffError(e: unknown): string {
+  if (e instanceof ApiError && e.status === 404 && e.message === "not found") return "This server's blimpd is too old to continue in a new session. Update it first.";
+  return `Couldn't continue in a new session: ${e instanceof Error ? e.message : String(e)}`;
 }

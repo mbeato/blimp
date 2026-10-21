@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Session } from "./api";
-import { oneLine, runBar } from "./runs";
+import { fitBar, oneLine, runBar } from "./runs";
 import { sessionTitle } from "./sessions";
 
 const s = (name: string, extra: Partial<Session> = {}): Session => ({
@@ -56,4 +56,16 @@ test("oneLine: a command of several lines as one, for a button", () => {
 
 test("a run's row is titled by its command (blimpd's title for it)", () => {
   expect(sessionTitle({ ...run("web-run-1", "web", "bun test", 1), title: "bun test" })).toBe("bun test");
+});
+
+test("in a narrow split, the commands that don't fit go to the +N menu; one that has run keeps its place", () => {
+  const claude = s("web", { runnable: ["a", "b", "c", "d"], runnableAt: 5 });
+  const bar = runBar(claude, [claude], [])!;
+  expect(fitBar(bar, 3)).toBe(bar);
+  expect(fitBar(bar, 2)).toEqual({ key: bar.key, shown: [{ command: "a" }, { command: "b" }], more: [{ command: "c" }, { command: "d" }] });
+  expect(fitBar(bar, 0).shown).toEqual([{ command: "a" }]); // at least one
+  const ran = run("run-1", "web", "c", 10, { exit: 0 });
+  const withRun = runBar(claude, [claude, ran], [])!;
+  expect(fitBar(withRun, 2)).toEqual({ key: bar.key, shown: [{ command: "a" }, { command: "c", run: ran }], more: [{ command: "b" }, { command: "d" }] });
+  expect(fitBar(withRun, 1).shown).toEqual([{ command: "c", run: ran }]);
 });

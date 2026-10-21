@@ -68,7 +68,7 @@ test("Continue in New Session: Claude writes the handoff, then the new session o
 
   await row.click({ button: "right" });
   await page.getByRole("menuitem", { name: "Continue in New Session" }).click();
-  await expect(row.locator(".srow-doing")).toHaveText("Writing handoff…");
+  await expect(row.locator(".srow-doing")).toHaveText("Writing handoff");
   // The request was typed into the session (cat shows it).
   await expect.poll(() => screenText(splitTerm(page, parent))).toContain("Write a handoff so a fresh session can continue this work");
 

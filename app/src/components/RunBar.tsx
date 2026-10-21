@@ -1,24 +1,44 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { Session } from "../lib/api";
-import { oneLine, type RunItem, runBar } from "../lib/runs";
+import { type Bar, fitBar, oneLine, type RunItem } from "../lib/runs";
 
-// A slim bar over the top of a Claude session's terminal with the commands in Claude's latest reply (lib/runs.ts).
+// A slim bar above a Claude session's terminal with the commands in Claude's latest reply (lib/runs.ts).
 // Each one's full text is its tooltip; clicking Run is the go-ahead (nothing runs before). A run opens in a
 // split to the right; once it ended, its exit code and Send result to Claude, which types the exit code
 // and the last lines of its output into Claude. × hides the bar until a reply with other commands.
+// In a narrow split, the commands that don't fit go to the +N menu (lib/runs.ts fitBar): measured, as
+// widths depend on the commands, their exit codes and the split.
 export function RunBar(props: {
-  bar: NonNullable<ReturnType<typeof runBar>>;
+  bar: Bar;
   onRun: (command: string) => void;
   onShow: (run: Session) => void;
   onSend: (run: Session) => void;
   onHide: () => void;
 }) {
-  const { bar } = props;
   const [menu, setMenu] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const items = useRef<HTMLSpanElement>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = box.current!;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // When the bar, a run's state or the width changes: all of them first, then one fewer at a time while
+  // they overflow (a layout effect, so before anything is painted).
+  const sig = [width, props.bar.key, ...props.bar.shown.map((i) => (i.run ? `${i.run.name}:${i.run.run?.exit}` : ""))].join("\0");
+  const [fit, setFit] = useState({ sig, n: props.bar.shown.length });
+  const n = fit.sig === sig ? fit.n : props.bar.shown.length;
+  useLayoutEffect(() => {
+    const el = items.current;
+    if (el && n > 1 && el.scrollWidth > el.clientWidth + 1) setFit({ sig, n: n - 1 });
+  });
+  const bar = fitBar(props.bar, n);
   return (
-    <div className="runbar" role="toolbar" aria-label="Commands from Claude's reply">
+    <div className="runbar" role="toolbar" aria-label="Commands from Claude's reply" ref={box}>
       <span className="runbar-label">Run</span>
-      <span className="runbar-items">
+      <span className={"runbar-items" + (bar.shown.length === 1 ? " lone" : "")} ref={items}>
         {bar.shown.map((item) => (
           <Item key={item.command} item={item} {...props} />
         ))}

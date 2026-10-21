@@ -556,7 +556,7 @@ h2 {
   white-space: nowrap;
 }
 
-/* isolation: what lies over the terminal (the Run bar) stays inside it, under the window's overlays. */
+/* isolation: what lies over the terminal (the Run bar, the return card) stays inside it, under the window's overlays. */
 .tsplit-body {
   flex: 1;
   min-height: 0;
@@ -564,8 +564,13 @@ h2 {
   isolation: isolate;
 }
 
-/* The Run bar (components/RunBar.tsx): commands from Claude's latest reply, over the top of its
-   terminal (above xterm's layers), so it comes and goes without resizing Claude's terminal. */
+/* A Claude session's terminal leaves the Run bar's height free at its top, whether the bar shows or
+   not: so the bar comes and goes without resizing Claude's terminal, and hides none of its rows. */
+.tsplit-body.runbar-slot > .term {
+  top: 28px;
+}
+
+/* The Run bar (components/RunBar.tsx): commands from Claude's latest reply, in that place. */
 .runbar {
   position: absolute;
   top: 0;
@@ -583,7 +588,8 @@ h2 {
   border-bottom: 1px solid var(--line);
 }
 
-/* Only the commands are cut in a narrow split: the +N menu below the bar must not be. */
+/* The commands that fit (RunBar measures them); the others are in the +N menu. Only these are cut, as
+   a last resort when even one doesn't fit: the +N menu below the bar must not be. */
 .runbar-items {
   display: flex;
   align-items: center;
@@ -601,13 +607,13 @@ h2 {
   color: var(--fg-faint);
 }
 
-/* A command keeps enough of itself to be read; commands that don't fit are cut at the bar's end. */
+/* A command keeps enough of itself to be read, then ends in "…". */
 .runbar-run {
   flex: 0 1 auto;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 96px;
+  min-width: 80px;
   max-width: 320px;
   height: 20px;
   padding: 0 8px;
@@ -656,9 +662,19 @@ h2 {
   color: var(--danger);
 }
 
+/* In a narrow split it gives way too, down to "Send…": its title says it all. */
 .runbar-send {
+  flex: 0 1 auto;
+  min-width: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border: 1px solid var(--line);
   color: var(--fg);
+}
+
+/* The one command left in a narrow split may get shorter than the others would. */
+.runbar-items.lone .runbar-run {
+  min-width: 48px;
 }
 
 .runbar-hide {
@@ -666,9 +682,10 @@ h2 {
   visibility: visible;
 }
 
+/* Opens leftwards from +N, at the bar's right end: rightwards, the split's edge would cut it off. */
 .runbar-menu {
-  left: 0;
-  right: auto;
+  left: auto;
+  right: 0;
   top: 24px;
   max-width: 420px;
 }
@@ -1060,12 +1077,14 @@ body.dragging-session * {
   place-items: center;
 }
 
-/* Another session on the same branch or files (TerminalPane's Clash): red, never amber. */
+/* Another session on the same branch or files (TerminalPane's Clash): red, never amber. A fixed width,
+   so an empty one (on the rows without, while a row has one) keeps every title at the same x. */
 .srow-clash {
   flex: none;
   display: grid;
   place-items: center;
-  margin-right: -2px;
+  width: 12px;
+  margin-right: -3px;
   color: var(--danger);
 }
 
