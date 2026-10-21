@@ -1,5 +1,6 @@
 // The app's entry: Pair until a server is saved (or after blimpd refuses the token), else the sessions.
-// A saved server that can't be read yet (the phone still locked) shows the lock cover, never Pair.
+// A saved server that can't be read yet (the phone still locked) shows the lock cover, never Pair. The lock
+// covers the sessions without ending them, and unlocking keeps the link that's up.
 import BlimpKit
 import SwiftUI
 
@@ -22,18 +23,18 @@ private struct Root: View {
 
     var body: some View {
         Group {
-            if store.waitingForKeychain || (lock.locked && store.server != nil) {
+            if store.waitingForKeychain {
                 LockedView()
             } else if store.server == nil || store.connection == .unauthorized {
                 PairView()
             } else {
-                HomeView()
+                // Kept alive under the lock, so unlocking lands on the same chat, scrolled where it was, with the
+                // words still in the box. Hidden from VoiceOver (and the UI tests) while covered.
+                HomeView().accessibilityHidden(covered)
             }
         }
-        // the app switcher's snapshot is taken as the app goes inactive: show no session titles
-        .overlay { if scenePhase != .active && store.server != nil { LockedView() } }
+        .overlay { if covered { LockedView() } }
         .onReturnFromBackground { store.reconnectNow() }
-        .onChange(of: lock.locked) { _, locked in if !locked { store.reconnectNow() } }
         // Again once a Keychain that couldn't be read at launch has been read: a saved server then asks for Face ID.
         .task(id: store.waitingForKeychain) {
             guard !store.waitingForKeychain else { return }
@@ -45,6 +46,12 @@ private struct Root: View {
         }
         // Nothing is read aloud in the background, behind the lock cover, or while locked.
         .onChange(of: scenePhase == .active && !lock.locked, initial: true) { _, open in Speaker.shared.allowed = open }
+    }
+
+    /// The cover is up while locked, and in the background, where the app switcher takes its snapshot. Not
+    /// while only inactive (Control Center, a notification, the Face ID sheet, the mic alert): the screen stays.
+    private var covered: Bool {
+        store.server != nil && !store.waitingForKeychain && (lock.locked || scenePhase == .background)
     }
 }
 
@@ -69,6 +76,51 @@ private struct ReturnFromBackground: ViewModifier {
                 wasInBackground = false
                 action()
             }
+        }
+    }
+}
+
+/// Where you were, for a cold launch: the open chat, saved as you open it and as the app leaves. A cold
+/// launch reopens it with the first session list, if it was used in the last hour and still runs, and
+/// nothing else was opened first.
+struct KeepsPlace: ViewModifier {
+    @Binding var opened: Opened
+    @Environment(Store.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var tried = false
+
+    private static let key = "lastChat"
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: store.sessions) { _, sessions in
+                guard !tried else { return }
+                tried = true
+                guard opened == .inbox, let name = Self.saved?.reopen(listed: sessions.map(\.name), now: Self.now),
+                      let session = sessions.first(where: { $0.name == name }) else { return }
+                store.dir = session.dir
+                opened = .session(name)
+            }
+            .onChange(of: opened) { _, now in
+                tried = true
+                Self.save(now)
+            }
+            // A project picked before the list came: that's where you want to be.
+            .onChange(of: store.dir) { tried = true }
+            .onChange(of: scenePhase) { _, phase in if phase == .background { Self.save(opened) } }
+    }
+
+    private static var now: Double { Date.now.timeIntervalSince1970 * 1000 }
+
+    private static var saved: LastChat? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(LastChat.self, from: $0) }
+    }
+
+    private static func save(_ opened: Opened) {
+        if case .session(let name) = opened, let data = try? JSONEncoder().encode(LastChat(name: name, at: now)) {
+            UserDefaults.standard.set(data, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
         }
     }
 }

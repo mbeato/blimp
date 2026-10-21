@@ -16,6 +16,11 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] App switcher. Swipe up to the app switcher. blimp's card is blank, with no session names.
 - [ ] Cancelling does not nag. Cancel the Face ID sheet. It stays on "Unlock" and does not ask again until you tap Unlock.
 - [ ] Lock after 5 minutes. Go to the Home Screen, wait more than 5 minutes, come back. It is locked again. Within 5 minutes it is not. Signed out (nothing paired), it never locks.
+- [ ] Unlocking keeps your place. Open a chat, scroll up a little, type a few words and don't send them. Lock (wait 5 minutes in the background). Unlock: the same chat, scrolled where you left it, the words still in the box. The chat does not reload.
+- [ ] No blank screen for a glance. Pull down Control Center, or a notification, while a chat is open. The chat stays on screen (no lock cover). The same while the Face ID sheet or the first mic alert shows.
+- [ ] One connect at launch. Quit the app and open it. The top bar says "Connecting…" (not "Reconnecting…") until it's up, and after Face ID it doesn't connect again: the Mac's blimpd log shows one /events connection for the launch.
+- [ ] A cold launch reopens the chat. Open a chat, leave the app, quit it from the app switcher, open it again within the hour: that chat opens. After more than an hour, or after you went back to the inbox, it opens on the inbox.
+- [ ] Drafts per chat. Type a few words in one chat without sending, open another chat, type there, go back: each has its own words. They come back after quitting the app too. The new-chat box keeps its own per project.
 
 ## Home
 
@@ -51,6 +56,8 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] A past conversation. Tap one in the drawer: it opens to read, and nothing starts (the Mac lists no new session). Send something: it resumes with that message.
 - [ ] End a session. Press and hold its row in the drawer, End session, confirm. It leaves the drawer.
 - [ ] Links. A link to a web page opens in Safari when tapped. A link with another kind of address (for example `file:` or `tel:`) is not tappable.
+- [ ] One-tap replies. In a chat with an empty box and nothing asked, "go", "continue", "yes go ahead" and "status?" sit above the box. Tap one: "Sending “go”… Undo" shows for 2 seconds (a light tap you can feel), then it's sent. Tap Undo before that: nothing is sent. Long-press one: its words go in the box, unsent. Type a letter, or let Claude ask something: the chips go.
+- [ ] Number picks. Ask Claude for three options as a numbered list. The chips become 1, 2, 3 and all. Tap 2: Claude gets "2".
 - [ ] Scrolling. A long chat opens at the bottom. A new message follows only when you are already at the bottom. If you scrolled up, a "New" pill shows. Tapping it scrolls down.
 - [ ] The prompt bar does not jump. When a permission appears, the bar slides in without flicker on its first frame.
 
@@ -64,7 +71,10 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 
 - [ ] Reconnect. Turn the Mac's wifi off and on. The chat shows "Reconnecting…", keeps the old messages, then fills in again.
 - [ ] A quiet connection counts as connected. Open a session that is idle. The "Reconnecting…" bar goes away on its own after a moment.
-- [ ] Coming back from the background. Go to the Home Screen for a minute, then return (unlock if asked). Both Home and the open chat reconnect at once.
+- [ ] Coming back from the background. Go to the Home Screen for a minute, then return (unlock if asked). A link that still works is kept: the chat does not flash "Reconnecting…" or reload. After a longer time away, with the link dead, both Home and the open chat are back within about 3 seconds.
+- [ ] A new network. With a chat open, turn Wi-Fi off (cellular takes over), then on again; or join a hotspot. The chat comes back within a few seconds each time, not after 20 to 40.
+- [ ] A send on a dead link. Turn on Airplane Mode, then at once send a message. Within about 3 seconds "Not sent. Check the connection." shows, and your text stays in the box. (phone)
+- [ ] Tailscale off. With the phone paired over Tailscale, turn the Tailscale VPN off in its app. The top bar says "Tailscale looks off" with "Open Tailscale". Tap it: the Tailscale app opens (if its link doesn't work, the App Store's Tailscale page opens; note which). Turn the VPN on: the bar goes within a few seconds. Paired over another address (the simulator's 127.0.0.1), it says "Can't reach the server" instead. (phone)
 
 ## Voice
 
@@ -72,7 +82,11 @@ Items marked (phone) need a real iPhone: speech recognition may not run in the s
 
 - [ ] First use. Tap the mic for the first time. "Getting speech ready…" shows while the speech model loads. (phone)
 - [ ] Permission denied. Deny the microphone or speech recognition when asked. The chat says where to turn them on: Settings > Apps > blimp. (phone)
-- [ ] Hold to talk. Hold the mic, speak, let go. Your words show in the box as you talk, and letting go sends them to Claude. (phone)
+- [ ] Hold to talk. Hold the mic, speak, let go. Your words show in the box as you talk. Letting go sends nothing: they stay in the box to read, edit or add to. Send sends them. (phone)
+- [ ] Talk more onto it. With words in the box, the mic is still there beside Send. Hold it and speak: the new words go after the old ones, with one space. (phone)
+- [ ] The new-chat box has the mic. In a project's inbox and in a past conversation, the mic is in the box. Words heard stay there until Send. (phone)
+- [ ] No clipped first words. Open a chat, wait a second, hold the mic and start talking at once. The first word is in the box. Try it with the very first press after opening the app too. (phone)
+- [ ] Nothing listens until you press. With a chat open and the mic not pressed, no orange dot shows in the status bar, and music from another app keeps playing. (phone)
 - [ ] Tap to talk. Tap the mic, speak, tap it again. The words stay in the box, unsent; Send sends them. (phone)
 - [ ] Dismiss a question. While Claude asks something, tap Dismiss on the question. It goes away, and Claude says you declined and carries on. (phone)
 - [ ] A question while you talk. Start talking. Have Claude ask something before you finish. Nothing is sent. Your words stay in the box, and "Claude asked something. Nothing was sent." shows. (phone)

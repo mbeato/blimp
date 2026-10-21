@@ -28,7 +28,7 @@ struct HomeView: View {
             chat
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
-                .safeAreaInset(edge: .top, spacing: 0) { StatusBar(connection: store.connection) }
+                .safeAreaInset(edge: .top, spacing: 0) { ConnectionBar() }
         }
         // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
         // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed.
@@ -54,6 +54,7 @@ struct HomeView: View {
                        onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .modifier(KeepsPlace(opened: $opened))
         .task(id: store.connection == .online) {
             guard let api = store.api else { return }
             folders = (try? await api.folders()) ?? []
@@ -192,26 +193,4 @@ private struct EarlierKey: Equatable {
     let inbox: Bool
     let online: Bool
     let running: Set<String>
-}
-
-private struct StatusBar: View {
-    let connection: Connection
-
-    var body: some View {
-        if let text {
-            Text(text)
-                .font(.footnote)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(.bar)
-        }
-    }
-
-    private var text: String? {
-        switch connection {
-        case .online, .unauthorized: nil
-        case .connecting: "Reconnecting…"
-        case .offline(let reason): reason
-        }
-    }
 }

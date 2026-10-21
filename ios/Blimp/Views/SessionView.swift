@@ -166,6 +166,7 @@ private struct ChatContent: View {
             try? await store.api?.seen(id)
         }
         .onAppear(perform: appeared)
+        .keepsDraft($draft, key: model.name)
         .onDisappear(perform: disappeared)
         .onChange(of: listener.partial) { _, heard in
             if micOn { draft = Self.joined(micBase, heard) }
@@ -237,7 +238,9 @@ private struct ChatContent: View {
                 errorLine
                 InputBar(
                     text: $draft, sending: model.sendingText, listening: micOn || micStopping, onSend: send,
-                    onMicDown: micDown, onMicUp: micUp)
+                    onMicDown: micDown, onMicUp: micUp,
+                    chips: ReplyChips.row(after: model.log.shown, draft: draft, asking: model.prompt != nil || model.waitingUnknown),
+                    onChip: { chip in Task { _ = await model.send(chip) } })
             }
         }
     }
@@ -371,8 +374,7 @@ private struct ChatContent: View {
                 draft = base
                 if !heard.isEmpty { answerByVoice(heard, to: asked) }
             } else {
-                draft = words
-                if !heard.isEmpty { send() }
+                draft = words  // to read before Send: letting go never sends
             }
         }
     }
