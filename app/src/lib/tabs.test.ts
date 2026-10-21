@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { closeTab, decodeLayout, dropHomeTabs, encodeLayout, keepServers, newLayout, openTab, releaseSession, type Layout } from "./tabs";
+import { closeTab, decodeLayout, dropHomeTabs, encodeLayout, keepServers, moveTab, newLayout, openTab, releaseSession, setPageOrder, type Layout } from "./tabs";
 
 const two = (): Layout => openTab(newLayout("s1"), "s1", "/h/a");
 
@@ -48,7 +48,7 @@ describe("closeTab", () => {
 
 describe("encode and decode", () => {
   test("round trip", () => {
-    const l = { ...openTab(two(), "s1", "/h/b", "x"), show: { files: false, term: true, sessions: false } };
+    const l = { ...openTab(two(), "s1", "/h/b", "x"), show: { files: false, term: true, sessions: false, browsers: true } };
     expect(decodeLayout(encodeLayout(l))).toEqual(l);
   });
   test("anything malformed is null, and bad parts are dropped", () => {
@@ -63,7 +63,7 @@ describe("encode and decode", () => {
         { server: "s", dir: "/x", panes: [], focus: 0, groups: [] },
       ],
       active: 1,
-      show: { files: true, term: true, sessions: true },
+      show: { files: true, term: true, sessions: true, browsers: true },
     });
   });
   test("kept split groups load, minus bad ones; layouts saved before them load with none", () => {
@@ -105,6 +105,28 @@ describe("dropHomeTabs", () => {
     expect(d.active).toBe(0);
     expect(dropHomeTabs(l, () => "/h").active).toBe(2);
     expect(dropHomeTabs(two(), () => "/h")).toEqual(two());
+  });
+});
+
+describe("moveTab", () => {
+  const four = () => openTab(openTab(openTab(newLayout("s1"), "s1", "/h/a"), "s1", "/h/b"), "s1", "/h/c");
+  test("moves a project tab; the one in front stays in front", () => {
+    const l = moveTab({ ...four(), active: 2 }, 3, 1);
+    expect(l.tabs.map((t) => t.dir)).toEqual([null, "/h/c", "/h/a", "/h/b"]);
+    expect(l.tabs[l.active].dir).toBe("/h/b");
+  });
+  test("Home stays first", () => {
+    expect(moveTab(four(), 2, 0).tabs.map((t) => t.dir)).toEqual([null, "/h/b", "/h/a", "/h/c"]);
+    expect(moveTab(four(), 0, 2)).toEqual(four());
+  });
+});
+
+describe("setPageOrder", () => {
+  test("keeps a folder's browser tab order, and a stored layout brings it back", () => {
+    const l = setPageOrder(two(), 1, ["t2", "t1"]);
+    expect(l.tabs[1].pageOrder).toEqual(["t2", "t1"]);
+    expect(decodeLayout(encodeLayout(l))!.tabs[1].pageOrder).toEqual(["t2", "t1"]);
+    expect(decodeLayout(encodeLayout(two()))!.tabs[1].pageOrder).toBeUndefined();
   });
 });
 

@@ -12,8 +12,9 @@ const tabB = `blimpe2e-tabb-${pid}`;
 const left = `blimpe2e-splitl-${pid}`;
 const right = `blimpe2e-splitr-${pid}`;
 const toggled = `blimpe2e-toggle-${pid}`;
+const ordered = `blimpe2e-order-${pid}`;
 
-test.afterAll(() => [tabA, tabB, left, right, toggled].forEach(killSession));
+test.afterAll(() => [tabA, tabB, left, right, toggled, ...[0, 1, 2].map((i) => `${ordered}-${i}`)].forEach(killSession));
 
 const jump = async (page: Page, name: string) => {
   await page.keyboard.press("Meta+k");
@@ -329,4 +330,33 @@ test("as in VS Code: clicking another session keeps the split group; clicking ei
   } finally {
     killSession(third);
   }
+});
+
+// Project tabs drag into another order (Home stays first), kept with the window's layout.
+test("project tabs drag into another order; Home stays first", async ({ page }) => {
+  const dirs = ["ptab-1", "ptab-2", "ptab-3"].map(fixtureDir);
+  dirs.forEach((d, i) => startSession(`${ordered}-${i}`, d));
+  await openSessionTab(page, dirs[0]);
+  for (const i of [1, 2]) {
+    await jump(page, `${ordered}-${i}`);
+    await expect(projectTab(page, `ptab-${i + 1}`)).toHaveAttribute("aria-selected", "true");
+  }
+  const names = () => page.locator(".ptab").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
+  await expect.poll(names).toEqual(["Home", "ptab-1", "ptab-2", "ptab-3"]);
+  const drag = async (name: string, x: number) => {
+    const b = (await projectTab(page, name).boundingBox())!;
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(x, b.y + b.height / 2, { steps: 8 });
+    await page.mouse.up();
+  };
+  // ptab-3 to before ptab-1; it was in front, and still is.
+  await drag("ptab-3", (await projectTab(page, "ptab-1").boundingBox())!.x + 2);
+  await expect.poll(names).toEqual(["Home", "ptab-3", "ptab-1", "ptab-2"]);
+  await expect(projectTab(page, "ptab-3")).toHaveAttribute("aria-selected", "true");
+  // Onto Home: it goes after Home, never before it.
+  await drag("ptab-2", 0);
+  await expect.poll(names).toEqual(["Home", "ptab-2", "ptab-3", "ptab-1"]);
+  await page.reload();
+  await expect.poll(names).toEqual(["Home", "ptab-2", "ptab-3", "ptab-1"]);
 });

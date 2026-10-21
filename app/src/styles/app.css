@@ -1085,6 +1085,13 @@ body.dragging-session * {
   background: var(--selected);
 }
 
+/* A tab being dragged along its strip (lib/reorder.ts): above the others, under the pointer. */
+.tab-dragging {
+  position: relative;
+  z-index: 3;
+  opacity: 0.85;
+}
+
 .menu button:disabled {
   opacity: 0.45;
 }

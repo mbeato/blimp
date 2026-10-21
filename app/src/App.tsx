@@ -39,7 +39,8 @@ import {
 } from "./lib/place";
 import { forgetProject, lastLayout, lastServer, rememberLayout, rememberProject } from "./lib/recent";
 import { tildify } from "./lib/sessions";
-import { closeTab, dropHomeTabs, homeTab, keepServers, newLayout, openTab, releaseSession, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
+import { closeTab, dropHomeTabs, homeTab, keepServers, moveTab, newLayout, openTab, releaseSession, setPageOrder, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
+import { startReorder } from "./lib/reorder";
 import { getSettings, startSettings, useSettings } from "./lib/settings";
 import { notify, setBadge, toMarkSeen, WaitWatcher } from "./lib/waiting";
 
@@ -500,6 +501,8 @@ export function App() {
     />
   );
   const show = layout.show;
+  const frontPages = !!root && !!link?.browserTabs.some((b) => b.folder === root);
+  const globe = !frontPages ? "New browser tab (⌘T)" : show.browsers ? "Hide browser tabs" : "Show browser tabs";
   const select = (i: number) => setLayout((l) => l && { ...l, active: i });
   const close = (i: number) => setLayout((l) => l && closeTab(l, i));
 
@@ -527,6 +530,11 @@ export function App() {
                 className={"ptab" + (i === layout.active ? " active" : "") + (i === 0 ? " home" : "")}
                 title={linkList.length > 1 ? `${t.server} · ${where}` : where}
                 onMouseDown={(e) => e.button === 0 && select(i)}
+                onPointerDown={(e) => {
+                  if (i === 0) return;
+                  const strip = e.currentTarget.parentElement!;
+                  startReorder(e, () => [...strip.querySelectorAll<HTMLElement>(".ptab:not(.home)")], (from, to) => setLayout((l) => l && moveTab(l, from + 1, to + 1)));
+                }}
                 onAuxClick={(e) => e.button === 1 && close(i)}
               >
                 {i === 0 && (
@@ -563,7 +571,9 @@ export function App() {
           <LayoutToggle label="Files" keys="⌘B" on={show.files} onClick={() => toggle("files")} pane={<rect x="1.5" y="2.5" width="5" height="11" rx="1.5" />} />
           <LayoutToggle label="Terminal" keys="⌘J" on={show.term} onClick={() => toggle("term")} pane={<rect x="1.5" y="9.5" width="13" height="4" rx="1.5" />} />
           <LayoutToggle label="Sessions" keys="⌘⌥B" on={show.sessions} onClick={() => toggle("sessions")} pane={<rect x="9.5" y="2.5" width="5" height="11" rx="1.5" />} />
-          <button className="icon-button small" title="New browser tab (⌘T)" aria-label="New browser tab" disabled={!frontKey} onClick={newBrowserTab}>
+          {/* Hides and shows the browser tabs (hidden, nothing streams; the pages stay open on the
+              server), or opens one if this folder has none. */}
+          <button className="icon-button small" title={globe} aria-label={globe} aria-pressed={frontPages ? show.browsers : undefined} disabled={!frontKey} onClick={() => (frontPages ? toggle("browsers") : newBrowserTab())}>
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor">
               <circle cx="8" cy="8" r="5.5" />
               <path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" />
@@ -595,6 +605,10 @@ export function App() {
             front={isFront}
             showFiles={show.files}
             showTerm={show.term}
+            showBrowsers={show.browsers}
+            pageOrder={t.pageOrder}
+            onPageOrder={(o) => setLayout((x) => x && setPageOrder(x, x.tabs.findIndex((y) => tabKey(y) === tabKey(t)), o))}
+            onShowBrowsers={() => setLayout((l) => l && { ...l, show: { ...l.show, browsers: true } })}
             welcome={i === 0 ? welcome : undefined}
             opener={opener}
             onDrop={refFor(fileDrops, key, () => {})}

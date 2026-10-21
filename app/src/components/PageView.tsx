@@ -11,7 +11,7 @@ export type Target = { name: string; title: string };
 
 // A browser tab: a tab of the server's Chrome, shown live (lib/serverview.ts). The bar has Back,
 // Forward, Reload, the address, Open in Browser and Send to session. While the tab is on screen
-// (`shown`) the view socket is open: frames come in and are drawn to a canvas at the page's size;
+// (`shown`, and the window can be seen: not minimized or behind other apps) the view socket is open: frames come in and are drawn to a canvas at the page's size;
 // clicks, scrolling and typing go out. Typing goes through a hidden text field, so
 // input methods, accents and emoji work. Copy, Cut and Paste use the Mac clipboard.
 export function PageView(props: {
@@ -27,6 +27,12 @@ export function PageView(props: {
   const [dialog, setDialog] = useState<ViewDialog | null>(null);
   const [answer, setAnswer] = useState("");
   const [state, setState] = useState<"connecting" | "open" | "lost">("connecting");
+  const [seen, setSeen] = useState(!document.hidden);
+  useEffect(() => {
+    const f = () => setSeen(!document.hidden);
+    document.addEventListener("visibilitychange", f);
+    return () => document.removeEventListener("visibilitychange", f);
+  }, []);
   const [drawn, setDrawn] = useState(false);
   const [retry, setRetry] = useState(0);
   const failures = useRef(0); // in a row, for the wait before the next try
@@ -76,7 +82,7 @@ export function PageView(props: {
   // The view socket, while the tab is on screen.
   useEffect(() => {
     const api = link.api;
-    if (!props.shown || !api) return;
+    if (!props.shown || !seen || !api) return;
     setState("connecting");
     let timer: ReturnType<typeof setTimeout> | undefined;
     const v = new ServerView(api.viewUrl(tab.id), {
@@ -129,7 +135,7 @@ export function PageView(props: {
       v.close();
       if (view.current === v) view.current = null;
     };
-  }, [props.shown, tab.id, link.api, retry]);
+  }, [props.shown, seen, tab.id, link.api, retry]);
 
   useEffect(() => {
     const el = area.current;

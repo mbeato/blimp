@@ -145,6 +145,14 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: in a session, run or print an `https://` URL. Click it, then ⌘-click it.
   Expect: the plain click opens nothing. The ⌘-click opens it in your default browser (not in blimp). blimp stays as it was.
 
+- [ ] **The globe hides browser tabs, and that and a hidden window stop the browser stream.**
+  Do: in a folder with no browser tabs, click the globe at the top right. Open a page that keeps changing (a clock or a video) in the tab it opens. Open Activity Monitor's Network tab and watch blimp. Click the globe again. Then once more. Then minimize blimp, and later bring it back. Then cover blimp fully with another app's window.
+  Expect: the first click opens a browser tab. The second takes the browser tabs out of the strip, and blimp's network use drops to almost nothing. The third brings back the same tab, still on the same page. Minimized, blimp's network use drops too, and the page comes back live when you return. Note whether a fully covered window also drops; that depends on macOS telling the page it's hidden.
+
+- [ ] **Tabs drag into another order.**
+  Do: open three folders as project tabs, and three browser tabs in one of them. Drag the last project tab to the left, between two others, and then onto Home. Drag a browser tab past another. Click a tab without moving the mouse. Quit blimp and start it again.
+  Expect: each tab moves where you let go of it, and never in front of Home. A click without moving just picks the tab. The new order is still there after the restart.
+
 - [ ] **A right-click on a terminal link offers the blimp browser.**
   Do: right-click the same `https://` URL. Pick Open in Blimp Browser. Right-click it again and pick Copy Link, then paste somewhere. Right-click plain text in the terminal.
   Expect: a menu with Open in Blimp Browser, Open in Default Browser and Copy Link. The first opens the page in a browser tab next to the file tabs. Copy Link copies the URL. On plain text you get the usual Mac menu, not this one.

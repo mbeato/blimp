@@ -4,7 +4,7 @@
 // session pastes the tab's title and address into a session.
 
 import { createServer, type Server } from "node:http";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { cspViolations, e2e, fixtureDir, frontTab, killSession, openSessionTab, screenText, startSession } from "./helpers";
 
 const sess = `blimpe2e-browser-${process.pid}`;
@@ -28,6 +28,18 @@ test.afterAll(() => {
   killSession(sess);
 });
 
+// The globe at the top right: New browser tab while the folder has none, else Hide or Show browser tabs.
+const globe = (page: Page, name: string) => page.locator(".layout-toggles").getByRole("button", { name }).click();
+
+// A tab dragged by the mouse to x (in steps, so the drag starts as a person's would).
+async function drag(page: Page, tab: ReturnType<Page["locator"]>, x: number) {
+  const b = (await tab.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x, b.y + b.height / 2, { steps: 8 });
+  await page.mouse.up();
+}
+
 test("a browser tab is the server's Chrome, live: clicks and typing reach the page; Send to session; closed on the server", async ({ page }) => {
   const dir = fixtureDir("browser");
   startSession(sess, dir, ["sh", "-c", "stty -echo; exec cat"]);
@@ -35,7 +47,7 @@ test("a browser tab is the server's Chrome, live: clicks and typing reach the pa
   const { base, token } = e2e();
   const tabsOnServer = async () => (await (await fetch(`${base}/browser/tabs`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { id: string; url: string; title: string; folder: string }[];
 
-  await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
+  await globe(page, "New browser tab");
   const tab = frontTab(page).locator(".ftabs .tab.active");
   await expect(tab).toBeVisible({ timeout: 10_000 });
   const viewer = frontTab(page).locator(".viewer:not([hidden])");
@@ -89,7 +101,7 @@ test.describe("Retina", () => {
     const dir = fixtureDir("browser-retina");
     startSession(`${sess}-r`, dir, ["sh", "-c", "exec cat"]);
     await openSessionTab(page, dir);
-    await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
+    await globe(page, "New browser tab");
     const tab = frontTab(page).locator(".ftabs .tab.active");
     const viewer = frontTab(page).locator(".viewer:not([hidden])");
     const address = viewer.getByLabel("Address");
@@ -116,7 +128,7 @@ test("the terminal covers a browser tab rather than resizing its page, all the w
   const dir = fixtureDir("browser-term");
   startSession(`${sess}-t`, dir, ["sh", "-c", "exec cat"]);
   await openSessionTab(page, dir);
-  await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
+  await globe(page, "New browser tab");
   const tab = frontTab(page).locator(".ftabs .tab.active");
   const viewer = frontTab(page).locator(".viewer:not([hidden])");
   const address = viewer.getByLabel("Address");
@@ -160,7 +172,7 @@ test("text selected in the page copies to the clipboard with the Edit menu's Cop
   const dir = fixtureDir("browser-copy");
   startSession(`${sess}-c`, dir, ["sh", "-c", "exec cat"]);
   await openSessionTab(page, dir);
-  await page.locator(".layout-toggles").getByRole("button", { name: "New browser tab" }).click();
+  await globe(page, "New browser tab");
   const tab = frontTab(page).locator(".ftabs .tab.active");
   const viewer = frontTab(page).locator(".viewer:not([hidden])");
   const address = viewer.getByLabel("Address");
@@ -185,4 +197,89 @@ test("text selected in the page copies to the clipboard with the Edit menu's Cop
   await page.keyboard.press("Enter");
   await expect(tab).toHaveText(/sent:(?!cutme)/, { timeout: 10_000 });
   killSession(`${sess}-c`);
+});
+
+// The globe opens a browser tab while the folder has none, then hides and shows them. Hidden
+// browsers stream nothing: their tabs leave the strip and the view socket closes, but the
+// page stays open on the server; showing them brings the tab back, live. A window that can't be
+// seen (minimized, or behind other apps) closes it too, until it's seen again.
+test("the globe hides the browser tabs, and that and a hidden window stop the stream; the page stays open on the server", async ({ page }) => {
+  const dir = fixtureDir("browser-hide");
+  startSession(`${sess}-h`, dir, ["sh", "-c", "exec cat"]);
+  const views: { closed: boolean }[] = [];
+  page.on("websocket", (ws) => {
+    if (!ws.url().includes("/browser/tabs/")) return;
+    const v = { closed: false };
+    views.push(v);
+    ws.on("close", () => (v.closed = true));
+  });
+  const live = () => views.filter((v) => !v.closed).length;
+  await openSessionTab(page, dir);
+  await globe(page, "New browser tab");
+  const tab = frontTab(page).locator(".ftabs .page-tab");
+  const address = frontTab(page).locator(".viewer:not([hidden])").getByLabel("Address");
+  await expect(address).toBeFocused({ timeout: 10_000 });
+  await address.fill(`127.0.0.1:${port}/form`);
+  await address.press("Enter");
+  await expect(tab).toHaveText(/Form page/, { timeout: 10_000 });
+  await expect.poll(live).toBe(1);
+
+  await globe(page, "Hide browser tabs");
+  await expect(tab).toHaveCount(0);
+  await expect.poll(live).toBe(0);
+  const { base, token } = e2e();
+  const onServer = async () => ((await (await fetch(`${base}/browser/tabs`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { url: string }[]).some((t) => t.url.includes(`:${port}/form`));
+  expect(await onServer()).toBe(true);
+
+  await globe(page, "Show browser tabs");
+  await expect(frontTab(page).locator(".ftabs .page-tab.active")).toHaveText(/Form page/);
+  await expect.poll(live).toBe(1);
+
+  // The window hidden, then seen again.
+  const visibility = (hidden: boolean) =>
+    page.evaluate((h) => {
+      Object.defineProperty(document, "hidden", { value: h, configurable: true });
+      Object.defineProperty(document, "visibilityState", { value: h ? "hidden" : "visible", configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, hidden);
+  await visibility(true);
+  await expect.poll(live).toBe(0);
+  await visibility(false);
+  await expect.poll(live).toBe(1);
+
+  // Opening a browser tab while they're hidden shows them again.
+  await globe(page, "Hide browser tabs");
+  await expect(tab).toHaveCount(0);
+  await page.keyboard.press("Meta+t");
+  await expect(frontTab(page).locator(".ftabs .page-tab")).toHaveCount(2, { timeout: 10_000 });
+  killSession(`${sess}-h`);
+});
+
+// Browser tabs drag into another order, kept with the window's layout (a reload keeps it).
+test("browser tabs drag into another order, and keep it", async ({ page }) => {
+  const dir = fixtureDir("browser-order");
+  startSession(`${sess}-o`, dir, ["sh", "-c", "exec cat"]);
+  await openSessionTab(page, dir);
+  const strip = frontTab(page).locator(".ftabs");
+  for (const name of ["one", "two", "three"]) {
+    await page.keyboard.press("Meta+t");
+    const address = frontTab(page).locator(".viewer:not([hidden])").getByLabel("Address");
+    await expect(address).toBeFocused({ timeout: 10_000 });
+    await address.fill(`127.0.0.1:${port}/${name}`);
+    await address.press("Enter");
+    await expect(strip.locator(".page-tab.active")).toHaveText(/Form page/, { timeout: 10_000 });
+  }
+  // Told apart by their addresses (each tab's tooltip).
+  const ids = async () => (await strip.locator(".page-tab").evaluateAll((els) => els.map((e) => e.getAttribute("title")))).map((t) => t!.split("\n")[0]);
+  expect((await ids()).map((u) => u.split("/").pop())).toEqual(["one", "two", "three"]);
+  // The last one dragged to the start.
+  const first = (await strip.locator(".page-tab").first().boundingBox())!;
+  await drag(page, strip.locator(".page-tab").last(), first.x + 2);
+  await expect.poll(async () => (await ids()).map((u) => u.split("/").pop())).toEqual(["three", "one", "two"]);
+  // A plain click is still a click: it picks the tab, and the order stays.
+  await strip.locator(".page-tab").nth(1).click();
+  await expect(strip.locator(".page-tab").nth(1)).toHaveClass(/active/);
+  await page.reload();
+  await expect.poll(async () => (await ids()).map((u) => u.split("/").pop()), { timeout: 10_000 }).toEqual(["three", "one", "two"]);
+  killSession(`${sess}-o`);
 });

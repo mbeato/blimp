@@ -19,6 +19,7 @@ import {
   type Viewer,
 } from "../lib/files";
 import { HOME, hostOf, serverTabTarget } from "../lib/browser";
+import { byOrder, moved, startReorder } from "../lib/reorder";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
 import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
@@ -128,6 +129,12 @@ export function Workbench(props: {
   front: boolean;
   showFiles: boolean;
   showTerm: boolean;
+  // false: browser tabs are hidden (the globe at the top right); opening one shows them again (onShowBrowsers).
+  showBrowsers: boolean;
+  onShowBrowsers: () => void;
+  // The browser tabs' order, once dragged (their ids); onPageOrder: dragged into a new one.
+  pageOrder?: string[];
+  onPageOrder: (ids: string[]) => void;
   welcome?: ReactNode;
   terminal: ReactNode;
   opener: { current: Opener };
@@ -489,8 +496,7 @@ export function Workbench(props: {
   const opening = useRef(new Set<string>()).current;
   const gone = useRef(new Set<string>()).current;
   const pages = new Map(
-    link.browserTabs
-      .filter((t) => t.folder === root)
+    byOrder(link.browserTabs.filter((t) => t.folder === root), (t) => t.id, props.pageOrder)
       .map((t): [string, BrowserTab] => [`tab:${t.id}`, t])
       .filter(([k]) => !gone.has(k)),
   );
@@ -507,6 +513,7 @@ export function Workbench(props: {
   };
   // A server port (its tab, if one is open on it), an address, or (none) a new tab at Google.
   const openPage: PageOpener = (p) => {
+    if (!props.showBrowsers) (lastPage.current = null), props.onShowBrowsers();
     if (!p) return openTab(HOME);
     if (typeof p === "string") return openTab(p);
     const have = [...pages].find(([, t]) => {
@@ -537,6 +544,19 @@ export function Workbench(props: {
   };
   // A file tab or a browser tab.
   const closeTab = (key: string) => (key.startsWith("tab:") ? closePage(key) : void closeDoc(key));
+  // Hidden: the browser tab in front gives way to the last file (none: the terminal fills the
+  // window), and comes back in front when they're shown. Hidden, their views aren't mounted.
+  const lastPage = useRef<string | null>(null);
+  const shownPages = props.showBrowsers ? pages : new Map<string, BrowserTab>();
+  useEffect(() => {
+    if (!props.showBrowsers && active?.startsWith("tab:")) {
+      lastPage.current = active;
+      setActiveState([...docs.keys()].at(-1) ?? null);
+    } else if (props.showBrowsers && lastPage.current) {
+      if (pages.has(lastPage.current)) setActiveState(lastPage.current);
+      lastPage.current = null;
+    }
+  }, [props.showBrowsers]);
   // A tab closed elsewhere (another Mac, a session) takes this one off it, if it was in front.
   const pageKeys = [...pages.keys()].join(",");
   const listed = link.browserTabs.map((t) => t.id).join(",");
@@ -747,7 +767,7 @@ export function Workbench(props: {
   const closingDoc = closing ? docs.get(closing) : undefined;
   const showTerm = props.showTerm;
   // With the terminal hidden and no file open, the editor area shows how to open one.
-  const showEditor = docs.size + pages.size > 0 || !!props.welcome || !showTerm;
+  const showEditor = docs.size + shownPages.size > 0 || !!props.welcome || !showTerm;
   const treeOpen = props.showFiles;
 
   return (
@@ -802,7 +822,7 @@ export function Workbench(props: {
       {treeOpen && <Splitter label="Resize files" onDrag={(x) => setTreeWidth(clamp(x - box.current!.getBoundingClientRect().left, 160, 520))} />}
       <div className="wb-right" ref={right}>
         <div className="wb-editor" hidden={!showEditor} style={showTerm ? { height: `${editorShare * 100}%` } : { flex: 1 }}>
-          {docs.size + pages.size > 0 && (
+          {docs.size + shownPages.size > 0 && (
             <div className="ftabs-bar">
               <div className="ftabs" role="tablist" ref={strip}>
                 {[...docs.values()].map((d) => (
@@ -830,7 +850,7 @@ export function Workbench(props: {
                     </button>
                   </div>
                 ))}
-                {[...pages].map(([key, t]) => {
+                {[...shownPages].map(([key, t]) => {
                   const title = t.title || hostOf(t.url) || "New tab";
                   return (
                     <div
@@ -840,6 +860,9 @@ export function Workbench(props: {
                       className={"tab page-tab" + (key === active ? " active" : "")}
                       title={`${t.url}${t.openedBy ? "\nOpened by a session" : ""}`}
                       onMouseDown={(e) => e.button === 0 && setActive(key)}
+                      onPointerDown={(e) =>
+                        startReorder(e, () => [...strip.current!.querySelectorAll<HTMLElement>(".page-tab")], (from, to) => props.onPageOrder(moved([...shownPages.values()], from, to).map((t) => t.id)))
+                      }
                       onAuxClick={(e) => e.button === 1 && closePage(key)}
                     >
                       {pageIcon}
@@ -872,8 +895,8 @@ export function Workbench(props: {
               )}
             </div>
           )}
-          {docs.size + pages.size === 0 && props.welcome}
-          {docs.size + pages.size === 0 && !props.welcome && (
+          {docs.size + shownPages.size === 0 && props.welcome}
+          {docs.size + shownPages.size === 0 && !props.welcome && (
             <div className="empty">
               No file open
               <div className="empty-sub">⌘P to open one, or pick it in the files on the left</div>
@@ -882,7 +905,7 @@ export function Workbench(props: {
               </button>
             </div>
           )}
-          {[...pages].map(([key, t]) => (
+          {[...shownPages].map(([key, t]) => (
             <div key={key} className="viewer" hidden={key !== active}>
               <PageView
                 tab={t}

@@ -4,16 +4,18 @@
 
 import type { Panes } from "./panes";
 import { forget, show as showSession } from "./panes";
+import { moved } from "./reorder";
 
 export type Tab = Panes & {
   server: string;
   dir: string | null; // null: Home
+  pageOrder?: string[]; // the browser tabs' order, once dragged (their ids)
 };
-// The buttons at the top right (and ⌘B, ⌘J, ⌘⌥B).
-export type Show = { files: boolean; term: boolean; sessions: boolean };
+// The buttons at the top right (and ⌘B, ⌘J, ⌘⌥B); browsers: the globe's, which hides the browser tabs.
+export type Show = { files: boolean; term: boolean; sessions: boolean; browsers: boolean };
 export type Layout = { tabs: Tab[]; active: number; show: Show };
 
-const SHOW_ALL: Show = { files: true, term: true, sessions: true };
+const SHOW_ALL: Show = { files: true, term: true, sessions: true, browsers: true };
 
 export const homeTab = (server: string): Tab => ({ server, dir: null, panes: [], focus: 0, groups: [] });
 export const newLayout = (server: string): Layout => ({ tabs: [homeTab(server)], active: 0, show: SHOW_ALL });
@@ -49,6 +51,16 @@ export const setPanes = (l: Layout, i: number, p: Panes): Layout => ({
   ...l,
   tabs: l.tabs.map((t, j) => (j === i ? { ...t, panes: p.panes, focus: p.focus, groups: p.groups, ...(p.order && { order: p.order }) } : t)),
 });
+
+// Project tab from dragged to the place `to` (Home stays first); the tab in front stays in front.
+export function moveTab(l: Layout, from: number, to: number): Layout {
+  to = Math.max(1, Math.min(to, l.tabs.length - 1));
+  if (from <= 0 || from >= l.tabs.length || from === to) return l;
+  const tabs = moved(l.tabs, from, to);
+  return { ...l, tabs, active: tabs.indexOf(l.tabs[l.active]) };
+}
+
+export const setPageOrder = (l: Layout, i: number, pageOrder: string[]): Layout => ({ ...l, tabs: l.tabs.map((t, j) => (j === i ? { ...t, pageOrder } : t)) });
 
 // Another window keeps "<server key>/<session>": it leaves every tab's splits and kept groups here.
 // On the layout, not the terminal pane, so it works before a tab's pane is there (Home, at launch,
@@ -96,7 +108,8 @@ export function decodeLayout(text: string): Layout | null {
     }
     // The session list's order, once dragged.
     const order = Array.isArray(t.order) ? t.order.filter((n: unknown): n is string => typeof n === "string") : null;
-    tabs.push({ server: t.server, dir: t.dir, panes, focus, groups, ...(order && { order }) });
+    const pageOrder = Array.isArray(t.pageOrder) ? t.pageOrder.filter((n: unknown): n is string => typeof n === "string") : null;
+    tabs.push({ server: t.server, dir: t.dir, panes, focus, groups, ...(order && { order }), ...(pageOrder && { pageOrder }) });
   }
   if (!tabs.length) return null;
   const front = tabs[Number.isInteger(v.active) ? Math.max(0, Math.min(v.active, tabs.length - 1)) : 0];
@@ -104,7 +117,7 @@ export function decodeLayout(text: string): Layout | null {
   const home = tabs[0].dir === null ? tabs[0] : homeTab(tabs[0].server);
   const out = [home, ...tabs.filter((t) => t.dir !== null)];
   const s = v.show ?? {};
-  const show = { files: s.files !== false, term: s.term !== false, sessions: s.sessions !== false };
+  const show = { files: s.files !== false, term: s.term !== false, sessions: s.sessions !== false, browsers: s.browsers !== false };
   return { tabs: out, active: Math.max(0, out.indexOf(front)), show };
 }
 

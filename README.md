@@ -108,6 +108,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - Each open folder is a **tab** along the top of the window. Below it is that folder's own row of file tabs. A tab keeps its open files and terminals while you look at another one.
 - **Home** is the first tab: your home folder on the server. Its Welcome page lists your recent projects. With more than one server, it has a server picker.
 - **Open Folder…** (⌘O, or the **+** after the tabs) picks a folder: from the folders you used Claude in, by browsing the server, or by typing a path (like `~/projects/app`). While browsing, **New folder** makes a folder and goes into it. The folder opens in a new tab, or its tab comes to the front if it's already open.
+- Drag a tab to move it. Home stays first.
 - Close a tab with its **×** or a middle-click. Its sessions keep running. An amber dot on a tab means a session in that folder is waiting for you.
 - blimp reopens every window you had open, with its tabs, where it was on screen, the next time you open it. A window you closed yourself (not by quitting) doesn't come back.
 - **⌘⇧N** opens a new window, on Home. Each window has its own tabs.
@@ -172,7 +173,8 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 **Browser tabs**
 
 - Browser tabs run in a Chrome on the server, and blimp shows them live next to your files. Click, scroll and type in them as in any browser. ⌘C and ⌘V use your Mac's clipboard. The page's own pop-up questions (alert, confirm) show in a bar over it.
-- ⌘T, the **+** after the tabs, or the globe at the top right opens one at Google. The address bar takes an address, or words to search Google for. **Open in Browser** opens the address on your Mac.
+- ⌘T or the **+** after the tabs opens one at Google, and so does the globe at the top right while the folder has none. The address bar takes an address, or words to search Google for. **Open in Browser** opens the address on your Mac.
+- Only the browser tab you're looking at streams to your Mac. Once the folder has browser tabs, the globe hides them, so nothing streams, and the pages keep running on the server. The globe again, or opening any browser tab, brings them back. Drag a browser tab to move it among the others. A minimized or covered blimp window streams nothing either.
 - The tabs belong to the folder, and they stay on the server: any Mac you connect from shows the same tabs, and closing one closes it everywhere.
 - When a program in one of the folder's sessions starts listening on a port (a dev server on `localhost:3000`, say), blimp says "Port 3000 is open" with **Open**. The session list shows every such port under **Ports**. **Open** shows `localhost:3000` in a browser tab: it's the server's own `localhost`, since the browser runs there.
 - The picture comes over your SSH connection, so it's a little behind a local browser, and video isn't smooth. For everyday browsing, your own browser is better.
