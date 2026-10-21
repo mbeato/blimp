@@ -155,6 +155,16 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - If you detach with `ctrl+\` (zmx's detach key), the terminal shows "Detached" and a **Reattach** button. If the connection drops, the terminal reconnects by itself.
 - **⌘K** searches all sessions on all servers, by title, folder and name. Pick one and blimp shows it in its folder's tab. If another window has that folder open, that window comes to the front; else the folder opens in a new tab here.
 
+**Running commands Claude gives you**
+
+- When Claude's latest reply has commands for you to run, a slim **Run** bar shows over the top of its terminal. A command is a code block marked `bash`, `sh`, `shell`, `zsh` or `console`, or a short piece of code that starts with `!` (as in `! bash /tmp/x.sh`) or with a command such as `bun`, `npm`, `npx`, `node`, `python`, `sh` or `cd`. If a code block shows `$` prompts, only the lines after a `$` are the command; the rest is output. A `cd` on its own isn't offered.
+- The bar shows up to 3 commands, newest first. **+N** lists the others. Hover a command to read all of it before you run it.
+- Nothing runs until you click it. A click on a command runs it in a new session of its own, in a split to the right of Claude's. It runs in the folder Claude works in, with your login shell, as if you typed it there. It has no time limit, and closing blimp doesn't stop it.
+- **Ctrl-C** in its split stops the command (exit 130) and keeps the split.
+- When the command ends, its split shows `── exit N ──` and keeps a shell open, so you can read the output and go on typing. That shell starts in Claude's folder again: a `cd` or `export` in the command doesn't carry over. The session list shows it with the label **Run**.
+- The bar then shows **exit N** and **Send result to Claude**. That types the exit code and the last 40 lines of the output into Claude's prompt and sends it. It doesn't type while Claude asks you something: answer first, then send. The bar goes when you next type to Claude; after that, right-click the run's split or row and pick **Send Result to Claude**.
+- **×** hides the bar until Claude gives you other commands.
+
 **Files**
 
 - **⌘P** opens a file by name.

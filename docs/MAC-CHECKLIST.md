@@ -185,6 +185,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a folder with a long Claude session (over half of its context window used; `/context` in Claude shows how much).
   Expect: a thin grey bar along the bottom of its row, as long as the part used. Over 80% it is red. Hovering the row shows "Context N% (… of … tokens)", close to what Claude's own status line says. It is easy to see but doesn't draw the eye more than the amber "waiting" mark.
 
+- [ ] **Run a command Claude gives you.**
+  Do: ask Claude "give me a bash command that prints the date and sleeps 3 seconds, in a code block, don't run it". Hover the command in the Run bar over the top of its terminal, then click it. When it ends, click Send result to Claude. Run it again and press Ctrl-C in its split before it ends. Then ask Claude, in one message: "show me `ls /nope` in a bash block, then create the file notes/x.txt" (it asks before it writes the file, in the same reply). While it asks, run `ls /nope` from the bar and press Send result. Answer Claude, type it any message, then right-click the `ls /nope` split's header and pick Send Result to Claude.
+  Expect: the tooltip shows the whole command. A split opens to the right, in the folder Claude works in, and shows the output, then `── exit 0 ──` and a shell prompt. The bar showing or going doesn't make Claude's screen redraw. The bar says "exit 0"; Send result types "[blimp run] … finished with exit 0" with the output into Claude, and Claude answers it. Ctrl-C ends the run with `── exit 130 ──` and the split keeps its shell. `ls /nope` says a non-zero exit (1 on macOS) in red. While Claude asks something, a notice says "Claude is asking something. Answer it first." and nothing is typed. After your message the bar is gone, and the right-click item types the result. In a narrow split the bar cuts the last commands, not the first one's button. × hides the bar until Claude's next reply with commands.
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**

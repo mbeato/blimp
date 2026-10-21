@@ -14,6 +14,8 @@ import { inbox } from "../lib/inbox";
 import { jobsOpen, jobsWords } from "../lib/jobs";
 import { JobsPopover } from "./JobsPopover";
 import { contextMeter, handoffNews, handoffWords } from "../lib/handoff";
+import { RunBar } from "./RunBar";
+import { runBar } from "../lib/runs";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
@@ -150,6 +152,8 @@ export function TerminalPane(props: {
   // A session's jobs popover, under (or over) its row's "2 jobs".
   const [jobsAt, setJobsAt] = useState<{ name: string; at: DOMRect } | null>(null);
   const [listWidth, setListWidth] = useState(230);
+  // Run bars closed with ×, by their key (lib/runs.ts): until a reply with other commands.
+  const [hiddenRuns, setHiddenRuns] = useState<string[]>([]);
   const box = useRef<HTMLDivElement>(null);
   // Moved to another window: not picked to fill an empty terminal here (the user can still
   // click or drag them back).
@@ -316,6 +320,24 @@ export function TerminalPane(props: {
       });
     }
   }, [handoffs]);
+  // A command from Claude's reply, run in a session of its own, in a split to the right of Claude's.
+  const runCommand = async (claude: string, command: string) => {
+    if (!api) return props.onNotice("Not connected.");
+    try {
+      const { name } = await api.run(claude, command);
+      pending.set(name, Date.now());
+      showBeside(claude, name);
+    } catch (e) {
+      props.onNotice(`Couldn't run it: ${errorText(e)}`);
+    }
+  };
+  const showBeside = (claude: string, name: string) => {
+    away.delete(name);
+    props.onTake(name);
+    onPanes((q) => (q.panes.includes(claude) ? dropAt(q, name, q.panes.indexOf(claude), "right") : show(q, name)));
+  };
+  // Refused while Claude asks something: the notice says so.
+  const sendRunResult = (run: Session) => void api?.sendRunResult(run.name).catch((e) => props.onNotice(errorText(e)));
 
   const showHere = (name: string) => {
     away.delete(name);
@@ -607,6 +629,8 @@ export function TerminalPane(props: {
             session between splits never remounts it (that would drop its scrollback). */}
         {mounted.map((name) => {
           const i = p.panes.indexOf(name);
+          const s = i >= 0 ? sessionOf(name) : undefined;
+          const bar = s ? runBar(s, running, hiddenRuns) : null;
           return (
             <div
               key={name}
@@ -647,6 +671,16 @@ export function TerminalPane(props: {
                   void uploadInto(name, items);
                 }}
               >
+                {/* Over the terminal's top, not above it: coming and going, it doesn't resize Claude's terminal. */}
+                {bar && (
+                  <RunBar
+                    bar={bar}
+                    onRun={(command) => void runCommand(name, command)}
+                    onShow={(run) => showBeside(name, run.name)}
+                    onSend={sendRunResult}
+                    onHide={() => setHiddenRuns((h) => [...h.slice(-50), bar.key])}
+                  />
+                )}
                 <TerminalView
                   link={link}
                   name={name}
@@ -851,6 +885,12 @@ export function TerminalPane(props: {
                 onClick={() => void handOff(sessionOf(ctx.name)!)}
               >
                 Continue in New Session
+              </button>
+            )}
+            {/* The bar's Send goes with the reply (at your next prompt); a run's own menu keeps it. */}
+            {sessionOf(ctx.name)?.run?.exit !== undefined && (
+              <button role="menuitem" title="Type its exit code and the last lines of its output into Claude" onClick={() => (setCtx(null), sendRunResult(sessionOf(ctx.name)!))}>
+                Send Result to Claude
               </button>
             )}
           </div>

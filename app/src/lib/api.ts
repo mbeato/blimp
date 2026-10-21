@@ -39,11 +39,18 @@ export type Session = {
   // came from (older blimpd: absent).
   handoff?: Handoff;
   parent?: string;
+  runnable?: string[]; // commands in Claude's latest reply, newest first, for the Run bar (older blimpd, or none: absent)
+  runnableAt?: number; // ms, when that reply began: runs from before it are an older reply's (older blimpd: absent)
+  run?: Run; // a run session's command and the Claude session it's for (older blimpd: absent)
 };
 
 // writing: Claude is writing the handoff file. started: child (a session's name) was started reading
 // file. failed: error says why.
 export type Handoff = { state: "writing" | "started" | "failed"; child?: string; file?: string; error?: string };
+
+// A command run from the Run bar (blimpd's runs.ts), in a session of its own: the Claude session it's for,
+// the folder it runs in, and once it ended, when (ms) and its exit code.
+export type Run = { command: string; parent: string; cwd: string; startedAt: number; endedAt?: number; exit?: number };
 
 // Background work Claude started (blimpd's activity.ts): a Bash command run in the background, a Monitor,
 // an async agent or a workflow. Times in ms; lastLine: a running bash job's or Monitor's last output line
@@ -136,6 +143,16 @@ export class Api {
 
   kinds() {
     return this.json<Kind[]>("/kinds");
+  }
+
+  // Runs a command Claude handed over, for that Claude session: the new run session's name.
+  run(session: string, command: string) {
+    return this.post<{ name: string }>("/runs", { session, command });
+  }
+
+  // Types a run's exit code and last output lines into its Claude session (409 while Claude asks something).
+  async sendRunResult(name: string) {
+    await this.req(`/runs/${encodeURIComponent(name)}/send`, { method: "POST" });
   }
 
   // Whether the server has each key. Keys only ever go to it, never come back.

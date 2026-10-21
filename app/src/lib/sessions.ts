@@ -12,8 +12,8 @@ export const isClaude = (s: Pick<Session, "kind">) => s.kind === "claude" || s.k
 // Kinds whose hooks report working / waiting / idle. Anything else shows a plain mark, like a shell.
 export const hasState = (s: Pick<Session, "kind">) => isClaude(s) || s.kind === "codex";
 
-// What a row shows: Claude's conversation title, or the zmx name for anything else.
-export const sessionTitle = (s: Session) => (isClaude(s) ? s.title : s.name);
+// What a row shows: Claude's conversation title, a run's command, or the zmx name for anything else.
+export const sessionTitle = (s: Session) => (isClaude(s) || s.run ? s.title : s.name);
 
 // What Copy Reference puts on the clipboard: pasted into another session, enough for its Claude
 // to read this one's conversation and, for Claude Code, send it a message (blimpd send).

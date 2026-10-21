@@ -7,12 +7,15 @@
 //   git      the folder of the latest line (it follows a `cd` into a worktree), and the branch checked
 //            out there, read from git's own files: a line's gitBranch is the start folder's branch.
 //   files    the files Claude edited, newest first. Kept on the server, not sent to clients.
+//   runnable the commands in Claude's latest reply (since your last prompt), for the Run button (runnable.ts),
+//            and runnableAt, when that reply began (its first text), so a run from before it isn't its.
 // Like transcriptTitles (sessions.ts), each transcript is read once, then only the lines added since:
 // the session list is rebuilt every second and transcripts run to 100 MB, most of it api-request lines.
 
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { runnableCommands } from "./runnable";
 
 export type JobKind = "bash" | "monitor" | "agent" | "workflow";
 export type JobStatus = "running" | "done" | "failed" | "stopped";
@@ -32,7 +35,9 @@ export type ActivityEvent =
   | { type: "usage"; at: number; used: number; model?: string }
   | { type: "compact"; at: number; used?: number }
   | { type: "where"; cwd: string }
-  | { type: "edit"; at: number; path: string };
+  | { type: "edit"; at: number; path: string }
+  | { type: "said"; at: number; text: string } // a main-thread reply's text
+  | { type: "prompt" }; // something you typed: a new reply starts
 
 // seen: the notifications already counted (status, summary, result), so a copy of one changes nothing.
 type JobRecord = Job & { seen?: string[] };
@@ -48,6 +53,10 @@ export type Activity = {
   cwd?: string;
   files: EditedFile[];
   tasks?: string;
+  // reply: the latest reply's texts (the newest 20), from replyAt; runnable: its commands, worked out when asked.
+  reply?: string[];
+  replyAt?: number;
+  runnable?: string[];
 };
 
 export const newActivity = (): Activity => ({ offset: 0, calls: new Map(), jobs: new Map(), files: [] });
@@ -57,6 +66,7 @@ const MAX_JOBS = 100;
 const MAX_CALLS = 50;
 const MAX_FILES = 200;
 const MAX_SEEN = 20;
+const MAX_SAID = 20;
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const cut = (s: string, n: number) => Array.from(s).slice(0, n).join("");
@@ -144,6 +154,8 @@ export function recordEvents(r: any): ActivityEvent[] {
     }
     out.push(...where());
     for (const b of Array.isArray(c) ? c : []) {
+      // "<synthetic>" is Claude Code's own note (as after Esc), not Claude's reply.
+      if (b?.type === "text" && str(b.text).trim() && r.message?.model !== "<synthetic>") out.push({ type: "said", at, text: b.text });
       if (b?.type !== "tool_use" || typeof b.id !== "string") continue;
       const input = b.input ?? {};
       if (b.name === "Bash" || b.name === "Monitor") out.push({ type: "call", id: b.id, name: b.name, label: label(str(input.description) || str(input.command)) });
@@ -157,6 +169,9 @@ export function recordEvents(r: any): ActivityEvent[] {
   }
   if (r.type === "user") {
     out.push(...where());
+    // What you typed (the chat's rule: tags are Claude Code's own, like a ! command or a notification).
+    const typed = (t: unknown) => typeof t === "string" && t.trim() !== "" && !t.startsWith("<");
+    if (!r.isMeta && (typed(c) || (Array.isArray(c) && c.some((b: any) => b?.type === "text" && typed(b.text))))) out.push({ type: "prompt" });
     if (typeof c === "string") out.push(...ending(c, at));
     else if (Array.isArray(c)) {
       for (const b of c) {
@@ -177,6 +192,7 @@ export function lineEvents(line: string): ActivityEvent[] {
   if (line.startsWith('{"type":"api-request')) return [];
   const interesting =
     line.includes('"type":"assistant"') || line.includes("<task-notification>") || line.includes('"compact_boundary"') ||
+    (line.includes('"type":"user"') && !line.includes('"tool_use_id"')) || // a prompt (a tool's result isn't one)
     (line.includes('"toolUseResult"') && (line.includes('"backgroundTaskId"') || line.includes('"async_launched"') || line.includes('"taskId"')));
   if (!interesting) return [];
   try {
@@ -219,7 +235,15 @@ export function fold(a: Activity, events: ActivityEvent[]) {
     } else if (e.type === "usage") a.context = { used: e.used, model: e.model ?? a.context?.model };
     else if (e.type === "compact") a.context = { used: e.used ?? 0, model: a.context?.model };
     else if (e.type === "where") a.cwd = e.cwd;
-    else if (e.type === "edit" && e.path.startsWith("/")) {
+    else if (e.type === "said") {
+      if (!a.reply) a.replyAt = e.at;
+      a.reply = [...(a.reply ?? []), e.text].slice(-MAX_SAID);
+      delete a.runnable;
+    } else if (e.type === "prompt") {
+      delete a.reply;
+      delete a.replyAt;
+      delete a.runnable;
+    } else if (e.type === "edit" && e.path.startsWith("/")) {
       a.files = [{ path: e.path, at: e.at }, ...a.files.filter((f) => f.path !== e.path)].slice(0, MAX_FILES);
     }
   }
@@ -245,7 +269,7 @@ export function contextLimit(model?: string, kind?: string): number {
 
 // The last non-empty line of some output, as a terminal shows it: colors out, and of a line a \r
 // rewrote (a progress bar) only its last state.
-const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+export const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
 export function lastLine(text: string): string | undefined {
   const lines = text.replace(ANSI, "").split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -396,15 +420,17 @@ export const editedFiles = (file: string): EditedFile[] => transcriptActivity(fi
 // What the session list shows of a transcript (sessions.ts): only what there is. processStart: when the
 // Claude process now on it started (ms). Background work dies with the process that started it, and a
 // process that exits writes nothing to say so, so what still runs from before a resume has stopped.
-export function sessionActivity(file: string, kind: string, now = Date.now(), processStart?: number): { jobs?: Job[]; context?: { used: number; limit: number }; git?: Git } {
+export function sessionActivity(file: string, kind: string, now = Date.now(), processStart?: number): { jobs?: Job[]; context?: { used: number; limit: number }; git?: Git; runnable?: string[]; runnableAt?: number } {
   const a = transcriptActivity(file);
   if (!a) return {};
   if (processStart) for (const j of a.jobs.values()) if (j.status === "running" && j.startedAt < processStart) Object.assign(j, { status: "stopped", endedAt: processStart });
   const jobs = shownJobs(a, now);
   const branch = a.cwd && branchOf(a.cwd, now);
+  const runnable = a.reply ? (a.runnable ??= runnableCommands(a.reply)) : [];
   return {
     ...(jobs.length && { jobs }),
     ...(a.context && { context: { used: a.context.used, limit: contextLimit(a.context.model, kind) } }),
     ...(a.cwd && { git: { cwd: a.cwd, ...(branch && { branch }) } }),
+    ...(runnable.length && { runnable, runnableAt: a.replyAt ?? 0 }),
   };
 }

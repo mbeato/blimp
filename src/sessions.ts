@@ -27,6 +27,7 @@ import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
 import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
 import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
+import { readRun, type Run } from "./runs";
 import { isUnread, readSeen, type Seen } from "./seen";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
@@ -56,6 +57,11 @@ export type Session = ZmxSession & {
   // file; on that new session, the zmx name of the one it came from.
   handoff?: HandoffView;
   parent?: string;
+  // Commands in Claude's latest reply, newest first (runnable.ts): what the apps' Run button offers.
+  runnable?: string[];
+  runnableAt?: number; // when that reply began (ms): a run started before it is for an older reply
+  // A run's command, the Claude session it's for, and once it ended, when and its exit code (runs.ts).
+  run?: Omit<Run, "dir">;
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -322,6 +328,8 @@ export function listSessions(
     // don't require the hook to be what set the state, only that both say waiting.
     const asked = !trust && st.state === "waiting" && hook.state === "waiting" && hook.at >= z.created * 1000 ? promptFor(z.name, hook) : undefined;
     const prompt = trust ? { ...trust, at: z.created * 1000 } : asked && { ...asked, at: hook.at as number };
+    // A run is listed with its Claude session's folder (it may run in a worktree of it), titled by its command.
+    const run = kind === "run" && isSafeName(z.name) ? readRun(z.name) : undefined;
     return {
       ...z,
       kind,
@@ -339,8 +347,13 @@ export function listSessions(
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
       ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
       ...handoffLinks(handoffs, z.name, z.created),
+      ...(run && runFields(run)),
     };
   });
+}
+
+function runFields({ dir, ...run }: Run) {
+  return { run, title: cut(run.command.split("\n")[0].trim(), 70), ...(dir && { dir }) };
 }
 
 function runZmxList(): string {
