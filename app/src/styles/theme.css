@@ -24,6 +24,8 @@
   /* Sessions split side by side: their headers, rows and numbers. */
   --group: #7aa7e0;
   --group-bg: rgba(122, 167, 224, 0.14);
+  /* A web page's own canvas (an HTML file shown as a page): white in both themes, as in a browser. */
+  --paper: #ffffff;
 
   /* xterm.js reads these when a terminal opens and when the system theme changes. */
   --term-bg: #1e1f22;

@@ -4,6 +4,7 @@ import {
   collapse,
   decodeText,
   formatSize,
+  hasPreview,
   imageType,
   initialSync,
   isBinary,
@@ -45,6 +46,15 @@ test("viewer by extension, then by content", () => {
   expect(viewerFor(".env", text("A=1"))).toBe("text");
   expect(viewerFor("app.bin", bin)).toBe("binary");
   expect(viewerFor("weird.md", bin)).toBe("binary");
+  expect(viewerFor("render.html", text("<p>hi</p>"))).toBe("html");
+  expect(viewerFor("old.HTM", text("<p>hi</p>"))).toBe("html");
+  expect(viewerFor("weird.html", bin)).toBe("binary");
+});
+
+test("Markdown and HTML show rendered, with Edit for their text; other text is only in the editor", () => {
+  expect(hasPreview("markdown")).toBe(true);
+  expect(hasPreview("html")).toBe(true);
+  for (const v of ["text", "image", "pdf", "binary"] as const) expect(hasPreview(v)).toBe(false);
 });
 
 test("sizes read like Finder", () => {

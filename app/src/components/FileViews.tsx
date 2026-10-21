@@ -2,7 +2,8 @@ import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import type { FileBody } from "../lib/api";
 import { errorText } from "../lib/connection";
-import { imageType, parentDir, resolvePath } from "../lib/files";
+import { baseName, decodeText, imageType, parentDir, resolvePath } from "../lib/files";
+import { limiter } from "../lib/gallery";
 import { openWebLink } from "../lib/links";
 import { parseMarkdown } from "../lib/markdown";
 
@@ -163,6 +164,115 @@ export function MarkdownView(props: {
           else openWebLink(href);
         }}
       />
+    </>
+  );
+}
+
+const dataUrl = (bytes: Uint8Array<ArrayBuffer>, type: string) =>
+  new Promise<string>((ok, fail) => {
+    const r = new FileReader();
+    r.onload = () => ok(r.result as string);
+    r.onerror = () => fail(r.error);
+    r.readAsDataURL(new Blob([bytes], { type }));
+  });
+
+// CSS url(...): quoted or not.
+const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]*))\s*\)/gi;
+
+// CSS with its relative url()s (resolved against from's folder) as data: URLs, through inline.
+// A url() to a part of the page (#id) stays, as does a data: URL; any other would load from the
+// web or the app's own origin, so it points nowhere. @import is taken out (its sheet would load
+// the same way), and so is anything that would end the <style> the CSS goes in.
+async function inlineCss(css: string, from: string, inline: (path: string) => Promise<string | null>): Promise<string> {
+  css = css.replace(/@import[^;]*;?/gi, "").replace(/<\/(style)/gi, "<\\/$1");
+  const urls = await Promise.all(
+    [...css.matchAll(CSS_URL)].map(async (m) => {
+      const u = m[1] ?? m[2] ?? m[3];
+      if (/^(data:|#)/i.test(u)) return m[0];
+      const p = relativeTarget(from, u);
+      return `url("${(p && (await inline(p))) || "about:invalid"}")`;
+    }),
+  );
+  let i = 0;
+  return css.replace(CSS_URL, () => urls[i++]);
+}
+
+// The page an HTML file shows, ready for a sandboxed frame. Relative images (<img>, and url() in its
+// CSS) become data: URLs and relative stylesheets <style>, all read through load (/fs/file): the
+// frame has no origin to load them from, and the token stays out of the page. Each file is read
+// once, 4 at a time. Other things that would load (from the web, or from the app's own origin,
+// which is what a relative URL means in the frame) are left out: other <link>s, scripts, frames,
+// <base>, <meta http-equiv>, media sources. So are links that would take the frame elsewhere: a
+// link to a part of the page (#id) still scrolls to it (about:srcdoc#id is the frame's own page).
+async function framePage(path: string, text: string, load: (path: string) => Promise<FileBody>): Promise<string> {
+  const doc = new DOMParser().parseFromString(text, "text/html");
+  doc.querySelectorAll("script, base, meta[http-equiv], iframe, frame, object, embed").forEach((n) => n.remove());
+  for (const n of doc.querySelectorAll("source, track, video, audio, input, [background]")) for (const a of ["src", "srcset", "poster", "background"]) n.removeAttribute(a);
+  for (const n of doc.querySelectorAll("image, use, feImage"))
+    for (const a of ["href", "xlink:href"]) if (!n.getAttribute(a)?.startsWith("#")) n.removeAttribute(a);
+  for (const a of doc.querySelectorAll("a, area")) {
+    const href = a.getAttribute("href");
+    if (href?.startsWith("#")) a.setAttribute("href", "about:srcdoc" + href);
+    else a.removeAttribute("href");
+  }
+  const run = limiter(4);
+  const read = new Map<string, Promise<string | null>>();
+  const inline = (p: string) => {
+    let u = read.get(p);
+    if (!u) read.set(p, (u = run(() => load(p)).then((b) => dataUrl(b.bytes, imageType(p)), () => null)));
+    return u;
+  };
+  const work: Promise<unknown>[] = [];
+  for (const img of doc.querySelectorAll("img")) {
+    const src = img.getAttribute("src") ?? "";
+    img.removeAttribute("srcset");
+    if (/^data:/i.test(src)) continue;
+    img.removeAttribute("src");
+    const p = relativeTarget(path, src);
+    // A missing image stays empty and shows its alt text.
+    if (p) work.push(inline(p).then((u) => u && img.setAttribute("src", u)));
+  }
+  for (const n of doc.querySelectorAll("[style]")) work.push(inlineCss(n.getAttribute("style")!, path, inline).then((css) => n.setAttribute("style", css)));
+  for (const style of doc.querySelectorAll("style")) work.push(inlineCss(style.textContent ?? "", path, inline).then((css) => void (style.textContent = css)));
+  for (const link of doc.querySelectorAll("link")) {
+    const p = /(^|\s)stylesheet(\s|$)/i.test(link.rel) ? relativeTarget(path, link.getAttribute("href") ?? "") : null;
+    if (!p) {
+      link.remove();
+      continue;
+    }
+    const style = doc.createElement("style");
+    link.replaceWith(style);
+    work.push(
+      run(() => load(p)).then(
+        (b) => inlineCss(decodeText(b.bytes) ?? "", p, inline).then((css) => void (style.textContent = css)),
+        () => style.remove(),
+      ),
+    );
+  }
+  await Promise.all(work);
+  return (doc.doctype ? "<!doctype html>" : "") + doc.documentElement.outerHTML;
+}
+
+// An HTML file as a page, in a frame with an empty sandbox: no script runs, and the page gets an
+// origin of its own, so it can't reach the app, its token or blimpd. srcdoc keeps the app's content
+// security policy on it (docs/DESIGN.md). While a new version of the file loads, the last one stays.
+export function HtmlView(props: { path: string; text: string; load: (path: string) => Promise<FileBody> }) {
+  const [page, setPage] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    framePage(props.path, props.text, props.load).then(
+      (h) => live && (setPage(h), setError("")),
+      (e) => live && setError(errorText(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [props.text, props.path]);
+  return (
+    <>
+      {error && <p className="view-note">Can't show this page: {error}. Edit shows its text.</p>}
+      {page !== null && <iframe className="html-view" sandbox="" srcDoc={page} title={baseName(props.path)} />}
     </>
   );
 }
