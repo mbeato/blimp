@@ -1,4 +1,5 @@
-// Small pieces shared by the chat screen and its drawer: a row's mark, the Inbox button, "2 min. ago", the "end it?" question, a plain-words alert.
+// Small pieces shared by the chat screen, the inbox and the drawer: a row's mark, its swipe and press-and-hold actions,
+// the Inbox button, "2 min. ago", the "end it?" question, a plain-words alert.
 import BlimpKit
 import SwiftUI
 
@@ -21,6 +22,81 @@ struct MarkView: View {
         }
         .frame(width: 14, height: 14)
         .frame(width: 20)
+    }
+}
+
+/// A row's actions without opening it, as a swipe from `edge` and in its press-and-hold menu (which also says its
+/// branch and clashes): Stop while Claude works, Mark read, Continue in new session, End (after a question); a past
+/// conversation's Resume, with no first message.
+struct RowMenu: ViewModifier {
+    let item: DrawerRow.Item
+    /// The inbox swipes from the right; the drawer from the left, as a swipe left closes it.
+    let edge: HorizontalEdge
+    let actions: RowActions
+    /// Opens a session: the one Resume started.
+    let onOpen: (String) -> Void
+    @Environment(Store.self) private var store
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: edge, allowsFullSwipe: false) { swipe }
+            .contextMenu { menu }
+    }
+
+    @ViewBuilder private var swipe: some View {
+        switch item {
+        case .running(let s):
+            if s.state == .working && s.isClaude { stop(s) }
+            if s.unread == true, let id = s.sessionId { markRead(id) }
+            Button("End", systemImage: "xmark.circle") { actions.pendingEnd = s }
+                .tint(.gray)
+        case .past(let c):
+            resume(c)
+            if c.unread == true { markRead(c.sessionId) }
+        }
+    }
+
+    @ViewBuilder private var menu: some View {
+        switch item {
+        case .running(let s):
+            ForEach(notes(s), id: \.self) { Text($0) }
+            if s.state == .working && s.isClaude { stop(s) }
+            if s.unread == true, let id = s.sessionId { markRead(id) }
+            if s.isClaude {
+                Button("Continue in new session", systemImage: "arrow.turn.down.right") {
+                    Task { await actions.handoff(s, api: store.api) }
+                }
+                .disabled(s.handoff?.state == .writing)
+            }
+            Button("End session", systemImage: "xmark.circle", role: .destructive) { actions.pendingEnd = s }
+        case .past(let c):
+            resume(c)
+            if c.unread == true { markRead(c.sessionId) }
+        }
+    }
+
+    /// Its branch and what it may get in the way of, as lines at the top of the menu.
+    private func notes(_ s: Session) -> [String] {
+        let c = RowCaption(s, all: store.sessions, now: Date().timeIntervalSince1970 * 1000)
+        return (c.branch.map { [$0] } ?? []) + c.clash
+    }
+
+    private func stop(_ s: Session) -> some View {
+        Button("Stop", systemImage: "stop.fill") { Task { await actions.stop(s, api: store.api) } }
+            .tint(.red)
+    }
+
+    private func markRead(_ conversation: String) -> some View {
+        Button("Mark read", systemImage: "envelope.open") { Task { await actions.markRead(conversation, api: store.api) } }
+            .tint(.blue)
+    }
+
+    private func resume(_ c: Conversation) -> some View {
+        Button("Resume", systemImage: "arrow.clockwise") {
+            guard let dir = store.dir else { return }
+            Task { if let name = await actions.resume(c, dir: dir, store: store) { onOpen(name) } }
+        }
+        .tint(.green)
     }
 }
 

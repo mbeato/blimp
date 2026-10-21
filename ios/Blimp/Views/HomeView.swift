@@ -1,6 +1,9 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
 // anywhere, or its button) with the project picker and the project's sessions, running and past. A project opens to
-// its inbox, where the box at the bottom starts a session.
+// its inbox, where the box at the bottom starts a session. On any screen, a session in any project that starts
+// waiting gives a double haptic, and away from a chat a banner that opens it (a chat has its own); one that finishes
+// working gives a light tick. A row's actions (RowActions) live here: End's question, a failure's alert, and the
+// new session a handoff started, which opens.
 import BlimpKit
 import SwiftUI
 
@@ -14,6 +17,7 @@ enum Opened: Equatable {
 struct HomeView: View {
     @Environment(Store.self) private var store
     @Environment(\.covered) private var covered
+    @Environment(\.scenePhase) private var scenePhase
     @State private var opened: Opened = .inbox
     @State private var drawer = false
     /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
@@ -21,8 +25,21 @@ struct HomeView: View {
     /// Whether the swipe going on pulls the drawer (sideways and right, decided once at its start).
     @State private var pulling: Bool?
     @State private var folders: [RecentFolder] = []
-    @State private var earlier: [Conversation] = []
+    /// Each project's past conversations, kept while another one shows, and fetched again as below.
+    @State private var earlierBy: [String: [Conversation]] = [:]
     @State private var showSettings = false
+    @State private var actions = RowActions()
+    /// Each session's last title, for one that has ended.
+    @State private var titles: [String: String] = [:]
+    /// What the last session list said each one was doing, for the banner and the haptics.
+    @State private var lastStates: [String: SessionState] = [:]
+    @State private var banner: HomeBanner?
+    @State private var waitingTicks = 0
+    @State private var doneTicks = 0
+    /// When the app last went to the background (ms), kept for the next launch; 0: not yet.
+    @AppStorage("inboxLeftAt") private var leftAt: Double = 0
+    /// Back after a while away: when it left. nil otherwise, and once a session opens.
+    @State private var away: Double?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +47,13 @@ struct HomeView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
                 .safeAreaInset(edge: .top, spacing: 0) { ConnectionBar() }
+                .overlay(alignment: .top) {
+                    if let banner {
+                        HomeBannerView(banner: banner) { show(.session(banner.name)) }
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy, value: banner)
         }
         // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
         // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed.
@@ -52,23 +76,45 @@ struct HomeView: View {
         )
         .overlay {
             DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
-                       onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true })
+                       onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true },
+                       needs: needs.count, actions: actions, onOpen: { show(.session($0)) })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .modifier(KeepsPlace(opened: $opened, drawer: drawer))
+        .endConfirmation(Binding(get: { actions.pendingEnd }, set: { actions.pendingEnd = $0 }), store: store)
+        .plainAlert("Couldn't do that", message: Binding(get: { actions.failure }, set: { actions.failure = $0 }))
+        .sensoryFeedback(.warning, trigger: waitingTicks)
+        .sensoryFeedback(.impact(weight: .light), trigger: doneTicks)
         .task(id: store.connection == .online) {
             guard let api = store.api else { return }
             folders = (try? await api.folders()) ?? []
             if store.dir == nil { store.dir = projects.first?.dir }
         }
-        // The project's past conversations: again when the drawer or the inbox opens, and as its sessions start and end.
+        // The project's past conversations: again when the drawer or the inbox opens, as its sessions start and end,
+        // and after a Mark read here. The ones kept meanwhile show, so the drawer's rows are there as it opens.
         .task(id: EarlierKey(dir: store.dir, drawer: drawer, inbox: opened == .inbox, online: store.connection == .online,
-                             running: Set(store.sessions.filter { $0.dir == store.dir }.map(\.name)))) {
+                             running: Set(store.sessions.filter { $0.dir == store.dir }.map(\.name)), reads: actions.reads)) {
             guard let dir = store.dir, let api = store.api else { return }
-            earlier = (try? await api.conversations(dir: dir)) ?? []
+            if let list = try? await api.conversations(dir: dir) { earlierBy[dir] = list }
         }
-        // No project yet (a first launch): the most active one, once the sessions come.
-        .onChange(of: store.sessions) { if store.dir == nil { store.dir = projects.first?.dir } }
+        .task(id: banner) {
+            guard banner != nil else { return }
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { banner = nil }
+        }
+        .onChange(of: store.sessions) { _, sessions in
+            // No project yet (a first launch): the most active one, once the sessions come.
+            if store.dir == nil { store.dir = projects.first?.dir }
+            changed(sessions)
+        }
+        .onAppear {
+            lastStates = Arrivals.states(store.sessions)
+            cameBack()
+        }
+        .onReturnFromBackground(cameBack)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { leftAt = Self.now() }
+        }
     }
 
     @ViewBuilder private var chat: some View {
@@ -76,8 +122,9 @@ struct HomeView: View {
         case .inbox:
             if let dir = store.dir {
                 StartView(dir: dir, past: nil,
-                          inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier),
-                                           digest: store.digests[dir], sessions: store.sessions, rows: rows, onPick: open)) {
+                          inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), needs: needs,
+                                           digest: store.digests[dir], sessions: store.sessions, left: away, actions: actions,
+                                           onPick: open, onOpen: { show(.session($0)) })) {
                     show(.session($0))
                 }
                 .id(dir)
@@ -120,8 +167,11 @@ struct HomeView: View {
         .accessibilityHidden(covered)
     }
 
+    /// Needs you's rule (Drawer.badge), so the badge and the band agree.
+    private var mark: Mark { Drawer.badge(store.sessions, needs: needs, onScreen: onScreen) }
+
     @ViewBuilder private var badge: some View {
-        switch Drawer.others(store.sessions, onScreen: onScreen) {
+        switch mark {
         case .asking: Image(systemName: "questionmark").font(.system(size: 9, weight: .heavy)).foregroundStyle(.orange)
         case .unread: Circle().fill(.blue).frame(width: 8, height: 8)
         case .working, .none: EmptyView()
@@ -129,7 +179,7 @@ struct HomeView: View {
     }
 
     private var badgeLabel: String? {
-        switch Drawer.others(store.sessions, onScreen: onScreen) {
+        switch mark {
         case .asking: "one is asking you something"
         case .unread: "new replies"
         case .working, .none: nil
@@ -144,12 +194,17 @@ struct HomeView: View {
     private var subtitle: String {
         switch opened {
         case .inbox: "Inbox"
-        case .session(let name): store.sessions.first { $0.name == name }?.title ?? "Starting…"
+        case .session(let name): store.sessions.first { $0.name == name }?.title ?? titles[name] ?? "Starting…"
         case .past(let c): c.title
         }
     }
 
     private var projects: [ProjectChoice] { Drawer.projects(sessions: store.sessions, recent: folders) }
+
+    private var earlier: [Conversation] { store.dir.flatMap { earlierBy[$0] } ?? [] }
+
+    /// Every project's sessions waiting on you, oldest first: the inbox's top, and the drawer's count.
+    private var needs: [InboxLine] { Inbox.needsYou(sessions: store.sessions, dir: store.dir, earlier: earlier) }
 
     private var rows: [DrawerRow] {
         guard let dir = store.dir else { return [] }
@@ -175,19 +230,41 @@ struct HomeView: View {
 
     private func pickProject(_ dir: String) {
         store.dir = dir
-        earlier = []
         show(.inbox)
     }
 
-    /// A session from another project (a banner's) brings its project along.
+    /// A session from another project (a banner's, a Needs you row's) brings its project along. Opening one
+    /// ends "since you left".
     private func show(_ o: Opened) {
-        if case .session(let name) = o, let s = store.sessions.first(where: { $0.name == name }), s.dir != store.dir {
-            store.dir = s.dir
-            earlier = []
+        if case .session(let name) = o {
+            away = nil
+            if let s = store.sessions.first(where: { $0.name == name }), s.dir != store.dir { store.dir = s.dir }
         }
         opened = o
         drawer = false
     }
+
+    /// A new session list: the titles kept, a banner and a haptic for what started waiting or finished (only while
+    /// the app is in front), and the new session of a handoff asked for here.
+    private func changed(_ sessions: [Session]) {
+        for s in sessions where titles[s.name] != s.title { titles[s.name] = s.title }
+        let news = scenePhase == .active ? Arrivals.news(before: lastStates, sessions: sessions, onScreen: onScreen) : []
+        lastStates = Arrivals.states(sessions)
+        if let w = news.last(where: \.waiting) {
+            waitingTicks += 1
+            if onScreen == nil { banner = HomeBanner(name: w.session.name, text: "\(w.session.title) is waiting") }
+        } else if news.contains(where: { !$0.waiting }) {
+            doneTicks += 1
+        }
+        if let child = actions.handoffNews(sessions).last { show(.session(child)) }
+    }
+
+    /// Back in front (or launched): after a while away, the inbox says what changed since.
+    private func cameBack() {
+        away = leftAt > 0 && Self.now() - leftAt >= InboxText.away ? leftAt : nil
+    }
+
+    private static func now() -> Double { Date().timeIntervalSince1970 * 1000 }
 }
 
 private struct EarlierKey: Equatable {
@@ -196,4 +273,35 @@ private struct EarlierKey: Equatable {
     let inbox: Bool
     let online: Bool
     let running: Set<String>
+    let reads: Int
+}
+
+private struct HomeBanner: Equatable {
+    let name: String
+    let text: String
+}
+
+/// "<title> is waiting", sliding in at the top; a tap opens that session.
+private struct HomeBannerView: View {
+    let banner: HomeBanner
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Circle().fill(.orange).frame(width: 8, height: 8)
+                Text(banner.text).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+        .padding(.top, 6)
+        .accessibilityIdentifier("waitingBanner")
+    }
 }

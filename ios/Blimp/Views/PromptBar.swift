@@ -1,6 +1,8 @@
-// What Claude is waiting on, above the input: a permission with a button per choice, a question dialog
-// a question at a time (QuestionFlow), or, when the phone can't answer it, the question read-only and a
-// pointer to the Mac.
+// What Claude is waiting on, above the input: a permission with its command (or a plan with its text) and a button
+// per choice, a question dialog a question at a time (QuestionFlow), or, when the phone can't answer it, the
+// question read-only and a pointer to the Mac. The buttons wait until blimpd has read Claude's real options
+// ("Loading choices…"), a tap gives a haptic and "Sent…", then "Answered" once blimpd typed it. "Don't ask
+// again" is a small link of its own; "No, and tell Claude why" declines and sends the reason in one step.
 import BlimpKit
 import SwiftUI
 
@@ -12,6 +14,14 @@ struct PromptBar: View {
     var highlight: Int? = nil
     /// The tallest it gets before it scrolls: the chat screen passes most of its height.
     var maxHeight: CGFloat = 320
+    /// The answer is on its way ("Sent…"), or blimpd typed it ("Answered").
+    var sending = false
+    var answered = false
+    /// The folder Claude works in, under a permission's command.
+    var folder: String? = nil
+    /// No, and why: Esc on this prompt, then the words typed as a message. Returns why it didn't go, nil once
+    /// typed. nil: not offered.
+    var onDeny: (@MainActor (String, Prompt) async -> String?)? = nil
     /// Esc, as on the Mac; nil for folder trust, where Esc would end Claude.
     let onDismiss: (() -> Void)?
     /// The choice's index, and the prompt it was shown in: a permission, or one single-choice question.
@@ -19,6 +29,8 @@ struct PromptBar: View {
     /// Every question's answer, for any other question dialog (or a typed answer to one question).
     let onAnswers: (QuestionDraft, Prompt) -> Void
     @State private var height: CGFloat = 0
+    /// Taps on a choice, for the haptic.
+    @State private var taps = 0
 
     var body: some View {
         // As tall as it needs, up to a point; a long question scrolls instead of hiding the chat.
@@ -29,6 +41,8 @@ struct PromptBar: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .frame(height: min(height, maxHeight))
+        .sensoryFeedback(.impact(weight: .medium), trigger: taps)
+        .sensoryFeedback(.success, trigger: answered) { _, new in new }
     }
 
     private var content: some View {
@@ -37,6 +51,7 @@ struct PromptBar: View {
                 Circle().fill(.orange).frame(width: 8, height: 8)
                 Text("Claude is waiting").font(.footnote).foregroundStyle(.secondary)
                 Spacer()
+                status
                 if let onDismiss {
                     Button("Dismiss", systemImage: "xmark", action: onDismiss)
                         .buttonStyle(.bordered)
@@ -56,16 +71,38 @@ struct PromptBar: View {
         }
     }
 
+    @ViewBuilder private var status: some View {
+        if answered {
+            Label("Answered", systemImage: "checkmark.circle.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.green)
+                .accessibilityIdentifier("promptAnswered")
+        } else if sending {
+            Text("Sent…").font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("promptSent")
+        }
+    }
+
     @ViewBuilder private var answerable: some View {
         switch prompt.kind {
         case .permission:
-            summary
-            buttons
+            if PromptChoices.isPlan(prompt) {
+                plan
+            } else {
+                summary
+                command
+            }
+            ChoicesGate(prompt: prompt) {
+                buttons
+                if let onDeny, PromptChoices.deniable(prompt) {
+                    DenyField(plan: PromptChoices.isPlan(prompt), busy: busy) { text in await onDeny(text, prompt) }
+                        .id(prompt.at)
+                }
+            }
         case .trust:
             trust
             buttons
         case .question:
-            QuestionFlow(prompt: prompt, highlight: highlight, onPick: onPick, onAnswers: onAnswers)
+            QuestionFlow(prompt: prompt, highlight: highlight, onPick: { taps += 1; onPick($0, $1) }, onAnswers: { taps += 1; onAnswers($0, $1) })
                 .disabled(busy)
                 .id(prompt.at)
         case .other:
@@ -73,11 +110,28 @@ struct PromptBar: View {
         }
     }
 
+    /// The choices as tall buttons, the likely one first; "don't ask again" as a small link under them.
     private var buttons: some View {
-        ForEach(Array(prompt.choices.enumerated()), id: \.offset) { i, choice in
-            ChoiceButton(label: choice, detail: nil, style: Self.style(i, choice), marked: highlight == i) { onPick(i, prompt) }
+        let split = PromptChoices.split(prompt)
+        return VStack(alignment: .leading, spacing: 8) {
+            ForEach(split.buttons, id: \.self) { i in
+                ChoiceButton(label: prompt.choices[i], detail: nil, style: Self.style(i, prompt.choices[i]), marked: highlight == i) { pick(i) }
+            }
+            ForEach(split.links, id: \.self) { i in
+                Button(prompt.choices[i]) { pick(i) }
+                    .font(.footnote)
+                    .buttonStyle(.borderless)
+                    .multilineTextAlignment(.leading)
+                    .accessibilityIdentifier("choice-\(prompt.choices[i])")
+            }
         }
+        .controlSize(.large)
         .disabled(busy)
+    }
+
+    private func pick(_ i: Int) {
+        taps += 1
+        onPick(i, prompt)
     }
 
     /// Claude's own question, and the folder in small text.
@@ -94,6 +148,7 @@ struct PromptBar: View {
         switch prompt.kind {
         case .permission:
             summary
+            command
             if !prompt.choices.isEmpty {
                 Text(prompt.choices.joined(separator: " · ")).font(.callout).foregroundStyle(.secondary)
             }
@@ -125,6 +180,150 @@ struct PromptBar: View {
                 .font(.callout)
                 .lineLimit(6)
                 .textSelection(.enabled)
+        }
+    }
+
+    /// The command, file or address it asks about, whole, and the folder; a red line when it pushes, deploys,
+    /// deletes or forces.
+    @ViewBuilder private var command: some View {
+        if let input = prompt.input, !input.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(input)
+                    .font(.system(.footnote, design: .monospaced))
+                    .lineLimit(12)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityIdentifier("promptInput")
+                if let folder, !folder.isEmpty {
+                    Text("in " + folder).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+            }
+        }
+        if prompt.risky == true {
+            Label("This can push, deploy, delete or force. Check it first.", systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.red)
+                .accessibilityIdentifier("promptRisky")
+        }
+    }
+
+    /// ExitPlanMode: the plan Claude wants to go ahead with, as Markdown.
+    @ViewBuilder private var plan: some View {
+        Text("Claude's plan").font(.callout.weight(.semibold))
+        if let text = prompt.plan, !text.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(MarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
+                    BlockView(block: block)
+                }
+            }
+            .font(.callout)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+}
+
+/// Shows its content (a prompt's buttons) once blimpd has read Claude's real options, or has stopped looking;
+/// until then "Loading choices…", so a tap never lands on the hook's stand-in Yes or No. Shared with the inbox's
+/// Needs you rows.
+struct ChoicesGate<Content: View>: View {
+    let prompt: Prompt
+    let content: Content
+    /// The prompt (its `at`) whose wait is over.
+    @State private var waited: Double? = nil
+
+    init(prompt: Prompt, @ViewBuilder content: () -> Content) {
+        self.prompt = prompt
+        self.content = content()
+    }
+
+    var body: some View {
+        Group {
+            // (no wait left: shown at once, not after a frame of "Loading choices…")
+            if waited == prompt.at || PromptReady.wait(prompt, now: Date().timeIntervalSince1970 * 1000) == 0 {
+                content
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading choices…").font(.footnote).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("loadingChoices")
+            }
+        }
+        .task(id: prompt.at) {
+            let ms = PromptReady.wait(prompt, now: Date().timeIntervalSince1970 * 1000)
+            if ms > 0 { try? await Task.sleep(for: .milliseconds(Int(ms))) }
+            if !Task.isCancelled { waited = prompt.at }
+        }
+    }
+}
+
+/// "No, and tell Claude why…" (for a plan: what to change): a field, then Send declines the prompt and types the
+/// reason, in one step.
+private struct DenyField: View {
+    let plan: Bool
+    let busy: Bool
+    /// nil once blimpd typed it, else why not.
+    let send: @MainActor (String) async -> String?
+    @State private var open = false
+    @State private var text = ""
+    @State private var sending = false
+    @State private var sent = false
+    @State private var failure: String? = nil
+    @FocusState private var focused: Bool
+
+    init(plan: Bool, busy: Bool, send: @escaping @MainActor (String) async -> String?) {
+        self.plan = plan
+        self.busy = busy
+        self.send = send
+    }
+
+    var body: some View {
+        if open {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .bottom) {
+                    TextField(plan ? "What should change?" : "Why not?", text: $text, axis: .vertical)
+                        .lineLimit(1...5)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focused)
+                        .onAppear { focused = true }
+                        .accessibilityIdentifier("denyField")
+                    Button("Send", action: go)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(sending || sent || text.allSatisfy(\.isWhitespace))
+                        .accessibilityIdentifier("denySend")
+                }
+                if sent {
+                    Text("Sent. Claude reads it once the prompt is gone.").font(.caption).foregroundStyle(.secondary)
+                } else if let failure {
+                    Text(failure).font(.caption).foregroundStyle(.red)
+                }
+            }
+        } else {
+            Button {
+                open = true
+            } label: {
+                Label(plan ? "No, tell Claude what to change…" : "No, and tell Claude why…", systemImage: "text.bubble")
+                    .font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .disabled(busy)
+            .accessibilityIdentifier("denyWithReason")
+        }
+    }
+
+    private func go() {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, !sending else { return }
+        sending = true
+        failure = nil
+        Task {
+            let error = await send(words)
+            sending = false
+            if let error { failure = error } else { sent = true }
         }
     }
 }

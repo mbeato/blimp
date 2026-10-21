@@ -3,8 +3,8 @@
 // for here). Pair, pick a project, open sessions from the drawer, read a chat, hide the keyboard, send a
 // message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
-// through it; two questions at once; unread and asking marks; a project's inbox. What reached the sessions is checked by the job afterwards. Screenshots
-// stay in the .xcresult.
+// through it; two questions at once; unread and asking marks; a project's inbox; Allow from Needs you, in another
+// project's inbox. What reached the sessions is checked by the job afterwards. Screenshots stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
 // Keychain keeps the server) and so locked: the job enrols Face ID first, and each unlocks with a
@@ -415,6 +415,29 @@ final class BlimpUITests: XCTestCase {
         shot("32-chat-top-right")
         inbox.tap()
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox again from the chat")
+    }
+
+    // MARK: - Needs you
+
+    /// api-server's inbox lists blimp-demo's demo-perm under Needs you, with its project and command; Allow answers it
+    /// from the row (blimpd's answer route, no chat opened), and the row says Answered. The job checks demo-perm got 1.
+    /// (After testInbox, by name: nothing else reads demo-perm.)
+    func testNeedsYouAllowFromTheInbox() throws {
+        try launchPaired()
+        try pickProject("api-server")
+        let line = element("inbox-session-demo-perm")
+        try wait(line, "demo-perm under Needs you in another project's inbox")
+        try until(line, "label CONTAINS 'blimp-demo'", "demo-perm's project on its row")
+        try until(line, "label CONTAINS 'npm run build'", "demo-perm's command on its row")
+        let allow = element("inbox-allow-demo-perm")
+        try wait(allow, "Allow on demo-perm's row")
+        try wait(element("inbox-deny-demo-perm"), "Deny on demo-perm's row")
+        shot("33-needs-you")
+        try tap(allow, until: "exists == true", on: labeled("Answered"), "the answer from the row to be typed") {
+            allow.isEnabled && self.hostFile("perm.in").isEmpty && !self.labeled("Not sent").exists
+        }
+        try until(allow, "isEnabled == false", "Allow to stay off once answered")
+        shot("34-needs-you-answered")
     }
 
     // MARK: - Helpers

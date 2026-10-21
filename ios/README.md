@@ -4,6 +4,8 @@ This is the iPhone app for blimp. It shows the Claude sessions running on your s
 
 What you type or say stays in the box until you tap Send, and each chat keeps its own words, through the lock and after the app quits. The lock covers the app without closing it: unlocking brings you back to the same chat. One-tap replies ("go", "continue", or the numbers of the options Claude listed) sit above an empty box. When the server can't be reached because Tailscale is off, the app says so.
 
+The inbox lists what needs you in every project at the top. You can answer a permission or a simple question right there, without opening the chat. Swipe a row to stop, end or mark it read. Press and hold a row to continue it in a new session. Each row shows its branch and background jobs, and a red mark when it may get in another session's way.
+
 It talks to `blimpd`, the small program that runs on your server. The chat features need a blimpd from the phone-chat branch, or the next release. An older blimpd will show the session list but not the chat. The chat then says "This server's blimpd can't show chats yet."
 
 ## Put this branch's blimpd on your server

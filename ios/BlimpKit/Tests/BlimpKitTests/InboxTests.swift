@@ -40,12 +40,27 @@ private func lines(_ l: [InboxLine]) -> [String] { l.map { "\($0.title): \($0.wo
     #expect(lines(i.waiting) == ["PERM: Ran `bun test`", "ASK: Which layout?", "OTHER: release it?", "PROSE: ship v0.2.16?"])
 }
 
-/// The project's paragraph tells work still going on, so it isn't listed: a working session, or one done with a
-/// progress note, even unread.
-@Test func workStillGoingOnIsNotListed() {
-    let i = Inbox(dir: "/p", sessions: [s("busy", state: .working, unread: true, note: n(.done, "released")),
-                                        s("part", unread: true, note: n(.progress, "fixing a flaky test"))], earlier: [])
-    #expect(i.isEmpty)
+/// Work still going on is under Working, the longest-running first; a turn done mid-way (a progress note), even
+/// unread, isn't news yet and folds with the project's other sessions.
+@Test func workStillGoingOnIsUnderWorkingLongestFirstAndATurnDoneMidWayFolds() {
+    let busy = Session(name: "busy", created: 1, dir: "/p", kind: "claude", label: nil, sessionId: "b", title: "BUSY", updatedAt: 9000,
+                   state: .working, stateSince: 5000, prompt: nil, unread: true)
+    let older = Session(name: "older", created: 1, dir: "/p", kind: "claude", label: nil, sessionId: "o", title: "OLDER", updatedAt: 9500,
+                        state: .working, stateSince: 2000, prompt: nil)
+    let i = Inbox(dir: "/p", sessions: [busy, older, s("part", unread: true, note: n(.progress, "fixing a flaky test"))], earlier: [])
+    #expect(i.working.map(\.id) == ["session-older", "session-busy"])
+    #expect(i.working.map(\.since) == [2000, 5000])
+    #expect(i.other.map(\.id) == ["session-part"])
+    #expect(i.waiting.isEmpty && i.done.isEmpty)
+}
+
+/// Shells, runs and sessions already read fold as the project's other sessions, newest first.
+@Test func shellsRunsAndReadSessionsFoldAsOtherNewestFirst() {
+    let sh = Session(name: "sh", created: 1, dir: "/p", kind: "shell", label: nil, sessionId: nil, title: "zsh", updatedAt: 3000,
+                     state: .unknown, stateSince: nil, prompt: nil)
+    let i = Inbox(dir: "/p", sessions: [s("read", updated: 2000, unread: false), sh], earlier: [])
+    #expect(i.other.map(\.id) == ["session-sh", "session-read"])
+    #expect(i.other.map(\.words) == [nil, nil])
 }
 
 @Test func doneIsASessionDoneAndUnreadWithItsNote() {
@@ -70,7 +85,7 @@ private func lines(_ l: [InboxLine]) -> [String] { l.map { "\($0.title): \($0.wo
                   earlier: [c("mid", updated: 500_000, unread: true), c("newer-id", updated: 2_000_000, unread: true)])
     #expect(i.done.map(\.id) == ["session-newer", "past-mid", "session-old"])
     #expect(!i.isEmpty)
-    #expect(Inbox(dir: "/p", sessions: [s("read")], earlier: []).isEmpty)
+    #expect(Inbox(dir: "/p", sessions: [other], earlier: []).isEmpty)
 }
 
 @Test func decodesNotes() throws {

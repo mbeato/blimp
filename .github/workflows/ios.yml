@@ -141,6 +141,8 @@ jobs:
         run: |
           grep -F "Thanks, ship it" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
           [ "$(cat "$E2E_DIR/prompt.in")" = 1 ] || { echo "demo-ask got:"; cat -v "$E2E_DIR/prompt.in"; exit 1; }
+          # Allow from another project's inbox (POST /answer): 1, maybe after the empty paste a new zmx client sends
+          [ "$(tr '\033' '~' < "$E2E_DIR/perm.in" | sed 's/~\[20[01]~//g')" = 1 ] || { echo "demo-perm got:"; od -c "$E2E_DIR/perm.in"; exit 1; }
           # Esc, after the empty paste blimpd sends first on a new zmx client (zmx 0.5 drops a first Esc)
           [ "$(tr '\033' '~' < "$E2E_DIR/stop.in")" = "~[200~~[201~~" ] || {
             echo "demo-busy got:"; od -c "$E2E_DIR/stop.in"
@@ -167,7 +169,7 @@ jobs:
           zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
           ! grep -qE "name=$new([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "$new was ended but zmx still lists it"; exit 1; }
           grep -qE "name=$resumed([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "the resumed $resumed isn't running"; exit 1; }
-          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; demo-quiz got both answers; demo-trust got Yes; $new started with its first message and ended; $resumed resumed the past conversation with a message"
+          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-perm got 1 (Allow from the inbox); demo-busy got Esc; demo-quiz got both answers; demo-trust got Yes; $new started with its first message and ended; $resumed resumed the past conversation with a message"
       - name: Export screenshots
         if: always()
         run: |
@@ -215,6 +217,7 @@ jobs:
             /tmp/be/claude.args
             /tmp/be/quiz.in
             /tmp/be/trust.in
+            /tmp/be/perm.in
             /tmp/be/zmx-logs
           if-no-files-found: warn
 
