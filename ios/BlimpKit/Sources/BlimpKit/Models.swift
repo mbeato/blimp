@@ -136,6 +136,8 @@ public struct Session: Codable, Sendable, Equatable, Identifiable {
     public let state: SessionState
     public let stateSince: Double?
     public let prompt: Prompt?
+    /// Claude replied since the phone or the Mac last had it on screen (nil from an older blimpd).
+    public var unread: Bool? = nil
 
     public var id: String { name }
     /// blimpd can show a session as chat only when Claude Code runs in it.
@@ -236,6 +238,7 @@ public enum ChatCommand: Encodable, Sendable, Equatable {
 public struct RecentFolder: Codable, Sendable, Equatable { public let dir: String; public let lastUsed: Double }
 public struct Conversation: Codable, Sendable, Equatable, Identifiable {
     public let sessionId: String; public let title: String; public let updatedAt: Double
+    public var unread: Bool? = nil
     public var id: String { sessionId }
 }
 public struct Started: Codable, Sendable, Equatable { public let name: String }

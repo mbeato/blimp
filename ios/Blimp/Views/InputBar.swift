@@ -14,8 +14,10 @@ struct InputBar: View {
     /// The mic is on: from the press until the words are sent or kept.
     let listening: Bool
     let onSend: () -> Void
-    let onMicDown: () -> Void
-    let onMicUp: (MicRelease) -> Void
+    /// nil: no mic (a chat that hasn't started yet); Send shows from the start, off while the box is empty.
+    let onMicDown: (() -> Void)?
+    let onMicUp: ((MicRelease) -> Void)?
+    var placeholder = "Message"
 
     @State private var pressedAt: Date?
     /// A tap started it: it listens until the next tap.
@@ -31,19 +33,19 @@ struct InputBar: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            TextField("Message", text: $text, axis: .vertical)
+            TextField(placeholder, text: $text, axis: .vertical)
                 .lineLimit(1...6)
                 .padding(.leading, 14)
                 .padding(.vertical, 9)
                 .accessibilityIdentifier("messageField")
             // The mic stays while it listens, though the words heard fill the box: swapping it would end the press.
             Group {
-                if listening || (!hasText && !sending) {
+                if onMicDown != nil, listening || (!hasText && !sending) {
                     mic
                 } else if sending {
                     ProgressView()
                 } else {
-                    send
+                    send.disabled(!hasText)
                 }
             }
             .frame(width: 32, height: 32)
@@ -70,7 +72,7 @@ struct InputBar: View {
             guard !now, pressedAt != nil else { return }
             pressedAt = nil
             inKeepZone = false
-            if !latched { onMicUp(.keep) }
+            if !latched { onMicUp?(.keep) }
         }
     }
 
@@ -94,7 +96,7 @@ struct InputBar: View {
                     .onChanged { value in
                         if pressedAt == nil {
                             pressedAt = .now
-                            if !latched { onMicDown() }
+                            if !latched { onMicDown?() }
                         }
                         inKeepZone = !latched && value.translation.height < -Self.keepDistance
                     }
@@ -104,13 +106,13 @@ struct InputBar: View {
                         inKeepZone = false
                         if latched {
                             latched = false
-                            onMicUp(.keep)
+                            onMicUp?(.keep)
                         } else if value.translation.height < -Self.keepDistance {
-                            onMicUp(.keep)
+                            onMicUp?(.keep)
                         } else if held < Self.tapTime {
                             latched = listening  // a press the screen refused (still stopping) doesn't latch
                         } else {
-                            onMicUp(.send)
+                            onMicUp?(.send)
                         }
                     }
             )
@@ -119,10 +121,10 @@ struct InputBar: View {
             .accessibilityAction {
                 if listening {
                     latched = false
-                    onMicUp(.keep)
+                    onMicUp?(.keep)
                 } else {
                     latched = true
-                    onMicDown()
+                    onMicDown?()
                 }
             }
     }

@@ -7,13 +7,12 @@ import SwiftUI
 
 struct SessionView: View {
     let name: String
-    /// After Resume, the new session takes this screen's place.
-    @State private var resumed: String?
+    /// Shows another session in this one's place: the one Resume started, or a banner's.
+    let onOpen: (String) -> Void
 
     var body: some View {
-        let current = resumed ?? name
-        ChatScreen(name: current) { resumed = $0 }
-            .id(current)
+        ChatScreen(name: name, onResumed: onOpen)
+            .id(name)
     }
 }
 
@@ -47,7 +46,6 @@ private struct ChatContent: View {
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
-    @State private var expanded: Set<String> = []
     @State private var atBottom = true
     @State private var unseen = false
     @State private var resuming = false
@@ -79,8 +77,8 @@ private struct ChatContent: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(model.log.messages) { message in
-                        MessageRow(message: message, expanded: expanded.contains(message.id)) { toggle(message.id) }
+                    ForEach(model.log.shown) { message in
+                        MessageRow(message: message)
                             .modifier(BeingRead(reading: Speaker.shared.speakingId == message.id))
                     }
                     workingRow
@@ -110,7 +108,7 @@ private struct ChatContent: View {
                 Task { @MainActor in proxy.scrollTo(Self.bottom, anchor: .bottom) }
             }
             // a new or longer last message: follow it if you're at the bottom, else say so
-            .onChange(of: model.log.messages.last) { _, last in
+            .onChange(of: model.log.shown.last) { _, last in
                 guard last != nil else { return }
                 if atBottom { proxy.scrollTo(Self.bottom, anchor: .bottom) } else { unseen = true }
             }
@@ -122,7 +120,9 @@ private struct ChatContent: View {
                 if model.reconnecting && !model.ended { ReconnectingBar() }
             }
             .overlay(alignment: .top) {
-                if let banner { BannerView(banner: banner).transition(.move(edge: .top).combined(with: .opacity)) }
+                if let banner {
+                    BannerView(banner: banner) { onResumed(banner.name) }.transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             .animation(.snappy, value: banner)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -147,22 +147,19 @@ private struct ChatContent: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
-        .navigationTitle(model.title)
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
-                    Text(model.title).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
-                    Text(model.folder).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(readAloud ? "Stop reading aloud" : "Read aloud",
                        systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
             }
         }
         .onReturnFromBackground { model.reconnectNow() }
+        // On screen with the app in front: Claude's replies are read, here and on the Mac.
+        .task(id: SeenKey(conversation: model.session?.sessionId, unread: model.session?.unread == true,
+                          looking: onScreen && scenePhase == .active)) {
+            guard let id = model.session?.sessionId, model.session?.unread == true, onScreen, scenePhase == .active else { return }
+            try? await store.api?.seen(id)
+        }
         .onAppear(perform: appeared)
         .onDisappear(perform: disappeared)
         .onChange(of: listener.partial) { _, heard in
@@ -247,7 +244,7 @@ private struct ChatContent: View {
     @ViewBuilder private var workingRow: some View {
         if showsWorking {
             let onStop: (() -> Void)? = typable ? { Task { await model.stop() } } : nil
-            WorkingRow(waiting: !model.working, stopping: model.stopping, onStop: onStop)
+            WorkingRow(waiting: !model.working, step: model.log.latestStep, stopping: model.stopping, onStop: onStop)
         }
     }
 
@@ -262,17 +259,13 @@ private struct ChatContent: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if model.log.messages.isEmpty && !showsWorking && !model.ended && !model.macOnly && !model.noChat && !model.starting {
+        if model.log.shown.isEmpty && !showsWorking && !model.ended && !model.macOnly && !model.noChat && !model.starting {
             if !model.loaded {
                 ProgressView()
             } else {
                 Text("No messages yet.").foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func toggle(_ id: String) {
-        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
     }
 
     /// The box clears only once blimpd has the text; anything typed meanwhile stays.
@@ -438,6 +431,12 @@ private struct ReconnectingBar: View {
     }
 }
 
+private struct SeenKey: Equatable {
+    let conversation: String?
+    let unread: Bool
+    let looking: Bool
+}
+
 /// A spoken answer's guess, for the prompt it was heard for: shown only while that prompt is.
 private struct Guess: Equatable {
     let prompt: Prompt
@@ -453,9 +452,10 @@ private struct Banner: Equatable, Hashable {
 /// Slides in at the top; a tap opens that session.
 private struct BannerView: View {
     let banner: Banner
+    let onTap: () -> Void
 
     var body: some View {
-        NavigationLink(value: SessionRoute(name: banner.name)) {
+        Button(action: onTap) {
             HStack(spacing: 8) {
                 if banner.waiting { Circle().fill(.orange).frame(width: 8, height: 8) }
                 Text(banner.text).font(.subheadline.weight(.semibold)).lineLimit(1)

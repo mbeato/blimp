@@ -40,8 +40,8 @@ test("recentFolders: newest first, only folders that still exist", () => {
 
 test("conversations: the folder's transcripts, newest first, with titles", () => {
   expect(conversations(web, claude)).toEqual([
-    { sessionId: "22222222-2222-2222-2222-222222222222", title: "Web v2", updatedAt: 3_000_000 },
-    { sessionId: "11111111-1111-1111-1111-111111111111", title: "old web", updatedAt: 1_000_000 },
+    { sessionId: "22222222-2222-2222-2222-222222222222", title: "Web v2", updatedAt: 3_000_000, unread: false },
+    { sessionId: "11111111-1111-1111-1111-111111111111", title: "old web", updatedAt: 1_000_000, unread: false },
   ]);
   expect(conversations(join(root, "nothing-here"), claude)).toEqual([]);
 });

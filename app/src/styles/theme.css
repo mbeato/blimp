@@ -1,5 +1,6 @@
 /* Every color in the app. Dark is the default; light follows the system setting.
-   The amber accent means "waiting for you" and nothing else; the blue one, "split together". */
+   The amber accent means "waiting for you" and nothing else; the bright blue one, "a reply you haven't
+   seen"; the soft blue one, "split together". */
 
 :root {
   color-scheme: dark;
@@ -19,6 +20,7 @@
   --danger: #f07878;
   --waiting: #f2b84b;
   --waiting-glow: rgba(242, 184, 75, 0.5);
+  --unread: #3b8cff;
   /* Sessions split side by side: their headers, rows and numbers. */
   --group: #7aa7e0;
   --group-bg: rgba(122, 167, 224, 0.14);
@@ -67,6 +69,7 @@
     --danger: #c63636;
     --waiting: #c27c00;
     --waiting-glow: rgba(194, 124, 0, 0.35);
+    --unread: #0a6cff;
     --group: #2f6fc4;
     --group-bg: rgba(47, 111, 196, 0.1);
 
@@ -111,6 +114,7 @@
   --danger: #c63636;
   --waiting: #c27c00;
   --waiting-glow: rgba(194, 124, 0, 0.35);
+  --unread: #0a6cff;
   --group: #2f6fc4;
   --group-bg: rgba(47, 111, 196, 0.1);
 

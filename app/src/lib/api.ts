@@ -28,10 +28,11 @@ export type Session = {
   updatedAt?: number; // ms
   state: SessionState;
   stateSince?: number; // ms
+  unread?: boolean; // Claude replied since this app or the phone last had it on screen (older blimpd: absent)
 };
 
 export type RecentFolder = { dir: string; lastUsed: number };
-export type Conversation = { sessionId: string; title: string; updatedAt: number };
+export type Conversation = { sessionId: string; title: string; updatedAt: number; unread?: boolean };
 export type DirEntry = { name: string; kind: "file" | "dir"; size: number; mtime: number };
 export type DirListing = { path: string; entries: DirEntry[] };
 export type FileBody = { bytes: Uint8Array<ArrayBuffer>; mtime: number; contentType: string };
@@ -85,6 +86,11 @@ export class Api {
 
   sessions() {
     return this.json<Session[]>("/sessions");
+  }
+
+  // The conversation is on screen: its replies so far are read, here and on the phone.
+  async seen(sessionId: string) {
+    await this.req("/seen", { method: "POST", body: JSON.stringify({ sessionId }), headers: { "Content-Type": "application/json" } });
   }
 
   createSession(body: { dir: string; name?: string; resume?: string; kind?: string }) {

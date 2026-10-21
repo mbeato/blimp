@@ -162,12 +162,12 @@ jobs:
           read -r new _ newargs < "$E2E_DIR/claude.args"
           read -r resumed _ resumedargs <<< "$(sed -n 2p "$E2E_DIR/claude.args")"
           [ -n "$new" ] && [ -n "$resumed" ] || { echo "the stand-in claude saw no ZMX_SESSION"; exit 1; }
-          [ "$newargs" = "[]" ] || { echo "+ started claude with $newargs"; exit 1; }
-          [ "$resumedargs" = "[--resume e2e00000-0000-0000-0000-000000000004]" ] || { echo "Earlier started claude with $resumedargs"; exit 1; }
+          [ "$newargs" = "[-- Write the changelog]" ] || { echo "the blank chat started claude with $newargs"; exit 1; }
+          [ "$resumedargs" = "[--resume e2e00000-0000-0000-0000-000000000004 -- Pick it up again]" ] || { echo "the past conversation started claude with $resumedargs"; exit 1; }
           zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
           ! grep -qE "name=$new([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "$new was ended but zmx still lists it"; exit 1; }
           grep -qE "name=$resumed([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "the resumed $resumed isn't running"; exit 1; }
-          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; demo-quiz got both answers; demo-trust got Yes; $new ended; $resumed resumed the past conversation"
+          echo "demo-chat got both messages; demo-ask got 1 (Yes); demo-busy got Esc; demo-quiz got both answers; demo-trust got Yes; $new started with its first message and ended; $resumed resumed the past conversation with a message"
       - name: Export screenshots
         if: always()
         run: |

@@ -24,6 +24,7 @@ import { basename, dirname, join } from "node:path";
 import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
 import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
+import { isUnread, readSeen, type Seen } from "./seen";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
 
@@ -40,6 +41,7 @@ export type Session = ZmxSession & {
   state: State;
   stateSince?: number; // ms
   prompt?: Prompt & { at: number }; // what a waiting Claude asks (prompt.ts), and when the wait started
+  unread: boolean; // Claude replied since either app last had it on screen (seen.ts)
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -87,12 +89,14 @@ export function parseZmxList(out: string): ZmxSession[] {
 // Title order matches Claude's own: last /rename, else last AI title, else the first thing typed,
 // with blimp's own name (names.ts) after your /rename and before Claude's AI title.
 // skipping: offset is inside a line longer than a chunk, which is read past without parsing.
-export type TitleScan = { offset: number; skipping?: boolean; custom?: string; ai?: string; prompt?: string };
+// The same pass notes `replied`, when Claude last wrote text (ms): what makes a conversation unread.
+export type TitleScan = { offset: number; skipping?: boolean; custom?: string; ai?: string; prompt?: string; replied?: number };
 
 function scanTitle(s: TitleScan, text: string) {
   for (const line of text.split("\n")) {
     const interesting =
-      line.includes('"custom-title"') || line.includes('"ai-title"') || (!s.prompt && line.includes('"type":"user"'));
+      line.includes('"custom-title"') || line.includes('"ai-title"') || (!s.prompt && line.includes('"type":"user"')) ||
+      (line.includes('"type":"assistant"') && line.includes('"type":"text"'));
     if (!interesting) continue;
     let r: any;
     try {
@@ -105,16 +109,23 @@ function scanTitle(s: TitleScan, text: string) {
     else if (r.type === "user" && !s.prompt) {
       const c = r.message?.content;
       if (typeof c === "string" && !c.startsWith("<")) s.prompt = cut(c.replace(/\s+/g, " "), 70);
+    } else if (r.type === "assistant" && !r.isSidechain && r.message?.model !== "<synthetic>") {
+      // Text, not only tool calls; "<synthetic>" is Claude Code's own note, as after you press Esc.
+      const said = Array.isArray(r.message?.content) && r.message.content.some((b: any) => b?.type === "text" && String(b.text ?? "").trim());
+      const at = Date.parse(r.timestamp);
+      if (said && at > (s.replied ?? 0)) s.replied = at;
     }
   }
 }
 
-const pickTitle = (s: TitleScan, name?: string) => s.custom ?? name ?? s.ai ?? s.prompt ?? "(new session)";
+const titleOf = (s: TitleScan, name?: string) => s.custom ?? name ?? s.ai ?? s.prompt ?? "(new session)";
+
+export const pickTitle = (s: TitleScan | undefined, name?: string) => (s ? titleOf(s, name) : "(new session)");
 
 export function titleFromTranscript(text: string, name?: string): string {
   const s: TitleScan = { offset: 0 };
   scanTitle(s, text);
-  return pickTitle(s, name);
+  return titleOf(s, name);
 }
 
 // Transcripts only grow and can be tens of MB, and the session list is rebuilt every second.
@@ -124,8 +135,7 @@ const titles = new Map<string, TitleScan>();
 const TITLE_CHUNK = 16 << 20;
 
 export function transcriptTitle(file: string, name?: string): string {
-  const s = transcriptTitles(file);
-  return s ? pickTitle(s, name) : "(new session)";
+  return pickTitle(transcriptTitles(file), name);
 }
 
 // The titles a transcript has (custom, ai, first prompt), or undefined if it can't be read.
@@ -276,6 +286,7 @@ export function listSessions(
   statusDir = join(blimpDir(), "status"),
   memoFile = kindsMemoFile(),
   names: Names = shownNames(),
+  seen: Seen = readSeen(),
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
@@ -283,6 +294,7 @@ export function listSessions(
     const info = readJson(join(dir, "sessions", `${z.pid}.json`));
     const hook = isSafeName(z.name) ? readJson(join(statusDir, `${z.name}.json`)) : {};
     const file = info.sessionId ? transcriptPath(dir, info.sessionId) : undefined;
+    const scan = file ? transcriptTitles(file) : undefined;
     // A shell someone then typed `claude` in is Claude Code now.
     let kind = typeof memo[z.name] === "string" ? memo[z.name] : info.sessionId || /\bclaude\b/.test(z.cmd) ? "claude" : "shell";
     if (kind === "shell" && info.sessionId) kind = "claude";
@@ -299,12 +311,13 @@ export function listSessions(
       label: kindLabel(kind, custom),
       dir: realDir(info.cwd || z.dir || "/"),
       sessionId: info.sessionId,
-      title: file ? transcriptTitle(file, names[info.sessionId]?.name) : "(new session)",
+      title: pickTitle(scan, names[info.sessionId]?.name),
       status: info.status ?? "",
       waitingFor: info.waitingFor,
       updatedAt: info.updatedAt,
       ...st,
       ...(prompt && { prompt }),
+      unread: isUnread(seen, info.sessionId, scan?.replied),
     };
   });
 }

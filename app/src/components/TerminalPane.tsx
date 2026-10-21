@@ -8,6 +8,7 @@ import { dragHover } from "../lib/place";
 import { relTime } from "../lib/time";
 import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
+import { StateMark } from "./StateMark";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
@@ -739,7 +740,7 @@ export function TerminalPane(props: {
           )}
           {showEarlier && past.map((c) => (
             <button key={c.sessionId} className="srow-main earlier" disabled={busy || !api} title={`Resume: ${c.title}`} onClick={() => void start({ resume: c.sessionId })}>
-              <span className="srow-mark" />
+              <span className="srow-mark" aria-label={c.unread ? "New reply" : undefined}>{c.unread && <span className="unread-dot" />}</span>
               <span className="srow-title">{c.title}</span>
               <span className="srow-time">{relTime(c.updatedAt, now)}</span>
             </button>
@@ -805,8 +806,8 @@ function Mark(props: { s: Session }) {
   // A shell, or a kind without hooks, has no state (Claude's and Codex's hooks are where states come from).
   if (!hasState(s) && s.state === "unknown") return <span className="srow-mark shell" aria-label={s.label ?? "Shell"}>{">_"}</span>;
   return (
-    <span className={"srow-mark state-" + s.state} aria-label={STATE_LABEL[s.state] || undefined}>
-      {s.state === "waiting" ? <span className="dot" /> : <span className="state-dot" />}
+    <span className={"srow-mark state-" + s.state} aria-label={(s.state !== "waiting" && s.unread ? "New reply" : STATE_LABEL[s.state]) || undefined}>
+      <StateMark s={s} />
     </span>
   );
 }

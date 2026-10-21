@@ -1,48 +1,22 @@
-// Small pieces shared by Home and Project: a session row, the "end it?" question, a plain-words alert.
+// Small pieces shared by the chat screen and its drawer: a row's mark, "2 min. ago", the "end it?" question, a plain-words alert.
 import BlimpKit
 import SwiftUI
 
-struct SessionRoute: Hashable {
-    let name: String
-}
-
-struct ProjectRoute: Hashable {
-    let dir: String
-}
-
-struct SessionRow: View {
-    let session: Session
-
-    var body: some View {
-        HStack(spacing: 12) {
-            StateMark(state: session.state)
-            VStack(alignment: .leading, spacing: 2) {
-                // A long name wraps onto a second line rather than being cut off.
-                Text(session.title).lineLimit(2)
-                HStack(spacing: 6) {
-                    if let label = session.label, !label.isEmpty {
-                        Text(label)
-                            .font(.caption2)
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(.quaternary, in: Capsule())
-                    }
-                    Text(ago(ms: session.activity)).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-}
-
-struct StateMark: View {
-    let state: SessionState
+/// A row's mark: Claude asks you something (an amber question mark), a reply you haven't seen (a blue dot),
+/// working (a spinner), or nothing.
+struct MarkView: View {
+    let mark: Mark
 
     var body: some View {
         Group {
-            switch state {
+            switch mark {
+            case .asking:
+                Image(systemName: "questionmark").font(.caption.weight(.heavy)).foregroundStyle(.orange)
+                    .accessibilityLabel("Asking you something")
+            case .unread:
+                Circle().fill(.blue).frame(width: 9, height: 9).accessibilityLabel("New reply")
             case .working: ProgressView().controlSize(.small)
-            case .waiting: Circle().fill(.orange)
-            case .done: Circle().strokeBorder(.secondary, lineWidth: 1.5)
-            case .unknown: Image(systemName: "terminal").foregroundStyle(.secondary)
+            case .none: Color.clear
             }
         }
         .frame(width: 14, height: 14)
@@ -64,17 +38,6 @@ struct StateMark: View {
 }
 
 extension View {
-    /// Swipe-to-end on a row; set `pending` to ask first.
-    /// Red, but not `role: .destructive`: with that role the List removes the row itself at the tap,
-    /// before the question is answered, and when blimpd's list then drops it too the List's counts
-    /// disagree and UIKit aborts the app ("Invalid number of items in section").
-    func endSwipe(_ session: Session, pending: Binding<Session?>) -> some View {
-        swipeActions(edge: .trailing) {
-            Button("End") { pending.wrappedValue = session }
-                .tint(.red)
-        }
-    }
-
     /// "End this session?" and the call itself; failures show in an alert.
     func endConfirmation(_ pending: Binding<Session?>, store: Store) -> some View {
         modifier(EndConfirmation(pending: pending, store: store))

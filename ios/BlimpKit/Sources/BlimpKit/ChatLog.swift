@@ -10,6 +10,18 @@ public struct ChatLog: Equatable, Sendable {
 
     public init() {}
 
+    /// What the chat shows: your messages and Claude's replies, without the tool steps between them.
+    public var shown: [ChatMessage] { messages.filter { $0.role != .tool } }
+
+    /// The newest tool step since your last message, for the working row to say what Claude is doing.
+    public var latestStep: ChatMessage? {
+        for m in messages.reversed() {
+            if m.role == .tool { return m }
+            if m.role == .user { return nil }
+        }
+        return nil
+    }
+
     public mutating func apply(_ e: ChatEvent) {
         switch e {
         case .history(let m):

@@ -4,6 +4,7 @@ import type { ServerLink } from "../lib/connection";
 import { rank, sessionScore } from "../lib/fuzzy";
 import { tildify } from "../lib/sessions";
 import { Dialog } from "./Dialog";
+import { StateMark } from "./StateMark";
 
 type Item = { link: ServerLink; s: Session; folder: string };
 
@@ -47,7 +48,7 @@ export function Palette(props: { links: ServerLink[]; onPick: (link: ServerLink,
             onMouseMove={() => setSel(n)}
             onClick={() => pick(i)}
           >
-            <span className="row-mark">{i.s.state === "waiting" && <span className="dot" />}</span>
+            <span className="row-mark">{(i.s.state === "waiting" || i.s.unread) && <StateMark s={i.s} />}</span>
             <span className="list-main">{i.s.title}</span>
             <span className="list-side">{i.folder}</span>
           </li>
