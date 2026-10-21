@@ -1573,3 +1573,140 @@ cat "${answer}"
     expect(sessions.find((s) => s.sessionId === "55555555-5555-5555-5555-555555555555")?.title).toBe("make the mobile app login work again");
   }, 20000);
 });
+
+// Secrets given to sessions (secrets.ts), on a blimpd of its own whose socket folder is in its home
+// folder, as ~/.blimp is: so the fs routes could reach the secrets folder if they weren't refused.
+describe("secrets", () => {
+  const sHome = realpathSync(mkdtempSync(join(tmpdir(), "bsec-")));
+  const sDir = join(sHome, ".blimp");
+  const sSock = join(sDir, "blimpd.sock");
+  const sClaude = join(sHome, "claude");
+  const secrets = join(sDir, "secrets");
+  const VALUE = "sk-live-0123456789abcdef";
+  let sServer: ReturnType<typeof Bun.spawn>;
+  let sToken = "";
+  const sApi = (path: string, init: RequestInit = {}, t = sToken) =>
+    fetch(`http://blimpd${path}`, { ...init, unix: sSock, headers: { Authorization: `Bearer ${t}`, ...(init.headers as any) } } as any);
+  const put = (name: string, body: unknown, t?: string) => sApi(`/secrets/${name}`, { method: "PUT", body: JSON.stringify(body) }, t);
+  const tell = (name: string, body: unknown) => sApi(`/secrets/${name}/tell`, { method: "POST", body: JSON.stringify(body) });
+  const q = (p: string) => encodeURIComponent(p);
+
+  // A session that looks like Claude to this blimpd, echoing each line it gets (ESC shown as ~).
+  async function fakeClaude(suffix: string, sessionId: string) {
+    const name = await shSession(suffix, ["sh", "-c", `while IFS= read -r l; do printf 'got:%s\\n' "$(printf %s "$l" | tr '\\033' '~')"; done`]);
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
+    mkdirSync(join(sClaude, "sessions"), { recursive: true });
+    writeFileSync(join(sClaude, "sessions", `${pid}.json`), JSON.stringify({ sessionId, cwd: sHome, status: "idle" }));
+    return name;
+  }
+  // What the session shows, from an attach socket at 300 columns (fewer wrapped lines).
+  async function view(name: string) {
+    const v = { text: "", ws: new WebSocket(`ws+unix://${sSock}:/sessions/${name}/attach?cols=300&rows=40&token=${sToken}`) };
+    v.ws.binaryType = "arraybuffer";
+    v.ws.onmessage = (e) => (v.text += typeof e.data === "string" ? "" : new TextDecoder().decode(e.data));
+    await new Promise((res, rej) => ((v.ws.onopen = res), (v.ws.onerror = () => rej(new Error("attach failed")))));
+    return v;
+  }
+
+  beforeAll(async () => {
+    mkdirSync(sDir, { mode: 0o700 });
+    writeFileSync(join(sDir, "config.json"), JSON.stringify({ names: false }));
+    sServer = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "serve"], {
+      env: { ...env, HOME: sHome, BLIMPD_SOCKET: sSock, CLAUDE_CONFIG_DIR: sClaude, SHELL: fakeShell, PATH: `${fakeBin}:${env.PATH}` },
+      stdout: "ignore",
+      stderr: "inherit",
+    });
+    await until(() => {
+      try {
+        return statSync(sSock).isSocket() && (sToken = readFileSync(join(sDir, "token"), "utf8").trim());
+      } catch {
+        return false;
+      }
+    }, "the secrets blimpd to start");
+  });
+
+  afterAll(() => {
+    sServer?.kill();
+    rmSync(sHome, { recursive: true, force: true });
+  });
+
+  test("PUT /secrets/<NAME>: 600 in a 700 folder, no temp file left, never returned; 400 for a bad name or value; GET lists names and times; DELETE takes it out", async () => {
+    for (const bad of ["", "x".repeat(16385), "a\0b", 42, undefined]) expect((await put("API_KEY", { value: bad })).status).toBe(400);
+    for (const bad of ["1KEY", "MY-KEY", "a%20b", "%2E%2E%2Ftoken"]) expect((await put(bad, { value: VALUE })).status).toBe(400);
+    expect((await sApi("/secrets/API_KEY", { method: "PUT", body: "not json" })).status).toBe(400);
+    expect(existsSync(secrets)).toBe(false);
+
+    const ok = await put("API_KEY", { value: VALUE });
+    expect(ok.status).toBe(204);
+    expect(await ok.text()).toBe("");
+    expect(readFileSync(join(secrets, "API_KEY"), "utf8")).toBe(VALUE);
+    expect(statSync(join(secrets, "API_KEY")).mode & 0o777).toBe(0o600);
+    expect(statSync(secrets).mode & 0o777).toBe(0o700);
+    expect(readdirSync(secrets)).toEqual(["API_KEY"]); // no temp file left
+    const list = await (await sApi("/secrets")).text();
+    expect(list).not.toContain(VALUE);
+    expect(JSON.parse(list)).toEqual([{ name: "API_KEY", mtime: Math.floor(statSync(join(secrets, "API_KEY")).mtimeMs) }]);
+
+    expect((await sApi("/secrets/API_KEY", { method: "DELETE" })).status).toBe(204);
+    expect(existsSync(join(secrets, "API_KEY"))).toBe(false);
+    expect(await (await sApi("/secrets")).json()).toEqual([]);
+  });
+
+  test("the fs api never serves, archives or replaces a secret, for the Mac or the phone", async () => {
+    const phone = "feed".repeat(16);
+    writeFileSync(join(sDir, "phone-token"), phone, { mode: 0o600 });
+    try {
+      expect((await put("DB_PASSWORD", { value: VALUE }, phone)).status).toBe(204); // the phone can give one too
+      const file = join(secrets, "DB_PASSWORD");
+      for (const t of [sToken, phone]) {
+        const r = await sApi(`/fs/file?path=${q(file)}`, {}, t);
+        expect(r.status).toBe(403);
+        expect(await r.text()).not.toContain(VALUE);
+        for (const p of [file, secrets, sDir, sHome]) expect((await sApi(`/fs/download?path=${q(p)}`, {}, t)).status).toBe(403);
+        for (const mode of ["replace", "new"]) {
+          const target = mode === "new" ? join(secrets, "PLANTED") : file;
+          expect((await sApi(`/fs/upload?path=${q(target)}&mode=${mode}`, { method: "PUT", body: "mine" }, t)).status).toBe(403);
+        }
+        expect((await sApi(`/fs/file?path=${q(file)}`, { method: "PUT", body: "mine" }, t)).status).toBe(403);
+      }
+      expect(readFileSync(file, "utf8")).toBe(VALUE);
+      expect(existsSync(join(secrets, "PLANTED"))).toBe(false);
+    } finally {
+      rmSync(join(sDir, "phone-token"));
+    }
+  });
+
+  test("POST /secrets/<NAME>/tell types where the secret is into Claude, never the value; 404, 400 and 409 when it can't", async () => {
+    expect((await put("GITHUB_TOKEN", { value: VALUE })).status).toBe(204);
+    const sid = "e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1";
+    const name = await fakeClaude("secret1", sid);
+    const shell = await shSession("secret2");
+    const v = await view(name);
+    try {
+      expect((await tell("NOPE", { session: name })).status).toBe(404);
+      expect((await tell("GITHUB_TOKEN", { session: `${tag}-nope` })).status).toBe(404);
+      expect((await tell("GITHUB_TOKEN", {})).status).toBe(400);
+      const notClaude = await tell("GITHUB_TOKEN", { session: shell });
+      expect([notClaude.status, (await notClaude.json()).error]).toEqual([400, `Claude isn't running in ${shell}`]);
+
+      // While Claude asks something, nothing is typed.
+      mkdirSync(join(sDir, "status"), { recursive: true });
+      const status = join(sDir, "status", `${name}.json`);
+      writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest",
+        prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }));
+      const busy = await tell("GITHUB_TOKEN", { session: name });
+      expect([busy.status, (await busy.json()).error]).toEqual([409, "Claude is asking something. Answer it first."]);
+      rmSync(status);
+
+      const ok = await tell("GITHUB_TOKEN", { session: name });
+      expect(ok.status).toBe(204);
+      const flat = () => v.text.replace(/\r\n/g, "");
+      await until(() => flat().includes("Never print it, echo it, or put it in a file, a commit or a message."), "the note reached the session");
+      expect(flat()).toContain("got:~[200~The secret GITHUB_TOKEN is saved in ~/.blimp/secrets/GITHUB_TOKEN (only you can read it).");
+      expect(flat()).toContain('export GITHUB_TOKEN="$(cat ~/.blimp/secrets/GITHUB_TOKEN)"');
+      expect(v.text).not.toContain(VALUE);
+    } finally {
+      v.ws.close();
+    }
+  }, 20000);
+});

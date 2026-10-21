@@ -16,6 +16,7 @@ import { conversations, projectFolderName, recentFolders, resumedKind } from "./
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
+import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
@@ -139,6 +140,22 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   }
   if (path === "/keys/zai" && req.method === "DELETE") {
     removeZaiKey();
+    return new Response(null, { status: 204 });
+  }
+
+  // Secrets for sessions (secrets.ts): in, never out. GET /secrets lists names and times only.
+  if (path === "/secrets" && get) return Response.json(listSecrets());
+  const secret = path.match(/^\/secrets\/([^/]+)(\/tell)?$/);
+  if (secret && !secret[2] && req.method === "PUT") {
+    saveSecret(decodeURIComponent(secret[1]), ((await req.json()) as Record<string, unknown> | null)?.value);
+    return new Response(null, { status: 204 });
+  }
+  if (secret && !secret[2] && req.method === "DELETE") {
+    removeSecret(decodeURIComponent(secret[1]));
+    return new Response(null, { status: 204 });
+  }
+  if (secret && secret[2] && req.method === "POST") {
+    await tellSecret(decodeURIComponent(secret[1]), ((await req.json()) as Record<string, unknown> | null)?.session);
     return new Response(null, { status: 204 });
   }
 
