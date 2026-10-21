@@ -4,7 +4,9 @@
 
 import { toolSummary } from "./chat";
 
-export type Question = { question: string; header?: string; multiSelect: boolean; options: { label: string; description?: string }[] };
+// preview: a single-choice question whose options have a `preview`. Claude Code draws those in a box beside
+// the rows, with no "Type something" row, and a digit there only moves the cursor.
+export type Question = { question: string; header?: string; multiSelect: boolean; preview?: true; options: { label: string; description?: string }[] };
 export type Prompt =
   | { kind: "permission"; tool: string; summary: string; options: string[]; keys: string[]; answerable: true }
   | { kind: "question"; questions: Question[]; answerable: boolean }
@@ -26,6 +28,7 @@ export function promptFromHook(ev: any): Prompt | undefined {
       question: str(q?.question),
       ...(typeof q?.header === "string" && { header: q.header }),
       multiSelect: q?.multiSelect === true,
+      ...(q?.multiSelect !== true && Array.isArray(q?.options) && q.options.some((o: any) => str(o?.preview).trim()) && { preview: true as const }),
       options: (Array.isArray(q?.options) ? q.options : []).map((o: any) => ({ label: str(o?.label), ...(typeof o?.description === "string" && { description: o.description }) })),
     }));
     return { kind: "question", questions, answerable: drivable(questions) };
@@ -63,7 +66,7 @@ export function withScreenOptions(p: Prompt, screen: string): Prompt {
 // `pick` alone answers a permission or one single-choice question (the phone's voice answers use it).
 export function answerKeys(p: Prompt, pick: number): string | undefined {
   if (!Number.isInteger(pick) || pick < 0 || !p.answerable) return;
-  const single = p.kind === "question" && p.questions.length === 1 && !p.questions[0].multiSelect;
+  const single = p.kind === "question" && p.questions.length === 1 && !p.questions[0].multiSelect && !p.questions[0].preview;
   const keys = p.kind === "permission" ? p.keys[pick] : single && pick < p.questions[0].options.length ? String(pick + 1) : undefined;
   return typeof keys === "string" && /^[1-9]$|^\x1b$/.test(keys) ? keys : undefined;
 }
@@ -86,7 +89,8 @@ export type QuestionAnswer = { picks: number[]; text?: string } | { picks?: unde
 // What has to be on the screen before a step: question `q` (0-based) as the current one, with the cursor
 // on that row (1-based, or the multi-choice "Next"/"Submit" row), exactly these rows ticked, the typed
 // answer in its row. Or the review screen.
-export type Expect = { q: number; cursor: number | "next"; ticked?: number[]; typed?: boolean } | { review: true };
+// No cursor: anywhere in the question (a digit there goes to its row wherever the cursor is).
+export type Expect = { q: number; cursor?: number | "next"; ticked?: number[]; typed?: boolean } | { review: true };
 export type Step = { expect: Expect; keys: string };
 
 const DOWN = "\x1b[B";
@@ -127,7 +131,11 @@ export function answerSteps(p: Prompt, answers: unknown, labels: unknown): { ste
     if (!Array.isArray(shown) || shown.length !== picks.length || picks.some((i, k) => question.options[i].label !== shown[k]))
       return { error: "the question changed" };
     const paste = text && `\x1b[200~${text}\x1b[201~`;
-    if (!question.multiSelect) {
+    if (question.preview) {
+      if (picks.length + (text ? 1 : 0) !== 1) return { error: "pick one option or type an answer" };
+      if (text) return { error: "this question takes one of its options; type an answer on the Mac" };
+      steps.push({ expect: { q }, keys: String(picks[0] + 1) }, { expect: { q, cursor: picks[0] + 1 }, keys: "\r" });
+    } else if (!question.multiSelect) {
       if (picks.length + (text ? 1 : 0) !== 1) return { error: "pick one option or type an answer" };
       // A digit picks and moves on. "Type something" (options + 1) becomes a text field; Enter takes it.
       if (!paste) steps.push({ expect: { q, cursor: 1 }, keys: String(picks[0] + 1) });
@@ -174,7 +182,9 @@ export function parseDialog(screen: string): Dialog | undefined {
     if (/^\s*─{3,}\s*$/.test(l) || /^\s*Enter to select/.test(l)) break;
     const row = l.match(/^\s*(❯)?\s*(\d)\.\s+(?:\[(✔| )\]\s+)?(.*?)\s*$/);
     if (row && Number(row[2]) === rows.length + 1) {
-      rows.push({ n: rows.length + 1, label: row[4], ...(row[3] && { ticked: row[3] === "✔" }) });
+      // A question with previews has the preview's box on the same line, after the label.
+      const label = row[4].replace(/\s{2,}[│┌├└].*$/, "");
+      rows.push({ n: rows.length + 1, label, ...(row[3] && { ticked: row[3] === "✔" }) });
       if (row[1]) cursor = rows.length;
       next = false;
       continue;
@@ -199,12 +209,12 @@ export function screenMeets(p: Prompt, d: Dialog | undefined, e: Expect): boolea
   if (!d || p.kind !== "question") return false;
   if ("review" in e) return d.review && d.cursor === 1 && d.rows[0]?.label === "Submit answers";
   const q = p.questions[e.q];
-  if (!q || d.review || squash(d.question) !== squash(q.question) || d.cursor !== e.cursor) return false;
+  if (!q || d.review || squash(d.question) !== squash(q.question) || (e.cursor !== undefined && d.cursor !== e.cursor)) return false;
   const n = q.options.length;
   // Row n + 1 is "Type something." (or "[ ] Type something") until text is typed into it.
   // A long label wraps: its row shows the start of it.
   const same = (shown: string, label: string) => !!squash(shown) && squash(label).startsWith(squash(shown));
-  if (d.rows.length < n + 1 || d.rows.slice(0, n).some((r, i) => !same(r.label, q.options[i].label))) return false;
+  if (d.rows.length < (q.preview ? n : n + 1) || d.rows.slice(0, n).some((r, i) => !same(r.label, q.options[i].label))) return false;
   if (e.typed !== undefined && /^Type something\.?$/.test(d.rows[n].label) === e.typed) return false;
   if (e.ticked) {
     const on = d.rows.slice(0, n + 1).filter((r) => r.ticked).map((r) => r.n);

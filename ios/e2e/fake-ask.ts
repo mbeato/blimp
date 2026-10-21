@@ -2,11 +2,13 @@
 // the dialog as Claude Code 2.1.300 does (the probe in .superpowers/ask-probe.md, summed up in docs/DESIGN.md)
 // and takes keys the way it does, so blimpd's screen checks and key steps meet what real Claude needs.
 //   bun fake-ask.ts <config.json>
+// A single-choice question whose options have a `preview` is drawn as Claude Code draws those (probed
+// 2026-10-21): each preview in a box beside the rows, no "Type something" row; a digit only moves the cursor.
 //   config: { questions, keys: file every key read is appended to, answers?: file the answers go to as JSON,
 //             status?: blimp's status file for the session, set to done once answered, sessionId? }
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
-type Q = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string }[] };
+type Q = { question: string; header?: string; multiSelect?: boolean; options: { label: string; description?: string; preview?: string }[] };
 const cfg = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const qs: Q[] = cfg.questions;
 const review = qs.length > 1 || !!qs[0].multiSelect;
@@ -20,6 +22,7 @@ const done: boolean[] = qs.map(() => false);
 let over = "";
 
 const textRow = (q: number) => qs[q].options.length + 1;
+const hasPreview = (q: Q) => !q.multiSelect && q.options.some((o) => o.preview);
 
 function draw() {
   const out: string[] = [];
@@ -35,6 +38,14 @@ function draw() {
     const n = q.options.length;
     const mark = (r: number) => (cursor === r ? "❯" : " ");
     out.push(q.question, "");
+    if (hasPreview(q)) {
+      const box = ["┌" + "─".repeat(20) + "┐", ...(q.options[cursor - 1].preview ?? "").split("\n").map((l) => `│ ${l.padEnd(18)} │`), "└" + "─".repeat(20) + "┘"];
+      const rows = q.options.map((o, i) => `${mark(i + 1)} ${i + 1}. ${o.label}`);
+      for (let i = 0; i < Math.max(rows.length, box.length); i++) out.push((rows[i] ?? "").padEnd(32) + (box[i] ?? ""));
+      out.push("", " ".repeat(32) + "Notes: press n to add notes", "─".repeat(60), "  Chat about this", "", "Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel");
+      process.stdout.write("\x1b[2J\x1b[H" + out.join("\n") + "\n");
+      return;
+    }
     for (const [i, o] of q.options.entries()) {
       const r = i + 1;
       if (q.multiSelect) out.push(`${mark(r)} ${r}. [${ticks[tab].has(r) ? "✔" : " "}] ${o.label}`, `         ${o.description ?? ""}`);
@@ -84,6 +95,16 @@ function key(k: string) {
   }
   const q = qs[tab];
   const n = q.options.length;
+  if (hasPreview(q)) {
+    if (/^[1-9]$/.test(k) && Number(k) <= n) cursor = Number(k);
+    else if (k === "\x1b[B") cursor = Math.min(cursor + 1, n);
+    else if (k === "\x1b[A") cursor = Math.max(cursor - 1, 1);
+    else if (k === "\r" || k === "\n") {
+      picked[tab] = cursor - 1;
+      next();
+    }
+    return;
+  }
   const onText = cursor === n + 1;
   if (k.startsWith("\x1b[200~")) {
     if (onText) {

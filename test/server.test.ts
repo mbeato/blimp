@@ -757,6 +757,25 @@ describe("chat", () => {
     viewer.ws.close();
   }, 20000);
 
+  test("a pick for a question with previews moves the cursor there, then presses Enter, even after the Mac moved it", async () => {
+    const preview = (l: string) => `+-----+\n| ${l} |\n+-----+`;
+    const qs = [{ question: "Pick a layout?", header: "Layout", multiSelect: false, options: ["Alpha", "Beta", "Gamma"].map((label) => ({ label, preview: preview(label) })) }];
+    const { name, at, cfg } = await fakeAsk("ask3", "a7a7a7a7-a7a7-a7a7-a7a7-a7a7a7a7a7a7", qs);
+    const viewer = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    type(viewer.ws, "3"); // someone on the Mac looked at Gamma's preview
+    await until(() => zmx("history", name).stdout.toString().includes("❯ 3. Gamma"), "the cursor on Gamma");
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    c.ws.send(JSON.stringify({ type: "answer", id: "v1", at, pick: 1, label: "Beta" }));
+    await until(() => c.messages.find((m) => m.id === "v1"), "reply", 10000);
+    expect(c.messages.find((m) => m.id === "v1")).toEqual({ type: "ack", id: "v1" });
+    await until(() => existsSync(cfg.answers), "the answers");
+    expect(JSON.parse(readFileSync(cfg.answers, "utf8"))).toEqual({ "Pick a layout?": "Beta" });
+    expect(readFileSync(cfg.keys, "utf8")).toBe("3" + "2" + "\r");
+    c.ws.close();
+    viewer.ws.close();
+  }, 20000);
+
   // A stand-in for Claude's folder trust question (ios/e2e/fake-trust.ts): Claude Code just started in a new
   // folder, with no status file yet. Yes makes it write one, as Claude does; No ends it.
   async function fakeTrust(suffix: string, sessionId: string) {

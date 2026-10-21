@@ -267,6 +267,7 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
     }
     if (m.type === "answer") {
       let steps: ReturnType<typeof trustSteps>;
+      let preview: { p: Prompt; steps: { expect: Expect }[] } | undefined;
       await typed(ws, id, async () => {
         const s = await find(d.name);
         // The same wait and the same choice under pick: the options can change within one wait.
@@ -277,10 +278,18 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
           await onTrust(d.name, steps[0].cursor);
           return steps.map((t) => t.keys);
         }
+        // A question with previews: the digit moves the cursor, then Enter, each after the screen shows its place.
+        if (same && p.kind === "question" && p.questions[0]?.preview) {
+          const r = answerSteps(p, [{ picks: [m.pick] }], [[m.label]]);
+          if ("error" in r) throw new Error(r.error);
+          preview = { p, steps: r.steps };
+          await onScreen(d.name, p, r.steps[0].expect);
+          return r.steps.map((s) => s.keys);
+        }
         const keys = same ? answerKeys(p, m.pick) : undefined;
         if (!keys) throw new Error("the question changed");
         return [keys];
-      }, (i) => onTrust(d.name, steps![i].cursor));
+      }, (i) => (preview ? onScreen(d.name, preview.p, preview.steps[i].expect) : onTrust(d.name, steps![i].cursor)));
       return send(ws, { type: "ack", id });
     }
     if (m.type === "interrupt") {

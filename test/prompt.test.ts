@@ -282,6 +282,56 @@ test("a question Claude draws with a border on its left is still recognised", ()
   expect(screenMeets(p as any, parseDialog(BORDERED), { q: 0, cursor: 1 })).toBe(true);
 });
 
+// A question whose options have a `preview`, as Claude Code 2.1.300 drew it in Max's session (2026-10-21): the
+// preview in a box beside the rows, a long label wrapped under its row, no "Type something" row. A digit
+// only moves the cursor there (the probe, the same day: `2` put ❯ on row 2, Enter then answered "Beta").
+const PREVIEW = `────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Inbox shape
+
+│ When you open a project on the phone, what should the inbox show? This decides what the small model writes after each
+│ turn: one line per session, or one summary for the whole project.
+
+  1. Session rows                 ┌──────────────────────────────────────────┐
+    (Recommended)                 │ blimp            [New chat]              │
+❯ 2. Project summary + rows       │ ───────────────────────────              │
+  3. Done / In progress lists     │ Done: v0.2.16 out, phone                 │
+                                  │ ? phone inbox             2m             │
+                                  ├─── ✂ ─── 1 lines hidden ─────────────────┤
+                                  └──────────────────────────────────────────┘
+
+                                  Notes: press n to add notes
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel`;
+const inbox = promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [{
+  question: "When you open a project on the phone, what should the inbox show? This decides what the small model writes after each turn: one line per session, or one summary for the whole project.",
+  header: "Inbox shape", multiSelect: false, options: [
+    { label: "Session rows (Recommended)", description: "a list", preview: "┌─┐\n│a│" },
+    { label: "Project summary + rows", description: "a summary", preview: "┌─┐\n│b│" },
+    { label: "Done / In progress lists", description: "sections", preview: "┌─┐\n│c│" },
+  ] }] } })!;
+
+test("a question with previews: its digit moves the cursor there, then Enter takes it", () => {
+  expect(inbox.kind === "question" && inbox.questions[0].preview).toBe(true);
+  expect(answerKeys(inbox, 1)).toBeUndefined(); // a digit alone would only move the cursor
+  // The digit goes wherever the cursor is (someone may have looked at another preview on the Mac).
+  expect(answerSteps(inbox, [{ picks: [1] }], [["Project summary + rows"]])).toEqual({ steps: [
+    { expect: { q: 0 }, keys: "2" },
+    { expect: { q: 0, cursor: 2 }, keys: "\r" },
+  ] });
+  expect((answerSteps(inbox, [{ text: "both" }], [[]]) as any).error).toBe("this question takes one of its options; type an answer on the Mac");
+  expect(parseDialog(PREVIEW)).toMatchObject({ cursor: 2, rows: [
+    { n: 1, label: "Session rows" }, { n: 2, label: "Project summary + rows" }, { n: 3, label: "Done / In progress lists" }] });
+  expect(screenMeets(inbox, parseDialog(PREVIEW), { q: 0 })).toBe(true);
+  expect(screenMeets(inbox, parseDialog(PREVIEW), { q: 0, cursor: 2 })).toBe(true);
+  expect(screenMeets(inbox, parseDialog(PREVIEW), { q: 0, cursor: 1 })).toBe(false);
+  // Without previews, a question still needs its "Type something" row on screen.
+  const plain = promptFromHook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [{ ...(inbox as any).questions[0], preview: undefined, options: (inbox as any).questions[0].options.map((o: any) => ({ label: o.label })) }] } })!;
+  expect(screenMeets(plain, parseDialog(PREVIEW), { q: 0 })).toBe(false);
+});
+
 // Plan approval (ExitPlanMode's permission), as the probe saw it: "Would you like to proceed?", and a
 // third row that opens a text field the phone can't type into while Claude waits.
 const PLAN = `Ready to code?
