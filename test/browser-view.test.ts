@@ -105,6 +105,24 @@ live("frames at the asked size; a click, typing and Enter reach the page", async
   w.v.close();
 }, 30_000);
 
+// Every ack lets one more frame out, even acks that come together: Chrome keeps up to 3 unacked,
+// so a slow link still has frames on the way while the last is drawn.
+live("each ack lets one more frame out, even acks that come together", async () => {
+  const id = await gate.createTab("/f", base + "/");
+  await until(async () => (await title(id)) === "start", "the page");
+  const w = await viewer(id, false);
+  w.send({ type: "size", width: 400, height: 300, scale: 1 });
+  await evalIn(id, "setInterval(() => (document.body.style.background = document.body.style.background === 'red' ? 'blue' : 'red'), 30)");
+  await until(() => w.frames.length === 3, "3 frames before any ack");
+  for (const n of [6, 9]) {
+    for (let i = 0; i < 3; i++) w.send({ type: "ack" });
+    await until(() => w.frames.length === n, `${n} frames after 3 more acks`);
+  }
+  await Bun.sleep(300);
+  expect(w.frames.length).toBe(9);
+  w.v.close();
+}, 30_000);
+
 live("go, back, forward and reload; the info follows", async () => {
   const id = await gate.createTab("/f", base + "/");
   await until(async () => (await title(id)) === "start", "the page");
@@ -187,9 +205,10 @@ function jpegSize(b: Uint8Array): [number, number] | undefined {
   }
 }
 
-// Sharp all the time: frames at the screen's ratio, while the page is scrolled too. At 1x there's
-// nothing sharper to send.
-live("frames are sharp, while the page is being scrolled too", async () => {
+// Sharp, and light while you use the page: frames at the screen's ratio (a blinking caret or a
+// spinner stays sharp), at the page's size (a quarter of the pixels) from a scroll, click or key
+// until it's been left alone a moment. At 1x there's nothing sharper to send.
+live("frames are sharp, and at the page's size while it's being scrolled, clicked or typed in", async () => {
   const id = await gate.createTab("/f", base + "/");
   await until(async () => (await title(id)) === "start", "the page");
   const w = await viewer(id);
@@ -197,13 +216,14 @@ live("frames are sharp, while the page is being scrolled too", async () => {
   w.send({ type: "size", width: 400, height: 300, scale: 2 });
   await until(() => last() === "[800,600]", "a sharp frame");
   expect(w.msgs.filter((m) => m.type === "frame").at(-1)).toEqual({ type: "frame", width: 400, height: 300 });
-  // Scrolling: still sharp.
+  // Scrolling: light frames while it goes on.
   const n = w.frames.length;
   const scroll = setInterval(() => w.send({ type: "mouse", event: "mouseWheel", x: 100, y: 100, button: "none", buttons: 0, clickCount: 0, modifiers: 0, deltaX: 0, deltaY: 40 }), 100);
   await evalIn(id, "document.body.style.background='red'");
-  await until(() => w.frames.length > n + 2, "frames while scrolling");
+  await until(() => w.frames.length > n && last() === "[400,300]", "a light frame while scrolling");
   clearInterval(scroll);
-  expect(w.frames.slice(n).every((f) => JSON.stringify(jpegSize(f)) === "[800,600]")).toBe(true);
+  // Left alone: sharp again.
+  await until(() => last() === "[800,600]", "sharp again", 3000);
   // At 1x: only frames at the page's size.
   w.send({ type: "size", width: 400, height: 300, scale: 1 });
   await until(() => last() === "[400,300]", "a frame at 1x");

@@ -1,8 +1,8 @@
 // A live view of one server browser tab, for the app (GET /browser/tabs/<id>/view). blimpd opens
 // its own CDP session on the tab, straight on Chrome's pipe beside the gate, and streams
-// Page.startScreencast frames (JPEG, binary messages). Chrome sends the next frame only once the
-// last is acked, and blimpd acks only when the app says it drew it, so a slow link gets fewer
-// frames instead of a queue. Input, navigation, the view's size, dialogs and copy come back as
+// Page.startScreencast frames (JPEG, binary messages). Chrome keeps at most 3 frames unacked
+// (each ack lets one more out), and blimpd acks only when the app says it drew one, so a slow link
+// gets fewer frames instead of a queue. Input, navigation, the view's size, dialogs and copy come back as
 // JSON (docs/DESIGN.md, Server browser).
 
 import type { CdpMessage, Chrome } from "./chrome";
@@ -27,14 +27,29 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
   if (!s) throw new Error("That browser tab is closed.");
   const call = (method: string, params: any = {}) => chrome.call(method, params, s);
   let closed = false;
-  let frame: number | null = null; // the frame Chrome waits to have acked
-  // Sharp: Chrome draws at 2x and the screencast sends frames at the screen's ratio, always.
+  // Chrome keeps up to 3 frames unacked. They carry the screencast's id, not their own, and every
+  // ack lets one more out, so each of the app's acks is passed on, even two that come together.
+  let frame: number | null = null; // the screencast's id, from its frames
+  let owed = 0; // frames sent to the app it hasn't acked
+  // Sharp, and light while in use: Chrome draws at 2x and the screencast sends frames at the
+  // screen's ratio, but from a scroll, click, drag or key until 400 ms after the last, at the
+  // page's size (a quarter of the pixels), so what you do shows sooner on a slow link.
   let size: { width: number; height: number; scale: number } | null = null;
+  let light = false;
+  let idle: ReturnType<typeof setTimeout> | undefined;
   const cast = async () => {
     if (!size) return;
+    const k = light ? 1 : size.scale;
     frame = null;
+    owed = 0;
     await call("Page.stopScreencast");
-    await call("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: Math.round(size.width * size.scale), maxHeight: Math.round(size.height * size.scale), everyNthFrame: 1 });
+    await call("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: Math.round(size.width * k), maxHeight: Math.round(size.height * k), everyNthFrame: 1 });
+  };
+  const busy = () => {
+    if (!size || size.scale <= 1) return;
+    clearTimeout(idle);
+    idle = setTimeout(() => ((light = false), void cast()), 400);
+    if (!light) (light = true), void cast();
   };
   let loading = false;
   // The last input sent: Chrome answers it once the page has handled it. Runtime.evaluate reaches
@@ -57,6 +72,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
   const close = () => {
     if (closed) return;
     closed = true;
+    clearTimeout(idle);
     off();
     void call("Page.stopScreencast");
     void chrome.call("Target.detachFromTarget", { sessionId: s });
@@ -75,6 +91,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
       // that size whatever the device scale, so the app can't tell it from the frame's pixels.
       case "Page.screencastFrame":
         frame = p.sessionId;
+        owed++;
         text({ type: "frame", width: p.metadata?.deviceWidth, height: p.metadata?.deviceHeight });
         return sock.send(Buffer.from(p.data, "base64"));
       case "Page.frameNavigated":
@@ -110,8 +127,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
       }
       switch (m?.type) {
         case "ack":
-          if (frame !== null) void call("Page.screencastFrameAck", { sessionId: frame });
-          frame = null;
+          if (frame !== null && owed > 0) owed--, void call("Page.screencastFrameAck", { sessionId: frame });
           return;
         case "size": {
           const width = Math.round(clamp(m.width, 1, 8000, 800));
@@ -126,6 +142,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
         }
         case "mouse":
           if (!MOUSE.has(m.event)) return;
+          if (m.event !== "mouseMoved" || m.buttons) busy(); // not a pointer passing over
           return void (input = call("Input.dispatchMouseEvent", {
             type: m.event,
             x: clamp(m.x, -1e5, 1e5, 0),
@@ -139,6 +156,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
           }));
         case "key":
           if (!KEY.has(m.event)) return;
+          busy();
           return void (input = call("Input.dispatchKeyEvent", {
             type: m.event,
             key: str(m.key),
@@ -150,7 +168,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
             modifiers: clamp(m.modifiers, 0, 15, 0),
           }));
         case "text":
-          if (typeof m.text === "string" && m.text) input = call("Input.insertText", { text: m.text });
+          if (typeof m.text === "string" && m.text) busy(), (input = call("Input.insertText", { text: m.text }));
           return;
         case "go":
           if (typeof m.url === "string" && /^https?:\/\/[^/\s]/i.test(m.url)) void call("Page.navigate", { url: m.url });
