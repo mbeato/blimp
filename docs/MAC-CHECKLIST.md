@@ -169,6 +169,14 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a folder with two Claude sessions, one working and one idle. Hover each and click the trash icon. Start a New shell from the + menu.
   Expect: only that folder's sessions are listed, each with its mark. The idle one ends at once and its conversation moves to Earlier. The working one asks "End this session?" first. `zmx list` on the server agrees. The shell row shows `>_` and its name.
 
+- [ ] **Continue in New Session.**
+  Do: in a real Claude session that did some work, right-click its row and pick Continue in New Session. Wait for Claude to answer.
+  Expect: the row says "Writing handoff…" while Claude writes. Claude saves notes/<today>/HANDOFF-….md in the folder and replies with its path. A new session opens in a split to the right, and its first message is "Read notes/…/HANDOFF-….md and do it". The old row says "Handed off". The new row has a ↳ before its title, and its tooltip names the old session.
+
+- [ ] **Context meter.**
+  Do: open a folder with a long Claude session (over half of its context window used; `/context` in Claude shows how much).
+  Expect: a thin grey bar along the bottom of its row, as long as the part used. Over 80% it is red. Hovering the row shows "Context N% (… of … tokens)", close to what Claude's own status line says. It is easy to see but doesn't draw the eye more than the amber "waiting" mark.
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**

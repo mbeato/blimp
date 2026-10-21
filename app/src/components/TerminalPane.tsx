@@ -11,6 +11,7 @@ import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
 import { InboxSummary } from "./InboxSummary";
 import { inbox } from "../lib/inbox";
+import { contextMeter, handoffNews, handoffWords } from "../lib/handoff";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
@@ -161,6 +162,8 @@ export function TerminalPane(props: {
   // Ends a drag in progress: also when the tab closes mid-drag.
   const endDrag = useRef(() => {});
   useEffect(() => () => endDrag.current(), []);
+  // Continue in New Session, asked for here: by session, whether its handoff was seen being written.
+  const handing = useRef(new Map<string, boolean>()).current;
 
   const isRunning = (name: string) => running.some((s) => s.name === name);
   for (const name of pending.keys()) if (isRunning(name) || Date.now() - pending.get(name)! > 15_000) pending.delete(name);
@@ -277,6 +280,38 @@ export function TerminalPane(props: {
     }
     return paths;
   };
+
+  // Claude writes a handoff; once the new session has started (lib/handoff.ts), it opens in a split to
+  // the right of this one. A handoff that fails says why.
+  const handOff = async (s: Session) => {
+    setCtx(null);
+    if (!api) return props.onNotice("Not connected.");
+    handing.set(s.name, false);
+    try {
+      await api.handoff(s.name);
+    } catch (e) {
+      handing.delete(s.name);
+      props.onNotice(`Couldn't continue in a new session: ${errorText(e)}`);
+    }
+  };
+  const handoffs = (link.sessions ?? []).map((s) => (s.handoff ? `${s.name}:${s.handoff.state}` : "")).join(",");
+  useEffect(() => {
+    if (!handing.size || !link.sessions) return;
+    for (const n of handoffNews(handing, link.sessions)) {
+      const child = n.child;
+      if (!child) {
+        props.onNotice(`The handoff didn't finish: ${n.error}`);
+        continue;
+      }
+      pending.set(child, Date.now());
+      away.delete(child);
+      props.onTake(child);
+      onPanes((q) => {
+        const i = q.panes.indexOf(n.parent);
+        return q.panes.length ? dropAt(q, child, i >= 0 ? i : q.panes.length - 1, "right") : show(q, child);
+      });
+    }
+  }, [handoffs]);
 
   const showHere = (name: string) => {
     away.delete(name);
@@ -486,6 +521,8 @@ export function TerminalPane(props: {
   // The row being dragged within the list (with its whole group).
   const moving = drag && drag.gap !== null ? itemOf(drag.s.name) : -1;
   const row = (s: Session, num?: number, item?: number) => {
+    const meter = contextMeter(s.context);
+    const parent = s.parent ? link.sessions?.find((x) => x.name === s.parent) : undefined;
     return (
       <div
         key={s.name}
@@ -497,7 +534,7 @@ export function TerminalPane(props: {
           (link.status !== "connected" ? " stale" : "") +
           (drag?.s.name === s.name ? " dragging" : "")
         }
-        title={`${s.kind === "shell" ? "Shell" : sessionTitle(s)}${s.label ? ` · ${s.label}` : ""}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
+        title={`${s.kind === "shell" ? "Shell" : sessionTitle(s)}${s.label ? ` · ${s.label}` : ""}\n${s.name}${STATE_LABEL[s.state] ? ` · ${STATE_LABEL[s.state]}` : ""}${meter ? `\n${meter.label}` : ""}\nDrag onto the terminal to split, or out of the window; right-click for more`}
         onContextMenu={(e) => openMenu(e, s.name)}
       >
         {confirm === s.name ? (
@@ -520,7 +557,14 @@ export function TerminalPane(props: {
             >
               <Mark s={s} />
               {num && <span className="split-num">{num}</span>}
-              <span className="srow-title">{sessionTitle(s)}</span>
+              <span className="srow-title">
+                {s.parent && (
+                  <span className="srow-parent" title={`Continued from ${parent ? sessionTitle(parent) : s.parent}`}>
+                    ↳{" "}
+                  </span>
+                )}
+                {sessionTitle(s)}
+              </span>
               <span className="srow-side">
                 <span className="srow-time">{relTime(lastActivity(s), now)}</span>
                 <Doing s={s} />
@@ -531,6 +575,7 @@ export function TerminalPane(props: {
                 <path d="M2.5 4.5h11M6 4.5V2.5h4v2M4 4.5l.7 9h6.6l.7-9M6.8 7v4.5M9.2 7v4.5" fill="none" stroke="currentColor" />
               </svg>
             </button>
+            {meter && <span className={"ctx-meter" + (meter.high ? " high" : "")} style={{ width: `${meter.width}%` }} title={meter.label} role="img" aria-label={meter.label} />}
           </>
         )}
       </div>
@@ -763,7 +808,7 @@ export function TerminalPane(props: {
               setCtx(null);
             }}
           />
-          <div className="menu context-menu" role="menu" style={{ left: Math.min(ctx.x, innerWidth - 240), top: Math.min(ctx.y, innerHeight - 150) }} onKeyDown={(e) => e.key === "Escape" && setCtx(null)}>
+          <div className="menu context-menu" role="menu" style={{ left: Math.min(ctx.x, innerWidth - 240), top: Math.min(ctx.y, innerHeight - 180) }} onKeyDown={(e) => e.key === "Escape" && setCtx(null)}>
             <button role="menuitem" autoFocus onClick={() => moveOut([ctx.name])}>
               Open in New Window
             </button>
@@ -780,6 +825,13 @@ export function TerminalPane(props: {
             {sessionOf(ctx.name) && (
               <button role="menuitem" title="For another session: its Claude can read this one's conversation and send it a message" onClick={() => (setCtx(null), void navigator.clipboard.writeText(sessionReference(sessionOf(ctx.name)!)).catch(() => {}))}>
                 Copy Reference
+              </button>
+            )}
+            {sessionOf(ctx.name) && isClaude(sessionOf(ctx.name)!) && (
+              <button role="menuitem" disabled={sessionOf(ctx.name)!.handoff?.state === "writing"} title="Claude writes down where the work stands, then a new session picks it up from there"
+                onClick={() => void handOff(sessionOf(ctx.name)!)}
+              >
+                Continue in New Session
               </button>
             )}
           </div>
@@ -806,7 +858,7 @@ export function DragGhost(props: { s?: Session; label: string; x: number; y: num
 
 function Doing(props: { s: Session }) {
   const { s } = props;
-  const words = doing(s);
+  const words = handoffWords(s) ?? doing(s);
   return (
     <span className={"srow-doing state-" + s.state}>
       {words}

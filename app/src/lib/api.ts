@@ -35,7 +35,15 @@ export type Session = {
   jobs?: Job[]; // background work Claude started, running or ended in the last 30 min (older blimpd, or none: absent)
   context?: { used: number; limit: number }; // tokens in Claude's context window, and its size (older blimpd: absent)
   git?: { cwd: string; branch?: string }; // the folder and branch Claude's latest line was in (older blimpd: absent)
+  // Continue in New Session: on the session that handed off, how it goes; on the new one, the session it
+  // came from (older blimpd: absent).
+  handoff?: Handoff;
+  parent?: string;
 };
+
+// writing: Claude is writing the handoff file. started: child (a session's name) was started reading
+// file. failed: error says why.
+export type Handoff = { state: "writing" | "started" | "failed"; child?: string; file?: string; error?: string };
 
 // Background work Claude started (blimpd's activity.ts): a Bash command run in the background, a Monitor,
 // an async agent or a workflow. Times in ms; lastLine: a running bash job's or Monitor's last output line
@@ -118,6 +126,12 @@ export class Api {
 
   createSession(body: { dir: string; name?: string; resume?: string; kind?: string }) {
     return this.post<{ name: string }>("/sessions", body);
+  }
+
+  // Claude writes a handoff, then a new session in the folder reads it (the session's `handoff` says how
+  // it goes). 409 while Claude asks something, or while one is being written.
+  handoff(name: string) {
+    return this.post<Handoff>(`/sessions/${encodeURIComponent(name)}/handoff`, {});
   }
 
   kinds() {
