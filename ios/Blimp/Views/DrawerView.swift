@@ -36,19 +36,23 @@ struct DrawerView: View {
             let out = pull.map { min(width, max(0, $0)) } ?? (open ? min(width, max(0, width + (push ?? 0))) : 0)
             let still = pull == nil && push == nil
             ZStack(alignment: .leading) {
-                Color.black.opacity(0.3 * out / width)
-                    .ignoresSafeArea()
-                    .onTapGesture { open = false }
-                    .accessibilityHidden(true)
-                panel
-                    .frame(width: width)
-                    .background(Color(.systemBackground).ignoresSafeArea())
-                    .offset(x: out - width)
+                // Closed, it isn't there at all, not only off screen: VoiceOver and the tests would still find it.
+                // While a swipe pulls it out it is, following the finger.
+                if open || pull != nil {
+                    Color.black.opacity(0.3 * out / width)
+                        .ignoresSafeArea()
+                        .onTapGesture { open = false }
+                        .accessibilityHidden(true)
+                        .transition(.opacity)
+                    panel
+                        .frame(width: width)
+                        .background(Color(.systemBackground).ignoresSafeArea())
+                        .offset(x: out - width)
+                        .transition(.move(edge: .leading))
+                }
             }
             .simultaneousGesture(closing(width: width), including: open ? .all : .none)
-            // Closed, it's off screen, and VoiceOver, the tests and taps don't find it there.
             .allowsHitTesting(open)
-            .accessibilityHidden(!open && pull == nil)
             .animation(.snappy, value: open)
             .animation(.snappy, value: still)
         }
