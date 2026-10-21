@@ -3,7 +3,7 @@
 // for here). Pair, pick a project, open sessions from the drawer, read a chat, hide the keyboard, send a
 // message, answer a permission prompt; Stop and a folded long reply; start a session from a blank chat and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock; two questions
-// at once; unread and asking marks. What reached the sessions is checked by the job afterwards. Screenshots
+// at once; unread and asking marks; a project's inbox. What reached the sessions is checked by the job afterwards. Screenshots
 // stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
@@ -31,10 +31,10 @@ final class BlimpUITests: XCTestCase {
         try wait(connect, "Connect")
         connect.tap()
 
-        // A blank chat in a project; the drawer lists blimp-demo's session by title, with a reply not seen yet
+        // A project's inbox; the drawer lists blimp-demo's session by title, with a reply not seen yet
         // (the stand-ins' replies came after blimpd started)
         try wait(element("projectPicker"), "the project picker")
-        shot("1-blank")
+        shot("1-inbox")
         try pickProject("blimp-demo")
         try openDrawer()
         let chatRow = element("session-demo-chat")
@@ -352,14 +352,36 @@ final class BlimpUITests: XCTestCase {
         try until(new, "exists == false", "the drawer to close on a swipe left")
     }
 
+    // MARK: - The inbox
+
+    /// A project opens to its inbox: blimp-demo's demo-chat is in progress, in the words blimpd's note call got from
+    /// the stand-in claude, and a tap opens its chat. The drawer's Inbox goes back to it. (Last: it runs after
+    /// test1 has read demo-chat, which an in-progress note keeps listed.)
+    func testInbox() throws {
+        try launchPaired()
+        try pickProject("blimp-demo")
+        try openDrawer()
+        element("drawerInbox").tap()
+        try wait(element("inboxNewChat"), "the inbox")
+        let line = element("inbox-session-demo-chat")
+        try wait(line, "demo-chat in the inbox", timeout: 60)
+        try until(line, "label CONTAINS 'dark mode toggle half done'", "demo-chat's note", timeout: 60)
+        shot("31-inbox")
+        line.tap()
+        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the inbox")
+        try openDrawer()
+        element("drawerInbox").tap()
+        try wait(element("inboxNewChat"), "the inbox again from the drawer")
+    }
+
     // MARK: - Helpers
 
-    /// Picks a project from the picker above the chat, unless it's the one showing; the chat is then a blank one.
+    /// Picks a project from the picker above the chat, unless it's the one showing; it opens to its inbox.
     private func pickProject(_ name: String) throws {
         let picker = element("projectPicker")
         try wait(picker, "the project picker")
         if picker.label.hasPrefix(name) { return }
-        // the open drawer covers the picker: close it (to a blank chat, as picking a project gives anyway)
+        // the open drawer covers the picker: close it (to a blank chat; picking a project then opens its inbox)
         let new = element("drawerNewChat")
         if new.exists {
             new.tap()

@@ -41,8 +41,9 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] Answered once. Tap a permission button. The buttons stay greyed until the prompt goes away. A second tap does nothing.
 - [ ] Changed options. A permission can first show Yes and No, then a moment later all of Claude's options. If you tap just as they change, nothing is pressed and "The question changed. Check it and answer again." shows.
 - [ ] No tool steps. The chat shows only your messages and Claude's replies. While Claude works, the working row says its latest step after "working…" (for example "Ran npm test").
-- [ ] A blank chat. Open the app: a blank chat in the project you used last. Type and send: Claude starts there with your message, and the chat becomes that session.
-- [ ] The project picker. Tap the project's name at the top: the projects, newest activity first, with "Asking you something" or "New reply" under one that needs you. Pick one: a blank chat there.
+- [ ] The inbox. Open the app: the inbox of the project you used last. Under Waiting on you, In progress and Done, a line per session with a few words on where it stands (Haiku's note, a little after its turn ends). Tap a line: its chat opens. A Done line goes once you've opened that session. The drawer's Inbox comes back here.
+- [ ] A blank chat. New chat, at the top of the inbox or the top right. Type and send: Claude starts there with your message, and the chat becomes that session.
+- [ ] The project picker. Tap the project's name at the top: the projects, newest activity first, with "Asking you something" or "New reply" under one that needs you. Pick one: its inbox.
 - [ ] The drawer. Swipe right from the left edge, or tap the button at the top left: the project's sessions, running and past, the newest activity on top. A swipe left or a tap beside it closes it. Settings is at its bottom.
 - [ ] Marks. A session asking you something shows an amber question mark; one with a reply you haven't seen, a blue dot; one working, a spinner. The drawer button shows the mark of anything but the chat on screen.
 - [ ] Read on one, read on both. Open a session with a blue dot on the phone: the dot goes on the phone and on the Mac. Show one with a blue dot on the Mac (window in front): it goes on the phone too.

@@ -138,12 +138,28 @@ public struct Session: Codable, Sendable, Equatable, Identifiable {
     public let prompt: Prompt?
     /// Claude replied since the phone or the Mac last had it on screen (nil from an older blimpd).
     public var unread: Bool? = nil
+    /// Haiku's note on its last turn (nil from an older blimpd, or with names off).
+    public var note: Note? = nil
 
     public var id: String { name }
     /// blimpd can show a session as chat only when Claude Code runs in it.
     public var isClaude: Bool { sessionId != nil }
     /// Milliseconds: the latest thing that happened in it.
     public var activity: Double { max(updatedAt ?? 0, stateSince ?? 0, created * 1000) }
+}
+
+/// Where a Claude session stands after its last turn, in Haiku's words (blimpd's notes.ts).
+public enum NoteStatus: String, Codable, Sendable, Equatable {
+    case done, progress, question
+    public init(from decoder: Decoder) throws {
+        self = NoteStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .done
+    }
+}
+
+public struct Note: Codable, Sendable, Equatable {
+    public let status: NoteStatus
+    public let text: String
+    public let at: Double
 }
 
 public enum ChatRole: String, Codable, Sendable, Equatable {
@@ -243,6 +259,7 @@ public struct RecentFolder: Codable, Sendable, Equatable { public let dir: Strin
 public struct Conversation: Codable, Sendable, Equatable, Identifiable {
     public let sessionId: String; public let title: String; public let updatedAt: Double
     public var unread: Bool? = nil
+    public var note: Note? = nil
     public var id: String { sessionId }
 }
 public struct Started: Codable, Sendable, Equatable { public let name: String }

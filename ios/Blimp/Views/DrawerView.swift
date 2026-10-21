@@ -1,4 +1,4 @@
-// The drawer from the left: New chat, the project's sessions (running and past, newest activity first, each with
+// The drawer from the left: the project's inbox, New chat, its sessions (running and past, newest activity first, each with
 // its mark), and Settings. A tap opens one; press and hold a running one to end it. A swipe left, or a tap beside
 // it, closes the drawer.
 import BlimpKit
@@ -11,6 +11,7 @@ struct DrawerView: View {
     /// The row of what the chat shows.
     let selected: String?
     let onPick: (DrawerRow) -> Void
+    let onInbox: () -> Void
     let onNew: () -> Void
     let onSettings: () -> Void
     @Environment(Store.self) private var store
@@ -49,6 +50,12 @@ struct DrawerView: View {
     private var panel: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title).font(.title3.bold()).padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
+            Button(action: onInbox) {
+                Label("Inbox", systemImage: "tray").frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .accessibilityIdentifier("drawerInbox")
             Button(action: onNew) {
                 Label("New chat", systemImage: "square.and.pencil").frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -83,7 +90,7 @@ struct DrawerView: View {
     }
 }
 
-private struct RowLabel: View {
+struct RowLabel: View {
     let row: DrawerRow
 
     var body: some View {

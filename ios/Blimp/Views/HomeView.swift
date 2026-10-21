@@ -1,10 +1,12 @@
-// The app's one screen, as chat apps have it: a chat, with the project picker above it and a drawer from the
-// left that lists the project's sessions, running and past, newest activity first. A blank chat starts a session.
+// The app's one screen, as chat apps have it: a project's inbox or a chat, with the project picker above it and a
+// drawer from the left that lists the project's sessions, running and past, newest activity first. A project opens
+// to its inbox; a blank chat starts a session.
 import BlimpKit
 import SwiftUI
 
 /// What the chat shows.
 enum Opened: Equatable {
+    case inbox
     case blank
     case session(String)
     case past(Conversation)
@@ -12,7 +14,7 @@ enum Opened: Equatable {
 
 struct HomeView: View {
     @Environment(Store.self) private var store
-    @State private var opened: Opened = .blank
+    @State private var opened: Opened = .inbox
     @State private var drawer = false
     @State private var folders: [RecentFolder] = []
     @State private var earlier: [Conversation] = []
@@ -36,7 +38,7 @@ struct HomeView: View {
         }
         .overlay {
             DrawerView(open: $drawer, title: store.dir.map(Drawer.name(of:)) ?? "Sessions", rows: rows, selected: selected,
-                       onPick: pick, onNew: { show(.blank) }, onSettings: { drawer = false; showSettings = true })
+                       onPick: pick, onInbox: { show(.inbox) }, onNew: { show(.blank) }, onSettings: { drawer = false; showSettings = true })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .task(id: store.connection == .online) {
@@ -44,8 +46,8 @@ struct HomeView: View {
             folders = (try? await api.folders()) ?? []
             if store.dir == nil { store.dir = projects.first?.dir }
         }
-        // The project's past conversations: again when the drawer opens, and as its sessions start and end.
-        .task(id: EarlierKey(dir: store.dir, drawer: drawer, online: store.connection == .online,
+        // The project's past conversations: again when the drawer or the inbox opens, and as its sessions start and end.
+        .task(id: EarlierKey(dir: store.dir, drawer: drawer, inbox: opened == .inbox, online: store.connection == .online,
                              running: Set(store.sessions.filter { $0.dir == store.dir }.map(\.name)))) {
             guard let dir = store.dir, let api = store.api else { return }
             earlier = (try? await api.conversations(dir: dir)) ?? []
@@ -56,6 +58,13 @@ struct HomeView: View {
 
     @ViewBuilder private var chat: some View {
         switch opened {
+        case .inbox:
+            if let dir = store.dir {
+                InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), rows: rows,
+                          onPick: open, onNew: { show(.blank) })
+            } else {
+                Text("No projects yet. Start Claude in a folder on the Mac first.").foregroundStyle(.secondary).padding()
+            }
         case .session(let name):
             SessionView(name: name) { show(.session($0)) }
         case .past(let c):
@@ -136,6 +145,7 @@ struct HomeView: View {
 
     private var subtitle: String {
         switch opened {
+        case .inbox: "Inbox"
         case .blank: "New chat"
         case .session(let name): store.sessions.first { $0.name == name }?.title ?? "Starting…"
         case .past(let c): c.title
@@ -151,14 +161,16 @@ struct HomeView: View {
 
     private var selected: String? {
         switch opened {
-        case .blank: nil
+        case .inbox, .blank: nil
         case .session(let name): "session-" + name
         case .past(let c): "past-" + c.sessionId
         }
     }
 
-    private func pick(_ row: DrawerRow) {
-        switch row.item {
+    private func pick(_ row: DrawerRow) { open(row.item) }
+
+    private func open(_ item: DrawerRow.Item) {
+        switch item {
         case .running(let s): show(.session(s.name))
         case .past(let c): show(.past(c))
         }
@@ -167,7 +179,7 @@ struct HomeView: View {
     private func pickProject(_ dir: String) {
         store.dir = dir
         earlier = []
-        show(.blank)
+        show(.inbox)
     }
 
     /// A session from another project (a banner's) brings its project along.
@@ -184,6 +196,7 @@ struct HomeView: View {
 private struct EarlierKey: Equatable {
     let dir: String?
     let drawer: Bool
+    let inbox: Bool
     let online: Bool
     let running: Set<String>
 }

@@ -24,7 +24,7 @@ words.
 - Its answer: one line, `DONE | <words>`, `PROGRESS | <words>` or `QUESTION | <words>`. DONE: Claude did what
   was asked and waits for the next request. PROGRESS: the work isn't finished (Claude stopped part way, or says
   what it does next). QUESTION: Claude asks you something or waits for a decision. Anything else is a failed
-  try; a failed session waits 10 minutes or its next turn, whichever is later.
+  try; a failed session waits 10 minutes.
 - `<socket dir>/notes.json`: `{ "<sessionId>": { "status": "done" | "progress" | "question", "text": string,
   "at": ms, "turn": "<prompts>/<replies>" } }`, 600, through a temp file, the 500 newest kept.
 - `GET /sessions` and `GET /conversations` carry each one's `note` (`{ status, text, at }`), none while names
@@ -51,7 +51,7 @@ Done line goes.
 ## Mac app
 
 At the top of the session list, above the rows: the summary, folding to one line ("1 waiting · 1 in progress ·
-2 done") with a chevron. Folded or not is remembered per window in localStorage.
+2 done") with a chevron. Folded or not is kept on this computer, like Earlier.
 
 ## Phone app
 
