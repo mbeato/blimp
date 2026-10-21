@@ -1,4 +1,4 @@
-// Small pieces shared by the chat screen and its drawer: a row's mark, "2 min. ago", the "end it?" question, a plain-words alert.
+// Small pieces shared by the chat screen and its drawer: a row's mark, the Inbox button, "2 min. ago", the "end it?" question, a plain-words alert.
 import BlimpKit
 import SwiftUI
 
@@ -21,6 +21,15 @@ struct MarkView: View {
         }
         .frame(width: 14, height: 14)
         .frame(width: 20)
+    }
+}
+
+/// The top right's way back to the project's inbox, where a new chat starts.
+struct InboxButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button("Inbox", systemImage: "tray", action: action).accessibilityIdentifier("inboxButton")
     }
 }
 

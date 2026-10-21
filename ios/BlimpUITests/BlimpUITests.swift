@@ -1,7 +1,7 @@
 // The app end to end, in the simulator, against a real blimpd with stand-in Claude sessions (the
 // app-e2e job in .github/workflows/ios.yml; ios/e2e/setup.ts makes the sessions and the texts looked
 // for here). Pair, pick a project, open sessions from the drawer, read a chat, hide the keyboard, send a
-// message, answer a permission prompt; Stop and a folded long reply; start a session from a blank chat and
+// message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock; two questions
 // at once; unread and asking marks; a project's inbox. What reached the sessions is checked by the job afterwards. Screenshots
 // stay in the .xcresult.
@@ -167,16 +167,16 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - Start and end a session
 
-    /// A blank chat: Send starts Claude in the project with the message as its first prompt (the job checks
+    /// The inbox's box: Send starts Claude in the project with the message as its first prompt (the job checks
     /// its arguments). Press and hold its row in the drawer to end it.
     func test4StartAndEnd() throws {
         try launchPaired()
         try pickProject("blimp-demo")
         try openDrawer()
         let before = Set(newRows().map(\.identifier))
-        element("drawerNewChat").tap()
-        try wait(labeled("What should Claude do here?"), "the blank chat")
-        if app.buttons["Talk"].exists { throw failed("no mic in a blank chat") }
+        element("drawerInbox").tap()
+        try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox")
+        if app.buttons["Talk"].exists { throw failed("no mic in the inbox's box") }
         shot("10-blank")
         let input = element("messageField")
         try type("Write the changelog", into: input)
@@ -343,7 +343,7 @@ final class BlimpUITests: XCTestCase {
     /// A swipe right, from the middle of the screen too, opens the drawer; a swipe left closes it.
     func test9DrawerFromASwipe() throws {
         try launchPaired()
-        let new = element("drawerNewChat")
+        let new = element("drawerInbox")
         if new.exists { throw failed("the drawer closed at launch") }
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
@@ -364,16 +364,21 @@ final class BlimpUITests: XCTestCase {
         try pickProject("blimp-demo")
         try openDrawer()
         element("drawerInbox").tap()
-        try wait(element("inboxNewChat"), "the inbox")
+        try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox")
         let line = element("inbox-session-demo-chat")
         try wait(line, "demo-chat in the inbox", timeout: 60)
         try until(line, "label CONTAINS 'dark mode toggle half done'", "demo-chat's note", timeout: 60)
         shot("31-inbox")
         line.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the inbox")
-        try openDrawer()
-        element("drawerInbox").tap()
-        try wait(element("inboxNewChat"), "the inbox again from the drawer")
+        // The top right: the speaker, then Inbox, which goes back
+        let speaker = app.buttons["Read aloud"].exists ? app.buttons["Read aloud"] : app.buttons["Stop reading aloud"]
+        let inbox = element("inboxButton")
+        try wait(inbox, "Inbox at the top right")
+        if speaker.frame.minX >= inbox.frame.minX { throw failed("the speaker left of Inbox") }
+        shot("32-chat-top-right")
+        inbox.tap()
+        try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox again from the chat")
     }
 
     // MARK: - Helpers
@@ -389,22 +394,22 @@ final class BlimpUITests: XCTestCase {
         let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
         try wait(item, "\(name) in the project picker")
         item.tap()
-        try until(element("drawerNewChat"), "exists == false", "the drawer to close on \(name)'s inbox")
+        try until(element("drawerInbox"), "exists == false", "the drawer to close on \(name)'s inbox")
         try until(element("screenTitle"), "label CONTAINS '\(name)'", "the title to show \(name)")
     }
 
     private func openDrawer() throws {
-        if element("drawerNewChat").exists { return }
+        if element("drawerInbox").exists { return }
         let button = element("drawerButton")
         try wait(button, "the drawer button")
         button.tap()
-        try wait(element("drawerNewChat"), "the drawer")
+        try wait(element("drawerInbox"), "the drawer")
     }
 
     /// A tap beside the open drawer closes it.
     private func closeDrawer() throws {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        try until(element("drawerNewChat"), "exists == false", "the drawer to close")
+        try until(element("drawerInbox"), "exists == false", "the drawer to close")
     }
 
     /// Unfolds Earlier in the open drawer (folded at first, and kept as it was left).

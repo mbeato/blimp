@@ -1,4 +1,4 @@
-// The drawer from the left: the project picker, the project's inbox, New chat, its running sessions, then its past
+// The drawer from the left: the project picker, the project's inbox (where a new chat starts), its running sessions, then its past
 // conversations folded under Earlier (each newest activity first, with its mark), and Settings. A tap opens one;
 // press and hold a running one to end it. A swipe left, or a tap beside it, closes the drawer.
 import BlimpKit
@@ -15,7 +15,6 @@ struct DrawerView: View {
     let selected: String?
     let onPick: (DrawerRow) -> Void
     let onInbox: () -> Void
-    let onNew: () -> Void
     let onSettings: () -> Void
     @Environment(Store.self) private var store
     @State private var pendingEnd: Session?
@@ -61,12 +60,6 @@ struct DrawerView: View {
             .padding(.horizontal)
             .padding(.vertical, 10)
             .accessibilityIdentifier("drawerInbox")
-            Button(action: onNew) {
-                Label("New chat", systemImage: "square.and.pencil").frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 10)
-            .accessibilityIdentifier("drawerNewChat")
             List {
                 if !active.isEmpty {
                     Section("Active") { ForEach(active) { rowButton($0) } }

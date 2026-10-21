@@ -1,5 +1,6 @@
-// A project's inbox, what opening a project shows: New chat, then what's waiting on you, in progress and done
-// (each line opens its session), then the project's sessions and past conversations as the drawer lists them.
+// A project's inbox, what opening a project shows, above the box that starts a new chat (StartView): what's
+// waiting on you, in progress and done (each line opens its session), then the project's sessions and past
+// conversations as the drawer lists them.
 import BlimpKit
 import SwiftUI
 
@@ -8,16 +9,9 @@ struct InboxView: View {
     let inbox: Inbox
     let rows: [DrawerRow]
     let onPick: (DrawerRow.Item) -> Void
-    let onNew: () -> Void
 
     var body: some View {
         List {
-            Section {
-                Button(action: onNew) {
-                    Label("New chat", systemImage: "square.and.pencil").frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .accessibilityIdentifier("inboxNewChat")
-            }
             heading("Waiting on you", inbox.waiting, color: .orange)
             heading("In progress", inbox.progress, color: .secondary)
             heading("Done", inbox.done, color: .secondary)
@@ -34,8 +28,10 @@ struct InboxView: View {
         .listStyle(.insetGrouped)
         .overlay {
             if inbox.isEmpty && rows.isEmpty {
-                Text("Nothing here yet. New chat starts Claude in \(Drawer.name(of: dir)).")
-                    .foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
+                VStack(spacing: 6) {
+                    Text(Drawer.name(of: dir)).font(.title2.bold())
+                    Text("What should Claude do here?").foregroundStyle(.secondary)
+                }
             }
         }
     }

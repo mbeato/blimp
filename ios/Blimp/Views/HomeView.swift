@@ -1,13 +1,12 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
 // anywhere, or its button) with the project picker and the project's sessions, running and past. A project opens to
-// its inbox; a blank chat starts a session.
+// its inbox, where the box at the bottom starts a session.
 import BlimpKit
 import SwiftUI
 
 /// What the chat shows.
 enum Opened: Equatable {
     case inbox
-    case blank
     case session(String)
     case past(Conversation)
 }
@@ -35,7 +34,7 @@ struct HomeView: View {
         )
         .overlay {
             DrawerView(open: $drawer, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
-                       onPick: pick, onInbox: { show(.inbox) }, onNew: { show(.blank) }, onSettings: { drawer = false; showSettings = true })
+                       onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .task(id: store.connection == .online) {
@@ -57,21 +56,18 @@ struct HomeView: View {
         switch opened {
         case .inbox:
             if let dir = store.dir {
-                InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), rows: rows,
-                          onPick: open, onNew: { show(.blank) })
+                StartView(dir: dir, past: nil,
+                          inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), rows: rows, onPick: open)) {
+                    show(.session($0))
+                }
+                .id(dir)
             } else {
                 Text("No projects yet. Start Claude in a folder on the Mac first.").foregroundStyle(.secondary).padding()
             }
         case .session(let name):
-            SessionView(name: name) { show(.session($0)) }
+            SessionView(name: name, onInbox: { show(.inbox) }) { show(.session($0)) }
         case .past(let c):
             if let dir = store.dir { StartView(dir: dir, past: c) { show(.session($0)) }.id(c.sessionId) }
-        case .blank:
-            if let dir = store.dir {
-                StartView(dir: dir, past: nil) { show(.session($0)) }.id(dir)
-            } else {
-                Text("No projects yet. Start Claude in a folder on the Mac first.").foregroundStyle(.secondary).padding()
-            }
         }
     }
 
@@ -85,9 +81,9 @@ struct HomeView: View {
             .accessibilityIdentifier("drawerButton")
         }
         ToolbarItem(placement: .principal) { title }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button("New chat", systemImage: "square.and.pencil") { show(.blank) }
-                .accessibilityIdentifier("newChat")
+        // In a session, its own toolbar has Inbox, after the speaker.
+        if case .past = opened {
+            ToolbarItem(placement: .topBarTrailing) { InboxButton { show(.inbox) } }
         }
     }
 
@@ -126,7 +122,6 @@ struct HomeView: View {
     private var subtitle: String {
         switch opened {
         case .inbox: "Inbox"
-        case .blank: "New chat"
         case .session(let name): store.sessions.first { $0.name == name }?.title ?? "Starting…"
         case .past(let c): c.title
         }
@@ -141,7 +136,7 @@ struct HomeView: View {
 
     private var selected: String? {
         switch opened {
-        case .inbox, .blank: nil
+        case .inbox: nil
         case .session(let name): "session-" + name
         case .past(let c): "past-" + c.sessionId
         }

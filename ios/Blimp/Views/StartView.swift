@@ -1,12 +1,13 @@
-// A chat with nothing running: a blank one (Send starts Claude in the project with your message), or a past
-// conversation to read (Send resumes it with your message). Nothing starts until Send.
+// A chat with nothing running: the project's inbox (Send starts Claude in the project with your message), or a
+// past conversation to read (Send resumes it with your message). Nothing starts until Send.
 import BlimpKit
 import SwiftUI
 
 struct StartView: View {
     let dir: String
-    /// nil: a blank chat.
+    /// nil: the project's inbox, above the box.
     let past: Conversation?
+    var inbox: InboxView? = nil
     /// The session Send started: the chat becomes it.
     let onStarted: (String) -> Void
     @Environment(Store.self) private var store
@@ -19,6 +20,30 @@ struct StartView: View {
     private static let bottom = "bottom"
 
     var body: some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
+                    InputBar(text: $draft, sending: starting, listening: false, onSend: send, onMicDown: nil, onMicUp: nil,
+                             placeholder: past == nil ? "Ask Claude in \(Drawer.name(of: dir))" : "Message to pick it up again")
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(.bar)
+            }
+            .task { await load() }
+    }
+
+    @ViewBuilder private var content: some View {
+        if let inbox {
+            inbox.scrollDismissesKeyboard(.interactively)
+        } else {
+            messageList
+        }
+    }
+
+    private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -32,28 +57,11 @@ struct StartView: View {
             // The messages come after the screen has laid out: open at the newest.
             .onChange(of: messages) { Task { @MainActor in proxy.scrollTo(Self.bottom, anchor: .bottom) } }
             .overlay { empty }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
-                    InputBar(text: $draft, sending: starting, listening: false, onSend: send, onMicDown: nil, onMicUp: nil,
-                             placeholder: past == nil ? "Ask Claude in \(Drawer.name(of: dir))" : "Message to pick it up again")
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity)
-                .background(.bar)
-            }
         }
-        .task { await load() }
     }
 
     @ViewBuilder private var empty: some View {
-        if past == nil {
-            VStack(spacing: 6) {
-                Text(Drawer.name(of: dir)).font(.title2.bold())
-                Text("What should Claude do here?").foregroundStyle(.secondary)
-            }
-        } else if !loaded {
+        if !loaded {
             ProgressView()
         } else if messages.isEmpty {
             Text("No messages to show.").foregroundStyle(.secondary)

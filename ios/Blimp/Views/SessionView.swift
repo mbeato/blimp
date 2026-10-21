@@ -7,11 +7,12 @@ import SwiftUI
 
 struct SessionView: View {
     let name: String
+    let onInbox: () -> Void
     /// Shows another session in this one's place: the one Resume started, or a banner's.
     let onOpen: (String) -> Void
 
     var body: some View {
-        ChatScreen(name: name, onResumed: onOpen)
+        ChatScreen(name: name, onInbox: onInbox, onResumed: onOpen)
             .id(name)
     }
 }
@@ -19,6 +20,7 @@ struct SessionView: View {
 /// Owns the ChatModel: made when the screen first appears, its socket closed when the screen goes.
 private struct ChatScreen: View {
     let name: String
+    let onInbox: () -> Void
     let onResumed: (String) -> Void
     @Environment(Store.self) private var store
     @State private var model: ChatModel?
@@ -26,7 +28,7 @@ private struct ChatScreen: View {
     var body: some View {
         Group {
             if let model {
-                ChatContent(model: model, onResumed: onResumed)
+                ChatContent(model: model, onInbox: onInbox, onResumed: onResumed)
             } else {
                 Color.clear
             }
@@ -42,6 +44,7 @@ private struct ChatScreen: View {
 
 private struct ChatContent: View {
     let model: ChatModel
+    let onInbox: () -> Void
     let onResumed: (String) -> Void
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var scenePhase
@@ -148,9 +151,11 @@ private struct ChatContent: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            // The speaker, then Inbox at the far right.
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Button(readAloud ? "Stop reading aloud" : "Read aloud",
                        systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
+                InboxButton(action: onInbox)
             }
         }
         .onReturnFromBackground { model.reconnectNow() }
