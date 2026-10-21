@@ -1,5 +1,8 @@
 // One open chat: blimpd's chat socket for a session, its messages, and what the phone types into it
 // (docs/DESIGN.md "Chat"). The session itself (state, prompt) comes live from the Store's /events.
+// The last few chats opened stay loaded (`warm`): switching back shows their messages at once, and the
+// socket's new history replaces them. Also what a chat does over blimpd's HTTP routes: run a command Claude
+// handed over and send its result back, give Claude a secret, hand off to a new session.
 import BlimpKit
 import Foundation
 import Observation
@@ -28,8 +31,22 @@ final class ChatModel {
     private var inputId: String?
     private var answerId: String?
     private var stopId: String?
+    /// An answer or a Dismiss went through in this visit: the chat offers the next session waiting.
+    private(set) var answeredHere = false
+    /// When this phone last had the chat on screen before this visit (ms; nil for never), and whether it had a
+    /// reply neither app had shown as the visit began: for "since you left" and the return card.
+    private(set) var visitFrom: Double?
+    private(set) var unreadAtOpen = false
+    /// Stop and send: between the Esc and the message.
+    private(set) var redirecting = false
+    // Runs of commands Claude handed over: commands being started, run sessions whose result is going or went to Claude.
+    private(set) var runsStarting: Set<String> = []
+    private(set) var runsSending: Set<String> = []
+    private(set) var runsSent: Set<String> = []
 
     private let store: Store
+    /// The server it was made for: a warm chat from another pairing isn't reused.
+    private let server: ServerLink?
     @ObservationIgnored private var socket: Socket?
     // Bumped by open() and close(), so a change noticed for an earlier open() doesn't watch twice.
     @ObservationIgnored private var watchRound = 0
@@ -45,6 +62,38 @@ final class ChatModel {
     init(name: String, store: Store) {
         self.name = name
         self.store = store
+        self.server = store.server
+    }
+
+    /// The chats kept loaded, the latest first.
+    private static var recent: [ChatModel] = []
+    private static let kept = 4
+
+    /// The chat for `name`: one still loaded from a recent visit, else a new one. Only the newest few stay.
+    static func warm(_ name: String, store: Store) -> ChatModel {
+        if let i = recent.firstIndex(where: { $0.name == name && $0.store === store && $0.server == store.server }) {
+            let m = recent.remove(at: i)
+            recent.insert(m, at: 0)
+            return m
+        }
+        let m = ChatModel(name: name, store: store)
+        recent.insert(m, at: 0)
+        for old in recent.dropFirst(kept) { old.close() }
+        recent = Array(recent.prefix(kept))
+        return m
+    }
+
+    private static let shownKey = "chat.lastShown"
+
+    /// When each chat was last on screen on this phone (ms, by session name).
+    static func lastShown(_ name: String) -> Double? {
+        (UserDefaults.standard.dictionary(forKey: shownKey) as? [String: Double])?[name]
+    }
+
+    /// The chat is on screen now (it opened, it goes, or the app goes to the background with it up).
+    static func markShown(_ name: String) {
+        let last = UserDefaults.standard.dictionary(forKey: shownKey) as? [String: Double] ?? [:]
+        UserDefaults.standard.set(RecapCard.markShown(last, [name], now: Date.now.timeIntervalSince1970 * 1000), forKey: shownKey)
     }
 
     isolated deinit {
@@ -77,8 +126,13 @@ final class ChatModel {
     var answered: Bool { prompt != nil && prompt?.at == answeredAt }
     var stopping: Bool { stopId != nil }
 
-    /// Opens the chat socket (again, after close()). The screen calls it on appear.
+    /// Opens the chat socket (again, after close()). The screen calls it on appear: a new visit.
     func open() {
+        visitFrom = Self.lastShown(name)
+        unreadAtOpen = session?.unread == true
+        answeredHere = false
+        lastError = nil
+        Self.markShown(name)
         if !watching {
             watching = true
             watchRound += 1
@@ -176,7 +230,9 @@ final class ChatModel {
         answerId = id
         defer { answerId = nil }
         switch await request(command, id: id) {
-        case .ack: answeredAt = shown.at
+        case .ack:
+            answeredAt = shown.at
+            answeredHere = true
         case .ended: break
         // A new wait, other options, or the Mac answered first; the bar shows the latest prompt.
         case .failed(let error) where error == "the question changed": lastError = Self.questionChanged
@@ -210,12 +266,102 @@ final class ChatModel {
         stopId = id
         defer { stopId = nil }
         switch await request(.dismiss(id: id, at: shown.at), id: id) {
-        case .ack: answeredAt = shown.at
+        case .ack:
+            answeredAt = shown.at
+            answeredHere = true
         case .ended: break
         case .failed(let error) where error == "the question changed": lastError = "That question isn't up anymore."
         case .failed(let error): lastError = "Not sent: \(error)"
         case .notSent, .timeout: lastError = Self.notSent
         }
+    }
+
+    /// Stop and send: Esc, then `text` as a new message once Claude has stopped (it gets 5 s). true once blimpd
+    /// has the text; false (and lastError set) if not, and then nothing is typed.
+    func stopAndSend(_ text: String) async -> Bool {
+        guard !redirecting else { return false }
+        redirecting = true
+        defer { redirecting = false }
+        await stop()
+        guard lastError == nil, !ended else { return false }
+        let end = Date.now.addingTimeInterval(5)
+        while working, Date.now < end { try? await Task.sleep(for: .milliseconds(100)) }
+        guard !working else {
+            lastError = "Claude didn't stop. Nothing was sent."
+            return false
+        }
+        return await send(text)
+    }
+
+    // MARK: - Over HTTP
+
+    /// Where `command` (one of Session.runnable) stands for this session.
+    func runStatus(_ command: String) -> RunStatus {
+        guard let s = session else { return .ready }
+        return RunStatus.of(command, for: s, in: store.sessions, starting: runsStarting, sending: runsSending, sent: runsSent)
+    }
+
+    /// Runs a command Claude handed over, in a run session of its own beside this one (after the confirm sheet).
+    func run(_ command: String) async {
+        guard let api = store.api, !runsStarting.contains(command) else { return }
+        lastError = nil
+        runsStarting.insert(command)
+        defer { runsStarting.remove(command) }
+        do {
+            let run = try await api.run(session: name, command: command)
+            // Starting until the list has it (or 5 s), so a second tap can't run it twice.
+            let end = Date.now.addingTimeInterval(5)
+            while !store.sessions.contains(where: { $0.name == run }), Date.now < end { try? await Task.sleep(for: .milliseconds(100)) }
+        } catch {
+            lastError = "Not run: " + Store.words(for: error)
+        }
+    }
+
+    /// Types an ended run's exit code and last lines into Claude here. Refused while Claude asks something.
+    func sendResult(of run: String) async {
+        guard let api = store.api, !runsSending.contains(run) else { return }
+        lastError = nil
+        runsSending.insert(run)
+        defer { runsSending.remove(run) }
+        do {
+            try await api.sendRunResult(name: run)
+            runsSent.insert(run)
+        } catch {
+            lastError = Store.words(for: error)
+        }
+    }
+
+    /// Saves a secret on the server and tells Claude here where it is (never what it is). nil once done, else why not.
+    func giveSecret(name secret: String, value: String) async -> String? {
+        guard let api = store.api else { return Store.words(for: APIError.offline) }
+        do {
+            try await api.saveSecret(name: secret, value: value)
+        } catch {
+            return "Not saved: " + Store.words(for: error)
+        }
+        do {
+            try await api.tellSecret(name: secret, session: name)
+            return nil
+        } catch {
+            return "Saved, but Claude wasn't told: " + Store.words(for: error)
+        }
+    }
+
+    /// Continue in a new session: Claude writes a handoff, then blimpd starts a new session that reads it.
+    func handOff() async {
+        guard let api = store.api else { return }
+        lastError = nil
+        do {
+            _ = try await api.handoff(name: name)
+        } catch {
+            lastError = HandoffText.failure(Store.words(for: error))
+        }
+    }
+
+    /// The return card. auto: when the chat opened by itself, only for a session with a few prompts.
+    func recap(auto: Bool) async throws -> Recap {
+        guard let api = store.api else { throw APIError.offline }
+        return try await api.recap(name: name, min: auto ? RecapCard.autoMin : nil)
     }
 
     /// Starts Claude again on this session's conversation; returns the new session's name.

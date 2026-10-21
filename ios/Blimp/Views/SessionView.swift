@@ -1,6 +1,9 @@
 // A session as a chat: the messages, what Claude is waiting on as buttons, and a box to type into.
 // Voice: the mic types (or answers the prompt), the speaker toggle reads new replies and prompts aloud,
-// and a banner says when another session starts waiting or finishes.
+// and a banner says when another session starts waiting or finishes. While Claude works, Stop (and Stop and
+// send, with text in the box) is pinned above the box. Opened after time away: a "since you left" line, and
+// the return card at the top after an hour. The toolbar has the context gauge (from half full) and a menu
+// with Recap and Give a Secret; Run is under the commands of Claude's latest reply (ChatExtras.swift).
 import AudioToolbox
 import BlimpKit
 import SwiftUI
@@ -17,7 +20,8 @@ struct SessionView: View {
     }
 }
 
-/// Owns the ChatModel: made when the screen first appears, its socket closed when the screen goes.
+/// Owns the ChatModel: one still loaded from a recent visit, or a new one, when the screen first appears;
+/// its socket closed when the screen goes.
 private struct ChatScreen: View {
     let name: String
     let onInbox: () -> Void
@@ -34,7 +38,7 @@ private struct ChatScreen: View {
             }
         }
         .onAppear {
-            let m = model ?? ChatModel(name: name, store: store)
+            let m = model ?? ChatModel.warm(name, store: store)
             model = m
             m.open()
         }
@@ -71,6 +75,16 @@ private struct ChatContent: View {
     @State private var lastStates: [String: SessionState] = [:]
     @State private var banner: Banner?
     @State private var onScreen = false
+    /// This visit's first history has been scrolled to: the end, or the "since you left" line.
+    @State private var placed = false
+    /// The message the "since you left" line is above, for this visit.
+    @State private var since: String?
+    @State private var recap: RecapLoad?
+    /// Bumped by each ask for a recap and by closing the card, so a late answer to an earlier ask shows nothing.
+    @State private var recapAsk = 0
+    @State private var confirming: RunConfirm?
+    @State private var givingSecret = false
+    @State private var secretsGiven = 0
 
     private static let bottom = "bottom"
     /// The screen's height (less the keyboard), so Claude's questions can take most of it.
@@ -80,11 +94,7 @@ private struct ChatContent: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(model.log.shown) { message in
-                        MessageRow(message: message)
-                            .modifier(BeingRead(reading: Speaker.shared.speakingId == message.id))
-                    }
-                    workingRow
+                    messages
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .padding(.horizontal)
@@ -101,10 +111,14 @@ private struct ChatContent: View {
                 atBottom = bottom
                 if bottom { unseen = false }
             }
-            // A history comes after the screen has laid out, empty, so the initial anchor misses it, and
-            // the jump in content height reads as "scrolled up". Open at the end; after a reconnect, stay
-            // at the end only if you were there.
+            // A history comes after the screen has laid out, empty (or with a recent visit's messages), so the
+            // initial anchor misses it, and the jump in content height reads as "scrolled up". Open at the end,
+            // or at "since you left"; after a reconnect, stay at the end only if you were there.
             .onChange(of: model.histories) { old, _ in
+                if !placed {
+                    place(proxy)
+                    return
+                }
                 guard old == 0 || atBottom else { return }
                 atBottom = true
                 unseen = false
@@ -119,9 +133,7 @@ private struct ChatContent: View {
                 if atBottom { proxy.scrollTo(Self.bottom, anchor: .bottom) }
             }
             .overlay { empty }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if model.reconnecting && !model.ended { ReconnectingBar() }
-            }
+            .safeAreaInset(edge: .top, spacing: 0) { top }
             .overlay(alignment: .top) {
                 if let banner {
                     BannerView(banner: banner) { onResumed(banner.name) }.transition(.move(edge: .top).combined(with: .opacity))
@@ -153,12 +165,41 @@ private struct ChatContent: View {
         .toolbar {
             // The speaker, then Inbox at the far right.
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if let meter = ContextText.meter(model.session?.context) {
+                    Menu {
+                        Section(meter.label) {
+                            if canAct {
+                                Button("Continue in New Session", systemImage: "arrow.forward.circle") { Task { await model.handOff() } }
+                                    .disabled(model.session?.handoff?.state == .writing)
+                            }
+                        }
+                    } label: {
+                        ContextRing(meter: meter)
+                    }
+                    .accessibilityLabel(meter.label)
+                    .accessibilityIdentifier("contextGauge")
+                }
+                if canAct {
+                    Menu {
+                        Button("Recap", systemImage: "text.alignleft") { loadRecap(auto: false) }
+                        Button("Give a Secret…", systemImage: "key") { givingSecret = true }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
+                    .accessibilityIdentifier("chatMenu")
+                }
                 Button(readAloud ? "Stop reading aloud" : "Read aloud",
                        systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
                 InboxButton(action: onInbox)
             }
         }
-        .onReturnFromBackground { model.reconnectNow() }
+        .onReturnFromBackground {
+            model.reconnectNow()
+            // Back after a while with this chat up: on screen again, and the return card if it's been an hour.
+            let last = ChatModel.lastShown(model.name)
+            ChatModel.markShown(model.name)
+            if recap == nil { recapIfDue(last) }
+        }
         // On screen with the app in front: Claude's replies are read, here and on the Mac.
         .task(id: SeenKey(conversation: model.session?.sessionId, unread: model.session?.unread == true,
                           looking: onScreen && scenePhase == .active)) {
@@ -184,7 +225,19 @@ private struct ChatContent: View {
         // .inactive: the first-use permission alert makes the app inactive while it waits for an answer.
         .onChange(of: scenePhase) { _, phase in
             if phase == .background, micOn { micUp(.keep) }
+            if phase == .background, onScreen { ChatModel.markShown(model.name) }
         }
+        .sheet(item: $confirming) { c in
+            RunConfirmSheet(command: c.command, folder: runFolder) { Task { await model.run(c.command) } }
+        }
+        .sheet(isPresented: $givingSecret) {
+            SecretSheet { name, value in
+                let failed = await model.giveSecret(name: name, value: value)
+                if failed == nil { secretsGiven += 1 }
+                return failed
+            }
+        }
+        .sensoryFeedback(.success, trigger: secretsGiven)
         .task(id: banner) {
             guard banner != nil else { return }
             try? await Task.sleep(for: .seconds(4))
@@ -192,6 +245,33 @@ private struct ChatContent: View {
         }
         // Links in Claude's replies: http and https open in Safari on tap, anything else does nothing.
         .environment(\.openURL, OpenURLAction { Inline.safe($0) ? .systemAction : .discarded })
+    }
+
+    /// The messages, the newest reply unfolded, the "since you left" line above the first new one; and the
+    /// working row where it isn't pinned.
+    @ViewBuilder private var messages: some View {
+        let newest = ChatFold.newest(model.log.shown)
+        ForEach(model.log.shown) { message in
+            VStack(alignment: .leading, spacing: 14) {
+                if message.id == since { SinceYouLeftLine() }
+                MessageRow(message: message, fold: message.id != newest, runs: runs(for: message))
+                    .modifier(BeingRead(reading: Speaker.shared.speakingId == message.id))
+            }
+        }
+        if !typable { workingRow }
+    }
+
+    /// Over the top of the chat: Reconnecting, and the return card.
+    @ViewBuilder private var top: some View {
+        VStack(spacing: 0) {
+            if model.reconnecting && !model.ended { ReconnectingBar() }
+            if let recap {
+                RecapCardView(load: recap) {
+                    self.recap = nil
+                    recapAsk += 1
+                }
+            }
+        }
     }
 
     /// What sits under the chat: the end of it, a pointer to the Mac, or the prompt and the input box.
@@ -229,6 +309,11 @@ private struct ChatContent: View {
                     Text("Claude is waiting. Open it on the Mac to answer.").font(.callout).foregroundStyle(.secondary)
                     Divider()
                 }
+                workingRow
+                chip
+                if model.session.flatMap(HandoffText.words) == "Writing handoff" {
+                    Text("Writing handoff…").font(.caption).foregroundStyle(.secondary)
+                }
                 if listener.preparing {
                     Text("Getting speech ready…").font(.caption).foregroundStyle(.secondary)
                 } else if let voiceNote {
@@ -247,10 +332,73 @@ private struct ChatContent: View {
     /// The input box shows (controls' last case), and so does Stop on the working row.
     private var typable: Bool { !model.ended && !model.noChat && !model.starting && !model.macOnly }
 
+    /// Claude runs in it and the phone can type into it: Run, Recap, a secret, a handoff.
+    private var canAct: Bool { typable && model.session?.isClaude == true }
+
+    /// In the scroll where the phone can't type into the session (no Stop); pinned above the box where it can.
     @ViewBuilder private var workingRow: some View {
         if showsWorking {
             let onStop: (() -> Void)? = typable ? { Task { await model.stop() } } : nil
-            WorkingRow(waiting: !model.working, step: model.log.latestStep, stopping: model.stopping, onStop: onStop)
+            let redirect = typable && model.working && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let onRedirect: (() -> Void)? = redirect ? { stopAndSend() } : nil
+            WorkingRow(waiting: !model.working, step: model.log.latestStep, stopping: model.stopping || model.redirecting,
+                       onStop: onStop, onStopAndSend: onRedirect)
+        }
+    }
+
+    /// Where to go next: the session a handoff started, or after an answer here, the next one waiting on you.
+    @ViewBuilder private var chip: some View {
+        if let s = model.session, s.handoff?.state == .started, let child = s.handoff?.child, s.state != .working {
+            ChipButton(words: "Handed off. Open the new session", id: "openHandoff") { onResumed(child) }
+        } else if model.answeredHere, model.prompt == nil, let next = NextWaiting.after(model.name, in: store.sessions) {
+            ChipButton(words: next.words, id: "nextWaiting") { onResumed(next.session.name) }
+        }
+    }
+
+    /// Run for Claude's latest reply, where Claude runs and the phone can type to it.
+    private func runs(for message: ChatMessage) -> RunContext? {
+        guard canAct, let offered = RunStatus.offers(message, in: model.session) else { return nil }
+        return RunContext(offered: offered, chat: model) { confirming = RunConfirm(command: $0) }
+    }
+
+    /// Where blimpd runs a command: the folder of Claude's latest line, else the session's.
+    private var runFolder: String { model.session?.git?.cwd ?? model.session?.dir ?? model.folder }
+
+    /// This visit's first history: at "since you left" (and New, to jump to the end) when there's one, else the end.
+    private func place(_ proxy: ScrollViewProxy) {
+        placed = true
+        let line = SinceYouLeft.first(model.log.shown, lastShown: model.visitFrom, unread: model.unreadAtOpen)
+        since = line
+        atBottom = line == nil
+        unseen = line != nil
+        Task { @MainActor in
+            if let line {
+                proxy.scrollTo(line, anchor: .top)
+                unseen = true
+            } else {
+                proxy.scrollTo(Self.bottom, anchor: .bottom)
+            }
+        }
+    }
+
+    /// The return card by itself: for a Claude session not on screen here for an hour (or ever).
+    private func recapIfDue(_ lastShown: Double?) {
+        guard model.session?.isClaude == true, RecapCard.due(lastShown: lastShown, now: Date.now.timeIntervalSince1970 * 1000) else { return }
+        loadRecap(auto: true)
+    }
+
+    /// auto: shows only once it has come, and nothing if it doesn't. From the menu: "…" first, and why if it fails.
+    private func loadRecap(auto: Bool) {
+        recapAsk += 1
+        let ask = recapAsk
+        if !auto { recap = .loading }
+        Task {
+            do {
+                let r = try await model.recap(auto: auto)
+                if ask == recapAsk { recap = .shown(r) }
+            } catch {
+                if ask == recapAsk { recap = auto ? nil : .failed(Store.words(for: error)) }
+            }
         }
     }
 
@@ -274,6 +422,16 @@ private struct ChatContent: View {
         }
     }
 
+    /// Stop and send: the same, after Esc.
+    private func stopAndSend() {
+        let text = draft
+        Task {
+            if await model.stopAndSend(text), draft.hasPrefix(text) {
+                draft.removeFirst(text.count)
+            }
+        }
+    }
+
     /// The box clears only once blimpd has the text; anything typed meanwhile stays.
     private func send() {
         let text = draft
@@ -291,6 +449,7 @@ private struct ChatContent: View {
 
     private func appeared() {
         onScreen = true
+        recapIfDue(model.visitFrom)
         readAloud = UserDefaults.standard.bool(forKey: readAloudKey)
         if let prompt = model.prompt { promptsSeen.append(prompt) }
         lastStates = Dictionary(store.sessions.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
@@ -304,6 +463,7 @@ private struct ChatContent: View {
     /// Only the session on screen speaks or listens.
     private func disappeared() {
         onScreen = false
+        ChatModel.markShown(model.name)
         model.onReply = nil
         Speaker.shared.stop()
         if micOn { micUp(.keep) }
@@ -424,6 +584,27 @@ private struct ChatContent: View {
         resuming = true
         defer { resuming = false }
         if let name = await model.resume() { onResumed(name) }
+    }
+}
+
+/// A one-line way to another session, above the box.
+private struct ChipButton: View {
+    let words: String
+    let id: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(words).lineLimit(1)
+                Image(systemName: "chevron.right").font(.caption2)
+            }
+            .font(.footnote.weight(.semibold))
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
+        .accessibilityIdentifier(id)
     }
 }
 

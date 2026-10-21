@@ -1,15 +1,20 @@
 // How each chat message looks: your prompts as bubbles, Claude's replies as native Markdown (a long
-// one folded, with Show more). Tool steps aren't shown; the working row says the latest one.
+// one folded, with Show more, except the newest). Tool steps aren't shown; the working row says the latest
+// one. In Claude's latest reply, a code block blimpd offers to run has Run under it (ChatExtras.swift).
 import BlimpKit
 import SwiftUI
 
 struct MessageRow: View {
     let message: ChatMessage
+    /// A long reply folds; the chat's newest reply doesn't.
+    var fold = true
+    /// For Claude's latest reply in an open chat: Run on its commands.
+    var runs: RunContext?
 
     var body: some View {
         switch message.role {
         case .user: UserBubble(text: message.text ?? "")
-        case .assistant: AssistantText(text: message.text ?? "")
+        case .assistant: AssistantText(text: message.text ?? "", fold: fold, runs: runs)
         case .tool: EmptyView()
         case .compacted:
             Text("Session compacted")
@@ -73,21 +78,23 @@ struct UserBubble: View {
 }
 
 /// A step smaller than your bubbles. A reply taller than about 12 lines folds to that height, with
-/// Show more; read aloud still reads all of it.
+/// Show more (unless fold is off: the newest reply); read aloud still reads all of it.
 struct AssistantText: View {
     let text: String
+    var fold = true
+    var runs: RunContext?
     @State private var open = false
     @State private var height: CGFloat = 0
     @ScaledMetric(relativeTo: .callout) private var foldHeight: CGFloat = 250
 
     var body: some View {
         // a little over the fold, so folding never hides just a line or two
-        let long = height > foldHeight * 1.2
+        let long = fold && height > foldHeight * 1.2
         let folded = long && !open
         VStack(alignment: .leading, spacing: 6) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(MarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
-                    BlockView(block: block)
+                    BlockView(block: block, runs: runs)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -117,6 +124,7 @@ struct AssistantText: View {
 
 struct BlockView: View {
     let block: MarkdownBlock
+    var runs: RunContext?
 
     var body: some View {
         switch block {
@@ -128,7 +136,16 @@ struct BlockView: View {
             ListView(markers: items.map { _ in "•" }, items: items)
         case .numbered(let start, let items):
             ListView(markers: items.indices.map { "\(start + $0)." }, items: items)
-        case .code(_, let s), .table(let s):
+        case .code(let language, let s):
+            if let runs, let command = RunnableCommand.offered(language: language, text: s, runnable: runs.offered) {
+                VStack(alignment: .leading, spacing: 6) {
+                    CodeBox { Text(s) }
+                    RunControls(command: command, chat: runs.chat, onAsk: runs.onAsk)
+                }
+            } else {
+                CodeBox { Text(s) }
+            }
+        case .table(let s):
             CodeBox { Text(s) }
         case .quote(let s):
             Text(Inline.text(s))
@@ -184,7 +201,8 @@ struct CodeBox<Content: View>: View {
     }
 }
 
-/// The end of the chat while Claude works, or waits on something only the Mac can answer: Stop presses Esc.
+/// While Claude works, or waits on something only the Mac can answer: Stop presses Esc. Pinned above the box
+/// where the phone can type into the session, else at the end of the chat.
 struct WorkingRow: View {
     let waiting: Bool
     /// The newest tool step, said after "working…".
@@ -192,6 +210,8 @@ struct WorkingRow: View {
     let stopping: Bool
     /// nil where the phone can't type into the session (Open on Mac): no Stop.
     let onStop: (() -> Void)?
+    /// With text in the box while Claude works: Esc, then the text as a new message.
+    var onStopAndSend: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -206,6 +226,7 @@ struct WorkingRow: View {
                     .foregroundStyle(step.error == true ? Color.red : Color.secondary)
                     .lineLimit(1)
             }
+            Spacer(minLength: 0)
             if let onStop {
                 Button("Stop", systemImage: "stop.fill", action: onStop)
                     .buttonStyle(.bordered)
@@ -214,6 +235,15 @@ struct WorkingRow: View {
                     .tint(.red)
                     .disabled(stopping)
                     .fixedSize()
+            }
+            if let onStopAndSend {
+                Button("Stop and send", systemImage: "arrow.uturn.right", action: onStopAndSend)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .disabled(stopping)
+                    .fixedSize()
+                    .accessibilityIdentifier("stopAndSend")
             }
         }
         .font(.footnote)
