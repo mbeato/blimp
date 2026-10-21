@@ -1,14 +1,14 @@
 // The chat socket (docs/DESIGN.md, Chat): a session's conversation as messages, and a way to type
 // into it, for the phone. Each socket keeps one zmx client attached while it's open, at the size
 // the session is shown at elsewhere: a client per message, or one of another size, upsets Claude's
-// screen (the probe in the phone spec).
+// screen (the probe in the phone spec). How keys are typed is in typing.ts, shared with blimpd's own messages.
 
-import type { ServerWebSocket, Subprocess } from "bun";
+import type { ServerWebSocket } from "bun";
 import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from "./chat";
 import { answerKeys, answerSteps, choiceLabel, cleanText, type Expect, type Prompt, parseDialog, parseTrust, screenMeets, trustSteps } from "./prompt";
 import { existsSync } from "node:fs";
-import { claudeDir, listSessions, type Session, sessionExists, transcriptPath, zmxEnv, zmxListAsync, zmxPath } from "./sessions";
-import { followSize, lastSize } from "./terminal";
+import { claudeDir, type Session, transcriptPath, zmxEnv, zmxPath } from "./sessions";
+import { Asking, findSession, forget, release, typed, type Typist, typist, wasTyped } from "./typing";
 
 export type ChatData = {
   kind: "chat";
@@ -18,28 +18,21 @@ export type ChatData = {
   file?: string;
   scan?: ChatScan;
   fresh?: boolean; // sent an empty history: the transcript isn't there yet, and all of it goes out as append
-  proc?: Subprocess;
-  ready?: Promise<void>; // the zmx client's first output: zmx has attached it
-  unfollow?: () => void;
+  typist: Typist; // this socket's zmx client, started on the first input
   timer?: ReturnType<typeof setInterval>;
   ticks: number;
   busy?: boolean;
   opened?: Promise<void>;
-  queue?: Promise<unknown>; // writes to the zmx client, one at a time
   handling?: Set<Promise<void>>; // messages being handled: closeChat waits for them
 };
 
-export const chatData = (name: string): ChatData => ({ kind: "chat", name, ticks: 0 });
+export const chatData = (name: string): ChatData => ({ kind: "chat", name, ticks: 0, typist: typist(name) });
 
 const HISTORY = 200;
-const seen = new Map<string, string[]>(); // session -> last 100 input ids, across sockets
-const typing = new Map<string, Promise<void>>(); // session + id -> its write in progress, across sockets
 
 const send = (ws: ServerWebSocket<ChatData>, m: object) => ws.data.closed || ws.send(JSON.stringify(m));
 
-async function find(name: string): Promise<Session | undefined> {
-  return listSessions(claudeDir(), await zmxListAsync()).find((s) => s.name === name);
-}
+const find = findSession;
 
 // The current conversation from the start: the last 200 messages.
 async function loadHistory(ws: ServerWebSocket<ChatData>) {
@@ -74,7 +67,7 @@ async function tick(ws: ServerWebSocket<ChatData>) {
       if (d.closed) return;
       if (!s) {
         d.closed = true;
-        seen.delete(d.name);
+        forget(d.name);
         return ws.close(4000, "ended");
       }
       const changed = s.sessionId !== d.session?.sessionId;
@@ -128,82 +121,8 @@ async function start(ws: ServerWebSocket<ChatData>) {
   }
 }
 
-// The zmx client is started on the first input, not on open: a phone that only reads adds no client.
-function client(ws: ServerWebSocket<ChatData>) {
-  const d = ws.data;
-  if (d.proc && d.proc.exitCode === null) return d.proc;
-  const { cols, rows } = lastSize(d.name);
-  let ready!: () => void;
-  d.ready = new Promise<void>((r) => (ready = r));
-  const proc = (d.proc = Bun.spawn([zmxPath(), "attach", d.name], {
-    env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor" },
-    // Its output is the same screen the viewers see, so nobody needs it here. zmx draws that screen
-    // as it attaches the client: the first output says input will reach the session.
-    terminal: { cols, rows, data: () => ready() },
-  }));
-  proc.exited.then(() => proc.terminal?.close()); // killed, or ended on its own (the next input starts another)
-  d.unfollow?.();
-  d.unfollow = followSize(d.name, (c, r) => {
-    try {
-      d.proc?.terminal?.resize(c, r);
-    } catch {} // the client's terminal may already be closed
-  });
-  return d.proc;
-}
-
-// keys says what to type when its turn comes (an answer checks its question is still up); recheck
-// runs again before each part after the first (input's Enter, each step of a dialog). What the phone
-// sent is typed even if the socket closes before its turn: closeChat waits for it. A Stop sent just
-// before the phone's link drops still stops Claude.
-type Recheck = (part: number) => Promise<void>;
-async function write(ws: ServerWebSocket<ChatData>, keys: () => Promise<string[]>, recheck?: Recheck) {
-  const d = ws.data;
-  const fresh = !d.proc || d.proc.exitCode !== null;
-  if (fresh) {
-    // `zmx attach` would create a session that has ended, and the text would go to a bare shell.
-    const alive = await sessionExists(d.name).catch(() => false);
-    if (!alive) throw new Error("the session ended");
-  }
-  const parts = await keys();
-  const term = client(ws).terminal!;
-  // Typing too soon after the client starts can land before zmx has attached it.
-  if (fresh) await Promise.race([d.ready, Bun.sleep(1000)]);
-  // zmx 0.5 drops an Esc that is a new client's first input; an empty paste passes and the TUI ignores it.
-  if (fresh && parts[0].startsWith("\x1b") && !parts[0].startsWith("\x1b[200~")) {
-    term.write("\x1b[200~\x1b[201~");
-    await Bun.sleep(50);
-  }
-  for (const [i, p] of parts.entries()) {
-    if (i) {
-      await Bun.sleep(50); // Enter apart from the paste, as a person would press it
-      await recheck?.(i);
-    }
-    term.write(p);
-  }
-}
-
-// One typed thing at a time, so two inputs close together don't interleave. A repeated id is typed
-// once: the phone resends what it didn't see acknowledged, maybe on a new socket while the old one
-// is still typing it (then it waits for that one).
-async function typed(ws: ServerWebSocket<ChatData>, id: string, keys: () => Promise<string[]>, recheck?: Recheck) {
-  const d = ws.data;
-  const key = `${d.name}\0${id}`;
-  const step = (d.queue ?? Promise.resolve()).then(async () => {
-    if ((seen.get(d.name) ?? []).includes(id)) return;
-    const other = typing.get(key);
-    if (other) return other;
-    const p = write(ws, keys, recheck).then(() => void seen.set(d.name, [...(seen.get(d.name) ?? []), id].slice(-100)));
-    typing.set(key, p);
-    try {
-      await p;
-    } finally {
-      typing.delete(key);
-    }
-  });
-  d.queue = step.catch(() => {});
-  await step;
-}
-
+// What the phone sent is typed even if the socket closes before its turn: closeChat waits for it. A
+// Stop sent just before the phone's link drops still stops Claude.
 export function chatMessage(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
   const handling = (ws.data.handling ??= new Set());
   const p = handle(ws, msg).finally(() => handling.delete(p));
@@ -231,7 +150,7 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       if (trust && m.type === "input") return fail("Claude is asking something. Answer it first.");
       if (!trust || m.type !== "answer") return fail("open this session on the Mac");
     }
-    if (m.type !== "input" && (seen.get(d.name) ?? []).includes(id)) return send(ws, { type: "ack", id });
+    if (m.type !== "input" && wasTyped(d.name, id)) return send(ws, { type: "ack", id });
     if (m.type === "input") {
       if (typeof m.text !== "string" || m.text.length > 100_000) return fail("text must be a string of at most 100 000 characters");
       // No control characters from the phone: ESC would end the paste early and turn the rest into key
@@ -241,20 +160,20 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       // Checked before the paste and again before Enter. A question that starts in between leaves the
       // paste in Claude's input box without Enter: it isn't sent, and the id doesn't count as typed.
       const notWaiting = async () => {
-        if ((await find(d.name))?.state === "waiting") throw new Error("Claude is asking something. Answer it first.");
+        if ((await find(d.name))?.state === "waiting") throw new Asking();
       };
       const keys = async () => {
         await notWaiting();
         return ["\x1b[200~" + text + "\x1b[201~", "\r"];
       };
-      await typed(ws, id, keys, notWaiting);
+      await typed(d.typist, id, keys, notWaiting);
       return send(ws, { type: "ack", id });
     }
     if (m.type === "answer" && m.answers !== undefined) {
       // Every question of a dialog: blimpd types it step by step, each after the screen shows its place.
       let steps: { expect: Expect }[] = [];
       let p: Prompt | undefined;
-      await typed(ws, id, async () => {
+      await typed(d.typist, id, async () => {
         const s = await find(d.name);
         p = s?.state === "waiting" && s.prompt?.at === m.at ? s.prompt : undefined;
         const r = p ? answerSteps(p, m.answers, m.labels) : { error: "the question changed" };
@@ -268,7 +187,7 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
     if (m.type === "answer") {
       let steps: ReturnType<typeof trustSteps>;
       let preview: { p: Prompt; steps: { expect: Expect }[] } | undefined;
-      await typed(ws, id, async () => {
+      await typed(d.typist, id, async () => {
         const s = await find(d.name);
         // The same wait and the same choice under pick: the options can change within one wait.
         const p = s?.state === "waiting" ? s.prompt : undefined;
@@ -295,7 +214,7 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
     if (m.type === "interrupt") {
       // With `at`, the phone dismisses that question: Esc only while it's still up. Otherwise the Esc would
       // stop Claude's work, if it was answered on the Mac just before.
-      await typed(ws, id, async () => {
+      await typed(d.typist, id, async () => {
         if (m.at !== undefined) {
           const s = await find(d.name);
           if (s?.state !== "waiting" || s.prompt?.at !== m.at) throw new Error("the question changed");
@@ -340,8 +259,5 @@ export async function closeChat(ws: ServerWebSocket<ChatData>) {
   d.closed = true;
   clearInterval(d.timer);
   while (d.handling?.size) await Promise.all(d.handling);
-  await d.queue;
-  d.unfollow?.();
-  if (d.proc) await Bun.sleep(100); // for zmx to pass the last keys on
-  d.proc?.kill("SIGTERM");
+  await release(d.typist);
 }

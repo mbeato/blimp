@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { type Git, type Job, sessionActivity } from "./activity";
 import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
 import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
@@ -45,6 +46,11 @@ export type Session = ZmxSession & {
   prompt?: Prompt & { at: number }; // what a waiting Claude asks (prompt.ts), and when the wait started
   unread: boolean; // Claude replied since either app last had it on screen (seen.ts)
   note?: ShownNote; // Haiku's note on its last turn (notes.ts)
+  // From its transcript (activity.ts), only when there is some: background work Claude started, how
+  // full its context window is (tokens), and the folder and branch it's working in.
+  jobs?: Job[];
+  context?: { used: number; limit: number };
+  git?: Git;
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -324,6 +330,7 @@ export function listSessions(
       ...(prompt && { prompt }),
       unread: isUnread(seen, info.sessionId, scan?.replied),
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
+      ...(file && sessionActivity(file, kind)),
     };
   });
 }

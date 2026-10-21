@@ -160,6 +160,32 @@ test("listSessions joins zmx with Claude's session file, transcript and blimp's 
   expect(unread({ s1: 9000 })).toBe(false);
 });
 
+test("listSessions adds a Claude session's background jobs, context and git folder from its transcript, and not the files it edited", async () => {
+  const real = (await import("./fixtures/activity-lines.json")).default as Record<string, string>;
+  const home = mkdtempSync(join(tmpdir(), "blimp-"));
+  mkdirSync(join(home, "sessions"));
+  mkdirSync(join(home, "projects", "-home-u-web"), { recursive: true });
+  writeFileSync(join(home, "sessions", "42.json"), JSON.stringify({ sessionId: "s1", cwd: "/home/u/web", status: "busy" }));
+  writeFileSync(join(home, "projects", "-home-u-web", "s1.jsonl"), [real.failedCall, real.failedStarted, real.edit, real.workflowCall].join("\n") + "\n");
+  writeFileSync(join(home, "sessions", "43.json"), JSON.stringify({ sessionId: "s2", cwd: "/home/u/web", status: "idle" }));
+  writeFileSync(join(home, "projects", "-home-u-web", "s2.jsonl"), real.bashCall + "\n");
+  const { listSessions } = await import("../src/sessions");
+  const zmxOut = "  name=web-1\tpid=42\tclients=1\tcreated=5\tcwd=/home/u/web\tcmd=claude\n  name=web-2\tpid=43\tclients=0\tcreated=6\tcwd=/home/u/web\tcmd=claude";
+  const memo = join(home, "session-kinds.json");
+  writeFileSync(memo, JSON.stringify({ "web-1": "claude-glm" }));
+  const [s, t] = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} });
+  const started = Date.parse(JSON.parse(real.failedStarted).timestamp);
+  expect(s.jobs).toEqual([
+    { id: "b5bbkbpfm", kind: "bash", label: "Watch the phone run for the fix", startedAt: started, status: "running", outputFile: expect.stringMatching(/\/tasks\/b5bbkbpfm\.output$/) },
+  ]);
+  expect(s.context).toEqual({ used: 531 + 148928, limit: 1048576 }); // the workflow call, a GLM reply
+  expect(s.git).toEqual({ cwd: "/Users/u/blimp", branch: "main" });
+  expect(s).not.toHaveProperty("files");
+  expect(t).not.toHaveProperty("jobs");
+  expect(t.context).toEqual({ used: 2 + 791 + 91091, limit: 1_000_000 });
+  rmSync(home, { recursive: true, force: true });
+});
+
 test("a session remembered as a shell that Claude now runs in is Claude Code", async () => {
   const home = mkdtempSync(join(tmpdir(), "blimp-"));
   mkdirSync(join(home, "sessions"));

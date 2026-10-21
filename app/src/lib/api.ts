@@ -32,6 +32,24 @@ export type Session = {
   unread?: boolean; // Claude replied since this app or the phone last had it on screen (older blimpd: absent)
   prompt?: { kind: string; summary?: string; questions?: { question: string }[] }; // what a waiting Claude asks
   note?: Note; // Haiku's note on its last turn (older blimpd, or names off: absent)
+  jobs?: Job[]; // background work Claude started, running or ended in the last 30 min (older blimpd, or none: absent)
+  context?: { used: number; limit: number }; // tokens in Claude's context window, and its size (older blimpd: absent)
+  git?: { cwd: string; branch?: string }; // the folder and branch Claude's latest line was in (older blimpd: absent)
+};
+
+// Background work Claude started (blimpd's activity.ts): a Bash command run in the background, a Monitor,
+// an async agent or a workflow. Times in ms; lastLine: a running bash job's or Monitor's last output line
+// (at most every 10 s). exit: a command's exit code, once it ended.
+export type Job = {
+  id: string;
+  kind: "bash" | "monitor" | "agent" | "workflow";
+  label: string;
+  startedAt: number;
+  status: "running" | "done" | "failed" | "stopped";
+  outputFile?: string;
+  endedAt?: number;
+  exit?: number;
+  lastLine?: string;
 };
 
 export type RecentFolder = { dir: string; lastUsed: number };

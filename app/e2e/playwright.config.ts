@@ -4,8 +4,8 @@
 
 import { defineConfig } from "@playwright/test";
 
-// Not 5173: `tauri dev` holds that one.
-const PORT = 5188;
+// Not 5173: `tauri dev` holds that one. BLIMP_E2E_PORT: another, for runs side by side.
+const PORT = Number(process.env.BLIMP_E2E_PORT) || 5188;
 
 export default defineConfig({
   testDir: ".",
