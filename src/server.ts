@@ -14,6 +14,7 @@ import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage
 import { createFile, download, guard, guardFile, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
 import { conversations, projectFolderName, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
+import { askHandoff, startHandoffs } from "./handoff";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { startNotes } from "./notes";
@@ -149,6 +150,10 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     await killSession(name);
     return new Response(null, { status: 204 });
   }
+
+  // Continue in a new session: Claude writes a handoff, then a new session reads it (handoff.ts).
+  const handoff = path.match(/^\/sessions\/([^/]+)\/handoff$/);
+  if (handoff && req.method === "POST") return Response.json(await askHandoff(decodeURIComponent(handoff[1])), { status: 202 });
 
   const attach = path.match(/^\/sessions\/([^/]+)\/attach$/);
   if (attach && get) {
@@ -348,6 +353,7 @@ export function serve(): Server {
   startNaming(); // off with {"names": false} in <socket dir>/config.json
   startNotes(); // the same switch
   startDigests(); // and again
+  startHandoffs();
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

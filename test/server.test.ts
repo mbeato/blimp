@@ -980,6 +980,71 @@ describe("starting sessions", () => {
   }, 15000);
 });
 
+describe("handoff", () => {
+  const claudeDir = join(tmp, "claude");
+  // A stand-in Claude that, typed the handoff request, does what Claude would: writes the file, and the
+  // request and a reply naming the file (relative to its folder) go in its transcript.
+  const fakeWriter = join(tmp, "fake-handoff-claude");
+  writeFileSync(
+    fakeWriter,
+    `#!/bin/sh
+# $1: transcript, $2: folder
+while IFS= read -r l; do case "$l" in *"Write a handoff so a fresh session"*)
+  mkdir -p "$2/notes/today" && echo "# where it stands" > "$2/notes/today/HANDOFF-tests.md"
+  t=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+  printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"Write a handoff so a fresh session can continue this work"}}\\n' "$t" >> "$1"
+  printf '{"type":"assistant","timestamp":"%s","cwd":"%s","message":{"role":"assistant","content":[{"type":"text","text":"notes/today/HANDOFF-tests.md"}]}}\\n' "$t" "$2" >> "$1";;
+esac; done
+`,
+  );
+  chmodSync(fakeWriter, 0o755);
+
+  async function fakeClaude(suffix: string, sessionId: string, dir: string) {
+    const transcript = join(claudeDir, "projects", "p", `${sessionId}.jsonl`);
+    mkdirSync(join(claudeDir, "sessions"), { recursive: true });
+    mkdirSync(join(claudeDir, "projects", "p"), { recursive: true });
+    writeFileSync(transcript, "");
+    const name = await shSession(suffix, [fakeWriter, transcript, dir]);
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
+    writeFileSync(join(claudeDir, "sessions", `${pid}.json`), JSON.stringify({ sessionId, cwd: dir, status: "idle" }));
+    return { name, transcript };
+  }
+  const handoff = (name: string) => api(`/sessions/${name}/handoff`, { method: "POST" });
+  const listed = async (name: string) => ((await (await api("/sessions")).json()) as any[]).find((s) => s.name === name);
+
+  test("POST /sessions/<name>/handoff: Claude writes the file, then a new session in the folder is told to read it, linked both ways", async () => {
+    const dir = join(homeDir, `${tag}-ho`);
+    mkdirSync(dir, { recursive: true });
+    const { name } = await fakeClaude("ho1", "40404040-4040-4040-8040-404040404040", dir);
+    const r = await handoff(name);
+    expect([r.status, await r.json()]).toEqual([202, { state: "writing" }]);
+    expect((await handoff(name)).status).toBe(409); // one at a time
+    const started = await until(async () => (await listed(name))?.handoff?.state === "started" && (await listed(name)), "the new session to start", 15000);
+    made.push(started.handoff.child);
+    expect(started.handoff).toEqual({ state: "started", child: started.handoff.child, file: join(dir, "notes", "today", "HANDOFF-tests.md") });
+    expect(started.handoff.child.startsWith(`${tag}-ho-`)).toBe(true);
+    const child = await listed(started.handoff.child);
+    expect([child.parent, child.kind, child.dir]).toEqual([name, "claude", dir]);
+    const s = await socket(`/sessions/${started.handoff.child}/attach?cols=100&rows=30`);
+    await until(() => s.text.includes("-- Read notes/today/HANDOFF-tests.md and do it]"), "the first message in Claude's arguments");
+    s.ws.close();
+    expect(statSync(join(tmp, "handoffs.json")).mode & 0o777).toBe(0o600);
+  }, 30000);
+
+  test("refused while Claude asks something, for a session that isn't Claude, and for one that isn't there", async () => {
+    const sid = "41414141-4141-4141-8141-414141414141";
+    const { name } = await fakeClaude("ho2", sid, tmp);
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    writeFileSync(join(tmp, "status", `${name}.json`), JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest",
+      prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }));
+    const r = await handoff(name);
+    expect([r.status, (await r.json()).error]).toEqual([409, "Claude is asking something. Answer it first."]);
+    expect((await listed(name)).handoff).toBeUndefined();
+    expect((await handoff(await shSession("ho3"))).status).toBe(400);
+    expect((await handoff(`${tag}-nope`)).status).toBe(404);
+  }, 15000);
+});
+
 describe("events", () => {
   test("sends the session list on connect, with state", async () => {
     const name = await shSession("c");
