@@ -31,8 +31,11 @@ export function decodeText(bytes: Uint8Array): string | null {
 
 const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "bmp"]);
 const MARKDOWN = new Set(["md", "markdown"]);
+const HTML = new Set(["html", "htm"]);
 
-export type Viewer = "image" | "pdf" | "markdown" | "text" | "binary";
+export const isImage = (name: string) => IMAGES.has(extOf(name));
+
+export type Viewer = "image" | "pdf" | "markdown" | "html" | "text" | "binary";
 
 // Images and PDFs go by extension (an SVG is text but shows as a picture). Everything else is
 // text unless its bytes say binary.
@@ -41,8 +44,12 @@ export function viewerFor(name: string, bytes: Uint8Array): Viewer {
   if (IMAGES.has(ext)) return "image";
   if (ext === "pdf") return "pdf";
   if (isBinary(bytes)) return "binary";
+  if (HTML.has(ext)) return "html";
   return MARKDOWN.has(ext) ? "markdown" : "text";
 }
+
+// Markdown and HTML are text that shows rendered, with Edit to change it in the editor.
+export const hasPreview = (v: Viewer) => v === "markdown" || v === "html";
 
 const IMAGE_TYPES: Record<string, string> = { jpg: "image/jpeg", svg: "image/svg+xml", ico: "image/x-icon" };
 

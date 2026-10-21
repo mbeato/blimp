@@ -1,6 +1,7 @@
 // Hostile files from a server can't run script in the app: Markdown goes through DOMPurify, SVG
-// shows only as an <img>, HTML shows as text, PDFs run no scripts, and the content security
-// policy (index.html) blocks inline script even if something slipped through.
+// shows only as an <img>, HTML shows as a page in a frame with an empty sandbox (no script, an
+// origin of its own), PDFs run no scripts, and the content security policy (index.html) blocks
+// inline script even if something slipped through.
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +41,14 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" onlo
 </svg>
 `;
 
-const HTML = `<!doctype html><script>window.__pwned='html';alert('html')</script><img src=x onerror="window.__pwned='htmlimg'">\n`;
+// The frame's own handlers stay in the page (only <script> elements are taken out), so it's the
+// sandbox that keeps them from running: a data: image does load and would fire onload.
+const HTML = `<!doctype html><script>window.__pwned='html';parent.__pwned='html';alert('html')</script>
+<img src=x onerror="window.__pwned='htmlimg'">
+<img id="dot" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" onload="window.__pwned='htmlonload';parent.__pwned='htmlonload';alert('htmlonload')">
+<svg onload="window.__pwned='htmlsvg'"><circle r="5"/></svg>
+<h1>Hostile page</h1>
+`;
 
 // One page, and an action that asks a viewer with scripting to run JavaScript.
 const PDF = `%PDF-1.4
@@ -79,13 +87,25 @@ test("hostile Markdown, SVG, HTML and PDF run nothing, and the CSP blocks inline
   await expect.poll(() => svg.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(40);
 
   await tree.getByText("evil.html").click();
+  const frame = ws.locator("iframe.html-view");
+  // An empty sandbox: neither allow-scripts nor allow-same-origin.
+  await expect(frame).toHaveAttribute("sandbox", "");
+  const inner = frame.contentFrame();
+  await expect(inner.locator("h1")).toHaveText("Hostile page");
+  await expect.poll(() => inner.locator("#dot").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+  expect(await inner.locator("#dot").evaluate(() => (window as any).__pwned)).toBeUndefined();
+  // Edit shows the file's text, scripts and all.
+  await ws.getByRole("button", { name: "Edit" }).click();
   await expect(ws.locator(".monaco-editor .view-lines")).toContainText("<script>window.__pwned='html'");
 
   await tree.getByText("evil.pdf").click();
   await expect(ws.locator(".pdf-view canvas.pdf-page")).toBeVisible();
 
-  // Monaco and its worker, pdf.js and its worker, xterm (WebGL) and blob images all work within the policy.
-  expect(await cspViolations(page)).toEqual([]);
+  // Monaco and its worker, pdf.js and its worker, xterm (WebGL), blob images and the HTML page's
+  // frame all work within the policy. Parsing the HTML file to inline its images (DOMParser's inert
+  // document, in FileViews) trips the policy on its inline handlers, as DOMPurify's does below: they
+  // are refused and reported, and the frame's sandbox wouldn't run them anyway. Nothing else is refused.
+  expect((await cspViolations(page)).filter((v) => !/^script-src-attr inline .*\/FileViews\.tsx:/.test(v))).toEqual([]);
 
   await tree.getByText("evil.md").click();
   const md = ws.locator(".md-view");

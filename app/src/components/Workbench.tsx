@@ -7,6 +7,7 @@ import {
   collapse,
   decodeText,
   formatSize,
+  hasPreview,
   initialSync,
   joinPath,
   nextSync,
@@ -19,16 +20,24 @@ import {
   type Viewer,
 } from "../lib/files";
 import { HOME, hostOf, serverTabTarget } from "../lib/browser";
+import { galleryDir, galleryKey } from "../lib/gallery";
 import { byOrder, moved, startReorder } from "../lib/reorder";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
 import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
 import { Dialog } from "./Dialog";
-import { ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
+import { HtmlView, ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
+import { Gallery } from "./Gallery";
 import { PageView } from "./PageView";
 import type { PaneActions } from "./TerminalPane";
 import { QuickOpen } from "./QuickOpen";
 import { Splitter } from "./Splitter";
+
+const galleryIcon = (
+  <svg className="page-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+    <path d="M2.5 2.5h4.5v4.5h-4.5zM9 2.5h4.5v4.5h-4.5zM2.5 9h4.5v4.5h-4.5zM9 9h4.5v4.5h-4.5z" fill="none" stroke="currentColor" />
+  </svg>
+);
 
 const pageIcon = (
   <svg className="page-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
@@ -64,7 +73,7 @@ type Menu = { x: number; y: number; path: string; kind: "file" | "dir" };
 // Names an upload would take that are already there: what to do with them.
 type Ask = { dir: string; names: string[]; resolve: (choice: "replace" | "keep" | "skip" | null) => void };
 
-// An open file. Text and Markdown live in a Monaco model; images and PDFs keep their bytes.
+// An open file. Text, Markdown and HTML live in a Monaco model; images and PDFs keep their bytes.
 type Doc = {
   path: string;
   name: string;
@@ -73,12 +82,12 @@ type Doc = {
   viewer: Viewer;
   size: number;
   bytes: Uint8Array<ArrayBuffer>;
-  text: string; // the server's text, which the Markdown preview shows until Monaco has loaded
+  text: string; // the server's text, which the Markdown or HTML preview shows until Monaco has loaded
   model: Monaco.editor.ITextModel | null;
   saved: number; // the model's alternative version id when it matched the server
   sync: Sync;
   viewState: Monaco.editor.ICodeEditorViewState | null;
-  editing: boolean; // Markdown shown in Monaco instead of rendered
+  editing: boolean; // Markdown or HTML shown in Monaco instead of rendered
   deleted: boolean; // gone on the server; still open, and only an explicit Save writes it back
   notice: string; // why the last save failed
   reveal: { line: number; col?: number } | null; // where to put the cursor once it's in the editor
@@ -152,6 +161,10 @@ export function Workbench(props: {
   const expanded = useRef(new Set([root]));
   const listings = useRef(new Map<string, DirEntry[]>()).current;
   const docs = useRef(new Map<string, Doc>()).current;
+  // Folders shown as a gallery ("gallery:<dir>", lib/gallery.ts), after the file tabs. ticks: bumped
+  // per folder when it changes on the server, so its gallery lists it again.
+  const galleries = useRef(new Set<string>()).current;
+  const ticks = useRef(new Map<string, number>()).current;
   // Saves not finished yet (sent, or waiting for the one before). Models are disposed only after
   // these finish, so leaving a project mid-save still sends what was typed meanwhile.
   const pending = useRef(new Set<Promise<void>>()).current;
@@ -301,14 +314,14 @@ export function Workbench(props: {
   // Puts the server's copy in the doc: into its Monaco model for text, as bytes otherwise.
   const applyBody = async (doc: Doc, body: FileBody) => {
     let viewer = viewerFor(doc.name, body.bytes);
-    const isText = viewer === "text" || viewer === "markdown";
+    const isText = viewer === "text" || hasPreview(viewer);
     const text = isText ? decodeText(body.bytes) : null;
     if (isText && text === null) viewer = "binary"; // not UTF-8: see decodeText
-    // Opened at a line (⌘-click in the terminal): show Markdown as source, where lines are.
-    if (viewer === "markdown" && doc.reveal) doc.editing = true;
+    // Opened at a line (⌘-click in the terminal): show Markdown or HTML as source, where lines are.
+    if (hasPreview(viewer) && doc.reveal) doc.editing = true;
     if (text !== null) {
       doc.text = text;
-      if (viewer === "markdown" && !monaco && !doc.editing) {
+      if (hasPreview(viewer) && !monaco && !doc.editing) {
         // The preview doesn't need Monaco, so it shows now instead of waiting for Monaco's first
         // load (seconds on a cold start). The model, for Edit and saving, follows with the latest text.
         void loadMonaco().then(
@@ -362,7 +375,7 @@ export function Workbench(props: {
       void loadDoc(doc);
     } else if (line) {
       doc.reveal = { line, col };
-      if (doc.viewer === "markdown") doc.editing = true;
+      if (hasPreview(doc.viewer)) doc.editing = true;
     }
     setActive(path);
     setClosing(null);
@@ -387,7 +400,7 @@ export function Workbench(props: {
     if (docs.get(doc.path) !== doc) return;
     if (doc.deleted) {
       doc.deleted = false; // it came back
-      link.watch(id, watchPaths(expanded.current, docs.keys()));
+      link.watch(id, watching());
       rerender();
     }
     if (dispatch(doc, { type: "remote", mtime: body.mtime }) === "reload") await applyBody(doc, body);
@@ -434,7 +447,7 @@ export function Workbench(props: {
         doc.notice = "";
         if (doc.deleted) {
           doc.deleted = false;
-          link.watch(id, watchPaths(expanded.current, docs.keys()));
+          link.watch(id, watching());
         }
         dispatch(doc, { type: "saved", mtime });
         // Typing while the save was in flight leaves the file dirty: save that too, later.
@@ -474,7 +487,7 @@ export function Workbench(props: {
       if (doc.sync.dirty) return setClosing(path);
     }
     clearTimeout(doc.timer);
-    const order = [...docs.keys()];
+    const order = [...docs.keys(), ...galleries];
     if (editor.current && editor.current.getModel() === doc.model) editor.current.setModel(null);
     if (editorDoc.current === doc) editorDoc.current = null;
     doc.unsub();
@@ -536,14 +549,32 @@ export function Workbench(props: {
       });
     gone.add(key);
     opening.delete(key);
-    const order = [...docs.keys(), ...pages.keys()];
+    const order = [...docs.keys(), ...galleries, ...pages.keys()];
     const rest = order.filter((k) => k !== key);
     const i = order.indexOf(key);
     setActiveState((a) => (a === key ? (rest[Math.min(i, rest.length - 1)] ?? null) : a));
     rerender();
   };
-  // A file tab or a browser tab.
-  const closeTab = (key: string) => (key.startsWith("tab:") ? closePage(key) : void closeDoc(key));
+
+  // ---- galleries ----
+
+  const openGallery = (dir: string) => {
+    galleries.add(galleryKey(dir));
+    setActive(galleryKey(dir));
+    rerender();
+  };
+  const closeGallery = (key: string) => {
+    const order = [...docs.keys(), ...galleries, ...pages.keys()];
+    galleries.delete(key);
+    const rest = order.filter((k) => k !== key);
+    const i = order.indexOf(key);
+    setActiveState((a) => (a === key ? (rest[Math.min(i, rest.length - 1)] ?? null) : a));
+    rerender();
+  };
+  const bump = (dir: string) => ticks.set(dir, (ticks.get(dir) ?? 0) + 1);
+
+  // A file tab, a gallery or a browser tab.
+  const closeTab = (key: string) => (key.startsWith("tab:") ? closePage(key) : galleryDir(key) !== null ? closeGallery(key) : void closeDoc(key));
   // Hidden: the browser tab in front gives way to the last file (none: the terminal fills the
   // window), and comes back in front when they're shown. Hidden, their views aren't mounted.
   const lastPage = useRef<string | null>(null);
@@ -551,7 +582,7 @@ export function Workbench(props: {
   useEffect(() => {
     if (!props.showBrowsers && active?.startsWith("tab:")) {
       lastPage.current = active;
-      setActiveState([...docs.keys()].at(-1) ?? null);
+      setActiveState([...docs.keys(), ...galleries].at(-1) ?? null);
     } else if (props.showBrowsers && lastPage.current) {
       if (pages.has(lastPage.current)) setActiveState(lastPage.current);
       lastPage.current = null;
@@ -563,7 +594,7 @@ export function Workbench(props: {
   useEffect(() => {
     for (const k of opening) if (pages.has(k)) opening.delete(k);
     for (const k of gone) if (!link.browserTabs.some((t) => `tab:${t.id}` === k)) gone.delete(k);
-    if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...pages.keys()].at(-1) ?? null);
+    if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...galleries, ...pages.keys()].at(-1) ?? null);
   }, [pageKeys, listed]);
 
   // ---- live updates ----
@@ -578,6 +609,7 @@ export function Workbench(props: {
       }
       const doc = docs.get(p);
       if (doc) void checkRemote(doc);
+      if (galleries.has(galleryKey(p))) (bump(p), rerender());
     }
   };
   useEffect(() => link.onFs((paths) => onFs.current(paths)), [link]);
@@ -587,10 +619,18 @@ export function Workbench(props: {
     if (link.status !== "connected") return;
     for (const dir of expanded.current) void refreshDir(dir);
     for (const doc of docs.values()) void (doc.phase === "error" ? loadDoc(doc) : checkRemote(doc));
+    if (galleries.size) {
+      for (const key of galleries) bump(galleryDir(key)!);
+      rerender();
+    }
   }, [link.status]);
 
-  // blimpd watches the expanded folders and open files for this window's events socket.
-  const watchKey = watchPaths(expanded.current, docs.keys()).join("\n");
+  // blimpd watches the expanded folders, the galleries' folders and the open files for this
+  // window's events socket.
+  function watching() {
+    return watchPaths([...expanded.current, ...[...galleries].map((k) => galleryDir(k)!)], docs.keys());
+  }
+  const watchKey = watching().join("\n");
   useEffect(() => link.watch(id, watchKey ? watchKey.split("\n") : []), [watchKey, link]);
   useEffect(() => () => link.watch(id, []), [link]);
 
@@ -694,8 +734,8 @@ export function Workbench(props: {
   // ---- view ----
 
   // The tab strip scrolls sideways with no scrollbar, so keep the active file's tab in sight,
-  // also when the Markdown Edit toggle appears beside it and narrows the strip.
-  const toggleShown = activeDoc?.viewer === "markdown" && !!activeDoc.model;
+  // also when the Markdown or HTML Edit toggle appears beside it and narrows the strip.
+  const toggleShown = !!activeDoc && hasPreview(activeDoc.viewer) && !!activeDoc.model;
   useEffect(() => {
     const tab = strip.current?.querySelector(".tab.active");
     if (!strip.current || !tab) return;
@@ -703,7 +743,7 @@ export function Workbench(props: {
     const t = tab.getBoundingClientRect();
     if (t.left < s.left) strip.current.scrollLeft -= Math.ceil(s.left - t.left);
     else if (t.right > s.right) strip.current.scrollLeft += Math.ceil(t.right - s.right);
-  }, [active, docs.size, toggleShown]);
+  }, [active, docs.size, galleries.size, toggleShown]);
 
   const createRow = (depth: number) =>
     creating && (
@@ -766,8 +806,10 @@ export function Workbench(props: {
   const doc = activeDoc;
   const closingDoc = closing ? docs.get(closing) : undefined;
   const showTerm = props.showTerm;
+  // File tabs, galleries and browser tabs shown.
+  const tabCount = docs.size + galleries.size + shownPages.size;
   // With the terminal hidden and no file open, the editor area shows how to open one.
-  const showEditor = docs.size + shownPages.size > 0 || !!props.welcome || !showTerm;
+  const showEditor = tabCount > 0 || !!props.welcome || !showTerm;
   const treeOpen = props.showFiles;
 
   return (
@@ -822,7 +864,7 @@ export function Workbench(props: {
       {treeOpen && <Splitter label="Resize files" onDrag={(x) => setTreeWidth(clamp(x - box.current!.getBoundingClientRect().left, 160, 520))} />}
       <div className="wb-right" ref={right}>
         <div className="wb-editor" hidden={!showEditor} style={showTerm ? { height: `${editorShare * 100}%` } : { flex: 1 }}>
-          {docs.size + shownPages.size > 0 && (
+          {tabCount > 0 && (
             <div className="ftabs-bar">
               <div className="ftabs" role="tablist" ref={strip}>
                 {[...docs.values()].map((d) => (
@@ -850,6 +892,27 @@ export function Workbench(props: {
                     </button>
                   </div>
                 ))}
+                {[...galleries].map((key) => {
+                  const dir = galleryDir(key)!;
+                  const title = baseName(dir) || dir;
+                  return (
+                    <div
+                      key={key}
+                      role="tab"
+                      aria-selected={key === active}
+                      className={"tab gallery-tab" + (key === active ? " active" : "")}
+                      title={tildify(dir, link.home)}
+                      onMouseDown={(e) => e.button === 0 && setActive(key)}
+                      onAuxClick={(e) => e.button === 1 && closeGallery(key)}
+                    >
+                      {galleryIcon}
+                      <span className="tab-title">{title}</span>
+                      <button className="tab-close" aria-label={`Close gallery ${title}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => closeGallery(key)}>
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
                 {[...shownPages].map(([key, t]) => {
                   const title = t.title || hostOf(t.url) || "New tab";
                   return (
@@ -881,7 +944,7 @@ export function Workbench(props: {
                 </button>
               </div>
               {/* Outside the scrolling strip, so many open files never push it out of sight. */}
-              {doc?.viewer === "markdown" && doc.model && (
+              {doc && hasPreview(doc.viewer) && doc.model && (
                 <button
                   className="ftabs-toggle"
                   aria-pressed={doc.editing}
@@ -895,8 +958,8 @@ export function Workbench(props: {
               )}
             </div>
           )}
-          {docs.size + shownPages.size === 0 && props.welcome}
-          {docs.size + shownPages.size === 0 && !props.welcome && (
+          {tabCount === 0 && props.welcome}
+          {tabCount === 0 && !props.welcome && (
             <div className="empty">
               No file open
               <div className="empty-sub">⌘P to open one, or pick it in the files on the left</div>
@@ -917,7 +980,18 @@ export function Workbench(props: {
               />
             </div>
           ))}
-          <div className="viewer" hidden={docs.size === 0 || !!active?.startsWith("tab:")}>
+          {[...galleries].map((key) => (
+            <div key={key} className="viewer" hidden={key !== active}>
+              <Gallery
+                dir={galleryDir(key)!}
+                tick={ticks.get(galleryDir(key)!) ?? 0}
+                list={(d) => (link.api ? link.api.fsList(d) : Promise.reject(new Error("Not connected.")))}
+                load={(p) => (link.api ? link.api.fsRead(p) : Promise.reject(new Error("Not connected.")))}
+                onOpen={(p) => openFile(p)}
+              />
+            </div>
+          ))}
+          <div className="viewer" hidden={docs.size === 0 || !!active?.startsWith("tab:") || galleryDir(active) !== null}>
             {closingDoc && (
               <div className="fbar" role="alert">
                 <span>{closingDoc.name} isn't saved.</span>
@@ -971,6 +1045,13 @@ export function Workbench(props: {
                       load={(p) => (link.api ? link.api.fsRead(p) : Promise.reject(new Error("Not connected.")))}
                     />
                   )}
+                  {doc.viewer === "html" && (
+                    <HtmlView
+                      path={doc.path}
+                      text={doc.model ? doc.model.getValue() : doc.text}
+                      load={(p) => (link.api ? link.api.fsRead(p) : Promise.reject(new Error("Not connected.")))}
+                    />
+                  )}
                   {doc.viewer === "image" && <ImageView name={doc.name} bytes={doc.bytes} />}
                   {doc.viewer === "pdf" && <PdfView bytes={doc.bytes} />}
                   {doc.viewer === "binary" && (
@@ -1009,7 +1090,7 @@ export function Workbench(props: {
               setMenu(null);
             }}
           />
-          <div className="menu context-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 240), top: Math.min(menu.y, innerHeight - 90) }} onKeyDown={(e) => e.key === "Escape" && setMenu(null)}>
+          <div className="menu context-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 240), top: Math.min(menu.y, innerHeight - 120) }} onKeyDown={(e) => e.key === "Escape" && setMenu(null)}>
             <button
               role="menuitem"
               autoFocus
@@ -1030,6 +1111,17 @@ export function Workbench(props: {
                 }}
               >
                 Upload…
+              </button>
+            )}
+            {menu.kind === "dir" && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenu(null);
+                  openGallery(menu.path);
+                }}
+              >
+                Show as Gallery
               </button>
             )}
           </div>

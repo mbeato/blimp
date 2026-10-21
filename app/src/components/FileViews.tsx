@@ -2,7 +2,7 @@ import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import DOMPurify from "dompurify";
 import type { FileBody } from "../lib/api";
 import { errorText } from "../lib/connection";
-import { imageType, parentDir, resolvePath } from "../lib/files";
+import { baseName, decodeText, imageType, parentDir, resolvePath } from "../lib/files";
 import { openWebLink } from "../lib/links";
 import { parseMarkdown } from "../lib/markdown";
 
@@ -163,6 +163,70 @@ export function MarkdownView(props: {
           else openWebLink(href);
         }}
       />
+    </>
+  );
+}
+
+const dataUrl = (bytes: Uint8Array<ArrayBuffer>, type: string) =>
+  new Promise<string>((ok, fail) => {
+    const r = new FileReader();
+    r.onload = () => ok(r.result as string);
+    r.onerror = () => fail(r.error);
+    r.readAsDataURL(new Blob([bytes], { type }));
+  });
+
+// The page an HTML file shows, ready for a sandboxed frame. Relative images become data: URLs and
+// relative stylesheets <style>, both read through load (/fs/file): the frame has no origin to load
+// them from, and the token stays out of the page. Anything else that would load (from the web, or
+// from the app's own origin, which is what a relative URL means in the frame) is left out, and so
+// are scripts, <base> and <meta http-equiv>, which the sandbox and the policy would refuse anyway.
+async function framePage(path: string, text: string, load: (path: string) => Promise<FileBody>): Promise<string> {
+  const doc = new DOMParser().parseFromString(text, "text/html");
+  doc.querySelectorAll("script, base, meta[http-equiv], iframe, frame, object, embed").forEach((n) => n.remove());
+  const work: Promise<unknown>[] = [];
+  for (const img of doc.querySelectorAll("img")) {
+    const src = img.getAttribute("src") ?? "";
+    img.removeAttribute("srcset");
+    if (/^data:/i.test(src)) continue;
+    img.removeAttribute("src");
+    const p = relativeTarget(path, src);
+    // A missing image stays empty and shows its alt text.
+    if (p) work.push(load(p).then((b) => dataUrl(b.bytes, imageType(p)).then((u) => img.setAttribute("src", u)), () => {}));
+  }
+  for (const link of doc.querySelectorAll("link")) {
+    const p = /(^|\s)stylesheet(\s|$)/i.test(link.rel) ? relativeTarget(path, link.getAttribute("href") ?? "") : null;
+    if (!p) {
+      link.remove();
+      continue;
+    }
+    const style = doc.createElement("style");
+    link.replaceWith(style);
+    work.push(load(p).then((b) => void (style.textContent = decodeText(b.bytes) ?? ""), () => style.remove()));
+  }
+  await Promise.all(work);
+  return (doc.doctype ? "<!doctype html>" : "") + doc.documentElement.outerHTML;
+}
+
+// An HTML file as a page, in a frame with an empty sandbox: no script runs, and the page gets an
+// origin of its own, so it can't reach the app, its token or blimpd. srcdoc keeps the app's content
+// security policy on it (docs/DESIGN.md). While a new version of the file loads, the last one stays.
+export function HtmlView(props: { path: string; text: string; load: (path: string) => Promise<FileBody> }) {
+  const [page, setPage] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    framePage(props.path, props.text, props.load).then(
+      (h) => live && (setPage(h), setError("")),
+      (e) => live && setError(errorText(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [props.text, props.path]);
+  return (
+    <>
+      {error && <p className="view-note">Can't show this page: {error}. Edit shows its text.</p>}
+      {page !== null && <iframe className="html-view" sandbox="" srcDoc={page} title={baseName(props.path)} />}
     </>
   );
 }

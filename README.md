@@ -157,7 +157,9 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Text and code** open in Monaco, the editor inside VS Code. It has the same keys, search and replace, and multi-cursor.
 - **Edits save by themselves**, one second after you stop typing, and at once when you click away, switch files or switch apps. A dot on the tab means the latest edit is not saved yet. **⌘S** saves at once.
 - **Markdown** shows rendered. Click **Edit** to change it and **Preview** to go back. A relative link opens that file in a tab. An `http` or `https` link opens in your default browser. Other links do not open.
+- **HTML files** show as a web page. The page's images and stylesheets next to it show too. Its scripts do not run, and nothing on it loads from the web. Click **Edit** to change it and **Preview** to go back.
 - **Images** (png, jpg, jpeg, gif, webp, svg, ico, bmp) show fitted to the pane.
+- **See a folder's images in one place:** right-click the folder and pick **Show as Gallery**. A tab shows all its images, newest first, with each name and how long ago it changed. New images show up by themselves. Click one to open it in its own tab.
 - **PDF** files show all pages, with pdf.js.
 - Other binary files show "Can't show this file" and the file size.
 - The tree and the open files update when a session changes them.
@@ -254,7 +256,7 @@ blimpd can start sessions, type into them, and read and write every file in your
 - blimpd has no network port. It listens on a unix socket in `~/.blimp`. The folder has mode 700, and the socket and the token file have mode 600.
 - The app reaches blimpd only through your own SSH connection. Because ssh runs with `BatchMode=yes`, an unknown or changed host key makes the connection fail. It is not accepted, unless your own `~/.ssh/config` says so for that host.
 - On the Mac, any program or web page can reach the local port. So every request must carry a random token (`~/.blimp/token` on the server). The token is never in a cookie.
-- Files from the server cannot run script in the app. Markdown goes through DOMPurify, SVG shows only as an image, and pdf.js runs with scripting off. A strict content security policy blocks remote and inline script.
+- Files from the server cannot run script in the app. Markdown goes through DOMPurify, SVG shows only as an image, and pdf.js runs with scripting off. An HTML file shows in a sandboxed frame: its scripts do not run, and it cannot reach the app or blimpd. A strict content security policy blocks remote and inline script.
 - The installer checks zmx against a pinned SHA-256 sum, and blimpd against the release's `SHA256SUMS`.
 - **Accepted trade-off, keystroke timing:** plain `ssh` (OpenSSH 9.5 and later) sends keystrokes in fixed 20 ms ticks, so that a network observer cannot see your typing rhythm. blimp's tunnel is a port forward, which does not do this. So a network observer can see when you type, but not what you type. VS Code Remote and Tailscale have the same trade-off.
 - The server browser has no network port that other users on the server can use. It listens on `127.0.0.1` only, and it lets in only connections from your own user.
