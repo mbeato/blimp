@@ -11,12 +11,14 @@ const term = `blimpe2e-linkterm-${process.pid}`;
 const md = `blimpe2e-linkmd-${process.pid}`;
 const osc = `blimpe2e-linkosc-${process.pid}`;
 const menuSess = `blimpe2e-linkmenu-${process.pid}`;
+const split = `blimpe2e-linksplit-${process.pid}`;
 
 test.afterAll(() => {
   killSession(term);
   killSession(md);
   killSession(osc);
   killSession(menuSess);
+  killSession(split);
 });
 
 async function recordOpens(page: Page) {
@@ -162,4 +164,26 @@ test("Markdown: a web link opens in the browser, a relative link opens the file,
   await expect(ws.locator(".ftabs .tab.active")).toHaveText(/other\.md/);
   await expect(ws.locator(".md-view h1")).toHaveText("Other");
   expect(await opened(page)).toEqual(["https://example.com/from-md"]);
+});
+
+test("⌘-click on any row of a link Claude Code broke at the edge opens all of it", async ({ page }) => {
+  const dir = fixtureDir("linksplit");
+  const url = `https://example.com/${Array.from({ length: 30 }, (_, i) => `seg${i}`).join("/")}?q=1`;
+  // On Enter, at the attached terminal's width: the link cut at the edge, its rows indented, the way
+  // Claude Code draws a reply.
+  const script = `stty -echo; read x; cols=$(stty size | cut -d' ' -f2); clear; printf '%s' '${url}' | fold -w $((cols - 2)) | sed '1s/^/* /; 2,$s/^/  /'; echo; exec cat`;
+  await startSessionPty(split, dir, ["sh", "-c", script]);
+  await recordOpens(page);
+  const t = await openSessionTab(page, dir);
+  await t.locator(".xterm").click();
+  await page.keyboard.press("Enter");
+  await expect(t.locator(".xterm-rows > div", { hasText: "q=1" })).toHaveCount(1);
+  const screen = t.locator(".xterm-screen");
+  // On the link's second row, past its indent.
+  const [rb, sb] = [(await t.locator(".xterm-rows > div").nth(1).boundingBox())!, (await screen.boundingBox())!];
+  const position = { x: rb.x - sb.x + 40, y: rb.y - sb.y + rb.height / 2 };
+  await screen.hover({ position });
+  await expect(t.locator(".xterm-cursor-pointer")).toHaveCount(1);
+  await screen.click({ position, modifiers: ["ControlOrMeta"] });
+  await expect.poll(() => opened(page)).toEqual([url]);
 });

@@ -3,8 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { fixtureDir, frontTerm, killSession, openSessionTab, screenText, startSessionPty } from "./helpers";
 
 const pid = process.pid;
-const sessions = ["redraw", "claude"].map((t) => `blimpe2e-copy${t}-${pid}`);
-const [sRedraw, sClaude] = sessions;
+const sessions = ["redraw", "claude", "link"].map((t) => `blimpe2e-copy${t}-${pid}`);
+const [sRedraw, sClaude, sLink] = sessions;
 test.afterAll(() => sessions.forEach(killSession));
 
 // Drags from the first row's start to the end of row `last`, then ⌘C, and reads the clipboard.
@@ -61,4 +61,24 @@ test("text a program wrapped to the width itself, Claude Code's way, copies as o
   expect(endRow).toBeGreaterThan(1); // it did wrap
   const text = await copyRows(page, endRow - 1);
   expect(text.trim()).toBe(`* ${para}`);
+});
+
+test("a link Claude Code broke at the edge copies whole, by ⌘C and by the Edit menu's Copy", async ({ page }) => {
+  const dir = fixtureDir("copy-link");
+  const url = `https://example.com/${Array.from({ length: 30 }, (_, i) => `seg${i}`).join("/")}?q=1`;
+  // On Enter: the link cut at the edge, its rows indented, the way Claude Code draws a reply.
+  const script = `stty -echo; read x; cols=$(stty size | cut -d' ' -f2); clear; printf '%s' '${url}' | fold -w $((cols - 2)) | sed '1s/^/* /; 2,$s/^/  /'; echo; echo END; exec cat`;
+  await startSessionPty(sLink, dir, ["sh", "-c", script]);
+  await openSessionTab(page, dir);
+  await frontTerm(page).click();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => screenText(frontTerm(page))).toContain("END");
+  const lines = (await screenText(frontTerm(page))).split("\n").filter((l) => l.trim());
+  const endRow = lines.findIndex((l) => l.includes("END"));
+  expect(endRow).toBeGreaterThan(1); // it did wrap
+  expect((await copyRows(page, endRow - 1)).trim()).toBe(`* ${url}`);
+  // The Edit menu's Copy: the copy event, with the selection still there.
+  await page.evaluate(() => navigator.clipboard.writeText(""));
+  await page.evaluate(() => document.execCommand("copy"));
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`* ${url}`);
 });

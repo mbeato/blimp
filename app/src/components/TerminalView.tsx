@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal, type IBufferRange, type ILink, type ITheme } from "@xterm/xterm";
+import { Terminal, type IBufferLine, type IBufferRange, type ILink, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { backoff, type ServerLink } from "../lib/connection";
-import { joinRows, type Row } from "../lib/copy";
+import { joinRows, rowBreak, webLinks, type Row } from "../lib/copy";
 import { mapKey } from "../lib/keys";
 import { followsLink, openWebLink, webUrl } from "../lib/links";
 import { ExistsCache, findPaths, resolveAgainst } from "../lib/pathlinks";
@@ -116,7 +115,7 @@ export function TerminalView(props: {
       macOptionClickForcesSelection: true,
       // For the Unicode 11 width tables below (a proposed API in xterm).
       allowProposedApi: true,
-      // OSC 8 links (any text can carry a hidden URL) follow the same rule as WebLinksAddon's:
+      // OSC 8 links (any text can carry a hidden URL) follow the same rule as the web links below:
       // ⌘-click only, http and https only, through the opener. xterm's default asks with
       // confirm() on a plain click and then opens the URL in a new webview window.
       linkHandler: {
@@ -132,14 +131,31 @@ export function TerminalView(props: {
     // xterm's default (Unicode 6) the two disagree on column counts and Claude's redraws land offset.
     t.loadAddon(new Unicode11Addon());
     t.unicode.activeVersion = "11";
-    t.loadAddon(
-      new WebLinksAddon(
-        (e, uri) => {
-          if (followsLink(e)) openWebLink(uri);
-        },
-        { hover: (_e, uri, range) => onLink(uri, range) },
-      ),
-    );
+    // Web links, also ones a wrap broke over rows (lib/copy.ts): the rows around y that go on from one
+    // another, at most 50 each way, read as one.
+    t.registerLinkProvider({
+      provideLinks(y, done) {
+        const buf = t.buffer.active;
+        const at = (i: number) => {
+          const line = buf.getLine(i);
+          return line && rowOf(line, t.cols);
+        };
+        const first = at(y - 1);
+        if (!first) return done(undefined);
+        const rows = [first];
+        let top = y - 1;
+        for (let r; top > y - 51 && (r = at(top - 1)) && rowBreak(r, rows[0], t.cols) !== "newline"; top--) rows.unshift(r);
+        for (let r; rows.length < y - top + 50 && (r = at(top + rows.length)) && rowBreak(rows.at(-1)!, r, t.cols) !== "newline"; ) rows.push(r);
+        const links = webLinks(rows, t.cols)
+          .filter((l) => l.start[0] <= y - 1 - top && l.end[0] >= y - 1 - top)
+          .map((l): ILink => {
+            const [s, e] = [l.start, l.end].map(([i, c]) => ({ x: rows[i].cellAt[c] + 1, y: top + i + 1 }));
+            const range = { start: s, end: e };
+            return { range, text: l.url, activate: (ev, uri) => followsLink(ev) && openWebLink(uri), hover: (_ev, uri) => onLink(uri, range) };
+          });
+        done(links.length ? links : undefined);
+      },
+    });
     // File paths: ⌘-click opens them in a file tab. A link shows only for a file that exists.
     const exists = new ExistsCache(() => linkRef.current.api);
     t.registerLinkProvider({
@@ -176,6 +192,16 @@ export function TerminalView(props: {
       },
     });
     t.open(box.current!);
+    // The Edit menu's Copy (and ⌘C when the menu takes it before the terminal sees the key) copies
+    // through the copy event, which xterm answers with one line per row: the joined text instead.
+    const el = box.current!;
+    const onCopy = (e: ClipboardEvent) => {
+      if (!t.hasSelection() || !e.clipboardData) return;
+      e.clipboardData.setData("text/plain", copied(t));
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    el.addEventListener("copy", onCopy, true);
     // WebGL is much faster for Claude's redraws; without it (or when the GPU context is lost)
     // xterm falls back to its DOM renderer.
     try {
@@ -294,6 +320,7 @@ export function TerminalView(props: {
       ws?.close();
       ro.disconnect();
       offSettings();
+      el.removeEventListener("copy", onCopy, true);
       t.dispose();
     };
   }, [props.name]);
@@ -367,16 +394,25 @@ function copied(t: Terminal): string {
   for (let y = p.start.y; y <= p.end.y; y++) {
     const line = buf.getLine(y);
     if (!line) return t.getSelection();
-    let width = 0;
-    for (let x = t.cols - 1; x >= 0; x--) {
-      const cell = line.getCell(x);
-      if (cell && cell.getChars() && cell.getChars() !== " ") {
-        width = x + Math.max(1, cell.getWidth());
-        break;
-      }
-    }
     const [from, to] = [y === p.start.y ? p.start.x : 0, y === p.end.y ? p.end.x : t.cols];
-    rows.push({ full: line.translateToString(true), width, wrapped: y > p.start.y && line.isWrapped, text: line.translateToString(true, from, to) });
+    rows.push({ ...rowOf(line, t.cols), text: line.translateToString(true, from, to) });
   }
   return joinRows(rows, t.cols);
+}
+
+// A buffer row as lib/copy.ts reads it, all of it selected, with the cell each character of it is in.
+function rowOf(line: IBufferLine, cols: number): Row & { cellAt: number[] } {
+  let full = "";
+  let width = 0;
+  const cellAt: number[] = [];
+  for (let x = 0; x < cols; x++) {
+    const cell = line.getCell(x);
+    if (!cell || cell.getWidth() === 0) continue;
+    const ch = cell.getChars() || " ";
+    for (let i = 0; i < ch.length; i++) cellAt.push(x);
+    full += ch;
+    if (ch !== " ") width = x + cell.getWidth();
+  }
+  full = full.trimEnd();
+  return { full, width, wrapped: line.isWrapped, text: full, cellAt };
 }
