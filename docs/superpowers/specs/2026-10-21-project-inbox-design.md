@@ -68,8 +68,12 @@ toolbar's New chat still opens a blank chat, and the drawer gets an Inbox row at
 - App e2e: the summary shows and a click opens the session; it folds. iPhone e2e: the project opens to the
   inbox, a tap on a line opens that chat.
 
-## Not doing
+## Later (10/21): In progress became a paragraph
 
-- A second model call to merge notes into prose.
+In progress only listed the working sessions' names again. Max asked for it to go on the Mac, and on the phone for
+a readable paragraph on the project's sessions, with links to them in it: a second Haiku call per project
+(`src/digests.ts`, docs/DESIGN.md "Digests"), when its sessions change. Waiting on you and Done stay as lists.
+
+## Not doing
 - Notes for shells or other kinds that aren't Claude Code.
 - A summary across all projects.

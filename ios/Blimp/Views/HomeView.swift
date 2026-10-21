@@ -74,7 +74,8 @@ struct HomeView: View {
         case .inbox:
             if let dir = store.dir {
                 StartView(dir: dir, past: nil,
-                          inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), rows: rows, onPick: open)) {
+                          inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier),
+                                           digest: store.digests[dir], sessions: store.sessions, rows: rows, onPick: open)) {
                     show(.session($0))
                 }
                 .id(dir)

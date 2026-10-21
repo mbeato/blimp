@@ -960,6 +960,7 @@ describe("events", () => {
     const msg = await until(() => e.messages.find((m) => m.type === "sessions"), "sessions message");
     const s = msg.sessions.find((x: any) => x.name === name);
     expect(s).toMatchObject({ name, title: "(new session)", state: "unknown" });
+    expect(msg.digests).toEqual({}); // names are off here
 
     // A hook file for it shows up within the 1 s check.
     mkdirSync(join(tmp, "status"), { recursive: true });
@@ -1514,6 +1515,23 @@ cat "${answer}"
     await Bun.sleep(500);
     expect(await titleOf(name)).toBe("Billing page review");
     expect(JSON.parse(readFileSync(join(nTmp, "names.json"), "utf8"))[sid]).toBeUndefined();
+  }, 20000);
+
+  // The project paragraphs (digests.ts) come with the session list, for the folders with sessions running.
+  test("the events socket carries each running folder's paragraph", async () => {
+    await fakeClaude("n4", "88888888-8888-8888-8888-888888888888", [user("u1", "write the docs"), said("a1", "Wrote them.")]);
+    const dir = (await list()).find((s) => s.sessionId === "88888888-8888-8888-8888-888888888888")!.dir;
+    const d = { text: "[The docs](1) are written.", sessions: ["x"], at: 5, key: "k" };
+    writeFileSync(join(nTmp, "digests.json"), JSON.stringify({ [dir]: d, "/nowhere": { ...d, text: "gone" } }));
+    const ws = new WebSocket(`ws+unix://${nSock}:/events?token=${nToken}`);
+    const got: any[] = [];
+    ws.onmessage = (e) => got.push(JSON.parse(String(e.data)));
+    try {
+      const m = await until(() => got.find((x) => x.type === "sessions" && x.digests?.[dir]), "the paragraph on the events socket");
+      expect(m.digests).toEqual({ [dir]: { text: "[The docs](1) are written.", sessions: ["x"], at: 5 } });
+    } finally {
+      ws.close();
+    }
   }, 20000);
 
   test('nothing is called with "names": false, and Claude\'s titles show again', async () => {

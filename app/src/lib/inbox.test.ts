@@ -21,7 +21,6 @@ const c = (id: string, extra: Partial<Conversation> = {}): Conversation => ({ se
 const note = (status: Note["status"], text: string): Note => ({ status, text, at: 1 });
 const lines = (r: ReturnType<typeof inbox>) => ({
   waiting: r.waiting.map((l) => `${l.title}: ${l.words ?? ""}`),
-  progress: r.progress.map((l) => `${l.title}: ${l.words ?? ""}`),
   done: r.done.map((l) => `${l.title}: ${l.words ?? ""}`),
 });
 
@@ -38,9 +37,10 @@ test("waiting on you: a session that waits, with what it asks; or one done with 
   expect(lines(r).waiting).toEqual(["PERM: Ran `bun test`", "ASK: Which layout?", "OTHER: release it?", "PROSE: ship v0.2.16?"]);
 });
 
-test("in progress: working (no words: its note is about the turn before), or done with a progress note", () => {
-  const r = inbox([s("busy", { state: "working", note: note("done", "released") }), s("part", { note: note("progress", "fixing a flaky test") })], []);
-  expect(lines(r).progress).toEqual(["BUSY: ", "PART: fixing a flaky test"]);
+test("work still going on isn't listed: a working session, or one done with a progress note, even unread", () => {
+  const r = inbox([s("busy", { state: "working", unread: true, note: note("done", "released") }), s("part", { unread: true, note: note("progress", "fixing a flaky test") })], []);
+  expect(lines(r)).toEqual({ waiting: [], done: [] });
+  expect(Object.keys(r)).toEqual(["waiting", "done"]);
 });
 
 test("done: a session done and unread, with its note; once seen it's gone", () => {
@@ -48,9 +48,9 @@ test("done: a session done and unread, with its note; once seen it's gone", () =
   expect(lines(r).done).toEqual(["NEW: v0.2.16 out", "BARE: "]);
 });
 
-test("earlier conversations: only unread ones, under the heading their note gives (done without one)", () => {
+test("earlier conversations: only unread ones, under the heading their note gives (done without one; not one still in progress)", () => {
   const r = inbox([], [c("a", { unread: true, note: note("done", "fixed") }), c("b", { unread: true, note: note("progress", "half way") }), c("q", { unread: true, note: note("question", "which?") }), c("d", { unread: false, note: note("done", "x") }), c("e", { unread: true })]);
-  expect(lines(r)).toEqual({ waiting: ["Q: which?"], progress: ["B: half way"], done: ["A: fixed", "E: "] });
+  expect(lines(r)).toEqual({ waiting: ["Q: which?"], done: ["A: fixed", "E: "] });
   expect(r.done[0].conversation?.sessionId).toBe("a");
   expect(r.done[0].session).toBeUndefined();
 });
@@ -61,7 +61,7 @@ test("newest activity first within a heading; shells and idle read sessions don'
     [c("mid", { unread: true, updatedAt: 500 })],
   );
   expect(r.done.map((l) => l.id)).toEqual(["session-newer", "past-mid", "session-old"]);
-  expect(r.waiting.length + r.progress.length).toBe(0);
+  expect(r.waiting.length).toBe(0);
 });
 
 test("askedWords", () => {

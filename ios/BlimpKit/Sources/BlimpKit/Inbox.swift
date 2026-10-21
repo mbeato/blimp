@@ -1,6 +1,7 @@
 // A project's inbox (docs/DESIGN.md, "Inbox"): its sessions and unread past conversations sorted under Waiting
-// on you, In progress and Done, each with a few words from what it asks or Haiku's note on its last turn. The Mac
-// builds the same (app/src/lib/inbox.ts), by the same rules.
+// on you and Done, each with a few words from what it asks or Haiku's note on its last turn. Work still going on
+// isn't listed: the project's paragraph (Digest) tells it. The Mac builds the same (app/src/lib/inbox.ts), by the
+// same rules.
 import Foundation
 
 public struct InboxLine: Equatable, Identifiable, Sendable {
@@ -20,10 +21,9 @@ public struct InboxLine: Equatable, Identifiable, Sendable {
 
 public struct Inbox: Equatable, Sendable {
     public private(set) var waiting: [InboxLine] = []
-    public private(set) var progress: [InboxLine] = []
     public private(set) var done: [InboxLine] = []
 
-    public var isEmpty: Bool { waiting.isEmpty && progress.isEmpty && done.isEmpty }
+    public var isEmpty: Bool { waiting.isEmpty && done.isEmpty }
 
     /// What a waiting session asks: a permission's summary, or its first question.
     public static func asked(_ p: Prompt?) -> String? {
@@ -42,26 +42,18 @@ public struct Inbox: Equatable, Sendable {
             func line(_ words: String?) -> InboxLine { InboxLine(item: .running(s), title: s.title, words: words, activity: s.activity) }
             if s.state == .waiting { waiting.append(line(Self.asked(s.prompt) ?? n?.text)) }
             else if s.state == .done, n?.status == .question { waiting.append(line(n?.text)) }
-            // A working session's note is about the turn before this one.
-            else if s.state == .working { progress.append(line(nil)) }
-            else if s.state == .done, n?.status == .progress { progress.append(line(n?.text)) }
-            else if s.state == .done, s.unread == true { done.append(line(n?.text)) }
+            else if s.state == .done, s.unread == true, n?.status != .progress { done.append(line(n?.text)) }
         }
         let open = Set(running.compactMap(\.sessionId))
-        for c in earlier where c.unread == true && !open.contains(c.sessionId) {
+        for c in earlier where c.unread == true && !open.contains(c.sessionId) && c.note?.status != .progress {
             let line = InboxLine(item: .past(c), title: c.title, words: c.note?.text, activity: c.updatedAt)
-            switch c.note?.status {
-            case .question: waiting.append(line)
-            case .progress: progress.append(line)
-            default: done.append(line)
-            }
+            if c.note?.status == .question { waiting.append(line) } else { done.append(line) }
         }
         // Newest first; ties keep the list's order.
         func sorted(_ l: [InboxLine]) -> [InboxLine] {
             l.enumerated().sorted { $0.element.activity != $1.element.activity ? $0.element.activity > $1.element.activity : $0.offset < $1.offset }.map(\.element)
         }
         waiting = sorted(waiting)
-        progress = sorted(progress)
         done = sorted(done)
     }
 }

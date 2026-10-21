@@ -13,6 +13,8 @@ enum Connection: Equatable, Sendable {
 final class Store {
     var server: ServerLink?
     var sessions: [Session] = []
+    /// Each running folder's paragraph (Digest), from the same messages as the sessions.
+    var digests: [String: Digest] = [:]
     var connection: Connection = .connecting
     /// The project the chat is in, kept for the next launch.
     var dir: String? = UserDefaults.standard.string(forKey: "project") {
@@ -63,6 +65,7 @@ final class Store {
             onMessage: { [weak self] data in
                 guard let self, case .sessions(let list) = EventsMessage.decode(data) else { return }
                 self.sessions = list
+                self.digests = EventsMessage.digests(data)
             },
             onState: { [weak self] state in self?.update(state) })
         events = socket

@@ -5,6 +5,7 @@
 import { type FSWatcher, statSync, watch } from "node:fs";
 import type { Server, ServerWebSocket } from "bun";
 import { browserTabs } from "./browser/service";
+import { shownDigests } from "./digests";
 import { guard } from "./files";
 import { sessionPorts } from "./ports";
 import { claudeDir, listSessions, parseZmxList, zmxListAsync } from "./sessions";
@@ -27,7 +28,11 @@ let lastPorts = "";
 let ticks = 0;
 let checking = false;
 
-const sessionsMessage = (zmx: string) => JSON.stringify({ type: "sessions", sessions: listSessions(claudeDir(), zmx) });
+// With each running folder's paragraph (digests.ts), so a new one reaches the phone as the list does.
+const sessionsMessage = (zmx: string) => {
+  const sessions = listSessions(claudeDir(), zmx);
+  return JSON.stringify({ type: "sessions", sessions, digests: shownDigests([...new Set(sessions.map((s) => s.dir))]) });
+};
 export const browserMessage = () => JSON.stringify({ type: "browser", tabs: browserTabs() });
 const portsMessage = async (zmx: string) => JSON.stringify({ type: "ports", ports: await sessionPorts(parseZmxList(zmx)) });
 

@@ -40,10 +40,12 @@ private func lines(_ l: [InboxLine]) -> [String] { l.map { "\($0.title): \($0.wo
     #expect(lines(i.waiting) == ["PERM: Ran `bun test`", "ASK: Which layout?", "OTHER: release it?", "PROSE: ship v0.2.16?"])
 }
 
-@Test func inProgressIsWorkingWithoutWordsOrDoneWithAProgressNote() {
-    let i = Inbox(dir: "/p", sessions: [s("busy", state: .working, note: n(.done, "released")), s("part", note: n(.progress, "fixing a flaky test"))],
-                  earlier: [])
-    #expect(lines(i.progress) == ["BUSY: ", "PART: fixing a flaky test"])
+/// The project's paragraph tells work still going on, so it isn't listed: a working session, or one done with a
+/// progress note, even unread.
+@Test func workStillGoingOnIsNotListed() {
+    let i = Inbox(dir: "/p", sessions: [s("busy", state: .working, unread: true, note: n(.done, "released")),
+                                        s("part", unread: true, note: n(.progress, "fixing a flaky test"))], earlier: [])
+    #expect(i.isEmpty)
 }
 
 @Test func doneIsASessionDoneAndUnreadWithItsNote() {
@@ -58,7 +60,6 @@ private func lines(_ l: [InboxLine]) -> [String] { l.map { "\($0.title): \($0.wo
         c("q", unread: true, note: n(.question, "which?")), c("d", unread: false, note: n(.done, "x")), c("e", unread: true),
     ])
     #expect(lines(i.waiting) == ["Q: which?"])
-    #expect(lines(i.progress) == ["B: half way"])
     #expect(lines(i.done) == ["A: fixed", "E: "])
 }
 
@@ -78,4 +79,20 @@ private func lines(_ l: [InboxLine]) -> [String] { l.map { "\($0.title): \($0.wo
     #expect(conv.note == Note(status: .progress, text: "half way", at: 2))
     let odd = try JSONDecoder().decode(Note.self, from: Data(#"{"status":"later","text":"x","at":1}"#.utf8))
     #expect(odd.status == .done)
+}
+
+@Test func aDigestsLinksNameItsSessions() {
+    let d = Digest(text: "[The login fix](1) needs you; [the limiter](2) is still going, and [x](9) is gone.", sessions: ["s1", "s2"], at: 1)
+    #expect(d.parts == [
+        .init(text: "The login fix", session: "s1"), .init(text: " needs you; ", session: nil),
+        .init(text: "the limiter", session: "s2"), .init(text: " is still going, and ", session: nil),
+        .init(text: "x", session: nil), .init(text: " is gone.", session: nil),
+    ])
+    #expect(Digest(text: "No links [here] (1).", sessions: ["s1"], at: 1).parts == [.init(text: "No links [here] (1).", session: nil)])
+}
+
+@Test func theSessionsEventCarriesEachFoldersDigest() {
+    let data = Data(#"{"type":"sessions","sessions":[],"digests":{"/p":{"text":"[A](1) is done.","sessions":["s1"],"at":5},"/bad":{"text":1}}}"#.utf8)
+    #expect(EventsMessage.digests(data) == ["/p": Digest(text: "[A](1) is done.", sessions: ["s1"], at: 5)])
+    #expect(EventsMessage.digests(Data(#"{"type":"sessions","sessions":[]}"#.utf8)) == [:])
 }

@@ -5,7 +5,6 @@ import type { Inbox, InboxLine } from "../lib/inbox";
 const OPEN_KEY = "blimp.inboxOpen";
 const HEADINGS = [
   ["waiting", "Waiting on you"],
-  ["progress", "In progress"],
   ["done", "Done"],
 ] as const;
 
@@ -27,11 +26,10 @@ export function InboxSummary(props: { inbox: Inbox; disabled: boolean; onSession
       } catch {}
       return !o;
     });
-  const { waiting, progress, done } = props.inbox;
-  if (!waiting.length && !progress.length && !done.length) return null;
+  const { waiting, done } = props.inbox;
+  if (!waiting.length && !done.length) return null;
   const counts = [
     waiting.length && `${waiting.length} waiting`,
-    progress.length && `${progress.length} in progress`,
     done.length && `${done.length} done`,
   ].filter(Boolean);
   const pick = (l: InboxLine) => (l.session ? props.onSession(l.session) : l.conversation && props.onPast(l.conversation));

@@ -243,11 +243,22 @@ For a project's inbox (below), blimpd notes where each Claude session stands aft
 A project's summary, the same in both apps (`app/src/lib/inbox.ts`, `ios/BlimpKit/Sources/BlimpKit/Inbox.swift`), from its running sessions and its Earlier conversations that no running session has open:
 
 - **Waiting on you:** a session that waits, with what it asks (a permission's summary, a question's first question), else its note; or one that's done with a `question` note.
-- **In progress:** a session that's working (no words: its note is about the turn before), or done with a `progress` note.
-- **Done:** a session that's done and unread, with its note. Once it's seen (Unread), it leaves.
-- An unread Earlier conversation goes under the heading its note gives, Done without one; a read one isn't listed.
+- **Done:** a session that's done and unread, with its note, unless the note says `progress`. Once it's seen (Unread), it leaves.
+- An unread Earlier conversation goes under the heading its note gives, Done without one; a read one, or one whose note says `progress`, isn't listed.
+- Work still going on (a working session, or a note that says `progress`) isn't listed: on the phone the project's paragraph (Digests, below) tells it.
 
 Each line is the title, then its words; newest activity first within a heading; an empty heading isn't shown. A line opens its session.
+
+### Digests
+
+On the phone the inbox starts with a paragraph on where the project's work stands (`src/digests.ts`), with the same model call as names.
+
+- **When:** every 5 s, for each folder with `claude` or `claude-glm` sessions running, once what they are has changed since its last paragraph (a session started or ended, changed state or got a new note) and stayed so for 15 s. One call at a time, at most 60 an hour; a folder whose call failed waits 10 minutes.
+- **What the model reads:** the folder's name, and each session numbered, with its title (~100 characters) and where it stands: waiting on the user (and its note), working now (and its latest request, ~200 characters), asking the user, stopped part way, finished (each with its note), or idle.
+- **The answer:** one paragraph, 2 to 4 sentences, at most 600 characters, no lists or control characters. Each session it mentions is a link, `[a few words](n)`, n its number; a number it doesn't have, or a square bracket outside a link, is a failed try. A single line break is a space.
+- **Where:** `<socket dir>/digests.json`, `{ [folder]: { text, sessions, at, key } }` (`sessions`: the names its links point at, link n at `sessions[n - 1]`; `key`: what it was written from), through a temp file and a rename, 600, the 200 newest kept. The events socket's `sessions` message carries `digests: { [folder]: { text, sessions, at } }` for the folders with sessions running, so a new one reaches the phone as the list does.
+- **The phone** (`Digest` in BlimpKit, `InboxView`): the paragraph on top, each link's words a link that opens its session's chat while it runs (else plain words).
+- **Off:** with names (`{ "names": false }`): nothing is called and no paragraphs are sent.
 
 ### Hooks (status backup)
 

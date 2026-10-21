@@ -49,7 +49,7 @@ Each item says what to do, and what should happen. If the result is different, w
 
 - [ ] **The inbox.**
   Do: in a folder, ask Claude in one session to do something small and wait for it to finish, without looking at that session (keep another one on screen). Wait a few seconds more. Click its line in the inbox at the top of the session list. Then click the inbox's header.
-  Expect: the session is under Done with a few words on what it did (a little after the turn ends). The click shows that session, and its line leaves Done. The header folds the inbox to one line of counts, and it stays folded after a restart.
+  Expect: the session is under Done with a few words on what it did (a little after the turn ends). The click shows that session, and its line leaves Done. The header folds the inbox to one line of counts, and it stays folded after a restart. While a session works, there's no In progress heading for it.
 
 - [ ] **Drag a session to split the terminal.**
   Do: in a folder with two sessions, drag the second one from the session list onto the right half of the terminal. Type in it. Drag it again onto the left half. Click × on its split. Start one more drag and press Esc before you let go.
