@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Api, Recap } from "../lib/api";
-import { cameBack, markShown, readLastShown, writeLastShown } from "../lib/recap";
+import { AWAY, cameBack, markShown, readLastShown, writeLastShown } from "../lib/recap";
 
 export type Card = Recap | "loading";
 
@@ -46,21 +46,25 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[]) {
       },
       () => {
         clearTimeout(t);
-        if (mine()) dismiss(name);
+        // Only the "…" goes: a card already showing stays (one asked for again, or asked on its own).
+        if (mine()) asking.delete(name), setCards(({ [name]: was, ...rest }) => (was === undefined || was === "loading" ? rest : { ...rest, [name]: was }));
       },
     );
   };
 
   const viewing = focused && api ? onScreen.map((n) => `${server}/${n}`) : [];
   const before = useRef<string[]>([]);
+  const looked = useRef(Date.now());
   useEffect(() => {
     if (!viewing.length && !before.current.length) return;
     const now = Date.now();
     const last = readLastShown();
-    const back = cameBack(viewing, before.current, last, now);
-    // The ones just gone off screen were on it until now.
-    writeLastShown(markShown(last, [...viewing, ...before.current], now));
+    const back = cameBack(viewing, before.current, last, now, looked.current);
+    // The ones just gone off screen were on it until now, or, after the Mac was asleep, until it slept.
+    const until = now - looked.current >= AWAY ? looked.current : now;
+    writeLastShown(markShown(markShown(last, before.current, until), viewing, now));
     before.current = viewing;
+    looked.current = now;
     for (const k of back) show(k.slice(server.length + 1), true);
   }, [viewing.join("\n"), tick]);
 
@@ -71,7 +75,8 @@ export function RecapCard(props: { card: Card; onClose: () => void }) {
   const { card } = props;
   return (
     <div className="recap-card" role="status" aria-label="Where this session is">
-      <button className="tab-close" title="Dismiss" aria-label="Dismiss recap" onClick={props.onClose}>
+      {/* No focus on mouse down, so the keyboard stays in the terminal once the card is gone. */}
+      <button className="tab-close" title="Dismiss" aria-label="Dismiss recap" onMouseDown={(e) => e.preventDefault()} onClick={props.onClose}>
         ×
       </button>
       {card === "loading" ? (

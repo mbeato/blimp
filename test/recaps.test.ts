@@ -20,13 +20,26 @@ describe("checkRecap", () => {
     expect(r).toEqual({ goal: "Fix the build", done: ["step 0", "step 1", "step 2", "step 3"], open: ["ship it"] });
   });
 
+  test("a line over 140 characters is cut at a word with …, and the rest of the card is kept", () => {
+    const long = "Saving your testing rule to recense failed twice because its background cleanup is holding a lock. Decide whether to let it finish so I can retry.";
+    const done150 = `${"word ".repeat(29)}abcd`.padEnd(150, "x");
+    const r = checkRecap(`GOAL | ${"goal ".repeat(40)}\nDONE | ${done150}\nDONE | Tests added\nOPEN | ${long}\nOPEN | Release it`)!;
+    expect(r.done[1]).toBe("Tests added");
+    expect(r.open[1]).toBe("Release it");
+    for (const l of [r.goal, r.done[0], r.open[0]]) expect(l.length).toBeLessThanOrEqual(140), expect(l.endsWith("…")).toBe(true);
+    expect(r.open[0]).toBe(long.slice(0, long.lastIndexOf(" ", 139)) + "…");
+    expect(r.goal).toBe(`${"goal ".repeat(27)}goal…`);
+    expect(r.done[0]).toBe(`${"word ".repeat(27)}word…`);
+    // One long word: cut where it hits 140.
+    expect(checkRecap(`GOAL | ${"x".repeat(200)}`)!.goal).toBe("x".repeat(139) + "…");
+  });
+
   test("anything else is ignored", () => {
     expect(checkRecap("")).toBeUndefined();
     expect(checkRecap("DONE | a")).toBeUndefined(); // no goal
     expect(checkRecap("GOAL | a\nGOAL | b")).toBeUndefined();
     expect(checkRecap("Here is the card:\nGOAL | a")).toBeUndefined();
     expect(checkRecap("GOAL | ")).toBeUndefined();
-    expect(checkRecap(`GOAL | ${"word ".repeat(30)}`)).toBeUndefined(); // over 140 characters
     expect(checkRecap("GOAL | a\nOPEN | bell\x07")).toBeUndefined();
     expect(checkRecap("GOAL | a\nNEXT | b")).toBeUndefined();
   });

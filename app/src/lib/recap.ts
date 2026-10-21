@@ -7,9 +7,10 @@ const KEEP = 30 * 24 * 60 * 60_000;
 const KEY = "blimp.lastShown";
 
 // The sessions on screen now that weren't at the last look (before), and were last on screen an hour
-// ago or more, or never on this Mac.
-export const cameBack = (viewing: string[], before: string[], last: Record<string, number>, now: number) =>
-  viewing.filter((k) => !before.includes(k) && !(now - (last[k] ?? -Infinity) < AWAY));
+// ago or more, or never on this Mac. prev: when that last look was. The app looks every 30 s, so a look
+// an hour or more ago means the Mac was asleep: then the ones on screen all along count too.
+export const cameBack = (viewing: string[], before: string[], last: Record<string, number>, now: number, prev = now) =>
+  viewing.filter((k) => (now - prev >= AWAY || !before.includes(k)) && !(now - (last[k] ?? -Infinity) < AWAY));
 
 // These sessions were on screen until now. Ones not on screen for a month are forgotten.
 export function markShown(last: Record<string, number>, shown: string[], now: number): Record<string, number> {

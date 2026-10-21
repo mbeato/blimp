@@ -10,8 +10,9 @@ import { fixtureDir, frontTab, killSession, openApp, sessionRow, startSession, z
 
 const name = `blimpe2e-recap-${process.pid}`;
 const bare = `blimpe2e-recapb-${process.pid}`;
+const failing = `blimpe2e-recapf-${process.pid}`;
 
-test.afterAll(() => (killSession(name), killSession(bare)));
+test.afterAll(() => (killSession(name), killSession(bare), killSession(failing)));
 
 // A session that looks like Claude to blimpd, with 3 prompts and replies.
 function fakeClaude(session: string, dir: string) {
@@ -56,8 +57,12 @@ test("a session not on screen for an hour gets a card; dismissed, it stays away;
   await expect(c.getByRole("list", { name: "Open" }).locator("li")).toHaveText(CARD.open);
   expect(asked).toEqual(["3"]); // asked on its own: only with 3 prompts or more
 
+  // Closing it leaves the keyboard in the terminal, so you can type your reply straight away.
+  const typing = frontTab(page).locator(`.tsplit[data-split="${name}"] .xterm-helper-textarea`);
+  await typing.focus();
   await c.getByRole("button", { name: "Dismiss recap" }).click();
   await expect(c).toHaveCount(0);
+  await expect(typing).toBeFocused();
 
   // Back within the hour: no card.
   await page.reload();
@@ -81,4 +86,26 @@ test("nothing shows when blimpd has no card for the session", async ({ page }) =
   await expect.poll(() => asked.length, { timeout: 10_000 }).toBe(1);
   await page.waitForTimeout(800);
   await expect(card(page, bare)).toHaveCount(0);
+});
+
+test("a Recap that fails leaves the card already showing", async ({ page }) => {
+  const dir = fixtureDir("recapf");
+  fakeClaude(failing, dir);
+  const asked: string[] = [];
+  let fail = false;
+  await page.route(`**/sessions/${failing}/recap*`, (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get("min") ?? "");
+    const headers = { "Access-Control-Allow-Origin": "*" };
+    return fail ? route.fulfill({ status: 429, json: { error: "Too many recaps this hour" }, headers }) : route.fulfill({ json: CARD, headers });
+  });
+  await openApp(page, { dir, session: failing });
+  await page.bringToFront();
+  await expect(card(page, failing).locator(".recap-goal")).toHaveText(CARD.goal, { timeout: 10_000 });
+
+  fail = true;
+  await sessionRow(page, failing).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Recap" }).click();
+  await expect.poll(() => asked.length).toBe(2);
+  await page.waitForTimeout(500);
+  await expect(card(page, failing).locator(".recap-goal")).toHaveText(CARD.goal);
 });

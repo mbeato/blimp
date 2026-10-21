@@ -81,7 +81,7 @@ export function recapPrompt(p: { title?: string; first?: string; last: string[];
     "GOAL | what the session is for, in one line",
     "DONE | something finished (at most 4 DONE lines, the most important first)",
     "OPEN | something still to do or to decide (at most 4 OPEN lines; none if nothing is left)",
-    "Each line at most 120 characters, in plain words: no markdown.",
+    "Each line at most 100 characters, in plain words: no markdown.",
     "",
   ];
   if (p.title) lines.push(`Session: ${clip(p.title)}`);
@@ -94,8 +94,8 @@ export function recapPrompt(p: { title?: string; first?: string; last: string[];
 }
 
 // The model's answer as a card, or undefined if it isn't one: one GOAL line, then DONE and OPEN lines
-// (the first 4 of each kept), nothing else; each at most 140 characters once markdown marks are off.
-// It's shown as plain text.
+// (the first 4 of each kept), nothing else. A line over 140 characters once markdown marks are off is
+// cut at a word, with "…" (haiku often goes past the 100 it's asked for). It's shown as plain text.
 export function checkRecap(out: string): Omit<Recap, "at"> | undefined {
   let goal: string | undefined;
   const done: string[] = [];
@@ -104,8 +104,12 @@ export function checkRecap(out: string): Omit<Recap, "at"> | undefined {
     if (!l) continue;
     const m = l.match(/^(GOAL|DONE|OPEN)\s*\|\s*(.*)$/i);
     if (!m) return;
-    const text = m[2].replace(/\*\*|__|`/g, "").replace(/^[-•]\s+/, "").replace(/\s+/g, " ").trim();
-    if (!text || text.length > 140 || /[\x00-\x1f\x7f]/.test(text)) return;
+    let text = m[2].replace(/\*\*|__|`/g, "").replace(/^[-•]\s+/, "").replace(/\s+/g, " ").trim();
+    if (!text || /[\x00-\x1f\x7f]/.test(text)) return;
+    if (text.length > 140) {
+      const at = text.lastIndexOf(" ", 139);
+      text = text.slice(0, at > 0 ? at : /[\ud800-\udbff]/.test(text[138]) ? 138 : 139).trimEnd() + "…";
+    }
     const kind = m[1].toUpperCase();
     if (kind === "GOAL") {
       if (goal !== undefined) return;
