@@ -39,7 +39,7 @@ import {
 } from "./lib/place";
 import { forgetProject, lastLayout, lastServer, rememberLayout, rememberProject } from "./lib/recent";
 import { tildify } from "./lib/sessions";
-import { closeTab, dropHomeTabs, homeTab, keepServers, newLayout, openTab, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
+import { closeTab, dropHomeTabs, homeTab, keepServers, newLayout, openTab, releaseSession, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
 import { getSettings, startSettings, useSettings } from "./lib/settings";
 import { notify, setBadge, toMarkSeen, WaitWatcher } from "./lib/waiting";
 
@@ -193,12 +193,17 @@ export function App() {
   // brings that window forward instead of showing the session twice.
   const [elsewhere, setElsewhere] = useState<Set<string>>(new Set());
   const me = useRef<string | null>(null);
+  // Another window took one of this window's sessions, or has one this window filled in on its own.
+  const releasing = useRef<Promise<() => void> | null>(null);
   const others = (s: Shown) => new Set(Object.entries(s).flatMap(([label, keys]) => (label === me.current ? [] : keys)));
   const shownKey = (layout?.tabs ?? []).flatMap((t) => t.panes.map((n) => `${t.server}/${n}`)).join("\n");
   useEffect(() => {
     let live = true;
     void (async () => {
       me.current ??= await windowLabel();
+      // Listening first: the answer to what this window shows can be to let one go (a launch, when
+      // every window says what it shows at once), and an event sent before then is lost.
+      await (releasing.current ??= onReleaseSession((key) => releaseRef.current(key)));
       const s = await setShown(shownKey ? shownKey.split("\n") : []);
       if (live) setElsewhere(others(s));
     })();
@@ -206,20 +211,24 @@ export function App() {
   }, [shownKey]);
   useEffect(() => {
     let off = () => {};
-    let offRelease = () => {};
     void onShown((s, label) => ((me.current = label), setElsewhere(others(s)))).then((f) => (off = f));
-    // Another window took one of this window's sessions, or has one this window filled in on its own.
-    void onReleaseSession((key) => releaseRef.current(key)).then((f) => (offRelease = f));
-    return () => (off(), offRelease());
+    return () => {
+      off();
+      void releasing.current?.then((f) => f());
+      releasing.current = null;
+    };
   }, []);
   const releaseRef = useRef((_: string) => {});
   releaseRef.current = (key) => {
+    // The pane keeps it from filling an empty terminal with it again; the layout lets it go even
+    // where there's no pane yet.
     for (const t of layout?.tabs ?? []) {
       const l = links.get(t.server);
       const r = rootOf(t);
       const name = key.startsWith(t.server + "/") ? key.slice(t.server.length + 1) : null;
       if (l && r && name && t.panes.includes(name)) actions.get(wbKey(l, r))?.current.release(name);
     }
+    setLayout((l) => l && releaseSession(l, key));
   };
 
   // A folder as a tab's dir: null for the server's home folder (Home).

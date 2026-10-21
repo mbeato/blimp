@@ -3,7 +3,7 @@
 // The window keeps it in its URL (a reload stays put) and on the Mac (the next launch reopens it).
 
 import type { Panes } from "./panes";
-import { show as showSession } from "./panes";
+import { forget, show as showSession } from "./panes";
 
 export type Tab = Panes & {
   server: string;
@@ -49,6 +49,19 @@ export const setPanes = (l: Layout, i: number, p: Panes): Layout => ({
   ...l,
   tabs: l.tabs.map((t, j) => (j === i ? { ...t, panes: p.panes, focus: p.focus, groups: p.groups, ...(p.order && { order: p.order }) } : t)),
 });
+
+// Another window keeps "<server key>/<session>": it leaves every tab's splits and kept groups here.
+// On the layout, not the terminal pane, so it works before a tab's pane is there (Home, at launch,
+// before the server says where home is).
+export function releaseSession(l: Layout, key: string): Layout {
+  let out = l;
+  l.tabs.forEach((t, i) => {
+    if (!key.startsWith(t.server + "/")) return;
+    const p = forget(t, [key.slice(t.server.length + 1)]);
+    if (p !== t) out = setPanes(out, i, p);
+  });
+  return out;
+}
 
 export const encodeLayout = (l: Layout) => JSON.stringify(l);
 

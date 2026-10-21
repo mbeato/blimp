@@ -59,6 +59,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a second window with ⌘⇧N and put it beside the first. Drag a session from the first window's list onto the second window's terminal and let go. Then drag it from the second window (its row or its split's name) back onto the first. Then drag one and let go on the desktop, away from both windows.
   Expect: it moves to the window you let go over, into that folder's tab, on the half you let go over; the window it left stops showing it. Let go on the desktop, a new window opens about there with it. If it lands in the wrong window or a new window opens while you were over one, write down where the windows were (and which screen, with several).
 
+- [ ] **Two windows on one folder never show the same session, even after a restart.**
+  Do: open the same folder in two windows (⌘⇧N, then the folder). Show a different session in each, and split one of them. Quit blimp (⌘Q) and open it again. Then do it once more with one of the sessions in Home instead of a folder. Then install an update when one comes, which restarts blimp for you.
+  Expect: after each restart, every session is on screen in one window only. A session one window shows isn't in the other window's session list. If one window is left with an empty terminal, it picks a session no other window shows.
+
 - [ ] **Right-click a session.**
   Do: right-click a session in the list, and the name on top of a split.
   Expect: a small menu with Open in New Window (and on a split, Open All Splits in New Window), not the system's Reload / Inspect menu. Each opens a new window with the session (or all the splits, side by side), and this window stops showing them.

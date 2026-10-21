@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { closeTab, decodeLayout, dropHomeTabs, encodeLayout, keepServers, newLayout, openTab, type Layout } from "./tabs";
+import { closeTab, decodeLayout, dropHomeTabs, encodeLayout, keepServers, newLayout, openTab, releaseSession, type Layout } from "./tabs";
 
 const two = (): Layout => openTab(newLayout("s1"), "s1", "/h/a");
 
@@ -105,5 +105,17 @@ describe("dropHomeTabs", () => {
     expect(d.active).toBe(0);
     expect(dropHomeTabs(l, () => "/h").active).toBe(2);
     expect(dropHomeTabs(two(), () => "/h")).toEqual(two());
+  });
+});
+
+describe("releaseSession", () => {
+  test("another window keeps the session: it leaves this window's splits and kept groups, in any tab of that server", () => {
+    let l = openTab(openTab(two(), "s1", "/h/a", "x"), "s1", "/h/a", "y");
+    l = { ...l, tabs: l.tabs.map((t, i) => (i === 1 ? { ...t, panes: ["x", "y"], focus: 1, groups: [["x", "y"]] } : i === 0 ? { ...t, panes: ["x"] } : t)) };
+    const r = releaseSession(l, "s1/x");
+    expect(r.tabs[1]).toMatchObject({ panes: ["y"], focus: 0, groups: [] });
+    expect(r.tabs[0].panes).toEqual([]);
+    expect(releaseSession(l, "s2/x")).toBe(l);
+    expect(releaseSession(l, "s1/none")).toBe(l);
   });
 });
