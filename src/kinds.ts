@@ -23,13 +23,14 @@ export type Launch = { script?: string; args: string[]; env?: Record<string, str
 type Custom = { id: string; label: string; command: string[]; env: Record<string, string> };
 type KindsFile = { kinds: Custom[]; glm: { model?: string; fast?: string }; note?: string };
 
-const BUILT_IN = ["claude", "claude-glm", "codex", "shell", "codex-login"];
+// run: a command Claude handed over, started by runs.ts (never from the kinds menu).
+const BUILT_IN = ["claude", "claude-glm", "codex", "shell", "codex-login", "run"];
 
 // Only these two are Claude Code: they can resume a conversation.
 export const CLAUDE_KINDS = ["claude", "claude-glm"];
 
 // The small label a session row shows (none for Claude Code and a shell).
-const SHORT: Record<string, string> = { "claude-glm": "GLM", codex: "Codex", "codex-login": "Codex sign-in" };
+const SHORT: Record<string, string> = { "claude-glm": "GLM", codex: "Codex", "codex-login": "Codex sign-in", run: "Run" };
 
 export const kindsFile = () => join(blimpDir(), "kinds.json");
 export const zaiKeyFile = (home = homedir()) => join(home, ".config", "zai", "key");

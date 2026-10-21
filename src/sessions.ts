@@ -26,6 +26,7 @@ import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
 import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
 import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
+import { readRun, type Run } from "./runs";
 import { isUnread, readSeen, type Seen } from "./seen";
 
 export type ZmxSession = { name: string; pid: number; clients: number; created: number; dir: string; cmd: string };
@@ -51,6 +52,10 @@ export type Session = ZmxSession & {
   jobs?: Job[];
   context?: { used: number; limit: number };
   git?: Git;
+  // Commands in Claude's latest reply, newest first (runnable.ts): what the apps' Run button offers.
+  runnable?: string[];
+  // A run's command, the Claude session it's for, and once it ended, when and its exit code (runs.ts).
+  run?: Omit<Run, "dir">;
 };
 
 export type State = "working" | "waiting" | "done" | "unknown";
@@ -316,6 +321,8 @@ export function listSessions(
     // don't require the hook to be what set the state, only that both say waiting.
     const asked = !trust && st.state === "waiting" && hook.state === "waiting" && hook.at >= z.created * 1000 ? promptFor(z.name, hook) : undefined;
     const prompt = trust ? { ...trust, at: z.created * 1000 } : asked && { ...asked, at: hook.at as number };
+    // A run is listed with its Claude session's folder (it may run in a worktree of it), titled by its command.
+    const run = kind === "run" && isSafeName(z.name) ? readRun(z.name) : undefined;
     return {
       ...z,
       kind,
@@ -332,8 +339,13 @@ export function listSessions(
       unread: isUnread(seen, info.sessionId, scan?.replied),
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
       ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
+      ...(run && runFields(run)),
     };
   });
+}
+
+function runFields({ dir, ...run }: Run) {
+  return { run, title: cut(run.command.split("\n")[0].trim(), 70), ...(dir && { dir }) };
 }
 
 function runZmxList(): string {

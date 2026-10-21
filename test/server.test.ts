@@ -1573,3 +1573,96 @@ cat "${answer}"
     expect(sessions.find((s) => s.sessionId === "55555555-5555-5555-5555-555555555555")?.title).toBe("make the mobile app login work again");
   }, 20000);
 });
+
+describe("runs", () => {
+  // A stand-in Claude, in a folder inside home (runs start in its folder, which must be in home):
+  // it echoes each line it reads, so what was typed into it shows on its screen.
+  const LOOP = `while IFS= read -r l; do printf 'got:%s\\n' "$l"; done`;
+  const claudeDir = join(tmp, "claude");
+  const T = new Date().toISOString();
+  const tline = (o: object) => JSON.stringify({ timestamp: T, isSidechain: false, ...o }) + "\n";
+  const asked = (text: string) => tline({ type: "user", uuid: "u", message: { role: "user", content: text } });
+  const said = (text: string) => tline({ type: "assistant", uuid: "a", message: { role: "assistant", content: [{ type: "text", text }] } });
+  const listed = async (name: string) => ((await (await api("/sessions")).json()) as any[]).find((s) => s.name === name);
+  const post = (path: string, body?: object) => api(path, { method: "POST", ...(body && { body: JSON.stringify(body) }) });
+
+  async function fakeClaude(suffix: string, sessionId: string, lines: string[]) {
+    const dir = join(homeDir, `${tag}-${suffix}`);
+    mkdirSync(dir, { recursive: true });
+    const name = await shSession(suffix, ["sh", "-c", LOOP]);
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
+    mkdirSync(join(claudeDir, "sessions"), { recursive: true });
+    mkdirSync(join(claudeDir, "projects", "p"), { recursive: true });
+    writeFileSync(join(claudeDir, "projects", "p", `${sessionId}.jsonl`), lines.join(""));
+    writeFileSync(join(claudeDir, "sessions", `${pid}.json`), JSON.stringify({ sessionId, cwd: dir, status: "idle" }));
+    return { name, dir };
+  }
+
+  test("the commands in Claude's latest reply are on its session", async () => {
+    const { name } = await fakeClaude("run1", "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1", [asked("how do I test it?"), said("Run:\n```bash\n$ bun test\n```\nor `npm test`.")]);
+    expect((await until(() => listed(name), "the session")).runnable).toEqual(["npm test", "bun test"]);
+  });
+
+  test("POST /runs runs the command in its own session in Claude's folder; its exit code is listed and its screen stays", async () => {
+    const { name: parent, dir } = await fakeClaude("run2", "a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2", []);
+    const r = await post("/runs", { session: parent, command: "pwd; echo out-$((40+2)); exit 3" });
+    expect(r.status).toBe(201);
+    const { name } = await r.json();
+    made.push(name);
+    const s = await until(async () => {
+      const x = await listed(name);
+      return x?.run?.exit !== undefined && x;
+    }, "the run to end");
+    expect(s).toMatchObject({ kind: "run", label: "Run", dir, title: "pwd; echo out-$((40+2)); exit 3" });
+    expect(s.run).toEqual({ command: "pwd; echo out-$((40+2)); exit 3", parent, cwd: dir, startedAt: expect.any(Number), endedAt: expect.any(Number), exit: 3 });
+    expect(s.run.endedAt).toBeGreaterThanOrEqual(s.run.startedAt);
+    for (const f of [`${name}.json`, `${name}.end.json`]) expect(statSync(join(tmp, "runs", f)).mode & 0o777).toBe(0o600);
+    expect(statSync(join(tmp, "runs")).mode & 0o777).toBe(0o700);
+    // Its screen: the command, what it printed, the exit line, then a login shell that stays on.
+    const v = await socket(`/sessions/${name}/attach?cols=120&rows=30`);
+    await until(() => v.text.includes("fake-shell size="), "the shell after the run");
+    const screen = zmx("history", name).stdout.toString();
+    expect(screen).toContain(`$ pwd; echo out-$((40+2)); exit 3\n${dir}\nout-42\n`);
+    expect(screen).toContain("── exit 3 ──");
+    v.ws.close();
+    expect(zmxNames()).toContain(name);
+  }, 15000);
+
+  test("Send result to Claude types the exit code and the output into the Claude session; not before the run ends, nor while Claude asks", async () => {
+    const sid = "a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3";
+    const { name: parent } = await fakeClaude("run3", sid, []);
+    const viewer = await socket(`/sessions/${parent}/attach?cols=200&rows=40`);
+    const { name } = await (await post("/runs", { session: parent, command: "echo first; echo second" })).json();
+    made.push(name);
+    await until(async () => (await listed(name))?.run?.exit === 0, "the run to end");
+    // Claude asks something: refused, with what to do.
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${parent}.json`);
+    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest",
+      prompt: { kind: "permission", tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], keys: ["1", "\x1b"], answerable: true } }));
+    const busy = await post(`/runs/${name}/send`);
+    expect([busy.status, (await busy.json()).error]).toEqual([409, "Claude is asking something. Answer it first."]);
+    rmSync(status);
+    expect((await post(`/runs/${name}/send`)).status).toBe(204);
+    await until(() => viewer.text.includes("got:second"), "the result typed into Claude's session");
+    // A paste (the terminal echoes it as it comes), then Enter.
+    expect(viewer.text).toContain("\x1b[200~[blimp run] `echo first; echo second` finished with exit 0. Last lines of its output:\r\ngot:```\r\ngot:first\r\ngot:second\r\n");
+    viewer.ws.close();
+    // One still running can't be sent yet.
+    const { name: slow } = await (await post("/runs", { session: parent, command: "sleep 30" })).json();
+    made.push(slow);
+    await until(async () => (await listed(slow))?.run, "the slow run");
+    const early = await post(`/runs/${slow}/send`);
+    expect([early.status, (await early.json()).error]).toEqual([400, "the run hasn't ended yet"]);
+  }, 20000);
+
+  test("POST /runs checks the command and the session; a run or session that isn't there is 404", async () => {
+    const { name: parent } = await fakeClaude("run4", "a4a4a4a4-a4a4-4a4a-8a4a-a4a4a4a4a4a4", []);
+    expect((await post("/runs", { command: "ls" })).status).toBe(400);
+    for (const command of ["", " ", "x".repeat(4001), 7]) expect((await post("/runs", { session: parent, command })).status).toBe(400);
+    expect((await post("/runs", { session: `${tag}-nope`, command: "ls" })).status).toBe(404);
+    expect((await post(`/runs/${tag}-nope/send`)).status).toBe(404);
+    // A session blimpd didn't start as a run isn't one.
+    expect((await post(`/runs/${parent}/send`)).status).toBe(404);
+  });
+});
