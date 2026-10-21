@@ -284,11 +284,13 @@ jobs:
         run: |
           set -o pipefail
           xcodegen generate
+          # Unsigned: signing the archive made a new development certificate on every fresh runner, and
+          # the account's limit stopped uploads. The export below signs it once, with Apple's
+          # cloud-managed distribution certificate.
           xcodebuild -project Blimp.xcodeproj -scheme Blimp -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/blimp.xcarchive" \
-            -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
-            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" \
-            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             archive | tail -80
       - name: Upload to TestFlight
         run: |
