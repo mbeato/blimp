@@ -1,4 +1,5 @@
-// The app's state: which server it's paired with, the live session list from /events, and how the link is.
+// The app's state: which server it's paired with, the live session list from /events, and how the link is
+// (in words: "Connecting…" the first time, "Reconnecting…" after, "Tailscale looks off" when that's why).
 import BlimpKit
 import Foundation
 import Observation
@@ -16,6 +17,10 @@ final class Store {
     /// Each running folder's paragraph (Digest), from the same messages as the sessions.
     var digests: [String: Digest] = [:]
     var connection: Connection = .connecting
+    /// The events socket has been open since the server was paired or loaded: a new try is a reconnect.
+    private(set) var everOnline = false
+    /// blimpd can't be reached, the server is on the tailnet, and the phone has no tailnet address.
+    private(set) var tailnetOff = false
     /// The project the chat is in, kept for the next launch.
     var dir: String? = UserDefaults.standard.string(forKey: "project") {
         didSet { UserDefaults.standard.set(dir, forKey: "project") }
@@ -31,6 +36,11 @@ final class Store {
 
     init() {
         loadServer()
+        // A new network may be Tailscale coming on or going off: say again why it's offline.
+        NetworkWatch.shared.onChange = { [weak self] in
+            guard let self, case .offline = self.connection else { return }
+            self.offline()
+        }
     }
 
     func loadServer() {
@@ -72,7 +82,8 @@ final class Store {
         socket.start()
     }
 
-    /// Back from the background: the old link may be dead, so don't wait for a ping to find out.
+    /// Back from the background: the old link may be dead, so don't wait for the 20 s ping to find out.
+    /// A link that answers within 3 s is kept.
     func reconnectNow() {
         events?.reconnectNow()
     }
@@ -84,6 +95,8 @@ final class Store {
         server = nil
         sessions = []
         connection = .connecting
+        everOnline = false
+        tailnetOff = false
     }
 
     /// Starts (or resumes) Claude Code in `dir`, with `prompt` as its first message if given; returns the new session's name.
@@ -116,10 +129,17 @@ final class Store {
             connection = .connecting
         case .open:
             connection = .online
+            everOnline = true
+            tailnetOff = false
         case .closed(code: 401):
             connection = .unauthorized
         case .closed:
-            connection = .offline("Can't reach the server")
+            offline()
         }
+    }
+
+    private func offline() {
+        tailnetOff = Tailnet.looksOff(server: server?.url.host(), interfaces: Interfaces.ipv4())
+        connection = .offline(LinkText.offline(tailnetOff: tailnetOff))
     }
 }

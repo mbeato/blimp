@@ -11,7 +11,11 @@ final class Lock {
     /// Plain reason shown under Unlock after a failure other than a cancel.
     private(set) var note: String?
     private var asking = false
-    static let grace: Duration = .seconds(300)
+    /// The UI tests shorten it with the launch argument `-lockGrace <seconds>`.
+    static var grace: Duration {
+        let seconds = UserDefaults.standard.double(forKey: "lockGrace")
+        return seconds > 0 ? .seconds(seconds) : .seconds(300)
+    }
 
     /// First launch with nothing paired: nothing to protect and no Face ID ask. Once paired,
     /// the usual rules apply (the 5-minute rule, and the ask at the next launch).
@@ -45,19 +49,27 @@ final class Lock {
     /// Locks when the app comes back after more than five minutes away, and asks once then; not
     /// while nothing is paired (there's nothing to protect). It never asks again by itself: the sheet
     /// makes the scene inactive, and a cancel returns to .active, so asking there would loop. After a
-    /// cancel, the Unlock button is the way.
+    /// cancel, the Unlock button is the way. The lock is already on in the inactive step on the way back,
+    /// so the chat never shows uncovered before the ask.
     func scenePhaseChanged(_ phase: ScenePhase, paired: Bool) {
         switch phase {
         case .background:
             if backgroundedAt == nil { backgroundedAt = .now }
         case .active:
-            if paired, let at = backgroundedAt, ContinuousClock.now - at > Self.grace {
+            if due(paired: paired) {
                 locked = true
                 Task { await unlock() }
             }
             backgroundedAt = nil
-        default: break
+        default:
+            if phase == .inactive, due(paired: paired) { locked = true }
         }
+    }
+
+    /// Back after more than the grace time in the background.
+    private func due(paired: Bool) -> Bool {
+        guard paired, let at = backgroundedAt else { return false }
+        return ContinuousClock.now - at > Self.grace
     }
 }
 

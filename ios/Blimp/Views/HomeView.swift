@@ -13,6 +13,7 @@ enum Opened: Equatable {
 
 struct HomeView: View {
     @Environment(Store.self) private var store
+    @Environment(\.covered) private var covered
     @State private var opened: Opened = .inbox
     @State private var drawer = false
     /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
@@ -28,7 +29,7 @@ struct HomeView: View {
             chat
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
-                .safeAreaInset(edge: .top, spacing: 0) { StatusBar(connection: store.connection) }
+                .safeAreaInset(edge: .top, spacing: 0) { ConnectionBar() }
         }
         // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
         // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed.
@@ -54,6 +55,7 @@ struct HomeView: View {
                        onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true })
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .modifier(KeepsPlace(opened: $opened, drawer: drawer))
         .task(id: store.connection == .online) {
             guard let api = store.api else { return }
             folders = (try? await api.folders()) ?? []
@@ -97,6 +99,7 @@ struct HomeView: View {
             }
             .accessibilityLabel(badgeLabel.map { "Sessions, \($0)" } ?? "Sessions")
             .accessibilityIdentifier("drawerButton")
+            .accessibilityHidden(covered)
         }
         ToolbarItem(placement: .principal) { title }
         // In a session, its own toolbar has Inbox, after the speaker.
@@ -114,6 +117,7 @@ struct HomeView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("screenTitle")
+        .accessibilityHidden(covered)
     }
 
     @ViewBuilder private var badge: some View {
@@ -192,26 +196,4 @@ private struct EarlierKey: Equatable {
     let inbox: Bool
     let online: Bool
     let running: Set<String>
-}
-
-private struct StatusBar: View {
-    let connection: Connection
-
-    var body: some View {
-        if let text {
-            Text(text)
-                .font(.footnote)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(.bar)
-        }
-    }
-
-    private var text: String? {
-        switch connection {
-        case .online, .unauthorized: nil
-        case .connecting: "Reconnecting…"
-        case .offline(let reason): reason
-        }
-    }
 }

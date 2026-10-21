@@ -2,8 +2,8 @@
 // app-e2e job in .github/workflows/ios.yml; ios/e2e/setup.ts makes the sessions and the texts looked
 // for here). Pair, pick a project, open sessions from the drawer, read a chat, hide the keyboard, send a
 // message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
-// end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock; two questions
-// at once; unread and asking marks; a project's inbox. What reached the sessions is checked by the job afterwards. Screenshots
+// end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
+// through it; two questions at once; unread and asking marks; a project's inbox. What reached the sessions is checked by the job afterwards. Screenshots
 // stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
@@ -52,10 +52,11 @@ final class BlimpUITests: XCTestCase {
         // Tool steps aren't shown: the reply before the tool call is, the tool call isn't
         try wait(message("message.assistant", "then run the tests"), "the reply before the tool call")
         if labeled("Ran swift test").exists { throw failed("no tool line in the chat") }
-        // The empty box: the mic inside it, no Send
+        // The empty box: the mic inside it, no Send, and one-tap replies above it
         let mic = app.buttons["Talk"]
         try wait(mic, "the mic in the empty box")
         if app.buttons["sendButton"].exists { throw failed("no Send while the box is empty") }
+        try wait(element("chip-go"), "the one-tap replies above the empty box")
         shot("2-chat")
 
         // The keyboard goes as in Messages: a drag down the chat, or a tap on it
@@ -75,15 +76,17 @@ final class BlimpUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
         try until(keyboard, "exists == false", "a tap on the chat to hide the keyboard")
 
-        // Send a message; the box clears once blimpd has it, and the mic is back
+        // Send a message; the mic stays beside Send (to talk more onto it), and Send goes once blimpd has it
         try type("Thanks, ship it", into: input)
         let send = app.buttons["sendButton"]
         try wait(send, "Send")
         try until(send, "isEnabled == true", "Send to be enabled")
-        if mic.exists { throw failed("no mic once there's text") }
+        if !mic.exists { throw failed("the mic beside Send once there's text") }
+        if element("chip-go").exists { throw failed("no one-tap replies once there's text") }
         shot("2b-typing")
         send.tap()
-        try wait(mic, "the box to clear once the message is sent")
+        try until(input, "NOT (value CONTAINS 'Thanks, ship it')", "the box to clear once the message is sent")
+        try until(send, "exists == false", "no Send once the box is empty")
         // The stand-in writes what it read and a reply to the transcript: both arrive in the open chat
         try wait(message("message.user", "Thanks, ship it"), "the sent message in the chat")
         try wait(message("message.assistant", "Shipped: Thanks, ship it"), "the reply to it")
@@ -176,7 +179,7 @@ final class BlimpUITests: XCTestCase {
         let before = Set(newRows().map(\.identifier))
         element("drawerInbox").tap()
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox")
-        if app.buttons["Talk"].exists { throw failed("no mic in the inbox's box") }
+        try wait(app.buttons["Talk"], "the mic in the inbox's box")
         shot("10-blank")
         let input = element("messageField")
         try type("Write the changelog", into: input)
@@ -226,8 +229,10 @@ final class BlimpUITests: XCTestCase {
         let send = app.buttons["sendButton"]
         try until(send, "isEnabled == true", "Send to be enabled")
         send.tap()
-        // The chat is the resumed session now: its mic, and the conversation's history
-        try wait(app.buttons["Talk"], "the resumed session's chat", timeout: 40)
+        // The chat is the resumed session now (its speaker button: the past one has a mic too), and the
+        // conversation's history
+        let speaker = app.buttons.matching(NSPredicate(format: "label == 'Read aloud' OR label == 'Stop reading aloud'")).firstMatch
+        try wait(speaker, "the resumed session's chat", timeout: 40)
         try wait(message("message.assistant", "the page you came from"), "the resumed conversation's history")
         shot("16a-resumed")
     }
@@ -354,6 +359,37 @@ final class BlimpUITests: XCTestCase {
         try until(new, "exists == false", "the drawer to close on a swipe left")
     }
 
+    // MARK: - The lock keeps your place
+
+    /// Words in the box and the open chat stay through the lock: the chat lives on under the cover. A long press
+    /// on a one-tap reply puts its words in the box and sends nothing. Here the lock comes after 2 s away
+    /// (-lockGrace) instead of 5 minutes.
+    func testDraftKeptThroughRelock() throws {
+        try launchPaired(arguments: ["-lockGrace", "2"])
+        try openSession("demo-chat", in: "blimp-demo")
+        let chat = message("message.user", "Add a dark mode toggle to settings")
+        try wait(chat, "demo-chat's chat")
+        let chip = element("chip-continue")
+        try wait(chip, "the one-tap replies above the empty box")
+        chip.press(forDuration: 1)
+        let input = element("messageField")
+        try until(input, "value == 'continue'", "the chip's words in the box")
+        shot("33-draft")
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 4)
+        app.activate()
+        try wait(app.buttons["Unlock"].firstMatch, "the lock after the grace time")
+        try unlockWithFace()
+        try wait(chat, "the same chat after unlocking")
+        try until(input, "value == 'continue'", "the words still in the box after unlocking")
+        if hostFile("chat.in").contains("continue") { throw failed("nothing sent by the long press or the lock") }
+        shot("34-draft-after-lock")
+        // Empty again, so no later test finds words in it
+        try focus(input)
+        input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12))
+        try until(app.buttons["sendButton"], "exists == false", "the box to be empty again")
+    }
+
     // MARK: - The inbox
 
     /// A project opens to its inbox: blimp-demo's demo-chat waits on you, in the words blimpd's note call got from
@@ -439,9 +475,10 @@ final class BlimpUITests: XCTestCase {
     }
 
     /// Launches the app and waits for Home, pairing first if it isn't (test1 failed before pairing).
-    private func launchPaired() throws {
+    private func launchPaired(arguments: [String] = []) throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.launchArguments += arguments
         app.launch()
         let home = element("drawerButton")
         let field = element("pairField")
@@ -452,24 +489,27 @@ final class BlimpUITests: XCTestCase {
             field.tap()
             field.typeText(try pairLink())
             app.buttons["connectButton"].tap()
-        } else if !home.exists {
+        } else if unlock.exists || !home.exists {
+            // Home lives on under the lock cover, so the lock is what says whether to unlock
             try unlockWithFace()
         }
         try wait(home, "Home")
     }
 
-    /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking.
+    /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking. Unlocked
+    /// means the cover went: Home is there under it all along.
     private func unlockWithFace() throws {
         let home = element("drawerButton")
         let unlock = app.buttons["Unlock"].firstMatch
         for _ in 0..<3 {
             allowFaceID()
             try signal("faceid-match")
-            if home.waitForExistence(timeout: 10) { return }
+            if unlock.waitForNonExistence(timeout: 10), home.waitForExistence(timeout: 5) { return }
             screen("still-locked")
             // the ask ended (or never started): Unlock asks again
             if unlock.exists && unlock.isHittable { unlock.tap() }
         }
+        try until(unlock, "exists == false", "the lock to go after Face ID")
         try wait(home, "Home after Face ID")
     }
 

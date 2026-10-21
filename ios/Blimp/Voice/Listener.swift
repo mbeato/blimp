@@ -1,5 +1,8 @@
 // Speech to text on the phone: the mic through AVAudioEngine, into SpeechAnalyzer with a SpeechTranscriber
-// for the phone's language. No audio leaves the phone.
+// for the phone's language. No audio leaves the phone. While a box with a mic is on screen, one analyzer is
+// made and loaded ahead of the press (warm()), with no mic or audio session, so music keeps playing and no
+// orange dot shows; and the mic starts before the analyzer does, its sound waiting in the stream, so the
+// first words aren't lost.
 import AVFoundation
 import Observation
 import Speech
@@ -30,6 +33,68 @@ final class Listener {
 
     static let fixedWords = ["blimp", "blimpd", "zmx", "Claude", "Codex"]
 
+    /// A transcriber and analyzer loaded before the press, for the phone's language.
+    private struct Ready {
+        let locale: Locale
+        let transcriber: SpeechTranscriber
+        let analyzer: SpeechAnalyzer
+    }
+
+    private static var ready: Ready?
+    private static var warming = false
+    /// Boxes with a mic on screen.
+    private static var users = 0
+
+    /// A box with a mic came on screen: load an analyzer now, if blimp may already listen (never asks).
+    static func warm() {
+        users += 1
+        prepare()
+    }
+
+    /// It went: the loaded analyzer goes once no box with a mic is left.
+    static func cool() {
+        users = max(0, users - 1)
+        guard users == 0, let analyzer = ready?.analyzer else { return }
+        ready = nil
+        Task { await analyzer.cancelAndFinishNow() }
+    }
+
+    private static func prepare() {
+        guard users > 0, ready == nil, !warming,
+              AVAudioApplication.shared.recordPermission == .granted,
+              SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
+        warming = true
+        Task {
+            defer { Self.warming = false }
+            guard SpeechTranscriber.isAvailable,
+                  let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { return }
+            let made = Self.transcriber(for: locale)
+            // A model still to download is start()'s job: it says "Getting speech ready…".
+            guard await AssetInventory.status(forModules: [made]) == .installed else { return }
+            let analyzer = SpeechAnalyzer(modules: [made], options: nil)
+            try? await analyzer.prepareToAnalyze(in: nil)
+            guard Self.users > 0, Self.ready == nil else {
+                await analyzer.cancelAndFinishNow()
+                return
+            }
+            Self.ready = Ready(locale: locale, transcriber: made, analyzer: analyzer)
+        }
+    }
+
+    /// The loaded analyzer, if it's for `locale`; it's this press's now.
+    private static func takeReady(for locale: Locale) -> Ready? {
+        guard let r = ready else { return nil }
+        ready = nil
+        if r.locale == locale { return r }
+        let analyzer = r.analyzer
+        Task { await analyzer.cancelAndFinishNow() }
+        return nil
+    }
+
+    private static func transcriber(for locale: Locale) -> SpeechTranscriber {
+        SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
+    }
+
     /// Starts listening. `vocabulary` is words it should know (folder names, titles).
     func start(vocabulary: [String]) async throws {
         await teardown()
@@ -45,9 +110,9 @@ final class Listener {
         else { throw ListenError.unavailable }
         try check(mine)
 
-        let transcriber = SpeechTranscriber(
-            locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
-        if await AssetInventory.status(forModules: [transcriber]) != .installed {
+        let warm = Self.takeReady(for: locale)
+        let transcriber = warm?.transcriber ?? Self.transcriber(for: locale)
+        if warm == nil, await AssetInventory.status(forModules: [transcriber]) != .installed {
             preparing = true
             defer { preparing = false }
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
@@ -69,15 +134,22 @@ final class Listener {
             else { throw ListenError.unavailable }
             try check(mine)
 
-            let analyzer = SpeechAnalyzer(modules: [transcriber], options: nil)
+            // The mic first: what's said while the analyzer starts waits in the stream.
+            let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
+            input = continuation
+            engine.inputNode.installTap(
+                onBus: 0, bufferSize: 4096, format: micFormat,
+                block: Self.tap(MicFeed(converter: converter, format: format, out: continuation)))
+            engine.prepare()
+            try engine.start()
+
+            let analyzer = warm?.analyzer ?? SpeechAnalyzer(modules: [transcriber], options: nil)
             self.analyzer = analyzer
             let context = AnalysisContext()
             context.contextualStrings = [.general: Self.words(vocabulary)]
             try? await analyzer.setContext(context)  // a hint only: listen without it rather than not at all
             try check(mine)  // a stop() during that await already tore down: store nothing more
 
-            let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
-            input = continuation
             let heard = transcriber.results
             results = Task { [weak self] in
                 do {
@@ -91,11 +163,6 @@ final class Listener {
             try check(mine)
             try await analyzer.start(inputSequence: stream)
             try check(mine)
-            engine.inputNode.installTap(
-                onBus: 0, bufferSize: 4096, format: micFormat,
-                block: Self.tap(MicFeed(converter: converter, format: format, out: continuation)))
-            engine.prepare()
-            try engine.start()
         } catch {
             // overtaken by stop() (which already tore down), or a real failure
             if mine == round { await teardown() }
@@ -128,6 +195,7 @@ final class Listener {
             partial = text
             if hadAudio { Self.deactivate() }
         }
+        Self.prepare()  // for the next press
         return text
     }
 

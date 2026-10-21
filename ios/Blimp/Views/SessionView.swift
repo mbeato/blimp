@@ -48,6 +48,7 @@ private struct ChatContent: View {
     let onResumed: (String) -> Void
     @Environment(Store.self) private var store
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.covered) private var covered
     @State private var draft = ""
     @State private var atBottom = true
     @State private var unseen = false
@@ -159,13 +160,14 @@ private struct ChatContent: View {
             }
         }
         .onReturnFromBackground { model.reconnectNow() }
-        // On screen with the app in front: Claude's replies are read, here and on the Mac.
+        // On screen with the app in front, not under the lock cover: Claude's replies are read, here and on the Mac.
         .task(id: SeenKey(conversation: model.session?.sessionId, unread: model.session?.unread == true,
-                          looking: onScreen && scenePhase == .active)) {
-            guard let id = model.session?.sessionId, model.session?.unread == true, onScreen, scenePhase == .active else { return }
+                          looking: onScreen && scenePhase == .active && !covered)) {
+            guard let id = model.session?.sessionId, model.session?.unread == true, onScreen, scenePhase == .active, !covered else { return }
             try? await store.api?.seen(id)
         }
         .onAppear(perform: appeared)
+        .keepsDraft($draft, key: model.name)
         .onDisappear(perform: disappeared)
         .onChange(of: listener.partial) { _, heard in
             if micOn { draft = Self.joined(micBase, heard) }
@@ -237,7 +239,9 @@ private struct ChatContent: View {
                 errorLine
                 InputBar(
                     text: $draft, sending: model.sendingText, listening: micOn || micStopping, onSend: send,
-                    onMicDown: micDown, onMicUp: micUp)
+                    onMicDown: micDown, onMicUp: micUp,
+                    chips: ReplyChips.row(after: model.log.shown, draft: draft, asking: model.prompt != nil || model.waitingUnknown),
+                    onChip: { chip in Task { _ = await model.send(chip) } })
             }
         }
     }
@@ -371,13 +375,13 @@ private struct ChatContent: View {
                 draft = base
                 if !heard.isEmpty { answerByVoice(heard, to: asked) }
             } else {
-                draft = words
-                if !heard.isEmpty { send() }
+                draft = words  // to read before Send: letting go never sends
             }
         }
     }
 
-    /// Only a clear match is sent. A guess is marked and waits for a tap; anything else asks again.
+    /// Only a clear match is sent, and never for a risky command. A guess is marked and waits for a tap;
+    /// anything else asks again.
     /// The words are matched against the choices as they were when the mic started, and only while
     /// the prompt is still exactly that (the options can change under the same wait).
     private func answerByVoice(_ heard: String, to asked: Prompt) {
@@ -385,7 +389,7 @@ private struct ChatContent: View {
             voiceNote = "The question changed. Nothing was sent."
             return
         }
-        switch VoiceAnswer.match(heard, choices: asked.choices) {
+        switch VoiceAnswer.match(heard, choices: asked.choices).needingTap(risky: asked.risky == true) {
         case .clear(let pick):
             Task { await model.answer(pick, to: asked) }
         case .guess(let pick):
@@ -400,12 +404,13 @@ private struct ChatContent: View {
         return base.last!.isWhitespace ? base + heard : base + " " + heard
     }
 
-    /// Another session newly waiting or finished, while this screen is up and the app is open: a banner and a sound.
+    /// Another session newly waiting or finished, while this screen is up and the app is open (not under the
+    /// lock cover): a banner and a sound.
     private func noticeOthers(_ sessions: [Session]) {
         var next: [String: SessionState] = [:]
         for s in sessions where s.name != model.name {
             next[s.name] = s.state
-            guard onScreen, scenePhase == .active, let before = lastStates[s.name], before != s.state else { continue }
+            guard onScreen, scenePhase == .active, !covered, let before = lastStates[s.name], before != s.state else { continue }
             switch s.state {
             case .waiting: show(Banner(name: s.name, text: "\(s.title) is waiting", waiting: true))
             case .done: show(Banner(name: s.name, text: "\(s.title) finished", waiting: false))
