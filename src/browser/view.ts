@@ -28,24 +28,13 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
   const call = (method: string, params: any = {}) => chrome.call(method, params, s);
   let closed = false;
   let frame: number | null = null; // the frame Chrome waits to have acked
-  // Sharp, and light while in use: Chrome draws at 2x and the screencast sends frames at the
-  // screen's ratio, but from a scroll, click, drag or key until 400 ms after the last, at the
-  // page's size (a quarter of the pixels), so what you do shows sooner on a slow link.
+  // Sharp: Chrome draws at 2x and the screencast sends frames at the screen's ratio, always.
   let size: { width: number; height: number; scale: number } | null = null;
-  let light = false;
-  let idle: ReturnType<typeof setTimeout> | undefined;
   const cast = async () => {
     if (!size) return;
-    const k = light ? 1 : size.scale;
     frame = null;
     await call("Page.stopScreencast");
-    await call("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: Math.round(size.width * k), maxHeight: Math.round(size.height * k), everyNthFrame: 1 });
-  };
-  const busy = () => {
-    if (!size || size.scale <= 1) return;
-    clearTimeout(idle);
-    idle = setTimeout(() => ((light = false), void cast()), 400);
-    if (!light) (light = true), void cast();
+    await call("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: Math.round(size.width * size.scale), maxHeight: Math.round(size.height * size.scale), everyNthFrame: 1 });
   };
   let loading = false;
   // The last input sent: Chrome answers it once the page has handled it. Runtime.evaluate reaches
@@ -68,7 +57,6 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
   const close = () => {
     if (closed) return;
     closed = true;
-    clearTimeout(idle);
     off();
     void call("Page.stopScreencast");
     void chrome.call("Target.detachFromTarget", { sessionId: s });
@@ -138,7 +126,6 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
         }
         case "mouse":
           if (!MOUSE.has(m.event)) return;
-          if (m.event !== "mouseMoved" || m.buttons) busy(); // not a pointer passing over
           return void (input = call("Input.dispatchMouseEvent", {
             type: m.event,
             x: clamp(m.x, -1e5, 1e5, 0),
@@ -152,7 +139,6 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
           }));
         case "key":
           if (!KEY.has(m.event)) return;
-          busy();
           return void (input = call("Input.dispatchKeyEvent", {
             type: m.event,
             key: str(m.key),
@@ -164,7 +150,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
             modifiers: clamp(m.modifiers, 0, 15, 0),
           }));
         case "text":
-          if (typeof m.text === "string" && m.text) busy(), (input = call("Input.insertText", { text: m.text }));
+          if (typeof m.text === "string" && m.text) input = call("Input.insertText", { text: m.text });
           return;
         case "go":
           if (typeof m.url === "string" && /^https?:\/\/[^/\s]/i.test(m.url)) void call("Page.navigate", { url: m.url });

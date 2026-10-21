@@ -187,10 +187,9 @@ function jpegSize(b: Uint8Array): [number, number] | undefined {
   }
 }
 
-// Sharp, and light while you use the page: frames at the screen's ratio (a blinking caret or a
-// spinner stays sharp), at the page's size (a quarter of the pixels) from a scroll, click or key
-// until it's been left alone a moment. At 1x there's nothing sharper to send.
-live("frames are sharp, and at the page's size while it's being scrolled, clicked or typed in", async () => {
+// Sharp all the time: frames at the screen's ratio, while the page is scrolled too. At 1x there's
+// nothing sharper to send.
+live("frames are sharp, while the page is being scrolled too", async () => {
   const id = await gate.createTab("/f", base + "/");
   await until(async () => (await title(id)) === "start", "the page");
   const w = await viewer(id);
@@ -198,14 +197,13 @@ live("frames are sharp, and at the page's size while it's being scrolled, clicke
   w.send({ type: "size", width: 400, height: 300, scale: 2 });
   await until(() => last() === "[800,600]", "a sharp frame");
   expect(w.msgs.filter((m) => m.type === "frame").at(-1)).toEqual({ type: "frame", width: 400, height: 300 });
-  // Scrolling: light frames while it goes on.
+  // Scrolling: still sharp.
   const n = w.frames.length;
   const scroll = setInterval(() => w.send({ type: "mouse", event: "mouseWheel", x: 100, y: 100, button: "none", buttons: 0, clickCount: 0, modifiers: 0, deltaX: 0, deltaY: 40 }), 100);
   await evalIn(id, "document.body.style.background='red'");
-  await until(() => w.frames.length > n && last() === "[400,300]", "a light frame while scrolling");
+  await until(() => w.frames.length > n + 2, "frames while scrolling");
   clearInterval(scroll);
-  // Left alone: sharp again.
-  await until(() => last() === "[800,600]", "sharp again", 3000);
+  expect(w.frames.slice(n).every((f) => JSON.stringify(jpegSize(f)) === "[800,600]")).toBe(true);
   // At 1x: only frames at the page's size.
   w.send({ type: "size", width: 400, height: 300, scale: 1 });
   await until(() => last() === "[400,300]", "a frame at 1x");
