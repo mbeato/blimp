@@ -11,6 +11,7 @@ import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
 import { InboxSummary } from "./InboxSummary";
 import { RecapCard, useRecaps } from "./RecapCard";
+import { SecretDialog } from "./SecretDialog";
 import { inbox } from "../lib/inbox";
 import { jobsOpen, jobsWords } from "../lib/jobs";
 import { JobsPopover } from "./JobsPopover";
@@ -154,6 +155,8 @@ export function TerminalPane(props: {
   const [ctx, setCtx] = useState<{ name: string; x: number; y: number } | null>(null);
   // A session's jobs popover, under (or over) its row's "2 jobs".
   const [jobsAt, setJobsAt] = useState<{ name: string; at: DOMRect } | null>(null);
+  // Give a Secret's dialog, for this session.
+  const [secretFor, setSecretFor] = useState<string | null>(null);
   const [listWidth, setListWidth] = useState(230);
   // Run bars closed with ×, by their key (lib/runs.ts): until a reply with other commands.
   const [hiddenRuns, setHiddenRuns] = useState<string[]>([]);
@@ -900,6 +903,11 @@ export function TerminalPane(props: {
                 Continue in New Session
               </button>
             )}
+            {api && sessionOf(ctx.name)?.sessionId && (
+              <button role="menuitem" title="A key or password for Claude, without pasting it into the chat" onClick={() => (setCtx(null), setSecretFor(ctx.name))}>
+                Give a Secret…
+              </button>
+            )}
             {/* The bar's Send goes with the reply (at your next prompt); a run's own menu keeps it. */}
             {sessionOf(ctx.name)?.run?.exit !== undefined && (
               <button role="menuitem" title="Type its exit code and the last lines of its output into Claude" onClick={() => (setCtx(null), sendRunResult(sessionOf(ctx.name)!))}>
@@ -914,6 +922,7 @@ export function TerminalPane(props: {
           </div>
         </>
       )}
+      {secretFor && api && <SecretDialog api={api} session={secretFor} title={sessionOf(secretFor) ? sessionTitle(sessionOf(secretFor)!) : secretFor} onClose={() => setSecretFor(null)} />}
     </div>
   );
 }

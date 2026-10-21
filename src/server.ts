@@ -18,6 +18,7 @@ import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZai
 import { askHandoff, startHandoffs } from "./handoff";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
+import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
 import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
@@ -163,6 +164,22 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     return new Response(null, { status: 204 });
   }
 
+  // Secrets for sessions (secrets.ts): in, never out. GET /secrets lists names and times only.
+  if (path === "/secrets" && get) return Response.json(listSecrets());
+  const secret = path.match(/^\/secrets\/([^/]+)(\/tell)?$/);
+  if (secret && !secret[2] && req.method === "PUT") {
+    saveSecret(decodeURIComponent(secret[1]), ((await req.json()) as Record<string, unknown> | null)?.value);
+    return new Response(null, { status: 204 });
+  }
+  if (secret && !secret[2] && req.method === "DELETE") {
+    removeSecret(decodeURIComponent(secret[1]));
+    return new Response(null, { status: 204 });
+  }
+  if (secret && secret[2] && req.method === "POST") {
+    await tellSecret(decodeURIComponent(secret[1]), ((await req.json()) as Record<string, unknown> | null)?.session);
+    return new Response(null, { status: 204 });
+  }
+
   const one = path.match(/^\/sessions\/([^/]+)$/);
   if (one && req.method === "DELETE") {
     const name = decodeURIComponent(one[1]);
@@ -299,7 +316,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const r = await upload(guardFile(q.get("path")), req.body, q.get("mode") ?? "new", Number(req.headers.get("content-length") ?? 0));
     return Response.json(r, { status: 201 });
   }
-  if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guard(await bodyPath(req))), { status: 201 });
+  if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/files" && get) {
     const root = guard(q.get("root"));

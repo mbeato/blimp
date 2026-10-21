@@ -233,6 +233,18 @@ Sessions run on the server, so keys and sign-ins live there too. **Settings > Mo
 
   Each kind shows in the arrow menu by its label and runs its command in your login shell, in the folder. An `id` is letters, digits, `-` and `_`, and can't be a built-in one. `glm` changes the models Claude Code on GLM uses. If the file is wrong, blimp ignores all of it, and the menu says why.
 
+### Secrets for Claude
+
+Sometimes Claude needs a key or a password, for example to call an API. Do not paste it into the chat. The chat is saved on the server, so the key stays there.
+
+- **Right-click a Claude session** and pick **Give a Secret…**.
+- Type a **Name**, for example `OPENAI_API_KEY`. Paste the key into **Value** (a key of several lines, like a PEM or SSH key, keeps its line breaks). Then click **Save and Tell Claude**. A server whose blimpd is older than this feature says so, and saves nothing.
+- blimp sends the key once to the server. The server saves it in `~/.blimp/secrets/<name>`. Only you can read that file. The field is cleared, and the app never keeps the key.
+- Then blimp types a note to Claude. The note says where the file is and how to use it, for example `export OPENAI_API_KEY="$(cat ~/.blimp/secrets/OPENAI_API_KEY)" && your-command`, all in one command, since a variable set in one command is gone in the next. The note never has the key in it. It also tells Claude never to print the key or put it in a file, a commit or a message.
+- To give the same secret to another session, type its name and leave **Value** empty. The button says **Tell Claude**.
+- If Claude is asking you something, blimp does not type the note. Answer Claude first, then click **Tell Claude**.
+- **Settings > Models** shows the names of the secrets on each server. **Remove** deletes one. The server never sends a secret back, and the files on the left cannot open, download or replace them.
+
 ### Keyboard shortcuts
 
 | Keys | What it does |

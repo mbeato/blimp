@@ -84,6 +84,8 @@ export type Job = {
 export type Recap = { goal: string; done: string[]; open: string[]; at: number };
 
 export type RecentFolder = { dir: string; lastUsed: number };
+// A secret given to sessions (GET /secrets): its name and when it was last saved (ms). Never its value.
+export type Secret = { name: string; mtime: number };
 // Haiku's note on a Claude session's last turn: done, still going, or asking you something.
 export type Note = { status: "done" | "progress" | "question"; text: string; at: number };
 export type Conversation = { sessionId: string; title: string; updatedAt: number; unread?: boolean; note?: Note };
@@ -182,6 +184,25 @@ export class Api {
 
   async removeZaiKey() {
     await this.req("/keys/zai", { method: "DELETE" });
+  }
+
+  // Secrets given to sessions: names and when each was saved, never a value (older blimpd: 404).
+  secrets() {
+    return this.json<Secret[]>("/secrets");
+  }
+
+  // The value goes in the body only, once: never in a URL, and the server never sends it back.
+  async setSecret(name: string, value: string) {
+    await this.req(`/secrets/${encodeURIComponent(name)}`, { method: "PUT", body: JSON.stringify({ value }), headers: { "Content-Type": "application/json" } });
+  }
+
+  async removeSecret(name: string) {
+    await this.req(`/secrets/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  // Types the session's Claude a note saying where the secret is (409 while Claude asks something).
+  async tellSecret(name: string, session: string) {
+    await this.req(`/secrets/${encodeURIComponent(name)}/tell`, { method: "POST", body: JSON.stringify({ session }), headers: { "Content-Type": "application/json" } });
   }
 
   // Ends the session (zmx kill). Claude's conversation stays resumable.

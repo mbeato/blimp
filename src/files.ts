@@ -84,24 +84,25 @@ function realPath(p: string): string {
 }
 
 // blimp's own key files: the daemon's token, the phone's token, the browser gate's key (all
-// beside the socket) and the model key. No fs route may serve, replace, or archive them: a
-// client holding one token — the phone's — must not read or plant another (the Mac's), so
-// `blimpd pair --revoke` stays final.
+// beside the socket), the model key, and the folder of secrets given to sessions (secrets.ts).
+// No fs route may serve, replace, or archive them: a client holding one token — the phone's —
+// must not read or plant another (the Mac's), so `blimpd pair --revoke` stays final.
 export function secretPaths(home = realHome(), dir = socketDir()): string[] {
   return [
     join(dir, "token"),
     join(dir, "phone-token"),
     join(dir, "browser", "key"),
     join(home, ".config", "zai", "key"),
+    join(dir, "secrets"),
   ].map(realPath);
 }
 
 // guard() for the routes that read or write one file: inside home, and never one of those key
-// files nor a folder that holds one (a folder download would archive it).
+// files, anything in the secrets folder, nor a folder that holds one (a folder download would archive it).
 export function guardFile(path: string | null, home = realHome(), dir = socketDir()): string {
   const real = guard(path, home);
   const slash = real === "/" ? "" : "/";
-  if (secretPaths(home, dir).some((s) => s === real || s.startsWith(real + slash)))
+  if (secretPaths(home, dir).some((s) => s === real || s.startsWith(real + slash) || real.startsWith(s + "/")))
     throw new HttpError(403, "that's one of blimp's own files");
   return real;
 }

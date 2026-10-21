@@ -197,6 +197,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: in a git repo on the server with `gh` signed in, check out a branch that has a pull request. Start two Claude sessions there and ask each to edit the same file. Hover each row, then hover the red sign before its title. Right-click a row and pick **Open PR #n**. Press ⌘K.
   Expect: within about a minute, each row shows a red (not amber) warning sign. Its tooltip says "Also on branch *x*: *other title*" and "Both edited *file* with *other title*". The row's tooltip says "On branch *x*". **Open PR #n** opens the pull request in your default browser. ⌘K shows the branch after the folder.
 
+- [ ] **Give a Secret.**
+  Do: right-click a Claude session, pick Give a Secret…, type the name `TEST_SECRET` and paste any text as the value. Click Save and Tell Claude. Then ask Claude "is TEST_SECRET set up? don't show it".
+  Expect: the dialog closes. Claude gets a note saying where the file is, and the note does not have the value. Claude reads the file without printing the value. Settings > Models lists TEST_SECRET. Remove takes it away. In the files on the left, opening `~/.blimp/secrets/TEST_SECRET` shows "that's one of blimp's own files".
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**

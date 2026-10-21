@@ -120,6 +120,15 @@ describe("guardFile", () => {
       else process.env.BLIMPD_SOCKET = old;
     }
   });
+
+  test("the secrets folder, anything in it (there or not yet), and a link to one are refused", () => {
+    mkdirSync(join(blimp, "secrets"), { recursive: true });
+    writeFileSync(join(blimp, "secrets", "API_KEY"), "sk-secret");
+    symlinkSync(join(blimp, "secrets", "API_KEY"), join(home, "key-link"));
+    for (const p of [join(blimp, "secrets"), join(blimp, "secrets", "API_KEY"), join(blimp, "secrets", "NEW"), join(home, "key-link")])
+      expect(status(() => guardFile(p, home, blimp))).toBe(403);
+    expect(guardFile(join(blimp, "secrets-notes.txt"), home, blimp)).toBe(join(blimp, "secrets-notes.txt"));
+  });
 });
 
 test("listDir: folders first, then by name; links as their target; broken links skipped", () => {
