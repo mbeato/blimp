@@ -187,17 +187,32 @@ function jpegSize(b: Uint8Array): [number, number] | undefined {
   }
 }
 
-// Sharp on a Retina Mac: frames at the screen's pixels (headless Chrome's screencast ignores the
-// emulated scale, so Chrome draws at 2x), and at the page's own size for a screen at 1x.
-live("frames come at the screen's pixel ratio: twice the page's size at 2x, its size at 1x", async () => {
+// Sharp, and light while you use the page: frames at the screen's ratio (a blinking caret or a
+// spinner stays sharp), at the page's size (a quarter of the pixels) from a scroll, click or key
+// until it's been left alone a moment. At 1x there's nothing sharper to send.
+live("frames are sharp, and at the page's size while it's being scrolled, clicked or typed in", async () => {
   const id = await gate.createTab("/f", base + "/");
   await until(async () => (await title(id)) === "start", "the page");
   const w = await viewer(id);
   const last = () => JSON.stringify(jpegSize(w.frames.at(-1) ?? new Uint8Array()));
   w.send({ type: "size", width: 400, height: 300, scale: 2 });
-  await until(() => last() === "[800,600]", "a frame at 2x");
+  await until(() => last() === "[800,600]", "a sharp frame");
+  expect(w.msgs.filter((m) => m.type === "frame").at(-1)).toEqual({ type: "frame", width: 400, height: 300 });
+  // Scrolling: light frames while it goes on.
+  const n = w.frames.length;
+  const scroll = setInterval(() => w.send({ type: "mouse", event: "mouseWheel", x: 100, y: 100, button: "none", buttons: 0, clickCount: 0, modifiers: 0, deltaX: 0, deltaY: 40 }), 100);
+  await evalIn(id, "document.body.style.background='red'");
+  await until(() => w.frames.length > n && last() === "[400,300]", "a light frame while scrolling");
+  clearInterval(scroll);
+  // Left alone: sharp again.
+  await until(() => last() === "[800,600]", "sharp again", 3000);
+  // At 1x: only frames at the page's size.
   w.send({ type: "size", width: 400, height: 300, scale: 1 });
   await until(() => last() === "[400,300]", "a frame at 1x");
+  const m = w.frames.length;
+  await evalIn(id, "document.body.style.background='blue'");
+  await Bun.sleep(1000);
+  expect(w.frames.slice(m).every((f) => JSON.stringify(jpegSize(f)) === "[400,300]")).toBe(true);
   expect(await evalIn(id, "innerWidth")).toBe(400);
   w.v.close();
 }, 30_000);
