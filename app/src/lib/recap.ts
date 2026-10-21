@@ -1,0 +1,35 @@
+// When the return card ("where was I?") shows by itself: a Claude session comes on screen in a focused
+// window, and this Mac hadn't shown it for an hour or more. Sessions are "<server key>/<session name>".
+// When each was last on screen is kept on this computer (localStorage), only for this.
+
+export const AWAY = 60 * 60_000;
+const KEEP = 30 * 24 * 60 * 60_000;
+const KEY = "blimp.lastShown";
+
+// The sessions on screen now that weren't at the last look (before), and were last on screen an hour
+// ago or more, or never on this Mac.
+export const cameBack = (viewing: string[], before: string[], last: Record<string, number>, now: number) =>
+  viewing.filter((k) => !before.includes(k) && !(now - (last[k] ?? -Infinity) < AWAY));
+
+// These sessions were on screen until now. Ones not on screen for a month are forgotten.
+export function markShown(last: Record<string, number>, shown: string[], now: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, at] of Object.entries(last)) if (now - at < KEEP) out[k] = at;
+  for (const k of shown) out[k] = now;
+  return out;
+}
+
+export function readLastShown(): Record<string, number> {
+  try {
+    const v = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeLastShown(last: Record<string, number>) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(last));
+  } catch {}
+}

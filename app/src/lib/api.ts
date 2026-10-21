@@ -52,6 +52,10 @@ export type Job = {
   lastLine?: string;
 };
 
+// The return card ("where was I?", GET /sessions/<name>/recap): what a Claude session is for, what's
+// done and what's still open, written by Haiku. at: when it was written (ms).
+export type Recap = { goal: string; done: string[]; open: string[]; at: number };
+
 export type RecentFolder = { dir: string; lastUsed: number };
 // Haiku's note on a Claude session's last turn: done, still going, or asking you something.
 export type Note = { status: "done" | "progress" | "question"; text: string; at: number };
@@ -140,6 +144,12 @@ export class Api {
   // Ends the session (zmx kill). Claude's conversation stays resumable.
   async endSession(name: string) {
     await this.req(`/sessions/${encodeURIComponent(name)}`, { method: "DELETE" });
+  }
+
+  // 404 when recaps are off, it isn't a Claude conversation, or it has had fewer than `min` prompts
+  // (older blimpd: always 404).
+  recap(name: string, min?: number) {
+    return this.json<Recap>(`/sessions/${encodeURIComponent(name)}/recap`, { query: { min } });
   }
 
   recentFolders() {

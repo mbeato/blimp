@@ -2309,3 +2309,69 @@ body.dragging-session * {
   font-size: 12px;
   color: var(--danger);
 }
+
+/* ---- return card ---- */
+
+/* "Where was I?": over the top of a Claude session's terminal, until dismissed. */
+.recap-card {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  width: min(560px, calc(100% - 28px));
+  max-height: calc(100% - 20px);
+  overflow: auto;
+  padding: 10px 34px 10px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.recap-card .tab-close {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  visibility: visible;
+}
+
+.recap-goal,
+.recap-loading {
+  margin: 0;
+}
+
+.recap-goal {
+  font-weight: 600;
+}
+
+.recap-loading {
+  color: var(--fg-dim);
+}
+
+.recap-part {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.recap-label {
+  flex: none;
+  width: 40px;
+  padding-top: 1px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.recap-part ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-dim);
+}
+
+.recap-part li + li {
+  margin-top: 2px;
+}

@@ -169,6 +169,10 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: open a folder with two Claude sessions, one working and one idle. Hover each and click the trash icon. Start a New shell from the + menu.
   Expect: only that folder's sessions are listed, each with its mark. The idle one ends at once and its conversation moves to Earlier. The working one asks "End this session?" first. `zmx list` on the server agrees. The shell row shows `>_` and its name.
 
+- [ ] **Return card.**
+  Do: pick a Claude session with 3 prompts or more that blimp has not shown for an hour (or open one this Mac never showed). Click its row. Close the card with ×. Then right-click the row and pick Recap.
+  Expect: a card shows at the top of its terminal, with a line on what the session is for, then Done and Open. It may show "…" for a few seconds first. × closes it, and it does not come back when you click another session and back. Recap shows it again at once. A session with fewer than 3 prompts gets no card by itself, and nothing shows if the server has `{ "names": false }`.
+
 ## Notifications and Dock
 
 - [ ] **Permission prompt and banner.**
