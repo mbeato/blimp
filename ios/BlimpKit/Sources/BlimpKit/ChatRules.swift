@@ -32,16 +32,15 @@ public struct NextWaiting: Equatable, Sendable {
         count > 1 ? "Next: \(session.title) is waiting (\(count) left)" : "Next: \(session.title) is waiting"
     }
 
-    /// The session other than `name` the inbox lists first under Waiting on you, across folders: by the
-    /// inbox's rule (Inbox.init: it waits, or it's done with a question for you) and in its order (newest
-    /// first, ties in the list's order). Only those with Claude (or Claude Code's folder trust question) in
-    /// them: the chip opens it to answer. nil when none waits.
+    /// The session other than `name` the inbox lists first under Needs you, across folders: by its rule (it
+    /// waits, or it's done with a question for you) and in its order (the oldest wait first, ties in the list's
+    /// order). Only those with Claude (or Claude Code's folder trust question) in them: the chip opens it to
+    /// answer. nil when none waits.
     public static func after(_ name: String, in sessions: [Session]) -> NextWaiting? {
-        let others = sessions.filter { s in
-            s.name != name && (s.isClaude || s.prompt != nil) && (s.state == .waiting || (s.state == .done && s.note?.status == .question))
+        let others = Inbox.needsYou(sessions: sessions, dir: nil, earlier: []).compactMap(\.session).filter { s in
+            s.name != name && (s.isClaude || s.prompt != nil)
         }
-        // max keeps the first of equals
-        guard let first = others.max(by: { $0.activity < $1.activity }) else { return nil }
+        guard let first = others.first else { return nil }
         return NextWaiting(session: first, count: others.count)
     }
 }
