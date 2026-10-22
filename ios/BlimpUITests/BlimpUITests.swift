@@ -446,8 +446,10 @@ final class BlimpUITests: XCTestCase {
     // MARK: - The recap drawer
 
     /// demo-chat's recap is in a drawer from the right, never on top of the chat: Recap opens it (the stand-in
-    /// claude writes its card), × closes it, a swipe left from the right edge pulls it out and a swipe right
-    /// pushes it back, and a tap beside it closes it. Closed, it isn't there. (By name after Needs you.)
+    /// claude writes its card), × closes it, a swipe left from the middle of the chat (as the left drawer's swipe
+    /// right, not only from the edge) pulls it out and a swipe right pushes it back, and a tap beside it closes it.
+    /// Scrolling moves neither drawer, and a swipe left on the open left drawer only closes it. Closed, it isn't
+    /// there. (By name after Needs you.)
     func testRecapDrawer() throws {
         try launchPaired()
         try openSession("demo-chat", in: "blimp-demo")
@@ -465,16 +467,31 @@ final class BlimpUITests: XCTestCase {
         element("recapClose").tap()
         try until(drawer, "exists == false", "the recap drawer to close on ×")
 
-        // From the right edge: it follows the finger; the left drawer stays shut
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)))
-        try wait(drawer, "the recap drawer after a swipe left from the edge")
+        // Scrolling the chat up: neither drawer
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.3)))
+        if drawer.exists || element("drawerInbox").exists { throw failed("a drawer moved on a scroll") }
+
+        // From the middle of the chat: it follows the finger; the left drawer stays shut
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
+        try wait(drawer, "the recap drawer after a swipe left from the middle of the chat")
         if element("drawerInbox").exists { throw failed("the left drawer shut on a swipe left") }
         try wait(labeled("Toggle added"), "the card kept in the drawer")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)))
         try until(drawer, "exists == false", "the recap drawer to close on a swipe right")
         if element("drawerInbox").exists { throw failed("the left drawer shut on the swipe that closed the recap") }
+
+        // The left drawer open, a swipe left closes it, and the recap stays shut
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        try wait(element("drawerInbox"), "the left drawer after a swipe right in the chat")
+        if drawer.exists { throw failed("the recap shut on a swipe right") }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
+        try until(element("drawerInbox"), "exists == false", "the left drawer to close on a swipe left")
+        if drawer.exists { throw failed("the recap shut on the swipe that closed the left drawer") }
 
         button.tap()
         try wait(drawer, "the recap drawer again")

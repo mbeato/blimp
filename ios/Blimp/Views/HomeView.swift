@@ -1,6 +1,6 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
 // anywhere, or its button) with the project picker and the project's sessions, running and past. In a Claude
-// session's chat, a drawer from the right (a swipe left from the right edge, or Recap) has its recap. A project opens to
+// session's chat, a drawer from the right (a swipe left anywhere, or Recap) has its recap. A project opens to
 // its inbox, where the box at the bottom starts a session. On any screen, a session in any project that starts
 // waiting gives a double haptic, and away from a chat a banner that opens it (a chat has its own); one that finishes
 // working gives a light tick. A row's actions (RowActions) live here: End's question, a failure's alert, and the
@@ -28,12 +28,10 @@ struct HomeView: View {
     /// The open chat's model (SessionView): its recap is in it.
     @State private var chatModel: ChatModel?
     @State private var recapOpen = false
-    /// A swipe left from the right edge that's pulling the recap drawer out: how far it has gone; nil while there's none.
+    /// A swipe left that's pulling the recap drawer out: how far it has gone; nil while there's none.
     @State private var recapPull: CGFloat?
     /// Whether the swipe going on pulls the recap drawer (RecapCard.pulls, decided once at its start).
     @State private var pullingRecap: Bool?
-    /// The screen's width, for where a swipe starts.
-    @State private var width: CGFloat = 0
     @State private var folders: [RecentFolder] = []
     /// Each project's past conversations, kept while another one shows, and fetched again as below.
     @State private var earlierBy: [String: [Conversation]] = [:]
@@ -67,15 +65,15 @@ struct HomeView: View {
         }
         // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
         // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. In a
-        // Claude session's chat, a swipe left from the right edge pulls the recap drawer out the same way.
+        // Claude session's chat, a swipe left anywhere pulls the recap drawer out the same way, mirrored. While
+        // either drawer is open this does nothing: a swipe on it closes it (DrawerView, RecapDrawer).
         .simultaneousGesture(
             DragGesture(minimumDistance: 10)
                 .onChanged { v in
                     if drawer || recapOpen { return }
                     if pulling == nil {
                         pulling = v.translation.width > 0 && abs(v.translation.width) > abs(v.translation.height) * 1.5
-                        pullingRecap = recapChat != nil && RecapCard.pulls(from: Double(v.startLocation.x), width: Double(width),
-                                                                           dx: Double(v.translation.width), dy: Double(v.translation.height))
+                        pullingRecap = recapChat != nil && RecapCard.pulls(dx: Double(v.translation.width), dy: Double(v.translation.height))
                     }
                     if pulling == true { pull = max(0, v.translation.width) }
                     if pullingRecap == true { recapPull = max(0, -v.translation.width) }
@@ -111,7 +109,6 @@ struct HomeView: View {
                 RecapDrawer(open: $recapOpen, pull: recapPull, title: subtitle, chat: recapChat)
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // The chat went (or isn't a Claude session any more): its drawer goes with it.
         .onChange(of: recapChat == nil) { _, gone in if gone { recapOpen = false } }
         // A card came by itself while the drawer is open: it's seen.

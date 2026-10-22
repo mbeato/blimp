@@ -113,8 +113,8 @@ enum RecapLoad: Equatable {
 }
 
 /// The chat's drawer from the right: "Recap" and the session's title, then what it's for and a section each for
-/// Stuck, In progress, Next and Done (BlimpKit's Recap.sections), with refresh and ×. It never opens by itself: its toolbar button opens it, and so does a swipe left from
-/// the chat's right edge (HomeView's `recapPull`), which it follows as the left drawer does (DrawerView). A swipe
+/// Stuck, In progress, Next and Done (BlimpKit's Recap.sections), with refresh and ×. It never opens by itself: its toolbar button opens it, and so does a swipe left
+/// anywhere in the chat (HomeView's `recapPull`), which it follows as the left drawer does (DrawerView). A swipe
 /// right on it, a tap beside it or × closes it. Closed, it isn't there at all, so VoiceOver and the tests don't find it.
 struct RecapDrawer: View {
     @Binding var open: Bool

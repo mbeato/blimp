@@ -33,15 +33,16 @@ import Testing
     #expect(RecapCard.autoMin == 3)
 }
 
-@Test func aSwipeLeftFromTheRightEdgePullsTheRecapDrawerAndScrollingNever() {
-    let w = 390.0
-    // From the edge, going left, mostly sideways.
-    #expect(RecapCard.pulls(from: w - 10, width: w, dx: -20, dy: 4))
-    #expect(RecapCard.pulls(from: w - RecapCard.edge, width: w, dx: -20, dy: 0))
-    // Not from the middle of the chat, not going right (the left drawer's), not a scroll.
-    #expect(!RecapCard.pulls(from: w / 2, width: w, dx: -40, dy: 0))
-    #expect(!RecapCard.pulls(from: w - 10, width: w, dx: 20, dy: 0))
-    #expect(!RecapCard.pulls(from: w - 10, width: w, dx: -20, dy: 20))
+@Test func aSwipeLeftFromAnywherePullsTheRecapDrawerAndScrollingNever() {
+    // Going left, mostly sideways: wherever it starts (it isn't asked), as the left drawer's swipe right.
+    #expect(RecapCard.pulls(dx: -20, dy: 4))
+    #expect(RecapCard.pulls(dx: -40, dy: 0))
+    #expect(RecapCard.pulls(dx: -16, dy: -10))
+    // Not going right (the left drawer's), not a scroll, not one only a little more sideways than up or down.
+    #expect(!RecapCard.pulls(dx: 20, dy: 0))
+    #expect(!RecapCard.pulls(dx: 0, dy: -30))
+    #expect(!RecapCard.pulls(dx: -20, dy: 20))
+    #expect(!RecapCard.pulls(dx: -15, dy: 10))
     // Let go past 120 points, or flung: it opens; else back closed.
     #expect(RecapCard.opens(dx: -121, predicted: -121))
     #expect(RecapCard.opens(dx: -40, predicted: -300))

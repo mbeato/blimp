@@ -26,13 +26,11 @@ public enum RecapCard {
         return out
     }
 
-    /// A swipe that pulls the drawer out starts this close to the chat's right edge (points).
-    public static let edge: Double = 32
-
-    /// A swipe in the chat pulls the recap drawer out: it starts near the right edge and goes left, mostly
-    /// sideways (as the left drawer's swipe right), so scrolling never does. x: where it started; dx, dy: how far.
-    public static func pulls(from x: Double, width: Double, dx: Double, dy: Double) -> Bool {
-        x >= width - edge && dx < 0 && abs(dx) > abs(dy) * 1.5
+    /// A swipe in the chat pulls the recap drawer out: one going left, from anywhere in the chat (not only its
+    /// right edge, which was hard to hit), mostly sideways, so scrolling never does. The left drawer's swipe right,
+    /// mirrored (HomeView). dx, dy: how far it has gone when it's decided, once at its start.
+    public static func pulls(dx: Double, dy: Double) -> Bool {
+        dx < 0 && abs(dx) > abs(dy) * 1.5
     }
 
     /// Let go past 120 points, or flung left: it opens; else back closed. predicted: where the swipe would end.
