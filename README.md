@@ -181,13 +181,28 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **PDF** files show all pages, with pdf.js.
 - Other binary files show "Can't show this file" and the file size.
 - The tree and the open files update when a session changes them.
+- **Right-click a file or folder** in the tree, as in VS Code:
+  - **Copy Path** copies its full path on the server. **Copy Relative Path** copies its path from the project folder (`src/app.ts`). Paste it into a session to tell Claude which file you mean.
+  - **Send Path to Session** types the path into the session on screen (the focused split), at the prompt. It does not press Enter. A path with spaces or other shell characters is put in single quotes. With the terminal hidden, the item is off.
+  - **Rename…** puts the name in a box in its row. The name without its extension is selected. Enter renames; Esc stops. A name that's already there is refused.
+  - **Delete** asks first, with the name. A folder goes with everything in it. The server has no trash, so you can't undo it.
+  - A folder also has **New File…** and **New Folder…** (they go in that folder), **Upload…**, **Download as .tar.gz** and **Show as Gallery**.
+- **Keys on the tree row that has the focus** (a file or folder you clicked, or a row you reach with Tab; a file you click opens in the editor and the focus stays on its row, as in VS Code, so click in the editor to type): Enter or F2 renames, ⌘⌫ deletes (after asking), ⌥⌘C copies the path, ⌥⇧⌘C copies the relative path.
+- **Drag a file or folder in the tree:**
+  - Onto a session's terminal: its path is typed there, as with Send Path to Session.
+  - Onto a folder (or a file in it): blimp asks "Move X into Y?", then moves it. Let go on the space below the rows to move it to the project folder. A folder can't go into itself.
+  - Esc stops the drag.
+- Open file tabs go with a rename or a move. A file deleted from the tree closes its tab.
+- **Right-click a file tab** for **Download**, **Copy Path**, **Copy Relative Path**, **Send Path to Session** and **Reveal in Files** (opens the folders down to the file in the tree and selects it).
 
 **Moving files between your Mac and the server**
 
 - **Download:** right-click a file (in the tree, or its tab) and pick **Download**. It goes to your Downloads folder, next to anything already there (`name 2.txt`, not over it). A folder downloads as a `.tar.gz`; double-click it on the Mac to open it.
 - **Upload:** drag files or folders from Finder onto the window. Over the tree, the folder under the pointer lights up and they go there; let go on a file, they go in its folder. Anywhere else in the window, they go in the folder you last clicked. Or right-click a folder and pick **Upload…**.
 - A name that's already there asks first: **Replace**, **Keep both** (as `name 2.txt`) or **Skip**.
-- **Drop a file on a Claude session** (a screenshot, say): it goes to `~/.blimp/uploads` on the server, and its path is typed into the prompt, so Claude can read it.
+- **Drop a file on a Claude session** (a screenshot, say): it goes to `~/.blimp/uploads` on the server, and its path is typed into the prompt, so Claude can read it. What lights up while you drag is where it goes.
+- **⌘V a screenshot** (after ⌃⇧⌘4) in a session does the same.
+- The Mac app takes files only. A picture dragged straight from a web page or from Photos is not a file, so it can't be dropped; blimp says so. Save it as a file first (or drag it to the desktop), then drop the file. Screenshots and other files from Finder work.
 - Transfers show at the bottom left, with their progress and **Cancel**. A finished download has **Show in Finder**.
 
 **Browser tabs**
@@ -260,6 +275,9 @@ Sometimes Claude needs a key or a password, for example to call an API. Do not p
 | ⌘, | Settings: theme, text sizes, terminal cursor and scrollback, Option as Meta, autosave, word wrap, minimap, notifications, Dock badge, models and keys, automatic update checks. |
 | ⌘B | Show or hide the files on the left. |
 | ⌘J | Show or hide the terminal. |
+| ⌥⌘C / ⌥⇧⌘C | On the focused row in the files: copy its path / its path from the project folder. |
+| Enter or F2 | On the focused row in the files: rename it. |
+| ⌘⌫ | On the focused row in the files: delete it (after asking). |
 | ⌘⌥B | Show or hide the session list. |
 | ⌘-click | In the terminal: open a file path in a tab, or a web link in your browser. |
 | Esc | Close a dialog. |

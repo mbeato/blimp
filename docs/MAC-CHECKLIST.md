@@ -89,6 +89,14 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: drag a file from Finder over the tree, and move it over a folder. Let go. Drag the same file onto the same folder again. Then drag a folder in. Then drag a screenshot onto a Claude session.
   Expect: the folder under the pointer lights up, and the file appears in it on the server. The second time, blimp asks Replace, Keep both or Skip. The folder arrives with what's in it. The screenshot appears in `~/.blimp/uploads`, and its path is typed into Claude's prompt. If the folder that lights up isn't the one under the pointer, write down how far off it is (and whether the screen is Retina).
 
+- [ ] **The lit target follows the pointer on a Retina screen.**
+  Do: on a Retina screen (the Mac's own), make the window large and expand folders so the tree reaches the bottom of the window. Drag a file from Finder slowly from the top of the tree to the bottom row. Then over the terminal, and let go on a Claude session's terminal near its bottom right.
+  Expect: the lit folder is always the one under the pointer, down to the last row (not one about halfway up the window). Over the terminal, the split under the pointer is lit. The file lands in `~/.blimp/uploads` and its path is typed into that session, not into the tree.
+
+- [ ] **A picture that isn't a file.**
+  Do: drag a picture straight from a web page in Safari (or from Photos) onto a Claude session. Then select some text in Safari and drag it onto the session. Then take a screenshot (⌘⇧4), drag the screenshot file from the desktop onto the session.
+  Expect: the first two drops light nothing and blimp says only files can be dropped, and how to save a picture as a file; nothing is typed. The screenshot file uploads and its path is typed in.
+
 - [ ] **Download and Upload….**
   Do: right-click a file and pick Download. Right-click a folder and pick Download as .tar.gz. Right-click a folder and pick Upload… and choose a file.
   Expect: both downloads are in Downloads, and the progress box at the bottom left has Show in Finder. The macOS file picker opens for Upload…, and the file arrives on the server.
@@ -144,6 +152,18 @@ Each item says what to do, and what should happen. If the result is different, w
 - [ ] **Autosave, Claude's edits, and the reload bar.**
   Do: open a text file and change a line. Wait two seconds. In Terminal on the server, run `git diff` (or `cat`) on the file. Then ask Claude to change that file while it is open. Last, type in blimp and, within a second, change the same file in Terminal (`echo x >> file`).
   Expect: without ⌘S, the server shows your change within about a second, and the dot on the file tab goes away. Claude's change shows in the open file by itself, and the cursor stays where it was. After the clash, a bar shows "Changed on the server" with Reload and Keep mine, and the file on the server still has the Terminal change. Reload shows the server's version. Keep mine saves yours.
+
+- [ ] **Right-click a file: paths, rename, delete.**
+  Do: right-click a file in the tree and pick Copy Path, then paste in TextEdit. Then Copy Relative Path, and paste. Click a Claude session, then right-click a file named with a space and pick Send Path to Session. Click a folder and press ⌥⌘C, then ⌥⇧⌘C, and paste each. Right-click a file and pick Rename…, type a new name, Enter. Then click a folder, press Enter, type a new name, Enter. Then press ⌘⌫ and pick Delete. Last, click one text file, then another, then the first again, and press ⌘⌫; pick Cancel.
+  Expect: the full path on the server, then the path from the project folder. The session's prompt shows the path in single quotes, with nothing sent. The keys copy the folder's two paths. The rename box selects the file's name without its extension, and the file is renamed on the server (`ls`); its open tab follows. Enter on the clicked folder renames it. The delete dialog names the folder and says you can't undo it; then the folder is gone on the server. With text files open, ⌘⌫ after the click still asks to delete the file, and no text goes from the editor.
+
+- [ ] **Drag from the tree.**
+  Do: drag a file from the tree onto a Claude session's terminal. Then drag a file onto a folder in the tree, and pick Move. Then drag a folder onto itself.
+  Expect: while you drag, the name follows the pointer and the target is lit. On the terminal, the path is typed in, with nothing sent. On the folder, blimp asks "Move X into Y?", then the file is in that folder on the server and the folder opens. A folder onto itself lights nothing and asks nothing. Finder drags still work as before.
+
+- [ ] **Right-click a file tab.**
+  Do: open a file deep in the tree, collapse the folders (the button at the top of the files) and hide the files (⌘B). Right-click the file's tab and pick Reveal in Files.
+  Expect: the files show, the folders open down to the file, and its row is selected.
 
 - [ ] **New file and new folder.**
   Do: in the file tree, click a folder, then the New folder button, type a name and press Enter. Then the New file button, a name, Enter.

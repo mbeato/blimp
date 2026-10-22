@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import {
+  ancestors,
   baseName,
+  canMoveInto,
   collapse,
   decodeText,
   formatSize,
@@ -8,11 +10,18 @@ import {
   imageType,
   initialSync,
   isBinary,
+  isInside,
   joinPath,
+  menuItems,
   mergeWatch,
+  movedPath,
+  nameError,
   nextSync,
   parentDir,
+  relPath,
+  renameSelection,
   resolvePath,
+  shellQuote,
   viewerFor,
   watchPaths,
   type Sync,
@@ -194,4 +203,61 @@ test("watch set: expanded folders plus open files, no duplicates", () => {
 test("watch sets of workspaces on one server merge", () => {
   expect(mergeWatch([["/r", "/r/a.ts"], ["/r", "/s"], []])).toEqual(["/r", "/r/a.ts", "/s"]);
   expect(mergeWatch([])).toEqual([]);
+});
+
+test("relative paths are from the project folder; the folder itself is ., a path outside it stays whole", () => {
+  expect(relPath("/home/me/proj", "/home/me/proj/src/a.ts")).toBe("src/a.ts");
+  expect(relPath("/home/me/proj", "/home/me/proj")).toBe(".");
+  expect(relPath("/home/me/proj", "/home/me/projects/a.ts")).toBe("/home/me/projects/a.ts");
+  expect(relPath("/", "/etc/hosts")).toBe("etc/hosts");
+  expect(isInside("/a/b", "/a")).toBe(true);
+  expect(isInside("/ab", "/a")).toBe(false);
+});
+
+test("a path typed into a terminal is quoted only when a shell would split or expand it", () => {
+  expect(shellQuote("/home/me/proj/src/a.ts")).toBe("/home/me/proj/src/a.ts");
+  expect(shellQuote("/home/me/My Pics/shot 1.png")).toBe("'/home/me/My Pics/shot 1.png'");
+  expect(shellQuote("/home/me/it's.txt")).toBe(`'/home/me/it'\\''s.txt'`);
+  for (const p of ["/a/$HOME", "/a/*.ts", "/a/b;rm", "/a/(x)", "/a/~b", "/a/`x`", "/a/é"]) expect(shellQuote(p).startsWith("'")).toBe(true);
+});
+
+test("a rename or move carries the paths inside it along", () => {
+  expect(movedPath("/p/a.txt", "/p/a.txt", "/p/b.txt")).toBe("/p/b.txt");
+  expect(movedPath("/p/docs/x/y.md", "/p/docs", "/p/notes")).toBe("/p/notes/x/y.md");
+  expect(movedPath("/p/docs2/y.md", "/p/docs", "/p/notes")).toBeNull();
+  expect(movedPath("/p/other", "/p/docs", "/p/notes")).toBeNull();
+});
+
+test("a drag in the tree goes into another folder, never its own folder nor into itself", () => {
+  expect(canMoveInto("/p/a.txt", "/p/docs")).toBe(true);
+  expect(canMoveInto("/p/a.txt", "/p")).toBe(false);
+  expect(canMoveInto("/p/docs", "/p/docs")).toBe(false);
+  expect(canMoveInto("/p/docs", "/p/docs/deep")).toBe(false);
+  expect(canMoveInto("/p/docs", "/p/docs2")).toBe(true);
+  expect(canMoveInto("/p/docs/deep", "/p")).toBe(true);
+});
+
+test("revealing a file opens the folders from the project folder down to it", () => {
+  expect(ancestors("/p", "/p/a/b/c.txt")).toEqual(["/p", "/p/a", "/p/a/b"]);
+  expect(ancestors("/p", "/p/c.txt")).toEqual(["/p"]);
+  expect(ancestors("/p", "/p")).toEqual([]);
+  expect(ancestors("/p", "/q/c.txt")).toEqual([]);
+});
+
+test("a rename selects a file's name without its extension, a folder's whole name; names are one name", () => {
+  expect(renameSelection("notes.md", "file")).toEqual([0, 5]);
+  expect(renameSelection("archive.tar.gz", "file")).toEqual([0, 11]);
+  expect(renameSelection(".env", "file")).toEqual([0, 4]);
+  expect(renameSelection("Makefile", "file")).toEqual([0, 8]);
+  expect(renameSelection("v1.2", "dir")).toEqual([0, 4]);
+  expect(nameError("ok.txt")).toBeNull();
+  for (const bad of ["", "a/b", ".", ".."]) expect(nameError(bad)).not.toBeNull();
+});
+
+test("right-click menus: files, folders, the project folder (no rename or delete) and file tabs", () => {
+  expect(menuItems("tree", "file")).toEqual(["download", "-", "copy-path", "copy-rel", "send-path", "-", "rename", "delete"]);
+  expect(menuItems("tree", "dir")).toEqual(["new-file", "new-folder", "-", "upload", "download", "gallery", "-", "copy-path", "copy-rel", "send-path", "-", "rename", "delete"]);
+  expect(menuItems("tree", "dir", true)).not.toContain("rename");
+  expect(menuItems("tree", "dir", true)).not.toContain("delete");
+  expect(menuItems("tab", "file")).toEqual(["download", "-", "copy-path", "copy-rel", "send-path", "-", "reveal"]);
 });

@@ -1,19 +1,29 @@
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/editor/editor.api";
 import { ApiError, type BrowserTab, type DirEntry, type FileBody, type Port } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import {
+  ancestors,
   baseName,
+  canMoveInto,
   collapse,
   decodeText,
   formatSize,
   hasPreview,
   initialSync,
+  isInside,
   joinPath,
+  menuItems,
+  movedPath,
+  nameError,
   nextSync,
   parentDir,
+  relPath,
+  renameSelection,
+  shellQuote,
   viewerFor,
   watchPaths,
+  type MenuItem,
   type Sync,
   type SyncEffect,
   type SyncEvent,
@@ -58,7 +68,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 
 // Opens a file in a tab, at a line (and column) if given. Set by the workbench for the
 // terminal's ⌘-click.
-export type Opener = (path: string, line?: number, col?: number) => void;
+export type Opener = (path: string, line?: number, col?: number, focus?: boolean) => void;
 
 // Opens a server port in a browser tab (or brings its tab forward); with none, a new browser tab;
 // with a server browser tab's address, that address (lib/browser.ts serverTabTarget).
@@ -68,8 +78,10 @@ export type PageOpener = (p?: Pick<Port, "port" | "host"> | string) => void;
 // go in (the one last clicked in the tree).
 export type FileDrop = (dir: string | null, items: Item[]) => void;
 
-// Right-click on a tree row or a file tab.
-type Menu = { x: number; y: number; path: string; kind: "file" | "dir" };
+// Right-click on a tree row (or the space below the rows: the project folder) or a file tab.
+type Menu = { x: number; y: number; path: string; kind: "file" | "dir"; on: "tree" | "tab" };
+// A question before a delete or a move: `run` on yes. path: the tree row to focus again after.
+type Confirm = { text: ReactNode; action: string; danger?: boolean; path: string; run: () => void };
 // Names an upload would take that are already there: what to do with them.
 type Ask = { dir: string; names: string[]; resolve: (choice: "replace" | "keep" | "skip" | null) => void };
 
@@ -91,6 +103,7 @@ type Doc = {
   deleted: boolean; // gone on the server; still open, and only an explicit Save writes it back
   notice: string; // why the last save failed
   reveal: { line: number; col?: number } | null; // where to put the cursor once it's in the editor
+  focus: boolean; // the editor takes the focus when it shows this; not after a click in the tree
   timer: ReturnType<typeof setTimeout> | undefined; // the pending autosave
   inflight: Promise<void> | null; // the save being sent
   unsub: () => void;
@@ -113,6 +126,7 @@ const newDoc = (path: string): Doc => ({
   deleted: false,
   notice: "",
   reveal: null,
+  focus: true,
   timer: undefined,
   inflight: null,
   unsub: () => {},
@@ -123,6 +137,8 @@ const sameSync = (a: Sync, b: Sync) =>
   a.mtime === b.mtime && a.dirty === b.dirty && a.saving === b.saving && a.conflict === b.conflict;
 
 type Creating = { kind: "file" | "dir"; dir: string; error: string };
+// A tree row's name being changed in place.
+type Renaming = { path: string; kind: "file" | "dir"; error: string };
 
 // Tells apart the workbenches sharing a server link: each tab has its own watch set.
 let workbenches = 0;
@@ -149,8 +165,10 @@ export function Workbench(props: {
   opener: { current: Opener };
   onDrop: { current: FileDrop };
   pages: { current: PageOpener };
-  // The terminal pane's, for a browser tab's Send to session.
+  // The terminal pane's, for a browser tab's Send to session and the files' Send Path to Session.
   pane: { current: PaneActions };
+  // Reveal in Files with the files hidden: show them.
+  onShowFiles: () => void;
   onNotice: (text: string) => void;
 }) {
   const { link, root } = props;
@@ -182,6 +200,10 @@ export function Workbench(props: {
   const [creating, setCreating] = useState<Creating | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
+  const [renaming, setRenaming] = useState<Renaming | null>(null);
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  // A tree row being dragged: its name, drawn at the pointer.
+  const [rowDrag, setRowDrag] = useState<{ name: string; x: number; y: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
   const editorBox = useRef<HTMLDivElement>(null);
@@ -222,8 +244,10 @@ export function Workbench(props: {
     rerender();
   };
 
-  const startCreate = (kind: Creating["kind"]) => {
-    const dir = listings.has(target) || target === root ? target : root;
+  // In `at` (a folder's right-click), else the folder new files go in.
+  const startCreate = (kind: Creating["kind"], at?: string) => {
+    const dir = at ?? (listings.has(target) || target === root ? target : root);
+    if (at) setTarget(at);
     expand(dir);
     setCreating({ kind, dir, error: "" });
   };
@@ -233,7 +257,8 @@ export function Workbench(props: {
     if (!c) return;
     name = name.trim();
     if (!name) return setCreating(null);
-    if (name.includes("/") || name === "." || name === "..") return setCreating({ ...c, error: "A name can't contain / or be . or .." });
+    const bad = nameError(name);
+    if (bad) return setCreating({ ...c, error: bad });
     const path = joinPath(c.dir, name);
     try {
       if (!link.api) throw new Error("Not connected.");
@@ -366,10 +391,12 @@ export function Workbench(props: {
   const setActive = (path: string | null) => {
     const prev = active ? docs.get(active) : undefined;
     if (prev && prev.path !== path && getSettings().autosave) flush(prev);
+    const next = path ? docs.get(path) : undefined;
+    if (next) next.focus = true;
     setActiveState(path);
   };
 
-  const openFile: Opener = (path, line, col) => {
+  const openFile: Opener = (path, line, col, focus = true) => {
     let doc = docs.get(path);
     if (!doc) {
       doc = newDoc(path);
@@ -381,6 +408,7 @@ export function Workbench(props: {
       if (hasPreview(doc.viewer)) doc.editing = true;
     }
     setActive(path);
+    doc.focus = focus;
     setClosing(null);
     rerender();
   };
@@ -623,6 +651,280 @@ export function Workbench(props: {
     if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...galleries, ...pages.keys()].at(-1) ?? null);
   }, [pageKeys, listed]);
 
+  // ---- paths, rename, delete, move ----
+
+  const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => {});
+  // The session in the focused split, while the terminal shows.
+  const onScreen = () => (props.showTerm ? props.pane.current.onScreen() : null);
+  // Typed into a session as a paste, with no Enter (quoted if a shell would split it), and a space
+  // after it for what comes next.
+  const sendPath = (name: string, path: string) => void props.pane.current.send(name, shellQuote(path) + " ");
+
+  // A tree row to focus once it's on screen (after a reveal, a rename, a move or a question).
+  const focusRow = useRef<string | null>(null);
+  useEffect(() => {
+    const p = focusRow.current;
+    const row = p && box.current?.querySelector<HTMLElement>(`.wb-tree .tree-row[data-path="${CSS.escape(p)}"]`);
+    if (!row || !props.showFiles) return;
+    focusRow.current = null;
+    row.scrollIntoView({ block: "nearest" });
+    row.focus();
+  });
+
+  // Reveal in Files: opens the folders down to the file, then selects and focuses its row.
+  const reveal = async (path: string) => {
+    const dirs = ancestors(root, path);
+    if (!dirs.length) return props.onNotice(`${baseName(path)} isn't in ${baseName(root) || root}.`);
+    if (!props.showFiles) props.onShowFiles();
+    for (const d of dirs) {
+      if (!expanded.current.has(d)) expanded.current = new Set(expanded.current).add(d);
+      if (!listings.has(d)) await refreshDir(d);
+    }
+    setTarget(parentDir(path));
+    focusRow.current = path;
+    setActive(path);
+    rerender();
+  };
+
+  // A clean open file loads again, from its new path, so its viewer and its language go by its new
+  // name. (One with edits keeps them, and saves them to the new path.)
+  const reopen = (doc: Doc) => {
+    if (editorDoc.current === doc && editor.current) doc.viewState = editor.current.saveViewState();
+    if (editor.current && editor.current.getModel() === doc.model) editor.current.setModel(null);
+    if (editorDoc.current === doc) editorDoc.current = null;
+    doc.unsub();
+    doc.unsub = () => {};
+    doc.model?.dispose();
+    doc.model = null;
+    doc.phase = "loading";
+    doc.editing = false;
+    void loadDoc(doc);
+  };
+
+  // After a rename or move: open files (in their places in the strip), galleries, open folders and
+  // the folder new files go in follow it.
+  const follow = (from: string, to: string) => {
+    const key = (k: string) => {
+      const g = galleryDir(k);
+      return g === null ? (movedPath(k, from, to) ?? k) : galleryKey(movedPath(g, from, to) ?? g);
+    };
+    const open = [...docs.values()];
+    docs.clear();
+    for (const d of open) {
+      const p = movedPath(d.path, from, to);
+      if (p) {
+        d.path = p;
+        d.name = baseName(p);
+        if (!d.sync.dirty && !d.timer && d.phase === "ready") reopen(d);
+      }
+      docs.set(d.path, d);
+    }
+    const gs = [...galleries];
+    galleries.clear();
+    for (const k of gs) galleries.add(key(k));
+    expanded.current = new Set([...expanded.current].map((p) => movedPath(p, from, to) ?? p));
+    for (const [k, v] of [...listings]) {
+      const p = movedPath(k, from, to);
+      if (p) (listings.delete(k), listings.set(p, v));
+    }
+    setTarget((t) => movedPath(t, from, to) ?? t);
+    setActiveState((a) => (a === null ? a : key(a)));
+    rerender();
+  };
+
+  // Renames or moves, after the saves already on their way in the files it takes along (a pending
+  // autosave, or one in flight, sent later would make the old file again). Edits not saved, with
+  // Autosave off, stay unsaved: follow() moves the tab, and ⌘S writes the new name (a rename keeps
+  // the mtime, so the save isn't taken for a change on the server). fail: why it didn't happen.
+  const moveTo = async (from: string, to: string, fail: (why: string) => void): Promise<boolean> => {
+    try {
+      if (!link.api) throw new Error("Not connected.");
+      for (const d of [...docs.values()]) if (isInside(d.path, from)) await (d.timer ? save(d) : d.inflight);
+      await link.api.fsRename(from, to);
+    } catch (e) {
+      fail(e instanceof ApiError && e.status === 409 ? `${baseName(to)} is already there.` : errorText(e));
+      return false;
+    }
+    follow(from, to);
+    for (const d of new Set([parentDir(from), parentDir(to)])) if (listings.has(d)) void refreshDir(d);
+    focusRow.current = to;
+    return true;
+  };
+
+  const startRename = (path: string, kind: Renaming["kind"]) => {
+    setMenu(null);
+    setRenaming({ path, kind, error: "" });
+  };
+  // This render's, so a blur after the row has gone (renamed) doesn't rename it again.
+  const renameRef = useRef(renaming);
+  renameRef.current = renaming;
+  const renameBusy = useRef(false);
+  const finishRename = async (name: string) => {
+    const r = renameRef.current;
+    if (!r || renameBusy.current) return;
+    name = name.trim();
+    if (!name || name === baseName(r.path)) {
+      focusRow.current = r.path;
+      return setRenaming(null);
+    }
+    const bad = nameError(name);
+    if (bad) return setRenaming({ ...r, error: bad });
+    renameBusy.current = true;
+    const ok = await moveTo(r.path, joinPath(parentDir(r.path), name), (why) => setRenaming({ ...r, error: why }));
+    renameBusy.current = false;
+    if (ok) setRenaming(null);
+  };
+
+  // Deletes on the server, after asking: there is no trash there. Open files in it close.
+  const askDelete = (path: string, kind: "file" | "dir") => {
+    setMenu(null);
+    const name = baseName(path);
+    const unsaved = [...docs.values()].filter((d) => isInside(d.path, path) && (d.sync.dirty || d.timer)).map((d) => d.name);
+    setConfirm({
+      text: (
+        <>
+          {kind === "dir" ? (
+            <>
+              Delete the folder <b>{name}</b> and everything in it from the server?
+            </>
+          ) : (
+            <>
+              Delete <b>{name}</b> from the server?
+            </>
+          )}{" "}
+          You can't undo this.
+          {unsaved.length > 0 && <> {unsaved.join(", ")} {unsaved.length === 1 ? "has edits" : "have edits"} that aren't saved.</>}
+        </>
+      ),
+      action: "Delete",
+      danger: true,
+      path,
+      run: () => void remove(path),
+    });
+  };
+  const remove = async (path: string) => {
+    setConfirm(null);
+    try {
+      if (!link.api) throw new Error("Not connected.");
+      await link.api.fsDelete(path);
+    } catch (e) {
+      focusRow.current = path;
+      return props.onNotice(`Couldn't delete ${baseName(path)}: ${errorText(e)}`);
+    }
+    for (const d of [...docs.values()]) if (isInside(d.path, path)) void closeDoc(d.path, true);
+    for (const k of [...galleries]) if (isInside(galleryDir(k)!, path)) closeGallery(k);
+    expanded.current = collapse(expanded.current, path);
+    for (const k of [...listings.keys()]) if (isInside(k, path)) listings.delete(k);
+    setTarget((t) => (isInside(t, path) ? parentDir(path) : t));
+    await refreshDir(parentDir(path));
+  };
+
+  // A tree row dropped on a folder: moved there, after asking (as VS Code does).
+  const askMove = (from: string, dir: string) =>
+    setConfirm({
+      text: (
+        <>
+          Move <b>{baseName(from)}</b> into <b>{baseName(dir) || dir}</b>?
+        </>
+      ),
+      action: "Move",
+      path: from,
+      run: () => {
+        setConfirm(null);
+        void moveTo(from, joinPath(dir, baseName(from)), (why) => props.onNotice(`Couldn't move ${baseName(from)}: ${why}`)).then((ok) => ok && expand(dir));
+      },
+    });
+
+  // Where a dragged tree row would go: a session's terminal (its path typed there), or a folder in
+  // the tree (a file's own folder; the space below the rows: the project folder). Null: nowhere.
+  const rowTarget = (from: string, x: number, y: number): { lit: Element; session?: string; dir?: string } | null => {
+    const el = document.elementFromPoint(x, y);
+    if (!el || !box.current?.contains(el)) return null;
+    const split = el.closest<HTMLElement>(".tsplit[data-split]");
+    if (split) return { lit: split, session: split.dataset.split! };
+    const tree = el.closest(".tree");
+    if (!tree) return null;
+    const row = el.closest<HTMLElement>(".tree-row[data-path]");
+    const dir = row ? (row.dataset.kind === "dir" ? row.dataset.path! : parentDir(row.dataset.path!)) : root;
+    if (!canMoveInto(from, dir)) return null;
+    return { lit: (dir !== root && tree.querySelector(`.tree-row[data-kind="dir"][data-path="${CSS.escape(dir)}"]`)) || tree, dir };
+  };
+
+  // Dragging a tree row, with pointer events as the session list does: on a Mac, Tauri's own file
+  // drop handling takes every HTML drag over the window. Esc cancels.
+  const rowDragged = useRef(false);
+  const endRowDrag = useRef(() => {});
+  useEffect(() => () => endRowDrag.current(), []);
+  const startRowDrag = (e: ReactPointerEvent, path: string) => {
+    if (e.button !== 0) return;
+    rowDragged.current = false;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let on = false;
+    let lit: Element | null = null;
+    const light = (el: Element | null) => {
+      if (el === lit) return;
+      lit?.classList.remove("drop-over");
+      el?.classList.add("drop-over");
+      lit = el;
+    };
+    const done = () => {
+      light(null);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", done);
+      window.removeEventListener("keydown", key, true);
+      endRowDrag.current = () => {};
+      setRowDrag(null);
+    };
+    const move = (ev: PointerEvent) => {
+      if (!on && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+      on = true;
+      light(rowTarget(path, ev.clientX, ev.clientY)?.lit ?? null);
+      setRowDrag({ name: baseName(path), x: ev.clientX, y: ev.clientY });
+    };
+    const up = (ev: PointerEvent) => {
+      done();
+      if (!on) return;
+      rowDragged.current = true;
+      const t = rowTarget(path, ev.clientX, ev.clientY);
+      if (t?.session) sendPath(t.session, path);
+      else if (t?.dir) askMove(path, t.dir);
+    };
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      rowDragged.current = on;
+      done();
+    };
+    endRowDrag.current();
+    endRowDrag.current = done;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", done);
+    window.addEventListener("keydown", key, true);
+  };
+
+  // The tree's keys, on the focused row, as VS Code's on a Mac: Enter or F2 renames, ⌘⌫ (or Delete)
+  // deletes, ⌥⌘C copies the path and ⌥⇧⌘C the relative path.
+  const onTreeKey = (e: ReactKeyboardEvent) => {
+    const row = e.target as HTMLElement;
+    if (!row.matches?.(".tree-row[data-path]")) return;
+    const path = row.dataset.path!;
+    const kind = row.dataset.kind === "dir" ? "dir" : "file";
+    const plain = !e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey;
+    // e.code: with ⌥ held, a Mac's e.key for C is "ç".
+    if ((e.key === "Enter" || e.key === "F2") && plain) startRename(path, kind);
+    else if ((e.key === "Delete" && plain) || (e.key === "Backspace" && e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey)) askDelete(path, kind);
+    else if (e.code === "KeyC" && e.metaKey && e.altKey && !e.ctrlKey) copy(e.shiftKey ? relPath(root, path) : path);
+    else return;
+    e.preventDefault();
+  };
+
   // ---- live updates ----
 
   const onFs = useRef((_: string[]) => {});
@@ -703,8 +1005,9 @@ export function Workbench(props: {
       ed.setModel(doc.model);
       if (doc.viewState) ed.restoreViewState(doc.viewState);
       editorDoc.current = doc;
-      if (!doc.reveal) ed.focus();
+      if (!doc.reveal && doc.focus) ed.focus();
     }
+    doc.focus = true;
     if (doc.reveal) {
       const { line, col } = doc.reveal;
       doc.reveal = null;
@@ -792,14 +1095,42 @@ export function Workbench(props: {
       </div>
     );
 
+  // A row's name in a box, as VS Code's rename: Enter (or clicking away) renames, Esc leaves it.
+  const renameRow = (name: string, kind: Renaming["kind"], depth: number) => (
+    <div className="tree-create" style={{ paddingLeft: 8 + depth * 12 }}>
+      <span className="tree-twisty">{kind === "dir" ? "›" : ""}</span>
+      <input
+        autoFocus
+        aria-label={`New name for ${name}`}
+        defaultValue={name}
+        onFocus={(e) => e.currentTarget.setSelectionRange(...renameSelection(name, kind))}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") void finishRename(e.currentTarget.value);
+          else if (e.key === "Escape") {
+            focusRow.current = renaming!.path;
+            setRenaming(null);
+          } else return;
+          e.preventDefault();
+        }}
+        onBlur={(e) => (renaming!.error ? setRenaming(null) : void finishRename(e.currentTarget.value))}
+      />
+      {renaming!.error && <div className="tree-create-error">{renaming!.error}</div>}
+    </div>
+  );
+
   const renderDir = (dir: string, depth: number): ReactNode => (
     <>
       {creating?.dir === dir && createRow(depth)}
       {listings.get(dir)?.map((e) => {
         const path = joinPath(dir, e.name);
         const open = e.kind === "dir" && expanded.current.has(path);
+        const kind = e.kind === "dir" ? "dir" : "file";
         return (
           <div key={path} role="none">
+            {renaming?.path === path ? (
+              renameRow(e.name, kind, depth)
+            ) : (
             <button
               className={"tree-row" + (path === active ? " selected" : "") + (e.kind === "dir" && path === target ? " target" : "")}
               style={{ paddingLeft: 8 + depth * 12 }}
@@ -810,25 +1141,71 @@ export function Workbench(props: {
               data-kind={e.kind === "dir" ? "dir" : "file"}
               onContextMenu={(ev) => {
                 ev.preventDefault();
-                setMenu({ x: ev.clientX, y: ev.clientY, path, kind: e.kind === "dir" ? "dir" : "file" });
+                setMenu({ x: ev.clientX, y: ev.clientY, path, kind, on: "tree" });
               }}
-              onClick={() => {
+              onPointerDown={(ev) => startRowDrag(ev, path)}
+              onClick={(ev) => {
+                // The end of a drag isn't a click.
+                if (rowDragged.current) return void (rowDragged.current = false);
+                // For the tree's keys: WebKit doesn't focus a button that's clicked. A file opened
+                // here leaves it there, as VS Code's explorer does, so ⌘⌫ never reaches the editor.
+                ev.currentTarget.focus();
                 if (e.kind === "dir") toggleDir(path);
                 else {
                   setTarget(dir);
-                  openFile(path);
+                  openFile(path, undefined, undefined, false);
                 }
               }}
             >
               <span className={"tree-twisty" + (open ? " open" : "")}>{e.kind === "dir" ? "›" : ""}</span>
               <span className="tree-name">{e.name}</span>
             </button>
+            )}
             {open && renderDir(path, depth + 1)}
           </div>
         );
       })}
     </>
   );
+
+  // One item of a right-click menu (lib/files.ts menuItems says which, in what order). The keys
+  // shown work on a focused tree row.
+  const menuItem = (m: Menu, item: MenuItem, i: number) => {
+    if (item === "-") return <div key={i} className="menu-sep" role="separator" />;
+    const keys = m.on === "tree";
+    const session = item === "send-path" ? onScreen() : null;
+    const [label, run, key] = (
+      {
+        "new-file": ["New File…", () => startCreate("file", m.path)],
+        "new-folder": ["New Folder…", () => startCreate("dir", m.path)],
+        upload: ["Upload…", async () => (setTarget(m.path), void uploadInto(m.path, await pickFiles()))],
+        download: [m.kind === "dir" ? "Download as .tar.gz" : "Download", () => void download(link, m.path, m.kind === "dir")],
+        gallery: ["Show as Gallery", () => openGallery(m.path)],
+        "copy-path": ["Copy Path", () => copy(m.path), "⌥⌘C"],
+        "copy-rel": ["Copy Relative Path", () => copy(relPath(root, m.path)), "⌥⇧⌘C"],
+        "send-path": ["Send Path to Session", () => session && sendPath(session, m.path)],
+        reveal: ["Reveal in Files", () => void reveal(m.path)],
+        rename: ["Rename…", () => startRename(m.path, m.kind), "↩"],
+        delete: ["Delete", () => askDelete(m.path, m.kind), "⌘⌫"],
+      } satisfies Record<Exclude<MenuItem, "-">, [string, () => void, string?]>
+    )[item] as [string, () => void, string?];
+    return (
+      <button
+        key={item}
+        role="menuitem"
+        autoFocus={i === 0}
+        disabled={item === "send-path" && !session}
+        title={item === "send-path" ? (session ? "Types the path into the session on screen" : "No session is on screen") : undefined}
+        onClick={() => {
+          setMenu(null);
+          run();
+        }}
+      >
+        {label}
+        {keys && key && <span className="menu-key">{key}</span>}
+      </button>
+    );
+  };
 
   const doc = activeDoc;
   const closingDoc = closing ? docs.get(closing) : undefined;
@@ -882,8 +1259,9 @@ export function Workbench(props: {
           onContextMenu={(e) => {
             if (e.target !== e.currentTarget) return;
             e.preventDefault();
-            setMenu({ x: e.clientX, y: e.clientY, path: root, kind: "dir" });
+            setMenu({ x: e.clientX, y: e.clientY, path: root, kind: "dir", on: "tree" });
           }}
+          onKeyDown={onTreeKey}
         >
           {rootError ? <p className="view-note error">{rootError}</p> : renderDir(root, 0)}
         </div>
@@ -905,7 +1283,7 @@ export function Workbench(props: {
                     onAuxClick={(e) => e.button === 1 && void closeDoc(d.path)}
                     onContextMenu={(e) => {
                       e.preventDefault();
-                      setMenu({ x: e.clientX, y: e.clientY, path: d.path, kind: "file" });
+                      setMenu({ x: e.clientX, y: e.clientY, path: d.path, kind: "file", on: "tab" });
                     }}
                   >
                     <span className="tab-title">{d.name}</span>
@@ -1117,40 +1495,20 @@ export function Workbench(props: {
               setMenu(null);
             }}
           />
-          <div className="menu context-menu" role="menu" style={{ left: Math.min(menu.x, innerWidth - 240), top: Math.min(menu.y, innerHeight - 120) }} onKeyDown={(e) => e.key === "Escape" && setMenu(null)}>
-            <button
-              role="menuitem"
-              autoFocus
-              onClick={() => {
-                setMenu(null);
-                void download(link, menu.path, menu.kind === "dir");
-              }}
-            >
-              {menu.kind === "dir" ? "Download as .tar.gz" : "Download"}
-            </button>
-            {menu.kind === "dir" && (
-              <button
-                role="menuitem"
-                onClick={async () => {
-                  setMenu(null);
-                  setTarget(menu.path);
-                  void uploadInto(menu.path, await pickFiles());
-                }}
-              >
-                Upload…
-              </button>
-            )}
-            {menu.kind === "dir" && (
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setMenu(null);
-                  openGallery(menu.path);
-                }}
-              >
-                Show as Gallery
-              </button>
-            )}
+          <div
+            className="menu context-menu"
+            role="menu"
+            style={{ left: menu.x, top: menu.y }}
+            // Kept inside the window, by its real size.
+            ref={(el) => {
+              if (!el) return;
+              const r = el.getBoundingClientRect();
+              el.style.left = `${Math.max(4, Math.min(menu.x, innerWidth - r.width - 4))}px`;
+              el.style.top = `${Math.max(4, Math.min(menu.y, innerHeight - r.height - 4))}px`;
+            }}
+            onKeyDown={(e) => e.key === "Escape" && setMenu(null)}
+          >
+            {menuItems(menu.on, menu.kind, menu.path === root).map((item, i) => menuItem(menu, item, i))}
           </div>
         </>
       )}
@@ -1176,6 +1534,35 @@ export function Workbench(props: {
             </button>
           </div>
         </Dialog>
+      )}
+      {confirm && (
+        <Dialog
+          className="ask"
+          onClose={() => {
+            focusRow.current = confirm.path;
+            setConfirm(null);
+          }}
+        >
+          <p className="ask-text">{confirm.text}</p>
+          <div className="dialog-actions">
+            <button
+              onClick={() => {
+                focusRow.current = confirm.path;
+                setConfirm(null);
+              }}
+            >
+              Cancel
+            </button>
+            <button className={"primary" + (confirm.danger ? " danger" : "")} autoFocus onClick={confirm.run}>
+              {confirm.action}
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {rowDrag && (
+        <div className="drag-ghost" style={{ left: rowDrag.x + 12, top: rowDrag.y + 8 }}>
+          {rowDrag.name}
+        </div>
       )}
       {quick && (
         <QuickOpen

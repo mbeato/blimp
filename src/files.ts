@@ -1,7 +1,7 @@
 // Files under the home folder: list, read, write, download, upload, and the file list for quick open.
 // Every path is checked after following symlinks, so a link can't lead outside home.
 
-import { open, readdir } from "node:fs/promises";
+import { link, lstat, open, readdir, rename, rm, unlink } from "node:fs/promises";
 import {
   chmodSync,
   type Dirent,
@@ -97,13 +97,36 @@ export function secretPaths(home = realHome(), dir = socketDir()): string[] {
   ].map(realPath);
 }
 
+// One of those key files, anything in the secrets folder, or a folder that holds one.
+function ownFile(real: string, home: string, dir: string): boolean {
+  const slash = real === "/" ? "" : "/";
+  return secretPaths(home, dir).some((s) => s === real || s.startsWith(real + slash) || real.startsWith(s + "/"));
+}
+
 // guard() for the routes that read or write one file: inside home, and never one of those key
 // files, anything in the secrets folder, nor a folder that holds one (a folder download would archive it).
 export function guardFile(path: string | null, home = realHome(), dir = socketDir()): string {
   const real = guard(path, home);
-  const slash = real === "/" ? "" : "/";
-  if (secretPaths(home, dir).some((s) => s === real || s.startsWith(real + slash) || real.startsWith(s + "/")))
-    throw new HttpError(403, "that's one of blimp's own files");
+  if (ownFile(real, home, dir)) throw new HttpError(403, "that's one of blimp's own files");
+  return real;
+}
+
+// For rename, move and delete, which act on a name itself: its folder's real path with the name on.
+// A symlink is renamed or deleted as a link, never what it points to. Inside home and never home
+// itself (its folder is outside), nor blimp's own files, blimpd's socket, a folder that holds one
+// (home, ~/.blimp, ~/.config), anything in the secrets folder, or a link to one of those.
+export function guardEntry(path: string | null, home = realHome(), dir = socketDir()): string {
+  if (!path || !isAbsolute(path)) throw new HttpError(400, "path must be absolute");
+  const abs = resolve(path);
+  if (abs === "/") throw new HttpError(403, "outside your home folder");
+  const real = join(guard(dirname(abs), home), basename(abs));
+  if (real === home) throw new HttpError(403, "that's your home folder");
+  // Also through a link: a ~/.blimp that is itself a link to the real folder.
+  if (ownFile(real, home, dir) || ownFile(realPath(real), home, dir)) throw new HttpError(403, "that's one of blimp's own files");
+  // Nor blimpd's socket: with it gone or moved, no new connection gets in (the Mac's, the phone's)
+  // until blimpd restarts. Only here: reading it is harmless, so guardFile doesn't check it.
+  const sock = realPath(join(dir, basename(process.env.BLIMPD_SOCKET || "blimpd.sock")));
+  if (real === sock || realPath(real) === sock) throw new HttpError(403, "that's one of blimp's own files");
   return real;
 }
 
@@ -212,6 +235,39 @@ export function createFile(path: string): { path: string; mtime: number } {
     throw e;
   }
   return { path, mtime: ms(statSync(path).mtimeMs) };
+}
+
+// A rename, or a move into another folder (the files pane's rename and drag). Never over something
+// that's there (409), nor a folder into itself (400). Parent folders aren't made: `to`'s must exist.
+// A file goes by a hard link, which fails if the name was taken meanwhile, as an upload does, then
+// the old name is removed. A folder or a link can't be hard linked, so it is checked, then renamed:
+// rename replaces only an empty folder (or a file, for a link) made at `to` between the two steps,
+// and only your own programs could do that.
+export async function renameEntry(from: string, to: string): Promise<{ path: string }> {
+  if (to === from) throw new HttpError(409, "that name is taken");
+  if (to.startsWith(from + "/")) throw new HttpError(400, "can't move a folder into itself");
+  const src = await lstat(from); // 404 if it's gone
+  const there = await lstat(to).catch(() => null);
+  // The same file under another case on a case-insensitive disk (a Mac's): readme → README.
+  const sameFile = !!there && there.ino === src.ino && there.dev === src.dev;
+  if (there && !sameFile) throw new HttpError(409, "that name is taken");
+  try {
+    if (src.isFile() && !sameFile) {
+      await link(from, to);
+      await unlink(from);
+    } else await rename(from, to);
+  } catch (e: any) {
+    if (e?.code === "EEXIST") throw new HttpError(409, "that name is taken");
+    if (e?.code === "EXDEV") throw new HttpError(400, "can't move to another disk");
+    throw e;
+  }
+  return { path: to };
+}
+
+// A file, a link, or a folder with everything in it. Links inside aren't followed.
+export async function deleteEntry(path: string): Promise<void> {
+  await lstat(path); // 404 if it's gone
+  await rm(path, { recursive: true });
 }
 
 const MAX_FILES = 20_000;
