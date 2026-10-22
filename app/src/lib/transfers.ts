@@ -55,12 +55,16 @@ export const plainName = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, "-"
 // from the top the lit folder was one title bar (about 28 pt) below the pointer. The bottoms are
 // the same edge, so y is taken from there: viewH (innerHeight) less the distance to the frame's
 // bottom (frameH, the frame's height in points). With no title bar inset frameH = viewH, and it
-// is y as wry gave it. Elsewhere (Windows, Linux) the position is physical pixels from the top.
+// is y as wry gave it. A gap that isn't a title bar's (below 0 or over 100 pt: a size read while
+// the window moved between a Retina screen and another) is taken as none, as before this.
+// Elsewhere (Windows, Linux) the position is physical pixels from the top.
 export function dropPoint(
   p: { x: number; y: number },
   o: { mac: boolean; dpr: number; frameH: number; viewH: number },
 ): { x: number; y: number } {
-  return o.mac ? { x: p.x, y: o.viewH - (o.frameH - p.y) } : { x: p.x / o.dpr, y: p.y / o.dpr };
+  if (!o.mac) return { x: p.x / o.dpr, y: p.y / o.dpr };
+  const gap = o.frameH - o.viewH;
+  return { x: p.x, y: gap >= 0 && gap <= 100 ? p.y - gap : p.y };
 }
 
 let next = 1;

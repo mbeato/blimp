@@ -50,3 +50,9 @@ test("dropPoint: on a Mac, y is measured from the bottom, since the web view's f
   // Windows and Linux: no change, from the top.
   expect(dropPoint({ x: 600, y: 1000 }, { ...o, mac: false })).toEqual({ x: 300, y: 500 });
 });
+
+test("dropPoint: a measured gap that can't be a title bar's (a size read mid-move between screens) is ignored", () => {
+  expect(dropPoint({ x: 10, y: 500 }, { mac: true, dpr: 2, frameH: 1800, viewH: 872 })).toEqual({ x: 10, y: 500 });
+  expect(dropPoint({ x: 10, y: 500 }, { mac: true, dpr: 1, frameH: 436, viewH: 872 })).toEqual({ x: 10, y: 500 });
+  expect(dropPoint({ x: 10, y: 500 }, { mac: true, dpr: 2, frameH: 900, viewH: 872 })).toEqual({ x: 10, y: 472 });
+});
