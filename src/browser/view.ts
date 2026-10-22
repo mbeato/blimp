@@ -104,10 +104,13 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
     if (!size) return;
     const was = shared.owner;
     shared.owner = me;
-    shared.pending = shared.pending.then(async () => {
-      if (was && was !== me) await was.drop();
-      await me.take();
-    });
+    // Never left failed: every later input waits on it.
+    shared.pending = shared.pending
+      .then(async () => {
+        if (was && was !== me) await was.drop();
+        await me.take();
+      })
+      .catch(() => {});
   };
   // Input: in order, once the page is laid out for this view. Using the page claims it.
   const send = (using: boolean, method: string, params: object) => {
@@ -155,7 +158,7 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
     if (shared.owner !== me) return;
     shared.owner = shared.views.findLast((v) => v.size()) ?? null;
     const next = shared.owner;
-    if (next) shared.pending = shared.pending.then(() => next.take());
+    if (next) shared.pending = shared.pending.then(() => next.take()).catch(() => {});
   };
 
   const off = chrome.onMessage((m: CdpMessage) => {

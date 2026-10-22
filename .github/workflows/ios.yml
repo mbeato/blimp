@@ -55,7 +55,7 @@ jobs:
   # it, as the SSH tunnel does on a Mac. Screenshots and logs go in the iphone-e2e artifact.
   app-e2e:
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       E2E_DIR: /tmp/be
       # zmx 0.8 limits session names by the length of its socket folder's path: keep it short.

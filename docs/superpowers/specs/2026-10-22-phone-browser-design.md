@@ -20,7 +20,8 @@ the phone's keyboard.
 - **Touches are passed on as touches** (`Input.dispatchTouchEvent`). Chrome does the scrolling,
   the glide after a fast swipe, taps and pinch zoom.
 - **The keyboard comes up by itself.** After a tap, blimpd says whether a text field has focus.
-- **On the phone, the tabs are in the drawer,** in a Browser section under New session: this
+- **On the phone, the tabs are in the drawer,** in a Browser section after the running sessions
+  (above Earlier, so the sessions stay in sight when the keyboard leaves the drawer short): this
   project's tabs, a dot on ones a session opened, + for a new tab, swipe to close. A tab opens full
   screen over the chat.
 - **Not now:** copying out of the page, file uploads and downloads, opening chat links in this

@@ -1,6 +1,6 @@
 // The drawer from the left: the project picker, the project's inbox (which says how many of its sessions need
-// you), New session (the inbox's box, ready to type into), the project's browser tabs (a dot on ones a session
-// opened; a tap opens one full screen, New Tab opens one, a swipe right closes one), its running sessions, then its past conversations
+// you), New session (the inbox's box, ready to type into), its running sessions, the project's browser tabs (a
+// dot on ones a session opened; a tap opens one full screen, New Tab opens one, a swipe right closes one), then its past conversations
 // folded under Earlier (each newest activity first, with its mark, and under its title its branch, jobs and
 // handoff), and Settings. A tap opens one; a swipe right on a row or press and hold has its actions (Stop, Mark
 // read, End; Resume a past one). It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`),
@@ -117,6 +117,13 @@ struct DrawerView: View {
             .padding(.bottom, 8)
             .accessibilityIdentifier("drawerNewSession")
             List {
+                if rows.isEmpty {
+                    Text("No sessions here yet.").foregroundStyle(.secondary).listRowSeparator(.hidden)
+                }
+                if !active.isEmpty {
+                    Section("Active") { ForEach(active) { rowButton($0) } }
+                }
+                // After the running sessions, so they stay in sight when the keyboard leaves the drawer short.
                 Section("Browser") {
                     ForEach(tabs) { tabRow($0) }
                     Button(action: onNewTab) {
@@ -124,12 +131,6 @@ struct DrawerView: View {
                     }
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("drawerNewTab")
-                }
-                if rows.isEmpty {
-                    Text("No sessions here yet.").foregroundStyle(.secondary).listRowSeparator(.hidden)
-                }
-                if !active.isEmpty {
-                    Section("Active") { ForEach(active) { rowButton($0) } }
                 }
                 if !past.isEmpty {
                     Section {
