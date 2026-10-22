@@ -10,7 +10,7 @@ import { Welcome } from "./components/Welcome";
 import { Workbench, type FileDrop, type Opener, type PageOpener } from "./components/Workbench";
 import { errorText, inTauri, loadServers, saveServers, serverKey, ServerLink, type Server } from "./lib/connection";
 import { baseName, parentDir } from "./lib/files";
-import type { Item } from "./lib/transfers";
+import { dropPoint, type Item } from "./lib/transfers";
 import type { Panes } from "./lib/panes";
 import {
   dropSession,
@@ -448,13 +448,22 @@ export function App() {
     if (inTauri()) {
       // The Mac app: Tauri's own drag-drop event, with the files' paths (Rust may then read them).
       let off = () => {};
+      // A picture dragged from a web page or Photos hands over no file, only its data, which Tauri
+      // doesn't pass on: nothing is lit for it, and letting go says how to get it in instead.
+      let files = true;
+      const mac = /Mac/.test(navigator.userAgent);
       void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
         getCurrentWebview()
           .onDragDropEvent((e) => {
             const p = e.payload;
             if (p.type === "leave") return clear();
-            const x = p.position.x / devicePixelRatio;
-            const y = p.position.y / devicePixelRatio;
+            if (p.type === "enter") files = p.paths.length > 0;
+            if (p.type === "drop" && !p.paths.length) {
+              clear();
+              return setNotice("Only files can be dropped here. Save the picture as a file, then drop the file.");
+            }
+            if (!files) return;
+            const { x, y } = dropPoint(p.position, { mac, dpr: devicePixelRatio });
             dropAt.current(x, y, p.type === "drop" ? p.paths.map((path) => ({ name: baseName(path), local: path })) : null);
           })
           .then((f) => (off = f)),
@@ -624,6 +633,7 @@ export function App() {
             onDrop={refFor(fileDrops, key, () => {})}
             pages={refFor(pageOpeners, key, () => {})}
             pane={refFor(actions, key, noActions)}
+            onShowFiles={() => setLayout((l) => l && { ...l, show: { ...l.show, files: true } })}
             onNotice={setNotice}
             terminal={
               <TerminalPane

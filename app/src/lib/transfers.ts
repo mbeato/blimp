@@ -45,6 +45,15 @@ export function freeName(name: string, taken: Set<string>): string {
 // a narrow no-break space before "PM"), no quotes or shell characters.
 export const plainName = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+/, "") || "file";
 
+// Where a file dragged in from Finder is in the page, from Tauri's drag-drop event. Tauri calls
+// that position physical pixels, but on macOS wry (src/wkwebview/drag_drop.rs) hands over AppKit's
+// draggingLocation unscaled: points from the webview's top left, which are the page's CSS pixels.
+// Divided by the Retina scale, the lit folder was at half the pointer's distance from the top
+// left, and a drop landed there. Elsewhere (Windows, Linux) the position is physical pixels.
+export function dropPoint(p: { x: number; y: number }, o: { mac: boolean; dpr: number }): { x: number; y: number } {
+  return o.mac ? { x: p.x, y: p.y } : { x: p.x / o.dpr, y: p.y / o.dpr };
+}
+
 let next = 1;
 const list: Transfer[] = [];
 const subs = new Set<() => void>();

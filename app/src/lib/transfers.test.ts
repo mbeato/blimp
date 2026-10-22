@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { freeName, pastedImages, plainName } from "./transfers";
+import { dropPoint, freeName, pastedImages, plainName } from "./transfers";
 
 test("freeName adds a number before the extension until the name is free", () => {
   const taken = new Set(["a.txt", "a 2.txt", "p.tar.gz", "README"]);
@@ -27,4 +27,12 @@ test("pastedImages names a pasted screenshot like the Mac does, and leaves text 
   expect(plainName(pastedImages([png], false, at)[0].name)).toBe("Screenshot-2026-10-20-at-09.05.03.png");
   expect(pastedImages([txt], false, at)).toEqual([]);
   expect(pastedImages([png], true, at)).toEqual([]);
+});
+
+test("dropPoint: a Mac's drag position is already in the page's pixels; elsewhere it is divided by the scale", () => {
+  // A Retina Mac, pointer near the bottom right of an 800 x 600 window: there, not at half the way.
+  expect(dropPoint({ x: 790, y: 590 }, { mac: true, dpr: 2 })).toEqual({ x: 790, y: 590 });
+  expect(dropPoint({ x: 790, y: 590 }, { mac: true, dpr: 1 })).toEqual({ x: 790, y: 590 });
+  expect(dropPoint({ x: 1580, y: 1180 }, { mac: false, dpr: 2 })).toEqual({ x: 790, y: 590 });
+  expect(dropPoint({ x: 300, y: 150 }, { mac: false, dpr: 1.5 })).toEqual({ x: 200, y: 100 });
 });
