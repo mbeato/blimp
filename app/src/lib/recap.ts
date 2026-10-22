@@ -14,6 +14,10 @@ const KEY = "blimp.lastShown";
 export const cameBack = (viewing: string[], before: string[], last: Record<string, number>, now: number, prev = now) =>
   viewing.filter((k) => (now - prev >= AWAY || !before.includes(k)) && !(now - (last[k] ?? -Infinity) < AWAY));
 
+// One card at a time: of the sessions that came back together (side by side), the one in the focused
+// split, else the leftmost.
+export const pickBack = (back: string[], focused?: string) => (focused && back.includes(focused) ? focused : back[0]);
+
 // These sessions were on screen until now. Ones not on screen for a month are forgotten.
 export function markShown(last: Record<string, number>, shown: string[], now: number): Record<string, number> {
   const out: Record<string, number> = {};
