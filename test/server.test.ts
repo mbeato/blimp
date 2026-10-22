@@ -1059,6 +1059,28 @@ describe("starting sessions", () => {
     expect((await post({ dir, shell: true, prompt: "hi" })).status).toBe(400);
   }, 15000);
 
+  test("a viewer that attaches at once sees what the session printed, while `zmx list` asks all the time", async () => {
+    // zmx counts a list asking at the same moment as a client, so blimpd once let its own client go before
+    // it got there, and the first viewer got an empty screen (here, at the first start of each run).
+    const lists = [1, 2, 3].map(() =>
+      Bun.spawn(["sh", "-c", `while :; do "${zmxPath()}" list >/dev/null 2>&1; done`], { env, stdin: "ignore", stdout: "ignore", stderr: "ignore" }),
+    );
+    try {
+      const dir = join(homeDir, tag);
+      mkdirSync(dir, { recursive: true });
+      for (let i = 0; i < 8; i++) {
+        const r = await api("/sessions", { method: "POST", body: JSON.stringify({ dir, name: `busy${i}`, prompt: `go ${i}` }) });
+        const { name } = await r.json();
+        made.push(name);
+        const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+        await until(() => s.text.includes(`-- go ${i}]`), `the first output of start ${i + 1}`);
+        s.ws.close();
+      }
+    } finally {
+      for (const l of lists) l.kill();
+    }
+  }, 60000);
+
   test("two starts at once get two sessions", async () => {
     const dir = join(homeDir, tag);
     const post = () => api("/sessions", { method: "POST", body: JSON.stringify({ dir, name: "twin" }) }).then((r) => r.json());

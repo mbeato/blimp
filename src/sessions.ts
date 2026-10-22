@@ -461,16 +461,21 @@ async function start(dir: string, { name: custom, kind = "claude", run = CLAUDE 
   const cmd = run.script ? [shell, "-l", "-i", "-c", run.script, ...run.args] : [shell, "-l", "-i"];
   // Before it's listed, so it never shows up as the wrong kind.
   rememberKind(name, kind, taken);
+  let connected = false;
   const proc = Bun.spawn([zmxPath(), "attach", name, ...cmd], {
     cwd: dir,
     env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor", ...run.env },
-    terminal: { cols: 120, rows: 36, data() {} }, // nobody watches this client; zmx keeps the screen
+    // Nobody watches this client; zmx keeps the screen. Its first bytes are zmx's clear, once it has connected.
+    terminal: { cols: 120, rows: 36, data: () => void (connected = true) },
   });
   try {
-    // Listed with this client attached. Killed any sooner, zmx 0.5 shows the first viewer an empty screen.
+    // Listed with this client attached, and this client connected: zmx counts a `zmx list` asking at the same
+    // moment (another loop's, an app's) as a client, so the list alone can say 1 before this client is there.
+    // Killed before it sends its size, zmx never redraws for the first viewer: it gets an empty screen, not
+    // what the session printed (a handoff's new session, opened at once, 1 in 10 in the server tests).
     const end = Date.now() + 5000;
     let list = "";
-    while (!parseZmxList((list = await zmxListAsync())).some((s) => s.name === name && s.clients > 0)) {
+    while (!connected || !parseZmxList((list = await zmxListAsync())).some((s) => s.name === name && s.clients > 0)) {
       if (proc.exitCode !== null || Date.now() > end) {
         const why = proc.exitCode !== null ? `its zmx client exited with ${proc.exitCode}` : "not listed with a client after 5 s";
         console.error(`starting ${name}: ${why}; zmx list said:\n${list}`);

@@ -347,7 +347,7 @@ zmx keeps session sockets in `ZMX_DIR`, else `$XDG_RUNTIME_DIR/zmx`, else `${TMP
 
 ### Starting sessions
 
-`POST /sessions` creates the zmx session from inside a PTY of 120×36 (not with stdin at /dev/null), waits until the session is listed with that client attached (`clients>0`; on zmx 0.5 killing it earlier loses the size), then kills that zmx client. Starts run one at a time, so two starts in the same second get different names. The session gets `TERM=xterm-256color` and `COLORTERM=truecolor`. The session then has a real size from the start: Claude renders its first screen properly, and output written before anyone attaches is shown to the first viewer.
+`POST /sessions` creates the zmx session from inside a PTY of 120×36 (not with stdin at /dev/null), waits until that client has connected (its first output, zmx's clear) and the session is listed with a client (`clients>0`), then kills that zmx client. The list alone is not enough: zmx counts another `zmx list` that asks at the same moment as a client. A client killed before it sends its size loses the size, and zmx then never redraws for the first viewer, who gets an empty screen. Starts run one at a time, so two starts in the same second get different names. The session gets `TERM=xterm-256color` and `COLORTERM=truecolor`. The session then has a real size from the start: Claude renders its first screen properly, and output written before anyone attaches is shown to the first viewer.
 
 ### Server browser
 
