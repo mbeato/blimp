@@ -81,6 +81,10 @@ private struct ChatContent: View {
     @State private var placed = false
     /// The message the "since you left" line is above, for this visit.
     @State private var since: String?
+    /// This visit is a return to a chat that stayed open: with nothing new, it stays where it was.
+    @State private var returned = false
+    /// It opened under the lock (a cold launch back into it): the first unlock is its first look, not a return.
+    @State private var openedLocked = false
     @State private var recap: RecapLoad?
     /// Bumped by each ask for a recap and by closing the card, so a late answer to an earlier ask shows nothing.
     @State private var recapAsk = 0
@@ -125,6 +129,10 @@ private struct ChatContent: View {
                 atBottom = true
                 unseen = false
                 Task { @MainActor in proxy.scrollTo(Self.bottom, anchor: .bottom) }
+            }
+            // Back, and the link was still up: no history comes, so the messages there are placed.
+            .onChange(of: model.linkKept) {
+                if !placed { place(proxy) }
             }
             // a new or longer last message: follow it if you're at the bottom, else say so
             .onChange(of: model.log.shown.last) { _, last in
@@ -201,7 +209,8 @@ private struct ChatContent: View {
             Task { @MainActor in if !lock.locked, onScreen { cameBack() } }
         }
         .onChange(of: lock.locked) { _, locked in
-            if !locked, onScreen { cameBack() }
+            guard !locked, onScreen else { return }
+            if openedLocked { openedLocked = false } else { cameBack() }
         }
         // On screen with the app in front, not under the lock cover: Claude's replies are read, here and on the Mac.
         .task(id: SeenKey(conversation: model.session?.sessionId, unread: model.session?.unread == true,
@@ -376,6 +385,12 @@ private struct ChatContent: View {
         placed = true
         let line = SinceYouLeft.first(model.log.shown, lastShown: model.visitFrom, unread: model.unreadAtOpen)
         since = line
+        defer { returned = false }
+        if line == nil, returned {
+            // Back with nothing new: where it was (the lock keeps the chat, scrolled as you left it), or the end.
+            if atBottom { Task { @MainActor in proxy.scrollTo(Self.bottom, anchor: .bottom) } }
+            return
+        }
         atBottom = line == nil
         unseen = line != nil
         Task { @MainActor in
@@ -389,12 +404,14 @@ private struct ChatContent: View {
     }
 
     /// Back to this chat from the background or the lock: a new visit from when it was last on screen, so the
-    /// reconnect's history places it again ("since you left"), and the return card if it's been an hour.
+    /// reconnect's history (or, with the link still up, the messages there) places it again ("since you left"),
+    /// and the return card if it's been an hour.
     private func cameBack() {
         let last = ChatModel.lastShown(model.name)
         ChatModel.markShown(model.name)
         model.newVisit(from: last)
         placed = false
+        returned = true
         since = nil
         model.reconnectNow()
         if recap == nil { recapIfDue(last) }
@@ -468,6 +485,7 @@ private struct ChatContent: View {
 
     private func appeared() {
         onScreen = true
+        openedLocked = lock.locked
         recapIfDue(model.visitFrom)
         readAloud = UserDefaults.standard.bool(forKey: readAloudKey)
         if let prompt = model.prompt { promptsSeen.append(prompt) }

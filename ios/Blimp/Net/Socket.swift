@@ -63,8 +63,8 @@ final class Socket {
     /// For when the app comes back and the old link may be dead: an open link is pinged and dropped only if
     /// blimpd says nothing within 3 s (a healthy one, and the chat it carries, stay as they are); one that
     /// isn't open connects again at once, without waiting out the backoff. Does nothing after stop() or once
-    /// it has ended.
-    func reconnectNow() {
+    /// it has ended. kept: called when the link answered and stays, so no new history comes.
+    func reconnectNow(kept: (@MainActor () -> Void)? = nil) {
         guard loop != nil else { return }
         guard let t = task, opened else { return restart() }
         guard !checking else { return }
@@ -72,7 +72,8 @@ final class Socket {
         Task {
             let alive = await heard(on: t, since: .now)
             checking = false
-            if !alive, task === t { restart() }
+            guard task === t else { return }
+            if alive { kept?() } else { restart() }
         }
     }
 

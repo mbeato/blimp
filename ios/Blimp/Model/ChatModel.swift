@@ -21,6 +21,8 @@ final class ChatModel {
     private(set) var loaded = false
     /// Bumped by each history (the first, and each one after a reconnect), so the screen can jump to the end.
     private(set) var histories = 0
+    /// Bumped when coming back found the link still up (reconnectNow): no new history comes, the log is current.
+    private(set) var linkKept = 0
     /// The last time the store listed this session: what it was, once it's gone.
     private(set) var lastSeen: Session?
     private var socketEnded = false
@@ -161,7 +163,7 @@ final class ChatModel {
     }
 
     func reconnectNow() {
-        socket?.reconnectNow()
+        socket?.reconnectNow { [weak self] in self?.linkKept += 1 }
     }
 
     /// A new visit: the chat opened, or the app came back to it. last: when it was on screen before (ms).
