@@ -453,8 +453,32 @@ export function App() {
       // does any other drag that isn't files (text, a link), so the words don't assume a picture.
       let files = true;
       const mac = /Mac/.test(navigator.userAgent);
-      void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
-        getCurrentWebview()
+      // The web view's frame height in points, for dropPoint (lib/transfers.ts): it reaches up under
+      // the title bar, by more than innerHeight. Asked when the window opens and after each resize
+      // (full screen drops the title bar), so a drag's events need no call of their own; one call at
+      // a time, then one more if the size changed meanwhile. Until it's known: innerHeight.
+      let frameH = 0;
+      let asking = false;
+      let again = false;
+      let measure = () => {};
+      void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
+        const view = getCurrentWebview();
+        measure = () => {
+          if (asking) return void (again = true);
+          asking = true;
+          view
+            .size()
+            .then((s) => (frameH = s.height / devicePixelRatio))
+            .catch(() => {})
+            .finally(() => {
+              asking = false;
+              if (!again) return;
+              again = false;
+              measure();
+            });
+        };
+        if (mac) measure();
+        return view
           .onDragDropEvent((e) => {
             const p = e.payload;
             if (p.type === "leave") return clear();
@@ -464,12 +488,18 @@ export function App() {
               return setNotice("Only files can be dropped here. A picture from a web page or Photos: save it as a file first.");
             }
             if (!files) return;
-            const { x, y } = dropPoint(p.position, { mac, dpr: devicePixelRatio });
+            const viewH = innerHeight;
+            const { x, y } = dropPoint(p.position, { mac, dpr: devicePixelRatio, frameH: frameH || viewH, viewH });
             dropAt.current(x, y, p.type === "drop" ? p.paths.map((path) => ({ name: baseName(path), local: path })) : null);
           })
-          .then((f) => (off = f)),
-      );
-      return () => off();
+          .then((f) => (off = f));
+      });
+      const resized = () => mac && measure();
+      window.addEventListener("resize", resized);
+      return () => {
+        off();
+        window.removeEventListener("resize", resized);
+      };
     }
     // A browser: HTML drag and drop, with File objects.
     const files = (e: DragEvent) => !!e.dataTransfer?.types.includes("Files");

@@ -46,12 +46,25 @@ export function freeName(name: string, taken: Set<string>): string {
 export const plainName = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+/, "") || "file";
 
 // Where a file dragged in from Finder is in the page, from Tauri's drag-drop event. Tauri calls
-// that position physical pixels, but on macOS wry (src/wkwebview/drag_drop.rs) hands over AppKit's
-// draggingLocation unscaled: points from the webview's top left, which are the page's CSS pixels.
-// Divided by the Retina scale, the lit folder was at half the pointer's distance from the top
-// left, and a drop landed there. Elsewhere (Windows, Linux) the position is physical pixels.
-export function dropPoint(p: { x: number; y: number }, o: { mac: boolean; dpr: number }): { x: number; y: number } {
-  return o.mac ? { x: p.x, y: p.y } : { x: p.x / o.dpr, y: p.y / o.dpr };
+// that position physical pixels, but on macOS wry 0.57 (src/wkwebview/drag_drop.rs) hands over
+// AppKit's draggingLocation unscaled, in points, which are the page's CSS pixels (divided by the
+// Retina scale, the lit folder was at half the pointer's distance from the top left). Its y is
+// frame height - draggingLocation.y: from the top of the web view's frame. That frame reaches up
+// under the title bar (tauri-runtime-wry 2.12 gives every window a full-size content view, and
+// the web view is the window's size), while the page starts below the title bar, so measured
+// from the top the lit folder was one title bar (about 28 pt) below the pointer. The bottoms are
+// the same edge, so y is taken from there: viewH (innerHeight) less the distance to the frame's
+// bottom (frameH, the frame's height in points). With no title bar inset frameH = viewH, and it
+// is y as wry gave it. A gap that isn't a title bar's (below 0 or over 100 pt: a size read while
+// the window moved between a Retina screen and another) is taken as none, as before this.
+// Elsewhere (Windows, Linux) the position is physical pixels from the top.
+export function dropPoint(
+  p: { x: number; y: number },
+  o: { mac: boolean; dpr: number; frameH: number; viewH: number },
+): { x: number; y: number } {
+  if (!o.mac) return { x: p.x / o.dpr, y: p.y / o.dpr };
+  const gap = o.frameH - o.viewH;
+  return { x: p.x, y: gap >= 0 && gap <= 100 ? p.y - gap : p.y };
 }
 
 let next = 1;
