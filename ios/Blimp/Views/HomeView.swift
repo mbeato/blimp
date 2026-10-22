@@ -26,7 +26,7 @@ struct HomeView: View {
     /// Whether the swipe going on pulls the drawer (sideways and right, decided once at its start).
     @State private var pulling: Bool?
     /// The open chat's model (SessionView): its recap is in it.
-    @State private var chat: ChatModel?
+    @State private var chatModel: ChatModel?
     @State private var recapOpen = false
     /// A swipe left from the right edge that's pulling the recap drawer out: how far it has gone; nil while there's none.
     @State private var recapPull: CGFloat?
@@ -169,7 +169,7 @@ struct HomeView: View {
                 Text("No projects yet. Start Claude in a folder on the Mac first.").foregroundStyle(.secondary).padding()
             }
         case .session(let name):
-            SessionView(name: name, onInbox: { show(.inbox) }, onOpen: { show(.session($0)) }, onRecap: openRecap, onModel: { chat = $0 })
+            SessionView(name: name, onInbox: { show(.inbox) }, onOpen: { show(.session($0)) }, onRecap: openRecap, onModel: { chatModel = $0 })
         case .past(let c):
             if let dir = store.dir { StartView(dir: dir, past: c) { show(.session($0)) }.id(c.sessionId) }
         }
@@ -245,8 +245,8 @@ struct HomeView: View {
 
     /// The open chat's model, while its recap drawer can open: a Claude session's.
     private var recapChat: ChatModel? {
-        guard case .session(let name) = opened, let chat, chat.name == name, chat.canRecap else { return nil }
-        return chat
+        guard case .session(let name) = opened, let chatModel, chatModel.name == name, chatModel.canRecap else { return nil }
+        return chatModel
     }
 
     private func openRecap() {
