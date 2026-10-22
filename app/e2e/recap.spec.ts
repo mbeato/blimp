@@ -18,8 +18,11 @@ const kept = `blimpe2e-recapk-${process.pid}`;
 const other = `blimpe2e-recaps-${process.pid}`;
 const left = `blimpe2e-recapl-${process.pid}`;
 const right = `blimpe2e-recapt-${process.pid}`;
+const slow = `blimpe2e-recapw-${process.pid}`;
+const shown = `blimpe2e-recaph-${process.pid}`;
+const long = `blimpe2e-recapg-${process.pid}`;
 
-test.afterAll(() => [name, bare, failing, withRun, old, kept, other, left, right].forEach(killSession));
+test.afterAll(() => [name, bare, failing, withRun, old, kept, other, left, right, slow, shown, long].forEach(killSession));
 
 // A session that looks like Claude to blimpd, with 3 prompts and replies.
 function fakeClaude(session: string, dir: string, last = "Shipped.") {
@@ -175,6 +178,42 @@ test("a Recap that fails leaves the card already showing", async ({ page }) => {
   await expect.poll(() => asked.length).toBe(2);
   await page.waitForTimeout(500);
   await expect(card(page).locator(".recap-goal")).toHaveText(CARD.goal);
+});
+
+test("another session's Recap that takes a moment and then fails puts back the card it took the place of", async ({ page }) => {
+  const dir = fixtureDir("recapw");
+  fakeClaude(shown, dir);
+  fakeClaude(slow, dir);
+  await stubRecap(page, shown, CARD);
+  let answered = false;
+  await page.route(`**/sessions/${slow}/recap*`, async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    answered = true;
+    return route.fulfill({ status: 429, json: { error: "Too many recaps this hour" }, headers: { "Access-Control-Allow-Origin": "*" } });
+  });
+  await openApp(page, { dir, session: shown });
+  await page.bringToFront();
+  const c = card(page);
+  await expect(c.locator(".recap-goal")).toHaveText(CARD.goal, { timeout: 10_000 });
+
+  await sessionRow(page, slow).locator(".srow-main").click();
+  await expect(c.locator(".recap-loading")).toBeVisible();
+  await expect.poll(() => answered).toBe(true);
+  await expect(c.locator(".recap-goal")).toHaveText(CARD.goal);
+  await expect(c.locator(".recap-session")).toHaveText(`Recap · ${await titleOf(page, shown)}`);
+});
+
+test("a card too long for its place fades out at the bottom until scrolled to the end", async ({ page }) => {
+  const dir = fixtureDir("recapg");
+  fakeClaude(long, dir);
+  const lines = Array.from({ length: 30 }, (_, i) => `Step ${i + 1} of the release goes out`);
+  await stubRecap(page, long, { ...CARD, done: lines });
+  await openApp(page, { dir, session: long });
+  await page.bringToFront();
+  const body = card(page).locator(".recap-body");
+  await expect(body).toHaveClass(/\bmore\b/, { timeout: 10_000 });
+  await body.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await expect(body).not.toHaveClass(/\bmore\b/);
 });
 
 test("a blimpd too old for recaps: no card on its own, and the menu's Recap says to update it", async ({ page }) => {

@@ -2667,16 +2667,22 @@ body.dragging-session * {
   white-space: nowrap;
   text-align: left;
   font-size: 11px;
-  color: var(--fg-faint);
+  color: var(--fg-dim);
 }
 
 .recap-session:hover {
-  color: var(--fg-dim);
+  color: var(--fg);
+  text-decoration: underline;
 }
 
 .recap-card.in-list .recap-body {
   min-height: 0;
   overflow-y: auto;
+}
+
+/* More below: the last line fades out. */
+.recap-card.in-list .recap-body.more {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
 }
 
 /* With the session list hidden: over the top of the session's terminal. */

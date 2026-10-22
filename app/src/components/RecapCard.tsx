@@ -5,7 +5,7 @@
 // the right-click menu's Recap. One card at a time: the newest ask wins. If blimpd can't give one,
 // nothing shows (from the menu, a blimpd too old for recaps says so).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Api, Recap } from "../lib/api";
 import { AWAY, cameBack, markShown, pickBack, readLastShown, recapError, writeLastShown } from "../lib/recap";
 
@@ -20,6 +20,8 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[], f
   // The ask still out (only the newest counts), so an older answer, or one dismissed, is dropped.
   const asking = useRef<{ name: string; id: number } | null>(null);
   const ids = useRef(0);
+  // The card the newest "…" took the place of, put back if that ask fails.
+  const prev = useRef<{ name: string; card: Card } | null>(null);
   const [focused, setFocused] = useState(() => document.hasFocus());
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -43,7 +45,17 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[], f
     const id = ++ids.current;
     asking.current = { name, id };
     const mine = () => asking.current?.id === id;
-    const t = setTimeout(() => mine() && setCard((c) => (c?.name === name ? c : { name, card: "loading" })), auto ? 300 : 0);
+    const t = setTimeout(
+      () =>
+        mine() &&
+        setCard((c) => {
+          if (c?.name === name) return c;
+          // Over a "…" of an ask since dropped, the card before that one stays the one to put back.
+          if (c?.card !== "loading") prev.current = c;
+          return { name, card: "loading" };
+        }),
+      auto ? 300 : 0,
+    );
     api.recap(name, auto ? 3 : undefined).then(
       (r) => {
         clearTimeout(t);
@@ -52,9 +64,10 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[], f
       (e) => {
         clearTimeout(t);
         if (!mine()) return;
-        // Only the "…" goes: a card already showing stays (one asked for again, or another session's).
+        // Only the "…" goes: a card already showing stays (one asked for again), or comes back (another
+        // session's, that the "…" took the place of).
         asking.current = null;
-        setCard((c) => (c?.name === name && c.card === "loading" ? null : c));
+        setCard((c) => (c?.name === name && c.card === "loading" ? prev.current : c));
         const notice = auto ? undefined : recapError(e);
         if (notice) onNotice(notice);
       },
@@ -85,6 +98,20 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[], f
 // click on that shows the session.
 export function RecapCard(props: { card: Card; title?: string; onSession?: () => void; onClose: () => void }) {
   const { card } = props;
+  // In the list, a body cut short fades out at the bottom, so it says there's more (macOS hides the
+  // scroll bar). Gone once scrolled to the end.
+  const body = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  const check = () => {
+    const b = body.current;
+    setMore(!!b && !!props.title && b.scrollTop + b.clientHeight < b.scrollHeight - 1);
+  };
+  useLayoutEffect(() => {
+    check();
+    const o = new ResizeObserver(check);
+    if (body.current) o.observe(body.current);
+    return () => o.disconnect();
+  }, [card, props.title]);
   return (
     <div className={"recap-card" + (props.title ? " in-list" : " over")} role="status" aria-label="Where this session is">
       {/* No focus on mouse down, so the keyboard stays in the terminal once the card is gone. */}
@@ -96,7 +123,7 @@ export function RecapCard(props: { card: Card; title?: string; onSession?: () =>
           Recap · {props.title}
         </button>
       )}
-      <div className="recap-body">
+      <div ref={body} className={"recap-body" + (more ? " more" : "")} onScroll={check}>
         {card === "loading" ? (
           <p className="recap-loading">…</p>
         ) : (
