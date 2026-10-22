@@ -29,9 +29,10 @@ private struct Root: View {
                 PairView()
             } else {
                 // Kept alive under the lock, so unlocking lands on the same chat, scrolled where it was, with the
-                // words still in the box. Hidden from VoiceOver (and the UI tests) while covered: the bar's buttons
-                // too (they live outside this view in UIKit's navigation bar, so they read `covered` themselves).
-                HomeView().accessibilityHidden(covered).environment(\.covered, covered)
+                // words still in the box. Hidden from VoiceOver (and the UI tests) while covered: .accessibilityHidden
+                // alone missed the parts UIKit hosts (the navigation bar, the chat), so it's also see-through, which
+                // UIKit skips too (nothing changes on screen: the cover is opaque), and the cover is modal.
+                HomeView().accessibilityHidden(covered).opacity(covered ? 0 : 1).environment(\.covered, covered)
             }
         }
         .overlay { if covered { LockedView() } }

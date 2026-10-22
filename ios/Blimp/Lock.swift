@@ -87,5 +87,9 @@ struct LockedView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
+        // Over a live Home, .accessibilityHidden doesn't reach Home's UIKit-hosted parts (the navigation bar,
+        // the chat), so the cover itself shuts VoiceOver and the UI tests out of everything beside it.
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
     }
 }

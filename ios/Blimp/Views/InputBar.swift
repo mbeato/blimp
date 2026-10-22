@@ -40,6 +40,10 @@ struct InputBar: View {
     @State private var pendingChip: String?
     /// This box asked Listener to load an analyzer ahead of a press.
     @State private var warmed = false
+    /// Where the caret is: at the end when the words arrive from outside (a chip's long press, a kept draft),
+    /// so a tap on the box carries on after them instead of typing in front.
+    @State private var selection: TextSelection?
+    @FocusState private var focused: Bool
 
     private static let tapTime: TimeInterval = 0.3
     private static let undoTime: Duration = .seconds(2)
@@ -72,7 +76,11 @@ struct InputBar: View {
 
     private var box: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            TextField(placeholder, text: $text, axis: .vertical)
+            TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
+                .focused($focused)
+                .onChange(of: text, initial: true) { _, now in
+                    if !focused { selection = TextSelection(insertionPoint: now.endIndex) }
+                }
                 .lineLimit(1...6)
                 .padding(.leading, 14)
                 .padding(.vertical, 9)
