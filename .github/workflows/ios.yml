@@ -167,8 +167,10 @@ jobs:
           read -r new _ newargs < "$E2E_DIR/claude.args"
           read -r resumed _ resumedargs <<< "$(sed -n 2p "$E2E_DIR/claude.args")"
           [ -n "$new" ] && [ -n "$resumed" ] || { echo "the stand-in claude saw no ZMX_SESSION"; exit 1; }
-          [ "$newargs" = "[-- Write the changelog]" ] || { echo "the blank chat started claude with $newargs"; exit 1; }
-          [ "$resumedargs" = "[--resume e2e00000-0000-0000-0000-000000000004 -- Pick it up again]" ] || { echo "the past conversation started claude with $resumedargs"; exit 1; }
+          # with the server browser's tools first: the runner has a Chrome
+          mcp="--mcp-config $(dirname "$BLIMPD_SOCKET")/browser/mcp.json"
+          [ "$newargs" = "[$mcp -- Write the changelog]" ] || { echo "the blank chat started claude with $newargs"; exit 1; }
+          [ "$resumedargs" = "[$mcp --resume e2e00000-0000-0000-0000-000000000004 -- Pick it up again]" ] || { echo "the past conversation started claude with $resumedargs"; exit 1; }
           zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
           ! grep -qE "name=$new([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "$new was ended but zmx still lists it"; exit 1; }
           grep -qE "name=$resumed([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "the resumed $resumed isn't running"; exit 1; }

@@ -19,6 +19,8 @@ if [ "$1" = -p ]; then
   exit 1
 fi
 echo "$ZMX_SESSION $$ [$*]" >> "$E2E_DIR/claude.args"
+# blimpd gives the session the server browser's tools first, as the runner has a Chrome (src/kinds.ts).
+[ "$1" = --mcp-config ] && shift 2
 sid=e2e00000-0000-0000-0001-$(printf %012d $$)
 [ "$1" = --resume ] && sid=$2
 mkdir -p "$CLAUDE_CONFIG_DIR/sessions"
