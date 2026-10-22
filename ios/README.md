@@ -6,6 +6,8 @@ What you type or say stays in the box until you tap Send, and each chat keeps it
 
 The inbox lists what needs you in every project at the top. You can answer a permission or a simple question right there, without opening the chat. Swipe a row to stop, end or mark it read. Press and hold a row to continue it in a new session. Each row shows its branch and background jobs, and a red mark when it may get in another session's way.
 
+In a chat, with blimpd 0.3: Stop stays above the box while Claude works, and "Stop and send" stops it with a new instruction. Claude's newest reply is never folded, and a "Since you left" line marks what came while you were away. The last few chats stay loaded, so switching back is instant, and after you answer a prompt a chip opens the next session waiting on you. A command in Claude's latest reply gets Run: a sheet shows the whole command first, and once it ended, "Send result to Claude" types the result in. After an hour away, a card at the top says what the session is for, what's done and what's open (also from the ••• menu, Recap). The ••• menu's Give a Secret saves a key on the server and tells Claude where it is, never what it is (a key with line breaks, PEM or SSH, needs the Mac). From half full, a ring in the top bar shows how full Claude's context is, with Continue in New Session.
+
 It talks to `blimpd`, the small program that runs on your server. The chat features need a blimpd from the phone-chat branch, or the next release. An older blimpd will show the session list but not the chat. The chat then says "This server's blimpd can't show chats yet."
 
 ## Put this branch's blimpd on your server

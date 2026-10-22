@@ -42,7 +42,7 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] Several questions at once. Make Claude ask two or three questions in one go, one of them with several choices. The bar shows "1 of 3", the header and question, the options. Tapping a single-choice option moves on; multi-choice options tick, then Next. Back goes to the question before. The review lists every answer; tapping one goes back to it. Submit: Claude's chat shows the answers.
 - [ ] A typed answer. In a question, tap "Type an answer", type, tap Use (or Next for a multi-choice question). Claude gets your words.
 - [ ] A tall question scrolls inside the bar.
-- [ ] Stop. While Claude works, Stop shows. Type something: Stop stays, with Send beside it. Tap Stop. Claude stops.
+- [ ] Stop. While Claude works, Stop shows just above the box, even when you have scrolled up. Type something: Stop stays, with "Stop and send" beside it, and Send in the box. Tap Stop. Claude stops.
 - [ ] Answered once. Tap a permission button. The phone gives a tap you can feel and says "Sent…", then "Answered" with a tick and a second, softer buzz. The buttons stay greyed until the prompt goes away. A second tap does nothing. (phone, for the buzz)
 - [ ] Real options only. Make Claude ask a permission. For a moment the bar says "Loading choices…" with a spinner, then Claude's own options show (for example Yes, then "Yes, and don't ask again …" as a small link under the buttons, then No). Yes and No never show first and then change.
 - [ ] No tool steps. The chat shows only your messages and Claude's replies. While Claude works, the working row says its latest step after "working…" (for example "Ran npm test").
@@ -78,6 +78,22 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] A clash. Two sessions on the same branch, or that edited the same file: a red warning triangle on each row (never amber). Press and hold: the menu's top says "Also on branch feat-x: …" or "Both edited … with …", and "On branch feat-x (worktree)" in a worktree.
 - [ ] Continue in new session. Press and hold a Claude session's row, Continue in new session. Its caption says "Writing handoff"; when the new session starts, it opens. The new session's row has an arrow before its title ("Continued from …" to VoiceOver), and the old one says "Handed off". Against a blimpd too old for it: "This server's blimpd is too old to continue in a new session. Update it first."
 - [ ] An ended session keeps its name. End a session on the Mac while its chat is open on the phone. The title at the top stays the session's name, not "Starting…".
+
+## In a chat (blimpd 0.3)
+
+- [ ] Stop and send. While Claude works, type a new instruction and tap "Stop and send". Claude stops, and your text arrives as a new message (on the Mac too). The box clears. Until it does, Send in the box shows a spinner, so the text can't go twice.
+- [ ] The newest reply is never folded. Make Claude write a long reply. It shows in full, with no Show more. An older long reply above it is still folded.
+- [ ] Since you left. Open a chat on the phone, leave it, let Claude reply (for example from the Mac without looking at it), then open it again on the phone. A blue "Since you left" line sits above the first new message, the chat opens there, and the New pill jumps to the end. If you read the reply on the Mac first, there is no line.
+- [ ] Since you left, back from the background. With a chat open, go to the Home Screen for a minute. Let Claude reply (without opening that session on the Mac). Come back: the line sits above the reply, and the chat jumps there.
+- [ ] Switching back is instant. Open chat A, then B, then A again. A's messages show at once, with no spinner, and new ones fill in a moment later.
+- [ ] Next waiting. With two other sessions asking something, answer the prompt in this chat. A chip says "Next: <title> is waiting (2 left)". Tap it: that session's chat opens, at its prompt.
+- [ ] Run. Ask Claude for a command in a ```bash block. Under the block, Run shows (only in Claude's latest reply, and only for commands blimpd also sees). Tap Run: a sheet shows the whole command and the folder it runs in. Cancel does nothing. Run: the Mac lists a new Run session, the block says "Running…", then "Finished · exit 0" or "Failed · exit N" in red. You feel a tap when it starts.
+- [ ] Send result to Claude. After a run ended, tap "Send result to Claude". Claude gets the exit code and the last lines of output, and the block says "Result sent to Claude", with a success tap. While Claude asks something, the red line under the box says why it wasn't sent.
+- [ ] The return card. Open a Claude session with 3 or more prompts that you haven't opened on this phone for an hour. A card at the top says what it's for, Done and Open. A tap shows the lines in full; × closes it. Within the hour it doesn't come back. The ••• menu's Recap shows it any time ("…" while it loads, or why it can't, for example "Recaps are off" with names turned off).
+- [ ] The return card after the background. Leave the app with a chat open for over an hour, then come back. The card shows.
+- [ ] The return card after the lock. On a phone with a passcode, leave the app with a chat open for over an hour, let Claude reply, then come back and unlock. Open the chat again if the inbox shows: the card shows, and so does the Since you left line.
+- [ ] Give a Secret. In the ••• menu, Give a Secret. Type a name (it says what a valid one is) and paste a value (dots, never shown). Save and Tell Claude: a success tap, the sheet closes, and Claude's chat shows where the secret is, never its value. The value is in `~/.blimp/secrets/<NAME>` on the server. Next time, the name is offered as a chip. Check that iOS does not offer to save it as a password. Paste a PEM or SSH key: this field drops its line breaks, so Save stays off and it says to give it from the Mac.
+- [ ] Context gauge. In a session whose context is half full or more, a ring with the percent shows in the top bar, red from 80%. Tap it: the menu says "Context 62% (620k of 1M tokens)" and has Continue in New Session. Tap that: the chat says "Writing handoff…", then a chip "Handed off. Open the new session" opens the new one.
 
 ## Ended sessions
 
