@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setSystemTime, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -248,6 +248,40 @@ describe("writeHookStatus", () => {
     await Bun.sleep(5);
     writeHookStatus(ask("PermissionRequest", "s3"), "q1", dir);
     expect(read("q1").at).toBeGreaterThan(first.at);
+  });
+
+  test("since: when the state began; each tool call while working keeps it, a change of state sets a new one", () => {
+    const t0 = 1_800_000_000_000;
+    const at = (ms: number, input: string) => {
+      setSystemTime(new Date(t0 + ms));
+      writeHookStatus(input, "w1", dir);
+    };
+    try {
+      at(0, ev("UserPromptSubmit"));
+      expect(read("w1")).toMatchObject({ state: "working", at: t0, since: t0 });
+      at(5_000, ev("PostToolUse"));
+      at(10_000, ev("PostToolUse"));
+      // at stays "last written", so the newer of Claude's file and this one still wins (deriveState).
+      expect(read("w1")).toMatchObject({ state: "working", at: t0 + 10_000, since: t0 });
+      at(15_000, ev("Stop"));
+      expect(read("w1")).toMatchObject({ state: "done", since: t0 + 15_000 });
+      at(20_000, ev("UserPromptSubmit"));
+      at(25_000, ev("PermissionRequest"));
+      expect(read("w1")).toMatchObject({ state: "waiting", at: t0 + 25_000, since: t0 + 25_000 });
+      at(30_000, ev("PostToolUse"));
+      expect(read("w1")).toMatchObject({ state: "working", since: t0 + 30_000 });
+      // Another conversation in the same zmx session starts its own stretch.
+      at(35_000, JSON.stringify({ hook_event_name: "PostToolUse", session_id: "other" }));
+      expect(read("w1")).toMatchObject({ state: "working", since: t0 + 35_000 });
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("a hook file written before since existed: the next same-state event keeps its at as the start", () => {
+    writeFileSync(join(dir, "old1.json"), JSON.stringify({ state: "working", at: 1000, sessionId: "abc", event: "PostToolUse" }));
+    writeHookStatus(ev("PostToolUse"), "old1", dir);
+    expect(read("old1").since).toBe(1000);
   });
 });
 

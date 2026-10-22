@@ -143,17 +143,26 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   // question comes as PreToolUse then PermissionRequest: one wait, so it keeps the first time.
   let prompt = codex ? undefined : promptFromHook(ev);
   let at = Date.now();
+  let prev: any;
+  try {
+    prev = JSON.parse(readFileSync(file, "utf8"));
+  } catch {}
   if (state === "waiting" && (!prompt || prompt.kind === "question")) {
-    try {
-      const prev = JSON.parse(readFileSync(file, "utf8"));
-      if (prev.state === "waiting" && prev.sessionId === ev.session_id && prev.prompt) {
-        if (!prompt) ({ prompt, at } = prev);
-        else if (prev.prompt.kind === "question") at = prev.at;
-      }
-    } catch {}
+    if (prev?.state === "waiting" && prev.sessionId === ev.session_id && prev.prompt) {
+      if (!prompt) ({ prompt, at } = prev);
+      else if (prev.prompt.kind === "question") at = prev.at;
+    }
+  }
+  // at is when this file was last written (what deriveState compares with Claude's file), or for a wait
+  // the wait's own time. since is when the state began: each tool call while working keeps it. A file
+  // from before since existed has only at.
+  let since = at;
+  if (state !== "waiting" && prev?.state === state && prev.sessionId === ev.session_id) {
+    const t = prev.since ?? prev.at;
+    if (typeof t === "number") since = t;
   }
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }) }));
+  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }) }));
   renameSync(tmp, file); // the server never reads half a file
 }
 
