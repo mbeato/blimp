@@ -27,6 +27,7 @@ import { branchLine } from "../lib/work";
 // dropFiles: files from Finder let go on a session's terminal.
 // targets / send: a browser tab's Send to session (the folder's sessions, the focused split's
 // first; a page's file pasted into one after a line saying where it's from).
+// onScreen: the focused split's session, where the files pane's Send Path to Session types.
 export type PaneActions = {
   newClaude: () => void;
   startKind: (kind: string) => void;
@@ -36,6 +37,7 @@ export type PaneActions = {
   targets: () => { name: string; title: string }[];
   // Pastes text into a session's prompt (a browser tab's Send to session).
   send: (name: string, text: string) => Promise<void>;
+  onScreen: () => string | null;
 };
 export const noActions: PaneActions = {
   newClaude: () => {},
@@ -45,6 +47,7 @@ export const noActions: PaneActions = {
   dropFiles: () => {},
   targets: () => [],
   send: async () => {},
+  onScreen: () => null,
 };
 
 const EARLIER_KEY = "blimp.earlierOpen";
@@ -270,6 +273,10 @@ export function TerminalPane(props: {
       if (!pastes.has(name)) showHere(name);
       for (let i = 0; i < 50 && !pastes.has(name); i++) await new Promise((r) => setTimeout(r, 100));
       pastes.get(name)?.(text);
+    },
+    onScreen: () => {
+      const name = p.panes[p.focus];
+      return name && pastes.has(name) ? name : null;
     },
   };
 

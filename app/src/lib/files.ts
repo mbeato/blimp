@@ -135,3 +135,63 @@ export const watchPaths = (expanded: Iterable<string>, openFiles: Iterable<strin
 
 // blimpd keeps one watch set per socket, so the sets of every workspace on a server are merged.
 export const mergeWatch = (sets: Iterable<string[]>) => [...new Set([...sets].flat())].sort();
+
+// ---- the tree's right-click, rename, delete and move ----
+
+// The path itself or something inside it.
+export const isInside = (path: string, dir: string) => path === dir || path.startsWith(dir.endsWith("/") ? dir : dir + "/");
+
+// For Copy Relative Path: from the project folder, as VS Code does ("." for the folder itself).
+// A path outside it stays as it is.
+export function relPath(root: string, path: string): string {
+  if (path === root) return ".";
+  return isInside(path, root) ? path.slice(root.endsWith("/") ? root.length : root.length + 1) : path;
+}
+
+// A path typed into a terminal: as it is when a shell reads it as one word, else in single quotes
+// (a ' in it as '\''), so a name with spaces is still one path for a shell and for Claude.
+export const shellQuote = (path: string) => (/^[A-Za-z0-9_\/.,:@%+=-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`);
+
+// Where `path` is once `from` has been renamed or moved to `to` (its own new path, or the new path
+// of something inside it); null when it isn't touched.
+export function movedPath(path: string, from: string, to: string): string | null {
+  if (path === from) return to;
+  return isInside(path, from) ? to + path.slice(from.length) : null;
+}
+
+// A drag in the tree: `from` can go into `dir` unless it's already there, or is a folder going
+// into itself or one inside it.
+export const canMoveInto = (from: string, dir: string) => parentDir(from) !== dir && !isInside(dir, from);
+
+// The folders to open to show `path` in a tree rooted at `root`: root, then down to path's folder.
+// None when it isn't inside root.
+export function ancestors(root: string, path: string): string[] {
+  if (path === root || !isInside(path, root)) return [];
+  const out = [root];
+  for (let d = parentDir(path); d !== root; d = parentDir(d)) out.splice(1, 0, d);
+  return out;
+}
+
+// What a rename selects first, as VS Code: a file's name without its extension, a folder's whole name.
+export function renameSelection(name: string, kind: "file" | "dir"): [number, number] {
+  const dot = name.lastIndexOf(".");
+  return kind === "file" && dot > 0 ? [0, dot] : [0, name.length];
+}
+
+// Why a new name can't be used (null: it can). One name, not a path.
+export function nameError(name: string): string | null {
+  if (!name) return "A name is needed";
+  if (name.includes("/") || name === "." || name === "..") return "A name can't contain / or be . or ..";
+  return null;
+}
+
+// The right-click menu of a tree row (a file, a folder, or the project folder itself: the empty space
+// below the rows) or of a file tab. "-": a line between groups.
+export type MenuItem = "new-file" | "new-folder" | "upload" | "download" | "gallery" | "copy-path" | "copy-rel" | "send-path" | "reveal" | "rename" | "delete" | "-";
+export function menuItems(on: "tree" | "tab", kind: "file" | "dir", root = false): MenuItem[] {
+  const paths: MenuItem[] = ["copy-path", "copy-rel", "send-path"];
+  if (on === "tab") return ["download", "-", ...paths, "-", "reveal"];
+  const edit: MenuItem[] = root ? [] : ["-", "rename", "delete"];
+  if (kind === "file") return ["download", "-", ...paths, ...edit];
+  return ["new-file", "new-folder", "-", "upload", "download", "gallery", "-", ...paths, ...edit];
+}

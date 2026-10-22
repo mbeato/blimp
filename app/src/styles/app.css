@@ -1916,6 +1916,12 @@ body.dragging-session * {
   border-color: transparent;
 }
 
+/* Delete: there is no trash on the server. */
+.dialog-actions button.primary.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
 .dialog-actions button:disabled {
   opacity: 0.4;
 }

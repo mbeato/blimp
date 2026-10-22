@@ -292,6 +292,16 @@ export class Api {
     return this.post<{ path: string; mtime: number }>("/fs/create", { path });
   }
 
+  // A rename, or a move into another folder: 409 if `to` is there, 400 for a folder into itself.
+  fsRename(from: string, to: string) {
+    return this.post<{ path: string }>("/fs/rename", { from, to });
+  }
+
+  // A file, or a folder with everything in it. There is no trash on the server.
+  async fsDelete(path: string) {
+    await this.req("/fs/file", { method: "DELETE", query: { path } });
+  }
+
   fsFiles(root: string) {
     return this.json<{ files: string[]; truncated: boolean }>("/fs/files", { query: { root } });
   }
