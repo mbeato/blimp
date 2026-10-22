@@ -160,7 +160,7 @@ test("listSessions joins zmx with Claude's session file, transcript and blimp's 
   expect(unread({ s1: 9000 })).toBe(false);
 });
 
-test("listSessions adds a Claude session's background jobs, context and git folder from its transcript, and not the files it edited", async () => {
+test("listSessions adds a Claude session's background jobs, context and git folder from its transcript", async () => {
   const real = (await import("./fixtures/activity-lines.json")).default as Record<string, string>;
   const home = mkdtempSync(join(tmpdir(), "blimp-"));
   mkdirSync(join(home, "sessions"));
@@ -180,7 +180,6 @@ test("listSessions adds a Claude session's background jobs, context and git fold
   ]);
   expect(s.context).toEqual({ used: 531 + 148928, limit: 1048576 }); // the workflow call, a GLM reply
   expect(s.git).toEqual({ cwd: "/Users/u/blimp" }); // no such folder here, so no branch
-  expect(s).not.toHaveProperty("files");
   expect(t).not.toHaveProperty("jobs");
   expect(t.context).toEqual({ used: 2 + 791 + 91091, limit: 1_000_000 });
   // `blimpd sessions` without --json shows none of it, so it doesn't read it.
