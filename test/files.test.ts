@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { deleteEntry, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, renameEntry, secretPaths, socketDir, writeFile } from "../src/files";
 import { socketPath } from "../src/sessions";
 
@@ -181,6 +181,16 @@ describe("rename, move and delete", () => {
     expect(guardEntry(join(blimp, "uploads"), home, blimp)).toBe(join(blimp, "uploads"));
   });
 
+  test("guardEntry refuses blimpd's socket, by its name or through a link, but reads still don't check it", () => {
+    // Deleting or moving it locks every new connection out until blimpd restarts.
+    const sock = join(blimp, basename(socketPath()));
+    writeFileSync(sock, "");
+    symlinkSync(blimp, join(home, "blimp-dir-link"));
+    symlinkSync(sock, join(home, "sock-link"));
+    for (const p of [sock, join(home, "blimp-dir-link", basename(sock)), join(home, "sock-link")]) expect(status(() => guardEntry(p, home, blimp))).toBe(403);
+    expect(guardFile(sock, home, blimp)).toBe(sock);
+  });
+
   test("renameEntry renames and moves; never over a name that's there; never a folder into itself", async () => {
     const d = join(home, "r");
     mkdirSync(join(d, "docs", "deep"), { recursive: true });
@@ -208,6 +218,16 @@ describe("rename, move and delete", () => {
     expect(await statusOf(() => renameEntry(join(d, "nope"), join(d, "x")))).toBe("ENOENT");
     expect(await statusOf(() => renameEntry(join(d, "b.txt"), join(d, "no", "b.txt")))).toBe("ENOENT");
     expect(existsSync(join(d, "no"))).toBe(false);
+  });
+
+  test("renameEntry moves a file by a hard link, so nothing made at the new name is replaced, and leaves one name", async () => {
+    const d = join(home, "linked");
+    mkdirSync(d);
+    writeFileSync(join(d, "a.txt"), "a");
+    await renameEntry(join(d, "a.txt"), join(d, "b.txt"));
+    expect(existsSync(join(d, "a.txt"))).toBe(false);
+    expect(readFileSync(join(d, "b.txt"), "utf8")).toBe("a");
+    expect(statSync(join(d, "b.txt")).nlink).toBe(1);
   });
 
   test("renameEntry moves a link as a link", async () => {

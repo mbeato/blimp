@@ -2041,6 +2041,16 @@ describe("secrets", () => {
     expect(await (await sApi("/secrets")).json()).toEqual([]);
   });
 
+  test("the fs api never deletes or moves blimpd's own socket, so new connections still get in", async () => {
+    const del = await sApi(`/fs/file?path=${q(sSock)}`, { method: "DELETE" });
+    expect(del.status).toBe(403);
+    const mv = await sApi("/fs/rename", { method: "POST", body: JSON.stringify({ from: sSock, to: join(sDir, "moved.sock") }) });
+    expect(mv.status).toBe(403);
+    expect(statSync(sSock).isSocket()).toBe(true);
+    expect(existsSync(join(sDir, "moved.sock"))).toBe(false);
+    expect((await sApi("/health")).status).toBe(200); // a new connection
+  });
+
   test("the fs api never serves, archives or replaces a secret, for the Mac or the phone", async () => {
     const phone = "feed".repeat(16);
     writeFileSync(join(sDir, "phone-token"), phone, { mode: 0o600 });

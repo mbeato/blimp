@@ -1,7 +1,7 @@
 // Files under the home folder: list, read, write, download, upload, and the file list for quick open.
 // Every path is checked after following symlinks, so a link can't lead outside home.
 
-import { lstat, open, readdir, rename, rm } from "node:fs/promises";
+import { link, lstat, open, readdir, rename, rm, unlink } from "node:fs/promises";
 import {
   chmodSync,
   type Dirent,
@@ -113,8 +113,8 @@ export function guardFile(path: string | null, home = realHome(), dir = socketDi
 
 // For rename, move and delete, which act on a name itself: its folder's real path with the name on.
 // A symlink is renamed or deleted as a link, never what it points to. Inside home and never home
-// itself (its folder is outside), nor blimp's own files, a folder that holds one (home, ~/.blimp,
-// ~/.config), anything in the secrets folder, or a link to one of those.
+// itself (its folder is outside), nor blimp's own files, blimpd's socket, a folder that holds one
+// (home, ~/.blimp, ~/.config), anything in the secrets folder, or a link to one of those.
 export function guardEntry(path: string | null, home = realHome(), dir = socketDir()): string {
   if (!path || !isAbsolute(path)) throw new HttpError(400, "path must be absolute");
   const abs = resolve(path);
@@ -123,6 +123,10 @@ export function guardEntry(path: string | null, home = realHome(), dir = socketD
   if (real === home) throw new HttpError(403, "that's your home folder");
   // Also through a link: a ~/.blimp that is itself a link to the real folder.
   if (ownFile(real, home, dir) || ownFile(realPath(real), home, dir)) throw new HttpError(403, "that's one of blimp's own files");
+  // Nor blimpd's socket: with it gone or moved, no new connection gets in (the Mac's, the phone's)
+  // until blimpd restarts. Only here: reading it is harmless, so guardFile doesn't check it.
+  const sock = realPath(join(dir, basename(process.env.BLIMPD_SOCKET || "blimpd.sock")));
+  if (real === sock || realPath(real) === sock) throw new HttpError(403, "that's one of blimp's own files");
   return real;
 }
 
@@ -235,18 +239,25 @@ export function createFile(path: string): { path: string; mtime: number } {
 
 // A rename, or a move into another folder (the files pane's rename and drag). Never over something
 // that's there (409), nor a folder into itself (400). Parent folders aren't made: `to`'s must exist.
-// (The check and the rename aren't one step, so a file made there between them is replaced; only
-// your own programs could race it.)
+// A file goes by a hard link, which fails if the name was taken meanwhile, as an upload does, then
+// the old name is removed. A folder or a link can't be hard linked, so it is checked, then renamed:
+// rename replaces only an empty folder (or a file, for a link) made at `to` between the two steps,
+// and only your own programs could do that.
 export async function renameEntry(from: string, to: string): Promise<{ path: string }> {
   if (to === from) throw new HttpError(409, "that name is taken");
   if (to.startsWith(from + "/")) throw new HttpError(400, "can't move a folder into itself");
   const src = await lstat(from); // 404 if it's gone
   const there = await lstat(to).catch(() => null);
   // The same file under another case on a case-insensitive disk (a Mac's): readme → README.
-  if (there && !(there.ino === src.ino && there.dev === src.dev)) throw new HttpError(409, "that name is taken");
+  const sameFile = !!there && there.ino === src.ino && there.dev === src.dev;
+  if (there && !sameFile) throw new HttpError(409, "that name is taken");
   try {
-    await rename(from, to);
+    if (src.isFile() && !sameFile) {
+      await link(from, to);
+      await unlink(from);
+    } else await rename(from, to);
   } catch (e: any) {
+    if (e?.code === "EEXIST") throw new HttpError(409, "that name is taken");
     if (e?.code === "EXDEV") throw new HttpError(400, "can't move to another disk");
     throw e;
   }
