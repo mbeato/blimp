@@ -25,6 +25,8 @@ final class BrowserModel {
     /// The page's area on screen, in points: sent on open, again on each reconnect, and when it changes.
     @ObservationIgnored private var size: (width: Int, height: Int)?
     @ObservationIgnored private var resizing: Task<Void, Never>?
+    /// The last frame being decoded: the next waits for it.
+    @ObservationIgnored private var drawing: Task<Void, Never>?
 
     init(tabId: String) { self.tabId = tabId }
 
@@ -97,11 +99,21 @@ final class BrowserModel {
         }
     }
 
-    /// Acked even when it can't be read, or no frame would come again.
+    /// Decoded off the main thread, which keeps the keys and fingers (a frame comes with every change while you
+    /// scroll or type), and drawn in the order they came. Acked even when it can't be read, or no frame would come
+    /// again.
     private func frame(_ data: Data) {
-        defer { link?.send(.ack) }
-        guard let image = UIImage(data: data) else { return }
-        self.image = image
-        page = next ?? CGSize(width: image.size.width / 2, height: image.size.height / 2)
+        let size = next
+        let before = drawing
+        drawing = Task { [weak self] in
+            let image = await UIImage(data: data)?.byPreparingForDisplay()
+            await before?.value
+            guard let self else { return }
+            if let image {
+                self.image = image
+                page = size ?? CGSize(width: image.size.width / 2, height: image.size.height / 2)
+            }
+            link?.send(.ack)
+        }
     }
 }
