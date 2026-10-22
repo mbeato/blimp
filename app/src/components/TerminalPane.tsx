@@ -541,7 +541,9 @@ export function TerminalPane(props: {
   useEffect(() => void (jobsAt && !jobsKey && setJobsAt(null)), [jobsAt, jobsKey]);
   // Return cards, for the Claude sessions on screen here while this tab is in front.
   const isConversation = (name: string) => !!sessionOf(name)?.sessionId && isClaude(sessionOf(name)!);
-  const recaps = useRecaps(api, link.key, props.front ? p.panes.filter(isConversation) : [], props.onNotice);
+  const recaps = useRecaps(api, link.key, props.front ? p.panes.filter(isConversation) : [], p.panes[p.focus], props.onNotice);
+  // While its session runs, on screen here or not. Over the terminal only while the list is hidden.
+  const recap = recaps.card && sessionOf(recaps.card.name) ? recaps.card : null;
   const openMenu = (e: ReactMouseEvent, name: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -695,7 +697,7 @@ export function TerminalPane(props: {
                     onHide={() => setHiddenRuns((h) => [...h.slice(-50), bar.key])}
                   />
                 )}
-                {recaps.cards[name] && <RecapCard card={recaps.cards[name]} onClose={() => recaps.dismiss(name)} />}
+                {!props.showList && recap?.name === name && <RecapCard card={recap.card} onClose={() => recaps.dismiss(name)} />}
                 <TerminalView
                   link={link}
                   name={name}
@@ -863,6 +865,11 @@ export function TerminalPane(props: {
             </button>
           ))}
         </div>
+        {/* Under the list, not in it: rows don't move when it comes and goes, and a drag between them
+            (data-item) never sees it. */}
+        {recap && (
+          <RecapCard card={recap.card} title={titleOf(recap.name)} onSession={() => showHere(recap.name)} onClose={() => recaps.dismiss(recap.name)} />
+        )}
       </nav>
       {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} h={drag.h} tall={drag.row} />}
       {jobsAt && jobsKey && <JobsPopover jobs={popJobs!} at={jobsAt.at} now={now} onClose={() => setJobsAt(null)} />}

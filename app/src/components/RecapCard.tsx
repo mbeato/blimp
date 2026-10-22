@@ -1,22 +1,25 @@
-// The return card ("where was I?") over the top of a Claude session's terminal: what the session is for,
-// what's done and what's still open, from blimpd (GET /sessions/<name>/recap). It shows by itself when
-// the session comes on screen in a focused window after an hour or more away (lib/recap.ts), and from
-// the right-click menu's Recap. If blimpd can't give one, nothing shows (from the menu, a blimpd too old
-// for recaps says so).
+// The return card ("where was I?") for a Claude session: what it is for, what's done and what's still
+// open, from blimpd (GET /sessions/<name>/recap). It sits at the bottom of the session list, out of the
+// terminal's way, or over the top of the session's terminal while the list is hidden. It shows by itself
+// when the session comes on screen in a focused window after an hour or more away (lib/recap.ts), and from
+// the right-click menu's Recap. One card at a time: the newest ask wins. If blimpd can't give one,
+// nothing shows (from the menu, a blimpd too old for recaps says so).
 
 import { useEffect, useRef, useState } from "react";
 import type { Api, Recap } from "../lib/api";
-import { AWAY, cameBack, markShown, readLastShown, recapError, writeLastShown } from "../lib/recap";
+import { AWAY, cameBack, markShown, pickBack, readLastShown, recapError, writeLastShown } from "../lib/recap";
 
 export type Card = Recap | "loading";
 
-// The cards of a pane's sessions, by session name. onScreen: the Claude sessions the pane shows while
-// its tab is in front. server: the link's key, so the same name on two servers is two sessions.
-// onNotice: for a Recap from the menu that a too-old blimpd can't give.
-export function useRecaps(api: Api | null, server: string, onScreen: string[], onNotice: (msg: string) => void) {
-  const [cards, setCards] = useState<Record<string, Card>>({});
-  // Asks still out: session name -> its latest, so an older answer (or one dismissed) is dropped.
-  const asking = useRef(new Map<string, number>()).current;
+// The card of a pane's sessions: which session it's for, and the card. onScreen: the Claude sessions the
+// pane shows while its tab is in front; focus: the one in the focused split. server: the link's key, so
+// the same name on two servers is two sessions. onNotice: for a Recap from the menu that a too-old blimpd
+// can't give.
+export function useRecaps(api: Api | null, server: string, onScreen: string[], focus: string | undefined, onNotice: (msg: string) => void) {
+  const [card, setCard] = useState<{ name: string; card: Card } | null>(null);
+  // The ask still out (only the newest counts), so an older answer, or one dismissed, is dropped.
+  const asking = useRef<{ name: string; id: number } | null>(null);
+  const ids = useRef(0);
   const [focused, setFocused] = useState(() => document.hasFocus());
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -29,29 +32,29 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[], o
   }, []);
 
   const dismiss = (name: string) => {
-    asking.delete(name);
-    setCards(({ [name]: _, ...rest }) => rest);
+    if (asking.current?.name === name) asking.current = null;
+    setCard((c) => (c?.name === name ? null : c));
   };
 
   // auto: on its own, so only for a session with 3 prompts or more, never over an ask already out, and
   // "…" only once it takes a moment (a session too new for a card says so at once).
   const show = (name: string, auto = false) => {
-    if (!api || (auto && asking.has(name))) return;
-    const id = (asking.get(name) ?? 0) + 1;
-    asking.set(name, id);
-    const mine = () => asking.get(name) === id;
-    const t = setTimeout(() => mine() && setCards((c) => (name in c ? c : { ...c, [name]: "loading" })), auto ? 300 : 0);
+    if (!api || (auto && asking.current?.name === name)) return;
+    const id = ++ids.current;
+    asking.current = { name, id };
+    const mine = () => asking.current?.id === id;
+    const t = setTimeout(() => mine() && setCard((c) => (c?.name === name ? c : { name, card: "loading" })), auto ? 300 : 0);
     api.recap(name, auto ? 3 : undefined).then(
       (r) => {
         clearTimeout(t);
-        if (mine()) asking.delete(name), setCards((c) => ({ ...c, [name]: r }));
+        if (mine()) (asking.current = null), setCard({ name, card: r });
       },
       (e) => {
         clearTimeout(t);
         if (!mine()) return;
-        // Only the "…" goes: a card already showing stays (one asked for again, or asked on its own).
-        asking.delete(name);
-        setCards(({ [name]: was, ...rest }) => (was === undefined || was === "loading" ? rest : { ...rest, [name]: was }));
+        // Only the "…" goes: a card already showing stays (one asked for again, or another session's).
+        asking.current = null;
+        setCard((c) => (c?.name === name && c.card === "loading" ? null : c));
         const notice = auto ? undefined : recapError(e);
         if (notice) onNotice(notice);
       },
@@ -71,29 +74,39 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[], o
     writeLastShown(markShown(markShown(last, before.current, until), viewing, now));
     before.current = viewing;
     looked.current = now;
-    for (const k of back) show(k.slice(server.length + 1), true);
+    const k = pickBack(back, focus && `${server}/${focus}`);
+    if (k) show(k.slice(server.length + 1), true);
   }, [viewing.join("\n"), tick]);
 
-  return { cards, show, dismiss };
+  return { card, show, dismiss };
 }
 
-export function RecapCard(props: { card: Card; onClose: () => void }) {
+// title and onSession: in the session list, away from its terminal, the card says whose it is, and a
+// click on that shows the session.
+export function RecapCard(props: { card: Card; title?: string; onSession?: () => void; onClose: () => void }) {
   const { card } = props;
   return (
-    <div className="recap-card" role="status" aria-label="Where this session is">
+    <div className={"recap-card" + (props.title ? " in-list" : " over")} role="status" aria-label="Where this session is">
       {/* No focus on mouse down, so the keyboard stays in the terminal once the card is gone. */}
       <button className="tab-close" title="Dismiss" aria-label="Dismiss recap" onMouseDown={(e) => e.preventDefault()} onClick={props.onClose}>
         ×
       </button>
-      {card === "loading" ? (
-        <p className="recap-loading">…</p>
-      ) : (
-        <>
-          <p className="recap-goal">{card.goal}</p>
-          {card.done.length > 0 && <Part label="Done" items={card.done} />}
-          {card.open.length > 0 && <Part label="Open" items={card.open} />}
-        </>
+      {props.title && (
+        <button className="recap-session" title={`Show ${props.title}`} onMouseDown={(e) => e.preventDefault()} onClick={props.onSession}>
+          Recap · {props.title}
+        </button>
       )}
+      <div className="recap-body">
+        {card === "loading" ? (
+          <p className="recap-loading">…</p>
+        ) : (
+          <>
+            <p className="recap-goal">{card.goal}</p>
+            {card.done.length > 0 && <Part label="Done" items={card.done} />}
+            {card.open.length > 0 && <Part label="Open" items={card.open} />}
+          </>
+        )}
+      </div>
     </div>
   );
 }

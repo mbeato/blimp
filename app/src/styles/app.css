@@ -2634,8 +2634,53 @@ body.dragging-session * {
 
 /* ---- return card ---- */
 
-/* "Where was I?": over the top of a Claude session's terminal, until dismissed. */
+/* "Where was I?", until dismissed. */
 .recap-card {
+  position: relative;
+  padding: 10px 34px 10px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* At the bottom of the session list, always in view while the list above it scrolls. At most 40% of
+   the list's height; past that its body scrolls. */
+.recap-card.in-list {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+  margin: 0 8px 8px;
+  padding: 8px 10px 10px;
+  font-size: 12px;
+}
+
+.recap-session {
+  flex: none;
+  min-width: 0;
+  max-width: calc(100% - 22px);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.recap-session:hover {
+  color: var(--fg-dim);
+}
+
+.recap-card.in-list .recap-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* With the session list hidden: over the top of the session's terminal. */
+.recap-card.over {
   position: absolute;
   top: 10px;
   left: 50%;
@@ -2644,17 +2689,11 @@ body.dragging-session * {
   width: min(560px, calc(100% - 28px));
   max-height: calc(100% - 20px);
   overflow: auto;
-  padding: 10px 34px 10px 14px;
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
-  border-radius: 8px;
   box-shadow: var(--shadow);
-  font-size: 13px;
-  line-height: 1.4;
 }
 
 /* Under the Run bar when both show: the bar (28px) would cover the card's top and its ×. */
-.runbar ~ .recap-card {
+.runbar ~ .recap-card.over {
   top: 38px;
   max-height: calc(100% - 48px);
 }
@@ -2664,6 +2703,11 @@ body.dragging-session * {
   top: 7px;
   right: 7px;
   visibility: visible;
+}
+
+.recap-card.in-list .tab-close {
+  top: 4px;
+  right: 4px;
 }
 
 .recap-goal,
@@ -2691,6 +2735,17 @@ body.dragging-session * {
   padding-top: 1px;
   font-size: 11px;
   color: var(--fg-faint);
+}
+
+/* In the list there's no room for a column of labels: each sits over its lines. */
+.recap-card.in-list .recap-part {
+  flex-direction: column;
+  gap: 1px;
+}
+
+.recap-card.in-list .recap-label {
+  width: auto;
+  padding-top: 0;
 }
 
 .recap-part ul {

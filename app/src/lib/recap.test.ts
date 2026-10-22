@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ApiError } from "./api";
-import { AWAY, cameBack, markShown, recapError } from "./recap";
+import { AWAY, cameBack, markShown, pickBack, recapError } from "./recap";
 
 const now = 1_000_000_000_000;
 const MIN = 60_000;
@@ -29,6 +29,13 @@ test("one on screen all along gets a card when the last look was an hour or more
   // Even with nothing kept on this computer.
   expect(cameBack(["s/a"], ["s/a"], {}, now, now - 30_000)).toEqual([]);
   expect(cameBack(["s/a"], ["s/a"], {}, now, now - 61 * MIN)).toEqual(["s/a"]);
+});
+
+test("pickBack: of splits that came back together, the focused one gets the card, else the leftmost", () => {
+  expect(pickBack(["s/a", "s/b"], "s/b")).toBe("s/b");
+  expect(pickBack(["s/a", "s/b"], "s/c")).toBe("s/a");
+  expect(pickBack(["s/a", "s/b"])).toBe("s/a");
+  expect(pickBack([], "s/a")).toBeUndefined();
 });
 
 test("recapError: a blimpd from before recaps (its generic 404) says to update; one that can't recap stays silent", () => {
