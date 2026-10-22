@@ -165,7 +165,7 @@ public struct Session: Codable, Sendable, Equatable, Identifiable {
     public var runnableAt: Double? = nil
     /// On a run session (kind "run"): its command, the Claude session it's for, and how it ended.
     public var run: Run? = nil
-    /// Its checkout, branch, pull requests, and clashes with other sessions.
+    /// Its checkout, branch and pull requests.
     public var work: Work? = nil
 
     public var id: String { name }
@@ -296,30 +296,13 @@ public struct PullRequest: Codable, Sendable, Equatable {
     public let url: String
 }
 
-public enum ClashReason: String, Codable, Sendable, Equatable {
-    case branch, files, other
-    public init(from decoder: Decoder) throws {
-        self = ClashReason(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
-    }
-}
-
-/// Another session that may get in this one's way: on the same branch, or it edited the same files.
-public struct Clash: Codable, Sendable, Equatable {
-    /// The other session's zmx name.
-    public let session: String
-    public let reason: ClashReason
-    /// For files: the files, from the checkout's root.
-    public var files: [String]? = nil
-}
-
-/// Which session is on what (blimpd's work.ts).
+/// Which session is on what (blimpd's work.ts). blimpd 0.3 also sent `clash`: not read, so it decodes all the same.
 public struct Work: Codable, Sendable, Equatable {
     public var branch: String? = nil
     public var root: String? = nil
     /// The checkout is a linked worktree, not the repo's main folder.
     public var worktree: Bool? = nil
     public var prs: [PullRequest]? = nil
-    public var clash: [Clash]? = nil
 }
 
 /// The return card ("where was I?"), GET /sessions/<name>/recap. at: when it was written (ms).

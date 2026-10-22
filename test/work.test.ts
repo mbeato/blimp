@@ -2,79 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type OnWhat, type PR, clashes, ghPrs, parsePrs, prsOf, readRoot, withWork, withWorkNow } from "../src/work";
+import { type PR, ghPrs, parsePrs, prsOf, readRoot, withWork, withWorkNow } from "../src/work";
 
 const NOW = 1_800_000_000_000;
 const H = 3600_000;
-const on = (name: string, extra: Partial<OnWhat> = {}): OnWhat => ({ name, files: [], ...extra });
-const edited = (...paths: string[]) => paths.map((path, i) => ({ path, at: NOW - i * 60_000 }));
-
-describe("clashes", () => {
-  test("two sessions on the same branch of the same checkout clash, both ways", () => {
-    const c = clashes([on("a", { root: "/r", branch: "feat" }), on("b", { root: "/r", branch: "feat" }), on("c", { root: "/r", branch: "other" })], NOW);
-    expect(c.get("a")).toEqual([{ session: "b", reason: "branch" }]);
-    expect(c.get("b")).toEqual([{ session: "a", reason: "branch" }]);
-    expect(c.has("c")).toBe(false);
-  });
-
-  test("the same branch name in another repo, or with no branch known, is no clash", () => {
-    expect(clashes([on("a", { root: "/r", branch: "feat" }), on("b", { root: "/s", branch: "feat" })], NOW).size).toBe(0);
-    expect(clashes([on("a", { root: "/r" }), on("b", { root: "/r" })], NOW).size).toBe(0);
-    expect(clashes([on("a", { branch: "feat" }), on("b", { branch: "feat" })], NOW).size).toBe(0);
-  });
-
-  test("two sessions on main or master clash only once one of them has edited files lately", () => {
-    for (const branch of ["main", "master"]) {
-      expect(clashes([on("a", { root: "/r", branch }), on("b", { root: "/r", branch })], NOW).size).toBe(0);
-      const old = [{ path: "/r/x.ts", at: NOW - 7 * H }];
-      expect(clashes([on("a", { root: "/r", branch, files: old }), on("b", { root: "/r", branch })], NOW).size).toBe(0);
-      const c = clashes([on("a", { root: "/r", branch, files: edited("/r/x.ts") }), on("b", { root: "/r", branch })], NOW);
-      expect(c.get("b")).toEqual([{ session: "a", reason: "branch" }]);
-      // A scratch or notes file outside the checkout isn't editing it.
-      const outside = [{ path: "/tmp/scratch/msg.txt", at: NOW }];
-      expect(clashes([on("a", { root: "/r", branch, files: outside }), on("b", { root: "/r", branch })], NOW).size).toBe(0);
-    }
-  });
-
-  test("two sessions that edited the same files in the last 6 hours clash, the files relative to each one's checkout", () => {
-    const a = on("a", { root: "/r", branch: "x", files: edited("/r/src/a.ts", "/r/b.ts", "/r/only-a.ts") });
-    const b = on("b", { root: "/r/wt", branch: "y", files: [...edited("/r/b.ts", "/r/src/a.ts"), { path: "/r/old.ts", at: NOW - 7 * H }] });
-    const c = clashes([a, b], NOW);
-    expect(c.get("a")).toEqual([{ session: "b", reason: "files", files: ["src/a.ts", "b.ts"] }]);
-    // Outside its own checkout, a path stays as it is. Each lists them as it edited them, newest first.
-    expect(c.get("b")).toEqual([{ session: "a", reason: "files", files: ["/r/b.ts", "/r/src/a.ts"] }]);
-  });
-
-  test("a file one of them edited more than 6 hours ago is no clash", () => {
-    const a = on("a", { files: [{ path: "/r/x.ts", at: NOW - 7 * H }] });
-    expect(clashes([a, on("b", { files: edited("/r/x.ts") })], NOW).size).toBe(0);
-  });
-
-  test("at most 5 shared files are listed, newest first", () => {
-    const paths = ["/r/1", "/r/2", "/r/3", "/r/4", "/r/5", "/r/6", "/r/7"];
-    const c = clashes([on("a", { root: "/r", files: edited(...paths) }), on("b", { files: edited(...paths) })], NOW);
-    expect(c.get("a")).toEqual([{ session: "b", reason: "files", files: ["1", "2", "3", "4", "5"] }]);
-  });
-
-  test("a session and the ones handed off from it are no clash, even on main with the handoff file and the same files edited", () => {
-    const parent = on("p", { root: "/r", branch: "main", files: edited("/r/notes/2026-10-22/HANDOFF-x.md", "/r/src/a.ts") });
-    const child = on("c", { root: "/r", branch: "main", parent: "p" });
-    expect(clashes([parent, child], NOW).size).toBe(0);
-    expect(clashes([parent, { ...child, files: edited("/r/src/a.ts") }], NOW).size).toBe(0);
-    // Its child's child too; another session on the branch still clashes with each of them.
-    const grandchild = on("g", { root: "/r", branch: "main", parent: "c", files: edited("/r/src/a.ts") });
-    const other = on("o", { root: "/r", branch: "main" });
-    const c = clashes([parent, child, grandchild, other], NOW);
-    expect(c.get("p")).toEqual([{ session: "o", reason: "branch" }]);
-    expect(c.get("g")).toEqual([{ session: "o", reason: "branch" }]);
-    expect(c.get("o")?.map((x) => x.session)).toEqual(["p", "g"]); // c and o have edited nothing: on main, no clash
-  });
-
-  test("the same branch and the same files with one session: both reasons", () => {
-    const c = clashes([on("a", { root: "/r", branch: "f", files: edited("/r/x") }), on("b", { root: "/r", branch: "f", files: edited("/r/x") })], NOW);
-    expect(c.get("a")).toEqual([{ session: "b", reason: "branch" }, { session: "b", reason: "files", files: ["x"] }]);
-  });
-});
 
 describe("pull requests", () => {
   const pr = { number: 12, title: "Fix the list", state: "OPEN", url: "https://github.com/o/r/pull/12" };
@@ -180,29 +111,19 @@ describe("a session's checkout", () => {
 });
 
 describe("withWork", () => {
-  test("only sessions with a git folder get work, and only what's known; the files stay on the server", () => {
+  test("only sessions with a git folder get work, and only what's known; nothing about the other sessions", () => {
     const rows = [
       { name: "a", transcript: "/t/a", git: { cwd: "/nowhere-a", branch: "feat" } },
-      { name: "b", transcript: "/t/b", git: { cwd: "/nowhere-b", branch: "feat" } },
+      { name: "b", transcript: "/t/b", git: { cwd: "/nowhere-b", branch: "feat" }, parent: "a" },
       { name: "c", transcript: "/t/c" },
       { name: "d" },
     ];
-    const files: Record<string, { path: string; at: number }[]> = { "/t/a": edited("/x/y.ts"), "/t/b": edited("/x/y.ts") };
-    const out = withWork(rows, NOW, (t) => files[t] ?? []);
-    expect(out[0]).toEqual({ ...rows[0], work: { branch: "feat", clash: [{ session: "b", reason: "files", files: ["/x/y.ts"] }] } });
-    expect(out[1].work).toEqual({ branch: "feat", clash: [{ session: "a", reason: "files", files: ["/x/y.ts"] }] });
+    const out = withWork(rows, NOW);
+    expect(out[0]).toEqual({ ...rows[0], work: { branch: "feat" } });
+    expect(out[1]).toEqual({ ...rows[1], work: { branch: "feat" } });
     expect(out[2]).toEqual(rows[2]);
     expect(out[3]).toEqual(rows[3]);
-    expect(JSON.stringify(out)).not.toContain('"files":[{');
-  });
-
-  test("a row's parent (handoff.ts) is what links it to the session it was handed off from: no clash between them", () => {
-    const rows = [
-      { name: "p", transcript: "/t/p", git: { cwd: "/nowhere-p", branch: "feat" } },
-      { name: "c", transcript: "/t/c", git: { cwd: "/nowhere-p", branch: "feat" }, parent: "p" },
-    ];
-    const out = withWork(rows, NOW, () => edited("/x/y.ts"));
-    expect(out.map((r) => r.work)).toEqual([{ branch: "feat" }, { branch: "feat" }]);
+    expect(JSON.stringify(out)).not.toContain("clash");
   });
 
   test("withWorkNow (blimpd sessions --json, run once) waits for the checkouts, so the first list has them, and looks up no PRs", async () => {
@@ -214,9 +135,9 @@ describe("withWork", () => {
       { name: "a", transcript: "/t/a", git: { cwd: repo, branch: "feat" } },
       { name: "b", transcript: "/t/b", git: { cwd: repo, branch: "feat" } },
     ];
-    const out = await withWorkNow(rows, NOW, () => []);
-    expect(out[0].work).toEqual({ branch: "feat", root: repo, clash: [{ session: "b", reason: "branch" }] });
-    expect(out[1].work).toEqual({ branch: "feat", root: repo, clash: [{ session: "a", reason: "branch" }] });
+    const out = await withWorkNow(rows, NOW);
+    expect(out[0].work).toEqual({ branch: "feat", root: repo });
+    expect(out[1].work).toEqual({ branch: "feat", root: repo });
     rmSync(tmp, { recursive: true, force: true });
   });
 });

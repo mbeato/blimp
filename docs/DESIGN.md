@@ -86,7 +86,7 @@ type Session = {
   run?: { command: string; parent: string; cwd: string; startedAt: number; endedAt?: number; exit?: number };  // on a run's own session (see Runs)
   handoff?: { state: "writing" | "started" | "failed"; child?: string; file?: string; error?: string };  // on a session that handed off (see Handoff)
   parent?: string;       // on the session a handoff started: the zmx name of the one it came from
-  work?: Work;           // its checkout, branch, pull requests and clashes with other sessions (see Jobs, context and work)
+  work?: Work;           // its checkout, branch and pull requests (see Jobs, context and work)
 };
 ```
 
@@ -179,11 +179,10 @@ What a Claude session is doing besides talking, read from its transcript (`src/a
 - **`context`:** how full Claude's context window is. `used` is the latest reply's input tokens (input plus cache read plus cache write); after a compact, what the compact left. `limit`: 1 048 576 for GLM, 1M for an id with `[1m]`, 200k for Claude 3 and 4, else 1M (so a new model doesn't show fuller than it is).
 - **`git`:** `cwd` is the folder of the transcript's latest line, so it follows a `cd` into a worktree. `branch` is the branch checked out there, read from git's own files (the repo's `HEAD`, through a worktree's `.git` file), at most every 10 s per folder. Detached, not a repo, or gone: no branch.
 
-`work` adds which checkout each Claude session is on, and where two sessions may get in each other's way (`src/work.ts`). `Work` = `{ branch?, root?, worktree?, prs?: [{ number, title, state, url }], clash?: [{ session, reason: "branch" | "files", files? }] }`.
+`work` adds which checkout each Claude session is on, and its branch's pull requests (`src/work.ts`). `Work` = `{ branch?, root?, worktree?, prs?: [{ number, title, state, url }] }`. blimpd 0.3.0 also sent `clash`; the apps don't read it.
 - **`root` and `worktree`:** from `git -c core.fsmonitor=false rev-parse --show-toplevel --git-dir --git-common-dir` in the `git.cwd` folder. `worktree` is true when its git folder isn't the repo's common one (a `git worktree add` checkout).
 - **`prs`:** the branch's pull requests, the newest 3 in any state, from `gh pr list --head <branch> --state all --limit 3 --json number,title,state,url`. gh runs in the checkout through the login shell (`$SHELL -l -i -c`), so it finds gh and its sign-in as a terminal does; the folder and the branch go as `"$1"` and `"$2"`, never into the script. It is killed after 10 s. Only entries with an `http` or `https` link are kept, titles cut to 200 characters. Not looked up for `main` or `master`: a pull request's head is its own branch.
 - **Caching:** git and gh run in the background, never while the session list is built (every second). The list shows what was last found: the root at most 60 s old, the pull requests at most 5 minutes old, per checkout and branch. One gh runs at a time. A gh that is missing or fails keeps what was found before. `blimpd sessions --json` waits for the roots and looks up no pull requests.
-- **Clashes:** two sessions clash (`branch`) when they're on the same branch of the same checkout. On `main` or `master` that is normal while both only read: it's a clash only once one of them edited a file inside the checkout in the last 6 hours. They also clash (`files`) when both edited the same file in the last 6 hours; `files` names up to 5 of them, relative to the checkout. A session and the ones handed off from it (Handoff, `parent`) are one piece of work, never a clash.
 
 ### Terminal
 

@@ -19,7 +19,7 @@ import { contextMeter, handoffError, handoffNews, handoffWords } from "../lib/ha
 import { RunBar } from "./RunBar";
 import { runBar } from "../lib/runs";
 import { openWebLink } from "../lib/links";
-import { branchLine, clashLines } from "../lib/work";
+import { branchLine } from "../lib/work";
 
 // Things the window reaches into the pane for: ⌘N, a kind of session started from elsewhere
 // (Settings' Codex sign-in), and a session dropped here from another window at (x, y) in the page.
@@ -572,8 +572,6 @@ export function TerminalPane(props: {
   itemsRef.current = items;
   // The row being dragged within the list (with its whole group).
   const moving = drag && drag.gap !== null ? itemOf(drag.s.name) : -1;
-  // While any row has a clash warning, every row keeps its place empty: titles then start at the same x.
-  const clashSlot = listed.some((x) => clashLines(x, link.sessions ?? []).length > 0);
   const row = (s: Session, num?: number, item?: number) => {
     const meter = contextMeter(s.context);
     const parent = s.parent ? link.sessions?.find((x) => x.name === s.parent) : undefined;
@@ -611,7 +609,6 @@ export function TerminalPane(props: {
             >
               <Mark s={s} />
               {num && <span className="split-num">{num}</span>}
-              <Clash s={s} all={link.sessions ?? []} slot={clashSlot} />
               <span className="srow-title">
                 {s.parent && (
                   <span className="srow-parent" title={`Continued from ${parent ? sessionTitle(parent) : s.parent}`}>
@@ -978,22 +975,6 @@ function Doing(props: { s: Session; now?: number; onJobs?: (at: DOMRect) => void
       )}
       {words && s.label && <span aria-hidden> · </span>}
       {s.label && <span className="kind-label">{s.label}</span>}
-    </span>
-  );
-}
-
-// Another session may get in this one's way (the same branch, or the same files edited): a red
-// warning, not amber, which means "waiting for you". Its tooltip says with whom and why.
-// slot: another row has one, so an empty place keeps this row's title in line with that row's.
-function Clash(props: { s: Session; all: Session[]; slot?: boolean }) {
-  const lines = clashLines(props.s, props.all);
-  if (!lines.length) return props.slot ? <span className="srow-clash none" aria-hidden /> : null;
-  return (
-    <span className="srow-clash" title={lines.join("\n")} aria-label={lines.join(". ")}>
-      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-        <path d="M6 1.2L11 10.5H1z" fill="none" stroke="currentColor" strokeLinejoin="round" />
-        <path d="M6 4.6v2.9M6 8.6v.6" stroke="currentColor" strokeLinecap="round" />
-      </svg>
     </span>
   );
 }

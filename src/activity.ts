@@ -6,7 +6,6 @@
 //   context  how full Claude's context window is: the latest reply's input tokens.
 //   git      the folder of the latest line (it follows a `cd` into a worktree), and the branch checked
 //            out there, read from git's own files: a line's gitBranch is the start folder's branch.
-//   files    the files Claude edited, newest first. Kept on the server, not sent to clients.
 //   runnable the commands in Claude's latest reply (since your last prompt), for the Run button (runnable.ts),
 //            and runnableAt, when that reply began (its first text), so a run from before it isn't its.
 // Like transcriptTitles (sessions.ts), each transcript is read once, then only the lines added since:
@@ -22,7 +21,6 @@ export type JobStatus = "running" | "done" | "failed" | "stopped";
 // startedAt and endedAt in ms; clients work out how long it's run. lastLine: a running bash job's or
 // Monitor's last output line, read at most every 10 s.
 export type Job = { id: string; kind: JobKind; label: string; startedAt: number; status: JobStatus; outputFile?: string; endedAt?: number; exit?: number; lastLine?: string };
-export type EditedFile = { path: string; at: number };
 export type Git = { cwd: string; branch?: string };
 
 // What one transcript line says.
@@ -35,7 +33,6 @@ export type ActivityEvent =
   | { type: "usage"; at: number; used: number; model?: string }
   | { type: "compact"; at: number; used?: number }
   | { type: "where"; cwd: string }
-  | { type: "edit"; at: number; path: string }
   | { type: "said"; at: number; text: string } // a main-thread reply's text
   | { type: "prompt" }; // something you typed: a new reply starts
 
@@ -51,7 +48,6 @@ export type Activity = {
   jobs: Map<string, JobRecord>;
   context?: { used: number; model?: string };
   cwd?: string;
-  files: EditedFile[];
   tasks?: string;
   // reply: the latest reply's texts (the newest 20), from replyAt; runnable: its commands, worked out when asked.
   reply?: string[];
@@ -59,12 +55,11 @@ export type Activity = {
   runnable?: string[];
 };
 
-export const newActivity = (): Activity => ({ offset: 0, calls: new Map(), jobs: new Map(), files: [] });
+export const newActivity = (): Activity => ({ offset: 0, calls: new Map(), jobs: new Map() });
 
 const KEEP_DONE = 30 * 60_000; // a finished job is shown this long, so the apps can say it finished
 const MAX_JOBS = 100;
 const MAX_CALLS = 50;
-const MAX_FILES = 200;
 const MAX_SEEN = 20;
 const MAX_SAID = 20;
 
@@ -134,8 +129,6 @@ function started(r: any, block: any): ActivityEvent | undefined {
   if (typeof u.taskId === "string" && ("timeoutMs" in u || "persistent" in u)) return { type: "start", at, id: u.taskId, kind: "monitor", call };
 }
 
-const EDITS = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
-
 // What a parsed line says. Only the main thread counts: a subagent's work is its own.
 export function recordEvents(r: any): ActivityEvent[] {
   if (!r || typeof r !== "object" || r.isSidechain === true) return [];
@@ -160,10 +153,6 @@ export function recordEvents(r: any): ActivityEvent[] {
       const input = b.input ?? {};
       if (b.name === "Bash" || b.name === "Monitor") out.push({ type: "call", id: b.id, name: b.name, label: label(str(input.description) || str(input.command)) });
       else if (b.name === "TaskStop" && typeof input.task_id === "string") out.push({ type: "stop", at, id: input.task_id });
-      else if (EDITS.includes(b.name)) {
-        const path = str(input.file_path) || str(input.notebook_path);
-        if (path) out.push({ type: "edit", at, path });
-      }
     }
     return out;
   }
@@ -243,8 +232,6 @@ export function fold(a: Activity, events: ActivityEvent[]) {
       delete a.reply;
       delete a.replyAt;
       delete a.runnable;
-    } else if (e.type === "edit" && e.path.startsWith("/")) {
-      a.files = [{ path: e.path, at: e.at }, ...a.files.filter((f) => f.path !== e.path)].slice(0, MAX_FILES);
     }
   }
 }
@@ -413,11 +400,6 @@ function readBranch(cwd: string): string | undefined {
     }
   }
 }
-
-// The files a session's Claude edited (absolute, newest first, at most 200), for the server only. The
-// session list (work.ts) asks right after sessionActivity read the same file, so that scan is used as it
-// is, without opening the file again; a file not scanned yet is read now.
-export const editedFiles = (file: string): EditedFile[] => (scans.get(file) ?? transcriptActivity(file))?.files ?? [];
 
 // What the session list shows of a transcript (sessions.ts): only what there is. processStart: when the
 // Claude process now on it started (ms). Background work dies with the process that started it, and a

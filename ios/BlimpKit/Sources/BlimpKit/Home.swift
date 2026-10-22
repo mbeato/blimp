@@ -90,23 +90,19 @@ public enum Drawer {
 }
 
 /// What a running session's row says under its title, beside its age: a handoff, the branch, the jobs (the
-/// Mac's words, JobsText, WorkText, HandoffText); a red mark for a clash; and a session a handoff started
-/// says which one it continues.
+/// Mac's words, JobsText, WorkText, HandoffText); and a session a handoff started says which one it continues.
 public struct RowCaption: Equatable, Sendable {
     /// "Writing handoff · feat-x · 2 jobs · 14m"; nil: nothing to say.
     public let text: String?
-    /// One line per other session it may get in the way of (drawn red, never amber).
-    public let clash: [String]
     /// "Continued from Fix the login": its parent's title, or its zmx name once that's gone.
     public let continued: String?
     /// "On branch feat-x (worktree)", for its menu.
     public let branch: String?
 
-    /// all: the server's sessions, for the other sessions' titles. now: ms.
+    /// all: the server's sessions, for the parent's title. now: ms.
     public init(_ s: Session, all: [Session], now: Double) {
         let parts = [HandoffText.words(s), WorkText.branch(s), JobsText.caption(s.jobs, now: now)].compactMap { $0 }
         text = parts.isEmpty ? nil : parts.joined(separator: " · ")
-        clash = WorkText.clashLines(s, all: all)
         continued = s.parent.map { p in "Continued from " + (all.first { $0.name == p }?.title ?? p) }
         branch = WorkText.branchLine(s)
     }

@@ -5,7 +5,8 @@ import Testing
 // What blimpd 0.3 sends, printed by its own listSessions over a made-up transcript (the test fixtures'
 // real lines), a hook file, a run, a handoff and a checkout on a branch, with the paths shortened and
 // two titles set by hand. web-1 waits on a risky permission, has a running and a failed job, offers two
-// commands, has handed off to web-3 and clashes with web-2; web-run is a run of one of its commands.
+// commands, has handed off to web-3 and clashes with web-2 (a field the app no longer reads: it decodes all the
+// same); web-run is a run of one of its commands.
 let sessions03 = #"""
 {"type":"sessions","sessions":[
 {"name":"web-1","pid":42,"clients":1,"created":1792617036,"dir":"/home/u/web","cmd":"claude","kind":"claude","sessionId":"s1","transcript":"/home/u/.claude/projects/p/s1.jsonl","title":"Fix the phone login","status":"waiting","updatedAt":1792624236489,"state":"waiting","stateSince":1792624236489,"prompt":{"kind":"permission","tool":"Bash","summary":"Ran `git push --force origin feat-x`","options":["Yes","No"],"keys":["1","\u001b"],"answerable":true,"input":"git push --force origin feat-x","risky":true,"at":1792624235489},"unread":true,"jobs":[{"id":"b1lysb74d","kind":"bash","label":"Run isolated blimpd benchmark","startedAt":1792623156489,"status":"running","outputFile":"/tmp/claude-1000/-home-u-web/s1/tasks/b1lysb74d.output"},{"id":"b5bbkbpfm","kind":"bash","label":"Watch the phone run for the fix","startedAt":1792623276489,"status":"failed","outputFile":"/tmp/claude-1000/-home-u-web/s1/tasks/b5bbkbpfm.output","endedAt":1792623336489,"exit":1}],"context":{"used":621072,"limit":1000000},"git":{"cwd":"/home/u/web","branch":"feat-x"},"runnable":["npm run e2e","bun test ./test"],"runnableAt":1792623456489,"handoff":{"state":"started","child":"web-3","file":"notes/2026-10-22/HANDOFF-web.md"},"work":{"branch":"feat-x","root":"/home/u/web","prs":[{"number":42,"title":"Phone answers prompts","state":"OPEN","url":"https://github.com/x/y/pull/42"}],"clash":[{"session":"web-2","reason":"branch"},{"session":"web-2","reason":"files","files":["app/src/lib/browser.ts"]}]}},
@@ -40,7 +41,6 @@ private struct DecodeFailed: Error {}
     #expect(s.handoff == Handoff(state: .started, child: "web-3", file: "notes/2026-10-22/HANDOFF-web.md"))
     #expect(s.work?.branch == "feat-x" && s.work?.root == "/home/u/web" && s.work?.worktree == nil)
     #expect(s.work?.prs == [PullRequest(number: 42, title: "Phone answers prompts", state: "OPEN", url: "https://github.com/x/y/pull/42")])
-    #expect(s.work?.clash == [Clash(session: "web-2", reason: .branch), Clash(session: "web-2", reason: .files, files: ["app/src/lib/browser.ts"])])
     #expect(s.parent == nil && s.run == nil)
     let p = try #require(s.prompt)
     #expect(p.input == "git push --force origin feat-x")

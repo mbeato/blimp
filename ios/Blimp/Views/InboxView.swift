@@ -14,7 +14,7 @@ struct InboxView: View {
     /// Every project's sessions waiting on you, oldest first (Inbox.needsYou).
     let needs: [InboxLine]
     let digest: Digest?
-    /// Every running session: the paragraph's links, and the rows' clashes and parents.
+    /// Every running session: the paragraph's links, and the rows' parents.
     let sessions: [Session]
     /// Back after a while away: when the app went to the background (ms). nil: not long enough to say.
     let left: Double?
@@ -177,7 +177,6 @@ private struct LineRow: View {
                     Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            if let clash = caption?.clash, !clash.isEmpty { ClashMark(lines: clash) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

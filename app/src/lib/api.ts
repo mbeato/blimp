@@ -42,18 +42,16 @@ export type Session = {
   runnable?: string[]; // commands in Claude's latest reply, newest first, for the Run bar (older blimpd, or none: absent)
   runnableAt?: number; // ms, when that reply began: runs from before it are an older reply's (older blimpd: absent)
   run?: Run; // a run session's command and the Claude session it's for (older blimpd: absent)
-  work?: Work; // its checkout, branch, pull requests and clashes with other sessions (older blimpd: absent)
+  work?: Work; // its checkout, branch and pull requests (older blimpd: absent)
 };
 
 // Which session is on what (blimpd's work.ts). root: the checkout's top folder; worktree: a linked one.
-// prs: the branch's newest 3 pull requests, any state. clash: another session (by name) on the same
-// branch of the same checkout, or that edited the same files in the last 6 hours (relative to root).
+// prs: the branch's newest 3 pull requests, any state.
 export type Work = {
   branch?: string;
   root?: string;
   worktree?: boolean;
   prs?: { number: number; title: string; state: string; url: string }[];
-  clash?: { session: string; reason: "branch" | "files"; files?: string[] }[];
 };
 
 // writing: Claude is writing the handoff file. started: child (a session's name) was started reading
