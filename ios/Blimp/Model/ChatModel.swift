@@ -46,6 +46,10 @@ final class ChatModel {
     private(set) var runsStarting: Set<String> = []
     private(set) var runsSending: Set<String> = []
     private(set) var runsSent: Set<String> = []
+    /// The recap drawer's card (ChatExtras.swift): nil until asked for, or until one came by itself.
+    private(set) var recapLoad: RecapLoad?
+    /// One came by itself (after an hour away) and the drawer hasn't been open since: a dot on its button.
+    private(set) var recapNew = false
 
     private let store: Store
     /// The server it was made for: a warm chat from another pairing isn't reused.
@@ -56,6 +60,8 @@ final class ChatModel {
     @ObservationIgnored private var watching = false
     @ObservationIgnored private var replies: [String: CheckedContinuation<Reply, Never>] = [:]
     @ObservationIgnored private var timers: [String: Task<Void, Never>] = [:]
+    /// Bumped by each ask for a recap, so a late answer to an earlier ask shows nothing.
+    @ObservationIgnored private var recapAsk = 0
     /// Called with each new reply from Claude as it arrives (by `append`, never from a history), to read it aloud.
     @ObservationIgnored var onReply: ((ChatMessage) -> Void)?
 
@@ -376,6 +382,37 @@ final class ChatModel {
     func recap(auto: Bool) async throws -> Recap {
         guard let api = store.api else { throw APIError.offline }
         return try await api.recap(name: name, min: auto ? RecapCard.autoMin : nil)
+    }
+
+    /// Claude runs in it: the recap drawer can open.
+    var canRecap: Bool { session?.isClaude == true }
+
+    /// auto: after time away. It's kept, with the dot, only once it came; nothing if it doesn't, and nothing
+    /// while an ask is loading. Asked for (the drawer, or its refresh): "…" first, and why if it fails.
+    func loadRecap(auto: Bool) {
+        if auto, recapLoad == .loading { return }
+        recapAsk += 1
+        let ask = recapAsk
+        if !auto { recapLoad = .loading }
+        Task {
+            do {
+                let r = try await recap(auto: auto)
+                guard ask == recapAsk else { return }
+                recapLoad = .shown(r)
+                if auto { recapNew = true }
+            } catch {
+                if ask == recapAsk, !auto { recapLoad = .failed(RecapText.failure(Store.words(for: error))) }
+            }
+        }
+    }
+
+    /// The drawer opens (or is open): the dot goes, and with no card yet (or only why one didn't come) it asks.
+    func recapOpened() {
+        recapNew = false
+        switch recapLoad {
+        case .shown, .loading: break
+        case .failed, nil: loadRecap(auto: false)
+        }
     }
 
     /// Starts Claude again on this session's conversation; returns the new session's name.

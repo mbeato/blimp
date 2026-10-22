@@ -1,5 +1,5 @@
 // The drawer from the left: the project picker, the project's inbox (where a new chat starts, and which says how
-// many sessions in every project need you), its running sessions, then its past conversations folded under Earlier
+// many of its sessions need you), its running sessions, then its past conversations folded under Earlier
 // (each newest activity first, with its mark, and under its title its branch, jobs and handoff), and Settings. A tap
 // opens one; a swipe right on a row or press and hold has its actions (Stop, Mark read, End; Resume a past one).
 // It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`), a swipe left on it or beside
@@ -22,7 +22,7 @@ struct DrawerView: View {
     let onPick: (DrawerRow) -> Void
     let onInbox: () -> Void
     let onSettings: () -> Void
-    /// How many sessions, in every project, wait on you: the inbox's Needs you.
+    /// How many of the project's sessions wait on you: the inbox's Needs you.
     let needs: Int
     let actions: RowActions
     /// Opens a session: the one a row's Resume started.

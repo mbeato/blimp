@@ -2,8 +2,9 @@
 // Voice: the mic types (or answers the prompt), the speaker toggle reads new replies and prompts aloud,
 // and a banner says when another session starts waiting or finishes. While Claude works, Stop (and Stop and
 // send, with text in the box) is pinned above the box. Opened (or come back to) after time away: a "since you left" line, and
-// the return card at the top after an hour. The toolbar has the context gauge (from half full) and a menu
-// with Recap and Give a Secret; Run is under the commands of Claude's latest reply (ChatExtras.swift).
+// after an hour a dot on Recap, whose drawer from the right (HomeView has it) has the return card. The toolbar has
+// the context gauge (from half full), Recap and a menu with Give a Secret; Run is under the commands of Claude's
+// latest reply (ChatExtras.swift).
 import AudioToolbox
 import BlimpKit
 import SwiftUI
@@ -13,9 +14,13 @@ struct SessionView: View {
     let onInbox: () -> Void
     /// Shows another session in this one's place: the one Resume started, or a banner's.
     let onOpen: (String) -> Void
+    /// Opens the recap drawer.
+    let onRecap: () -> Void
+    /// The chat's model, once there is one: the recap drawer's card is in it.
+    let onModel: (ChatModel) -> Void
 
     var body: some View {
-        ChatScreen(name: name, onInbox: onInbox, onResumed: onOpen)
+        ChatScreen(name: name, onInbox: onInbox, onResumed: onOpen, onRecap: onRecap, onModel: onModel)
             .id(name)
     }
 }
@@ -26,13 +31,15 @@ private struct ChatScreen: View {
     let name: String
     let onInbox: () -> Void
     let onResumed: (String) -> Void
+    let onRecap: () -> Void
+    let onModel: (ChatModel) -> Void
     @Environment(Store.self) private var store
     @State private var model: ChatModel?
 
     var body: some View {
         Group {
             if let model {
-                ChatContent(model: model, onInbox: onInbox, onResumed: onResumed)
+                ChatContent(model: model, onInbox: onInbox, onResumed: onResumed, onRecap: onRecap)
             } else {
                 Color.clear
             }
@@ -40,6 +47,7 @@ private struct ChatScreen: View {
         .onAppear {
             let m = model ?? ChatModel.warm(name, store: store)
             model = m
+            onModel(m)
             m.open()
         }
         .onDisappear { model?.close() }
@@ -50,6 +58,7 @@ private struct ChatContent: View {
     let model: ChatModel
     let onInbox: () -> Void
     let onResumed: (String) -> Void
+    let onRecap: () -> Void
     @Environment(Store.self) private var store
     @Environment(Lock.self) private var lock
     @Environment(\.scenePhase) private var scenePhase
@@ -85,9 +94,6 @@ private struct ChatContent: View {
     @State private var returned = false
     /// It opened under the lock (a cold launch back into it): the first unlock is its first look, not a return.
     @State private var openedLocked = false
-    @State private var recap: RecapLoad?
-    /// Bumped by each ask for a recap and by closing the card, so a late answer to an earlier ask shows nothing.
-    @State private var recapAsk = 0
     @State private var confirming: RunConfirm?
     @State private var givingSecret = false
     @State private var secretsGiven = 0
@@ -189,9 +195,18 @@ private struct ChatContent: View {
                     .accessibilityLabel(meter.label)
                     .accessibilityIdentifier("contextGauge")
                 }
+                if model.canRecap {
+                    Button(action: onRecap) {
+                        Image(systemName: "text.alignleft")
+                            .overlay(alignment: .topTrailing) {
+                                if model.recapNew { Circle().fill(.blue).frame(width: 8, height: 8).offset(x: 5, y: -3) }
+                            }
+                    }
+                    .accessibilityLabel(model.recapNew ? "Recap, new" : "Recap")
+                    .accessibilityIdentifier("recapButton")
+                }
                 if canAct {
                     Menu {
-                        Button("Recap", systemImage: "text.alignleft") { loadRecap(auto: false) }
                         Button("Give a Secret…", systemImage: "key") { givingSecret = true }
                     } label: {
                         Label("More", systemImage: "ellipsis.circle")
@@ -274,17 +289,9 @@ private struct ChatContent: View {
         if !typable { workingRow }
     }
 
-    /// Over the top of the chat: Reconnecting, and the return card.
+    /// Over the top of the chat: Reconnecting.
     @ViewBuilder private var top: some View {
-        VStack(spacing: 0) {
-            if model.reconnecting && !model.ended { ReconnectingBar() }
-            if let recap {
-                RecapCardView(load: recap) {
-                    self.recap = nil
-                    recapAsk += 1
-                }
-            }
-        }
+        if model.reconnecting && !model.ended { ReconnectingBar() }
     }
 
     /// What sits under the chat: the end of it, a pointer to the Mac, or the prompt and the input box.
@@ -348,7 +355,7 @@ private struct ChatContent: View {
     /// The input box shows (controls' last case), and so does Stop on the working row.
     private var typable: Bool { !model.ended && !model.noChat && !model.starting && !model.macOnly }
 
-    /// Claude runs in it and the phone can type into it: Run, Recap, a secret, a handoff.
+    /// Claude runs in it and the phone can type into it: Run, a secret, a handoff.
     private var canAct: Bool { typable && model.session?.isClaude == true }
 
     /// In the scroll where the phone can't type into the session (no Stop); pinned above the box where it can.
@@ -362,11 +369,13 @@ private struct ChatContent: View {
         }
     }
 
-    /// Where to go next: the session a handoff started, or after an answer here, the next one waiting on you.
+    /// Where to go next: the session a handoff started, or after an answer here, the next one in this project
+    /// waiting on you.
     @ViewBuilder private var chip: some View {
         if let s = model.session, s.handoff?.state == .started, let child = s.handoff?.child, s.state != .working {
             ChipButton(words: "Handed off. Open the new session", id: "openHandoff") { onResumed(child) }
-        } else if model.answeredHere, model.prompt == nil, let next = NextWaiting.after(model.name, in: store.sessions) {
+        } else if model.answeredHere, model.prompt == nil, let dir = model.session?.dir,
+                  let next = NextWaiting.after(model.name, in: store.sessions, dir: dir) {
             ChipButton(words: next.words, id: "nextWaiting") { onResumed(next.session.name) }
         }
     }
@@ -405,7 +414,7 @@ private struct ChatContent: View {
 
     /// Back to this chat from the background or the lock: a new visit from when it was last on screen, so the
     /// reconnect's history (or, with the link still up, the messages there) places it again ("since you left"),
-    /// and the return card if it's been an hour.
+    /// and the return card waits in the recap drawer if it's been an hour.
     private func cameBack() {
         let last = ChatModel.lastShown(model.name)
         ChatModel.markShown(model.name)
@@ -414,28 +423,14 @@ private struct ChatContent: View {
         returned = true
         since = nil
         model.reconnectNow()
-        if recap == nil { recapIfDue(last) }
+        recapIfDue(last)
     }
 
-    /// The return card by itself: for a Claude session not on screen here for an hour (or ever).
+    /// The return card by itself, into the recap drawer (a dot on its button): for a Claude session not on
+    /// screen here for an hour (or ever). The drawer never opens by itself.
     private func recapIfDue(_ lastShown: Double?) {
-        guard model.session?.isClaude == true, RecapCard.due(lastShown: lastShown, now: Date.now.timeIntervalSince1970 * 1000) else { return }
-        loadRecap(auto: true)
-    }
-
-    /// auto: shows only once it has come, and nothing if it doesn't. From the menu: "…" first, and why if it fails.
-    private func loadRecap(auto: Bool) {
-        recapAsk += 1
-        let ask = recapAsk
-        if !auto { recap = .loading }
-        Task {
-            do {
-                let r = try await model.recap(auto: auto)
-                if ask == recapAsk { recap = .shown(r) }
-            } catch {
-                if ask == recapAsk { recap = auto ? nil : .failed(RecapText.failure(Store.words(for: error))) }
-            }
-        }
+        guard model.canRecap, RecapCard.due(lastShown: lastShown, now: Date.now.timeIntervalSince1970 * 1000) else { return }
+        model.loadRecap(auto: true)
     }
 
     private func hideKeyboard() {

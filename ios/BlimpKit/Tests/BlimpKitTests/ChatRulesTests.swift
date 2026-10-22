@@ -44,14 +44,16 @@ private struct NoSessions: Error {}
 
 // MARK: - Next waiting
 
-@Test func nextWaitingIsTheOtherSessionNeedsYouListsFirstAcrossFolders() {
-    var asked = session("asked", dir: "/c", created: 0, state: .done, since: 200)
+@Test func nextWaitingIsTheOtherSessionNeedsYouListsFirstInTheSameProject() {
+    var asked = session("asked", dir: "/a", created: 0, state: .done, since: 200)
     asked.note = Note(status: .question, text: "Which one?", at: 200)
     var finished = session("finished", dir: "/a", created: 0, state: .done, since: 400, unread: true)
     finished.note = Note(status: .done, text: "Done.", at: 400)
     let list = [
         session("here", dir: "/a", created: 0, state: .waiting, since: 500),
-        session("old", dir: "/b", created: 0, state: .waiting, since: 100),
+        // Another project's: its own inbox has it, not this chat's chip.
+        session("away", dir: "/b", created: 0, state: .waiting, since: 50),
+        session("old", dir: "/a", created: 0, state: .waiting, since: 100),
         session("new", dir: "/a", created: 0, state: .waiting, since: 300),
         asked,
         // Done and unread is the inbox's Done, not Waiting on you; working isn't listed.
@@ -60,32 +62,35 @@ private struct NoSessions: Error {}
         // Waiting, but no Claude in it to answer.
         session("shell", dir: "/a", created: 0, state: .waiting, since: 700, id: nil),
     ]
-    // The oldest wait first, as Needs you sorts every project's waits.
-    let next = NextWaiting.after("here", in: list)
+    // The oldest wait first, as Needs you sorts the project's waits.
+    let next = NextWaiting.after("here", in: list, dir: "/a")
     #expect(next?.session.name == "old")
     #expect(next?.count == 3)
     #expect(next?.words == "Next: old is waiting (3 left)")
     // Done with a question for you counts, as in the inbox.
-    #expect(NextWaiting.after("old", in: list)?.session.name == "asked")
-    #expect(NextWaiting.after("x", in: [asked])?.session.name == "asked")
+    #expect(NextWaiting.after("old", in: list, dir: "/a")?.session.name == "asked")
+    #expect(NextWaiting.after("x", in: [asked], dir: "/a")?.session.name == "asked")
     // The chip opens the session Needs you lists first.
-    #expect(NextWaiting.after("here", in: list)?.session.name == Inbox.needsYou(sessions: list, dir: nil, earlier: []).first { $0.session?.name != "here" }?.session?.name)
+    #expect(NextWaiting.after("here", in: list, dir: "/a")?.session.name == Inbox.needsYou(sessions: list, dir: "/a", earlier: []).first { $0.session?.name != "here" }?.session?.name)
+    // Only another project waits: no chip.
+    #expect(NextWaiting.after("away", in: list, dir: "/b") == nil)
+    #expect(NextWaiting.after("x", in: [asked], dir: "/b") == nil)
     // Two that started waiting at once: the list's order.
     let tie = [session("b", dir: "/a", created: 0, state: .waiting, since: 5), session("a", dir: "/a", created: 0, state: .waiting, since: 5)]
-    #expect(NextWaiting.after("x", in: tie)?.session.name == "b")
+    #expect(NextWaiting.after("x", in: tie, dir: "/a")?.session.name == "b")
 }
 
 @Test func withOneOtherWaitingTheChipNamesItAloneAndWithNoneThereIsNoChip() {
     let one = [session("here", dir: "/a", created: 1, state: .done), session("other", dir: "/a", created: 1, state: .waiting, since: 5)]
-    #expect(NextWaiting.after("here", in: one)?.words == "Next: other is waiting")
-    #expect(NextWaiting.after("other", in: one) == nil)
+    #expect(NextWaiting.after("here", in: one, dir: "/a")?.words == "Next: other is waiting")
+    #expect(NextWaiting.after("other", in: one, dir: "/a") == nil)
 }
 
 @Test func aFolderTrustQuestionCountsAsWaitingThoughClaudeHasNoConversationYet() throws {
     let prompt = try JSONDecoder().decode(Prompt.self, from: Data(#"{"kind":"trust","at":1,"answerable":true,"options":["Yes","No"]}"#.utf8))
     let trust = Session(name: "new", created: 1, dir: "/a", kind: "claude", label: nil, sessionId: nil, title: "new", updatedAt: nil,
                         state: .waiting, stateSince: 2, prompt: prompt)
-    #expect(NextWaiting.after("here", in: [trust])?.session.name == "new")
+    #expect(NextWaiting.after("here", in: [trust], dir: "/a")?.session.name == "new")
 }
 
 // MARK: - Run

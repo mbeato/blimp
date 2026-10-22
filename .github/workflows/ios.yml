@@ -141,7 +141,7 @@ jobs:
         run: |
           grep -F "Thanks, ship it" "$E2E_DIR/chat.in" || { echo "demo-chat got:"; cat -v "$E2E_DIR/chat.in"; exit 1; }
           [ "$(cat "$E2E_DIR/prompt.in")" = 1 ] || { echo "demo-ask got:"; cat -v "$E2E_DIR/prompt.in"; exit 1; }
-          # Allow from another project's inbox (POST /answer): 1, maybe after the empty paste a new zmx client sends
+          # Allow from its project's inbox (POST /answer): 1, maybe after the empty paste a new zmx client sends
           [ "$(tr '\033' '~' < "$E2E_DIR/perm.in" | sed 's/~\[20[01]~//g')" = 1 ] || { echo "demo-perm got:"; od -c "$E2E_DIR/perm.in"; exit 1; }
           # Esc, after the empty paste blimpd sends first on a new zmx client (zmx 0.5 drops a first Esc)
           [ "$(tr '\033' '~' < "$E2E_DIR/stop.in")" = "~[200~~[201~~" ] || {

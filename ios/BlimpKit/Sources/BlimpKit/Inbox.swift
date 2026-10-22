@@ -1,8 +1,8 @@
 // A project's inbox (docs/DESIGN.md, "Inbox"): its sessions and unread past conversations sorted under Waiting
 // on you, Done (finished, not read yet) and Working, each with a few words from what it asks or Haiku's note on
-// its last turn, and the rest folded as "other". Across every project, Needs you: each waiting session, oldest
-// first, which the phone shows on top with its answers. The Mac builds the same (app/src/lib/inbox.ts), by the
-// same rules.
+// its last turn, and the rest folded as "other". Needs you: the project's sessions waiting on you, oldest first,
+// which the phone shows on top with its answers (another project's are in its own inbox). The Mac builds the
+// same (app/src/lib/inbox.ts), by the same rules.
 import Foundation
 
 public struct InboxLine: Equatable, Identifiable, Sendable {
@@ -13,8 +13,6 @@ public struct InboxLine: Equatable, Identifiable, Sendable {
     public let activity: Double
     /// Milliseconds: when it started waiting or working (its state's start), else its activity.
     public let since: Double
-    /// The project it's in.
-    public let dir: String
 
     public var id: String {
         switch item {
@@ -34,16 +32,14 @@ public struct InboxLine: Equatable, Identifiable, Sendable {
         self.words = words
         activity = s.activity
         since = s.stateSince ?? s.activity
-        dir = s.dir
     }
 
-    init(_ c: Conversation, dir: String) {
+    init(_ c: Conversation) {
         item = .past(c)
         title = c.title
         words = c.note?.text
         activity = c.updatedAt
         since = c.updatedAt
-        self.dir = dir
     }
 }
 
@@ -83,7 +79,7 @@ public struct Inbox: Equatable, Sendable {
             else { other.append(InboxLine(s, words: nil)) }
         }
         for c in Self.unreadPast(dir: dir, sessions: sessions, earlier: earlier) {
-            if c.note?.status == .question { waiting.append(InboxLine(c, dir: dir)) } else { done.append(InboxLine(c, dir: dir)) }
+            if c.note?.status == .question { waiting.append(InboxLine(c)) } else { done.append(InboxLine(c)) }
         }
         waiting = Self.newestFirst(waiting)
         done = Self.newestFirst(done)
@@ -91,13 +87,11 @@ public struct Inbox: Equatable, Sendable {
         working = Self.oldestFirst(working)
     }
 
-    /// Needs you, across every project: each running session that waits on you (as Waiting on you has them),
-    /// and dir's unread past conversations with a question, the oldest wait first.
-    public static func needsYou(sessions: [Session], dir: String?, earlier: [Conversation]) -> [InboxLine] {
-        let past = dir.map { d in
-            unreadPast(dir: d, sessions: sessions, earlier: earlier).filter { $0.note?.status == .question }.map { InboxLine($0, dir: d) }
-        } ?? []
-        return oldestFirst(sessions.compactMap(waitingLine) + past)
+    /// Needs you, in dir: each of its running sessions that waits on you (as Waiting on you has them), and its
+    /// unread past conversations with a question, the oldest wait first.
+    public static func needsYou(sessions: [Session], dir: String, earlier: [Conversation]) -> [InboxLine] {
+        let past = unreadPast(dir: dir, sessions: sessions, earlier: earlier).filter { $0.note?.status == .question }.map { InboxLine($0) }
+        return oldestFirst(sessions.filter { $0.dir == dir }.compactMap(waitingLine) + past)
     }
 
     /// Only what changed since `since` (ms): the lines with activity from then on. Waiting on you stays whole.
@@ -152,8 +146,8 @@ public enum InboxText {
     }
 
     /// Coming back after a while: "4 finished, 1 asking, 2 working", leaving out a count of none. The rows that
-    /// "Show these" shows (inbox.changed(since:)): the project's finished and working since then, and Needs you
-    /// (every project's), so the counts and the list agree. nil: nothing to say.
+    /// "Show these" shows (inbox.changed(since:)): the project's finished and working since then, and its Needs
+    /// you, so the counts and the list agree. nil: nothing to say.
     public static func since(_ since: Double, inbox: Inbox, needs: [InboxLine]) -> String? {
         let shown = inbox.changed(since: since)
         let finished = shown.done.count
