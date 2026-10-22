@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { guard, guardFile, guardList, HttpError, listDir, listFiles, secretPaths, socketDir, writeFile } from "../src/files";
+import { deleteEntry, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, renameEntry, secretPaths, socketDir, writeFile } from "../src/files";
 import { socketPath } from "../src/sessions";
 
 // A fake home with a sibling folder outside it.
@@ -135,6 +135,103 @@ describe("guardFile", () => {
     for (const p of [join(blimp, "secrets"), join(blimp, "secrets", "sub")]) expect(status(() => guardList(p, home, blimp))).toBe(403);
     expect(guardList(blimp, home, blimp)).toBe(blimp);
     expect(guardList(join(blimp, "secrets-notes"), home, blimp)).toBe(join(blimp, "secrets-notes"));
+  });
+});
+
+describe("rename, move and delete", () => {
+  // A third fake home, with blimp's folder in it as on a real box.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-entries-")));
+  const home = join(root, "home");
+  const blimp = join(home, ".blimp");
+  const away = join(root, "away");
+  mkdirSync(join(blimp, "secrets"), { recursive: true });
+  mkdirSync(away);
+  writeFileSync(join(blimp, "token"), "mac-token");
+  writeFileSync(join(away, "keep.txt"), "keep");
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const statusOf = async (f: () => Promise<unknown>) => {
+    try {
+      await f();
+      return 0;
+    } catch (e) {
+      return e instanceof HttpError ? e.status : (e as any)?.code ?? -1;
+    }
+  };
+
+  test("guardEntry: the name in its folder's real path; a link is itself, not what it points to", () => {
+    mkdirSync(join(home, "p"), { recursive: true });
+    symlinkSync(join(home, "p"), join(home, "p-link"));
+    symlinkSync(away, join(home, "away-link"));
+    expect(guardEntry(join(home, "p", "a.txt"), home, blimp)).toBe(join(home, "p", "a.txt"));
+    expect(guardEntry(join(home, "p-link"), home, blimp)).toBe(join(home, "p-link"));
+    expect(guardEntry(join(home, "p-link", "a.txt"), home, blimp)).toBe(join(home, "p", "a.txt"));
+    expect(guardEntry(join(home, "away-link"), home, blimp)).toBe(join(home, "away-link"));
+  });
+
+  test("guardEntry refuses home, outside it, blimp's own files and the folders that hold them", () => {
+    for (const p of [home, "/", join(away, "keep.txt"), join(home, "away-link", "keep.txt")]) expect(status(() => guardEntry(p, home, blimp))).toBe(403);
+    for (const p of [blimp, join(blimp, "token"), join(blimp, "secrets"), join(blimp, "secrets", "API_KEY")]) expect(status(() => guardEntry(p, home, blimp))).toBe(403);
+    expect(status(() => guardEntry("relative", home, blimp))).toBe(400);
+    expect(status(() => guardEntry(null, home, blimp))).toBe(400);
+    // A link to ~/.blimp is refused too: deleting what it points to is never on the table, but a
+    // ~/.blimp that is a link would be the real one.
+    symlinkSync(blimp, join(home, "blimp-link"));
+    expect(status(() => guardEntry(join(home, "blimp-link"), home, blimp))).toBe(403);
+    // Other things in ~/.blimp are the user's to tidy (uploads).
+    expect(guardEntry(join(blimp, "uploads"), home, blimp)).toBe(join(blimp, "uploads"));
+  });
+
+  test("renameEntry renames and moves; never over a name that's there; never a folder into itself", async () => {
+    const d = join(home, "r");
+    mkdirSync(join(d, "docs", "deep"), { recursive: true });
+    writeFileSync(join(d, "a.txt"), "a");
+    writeFileSync(join(d, "b.txt"), "b");
+    expect(await renameEntry(join(d, "a.txt"), join(d, "c.txt"))).toEqual({ path: join(d, "c.txt") });
+    expect(readFileSync(join(d, "c.txt"), "utf8")).toBe("a");
+    expect(existsSync(join(d, "a.txt"))).toBe(false);
+    // Into a folder.
+    await renameEntry(join(d, "c.txt"), join(d, "docs", "c.txt"));
+    expect(readFileSync(join(d, "docs", "c.txt"), "utf8")).toBe("a");
+    // A name that's there: 409, and both stay as they were.
+    writeFileSync(join(d, "docs", "b.txt"), "other");
+    expect(await statusOf(() => renameEntry(join(d, "b.txt"), join(d, "docs", "b.txt")))).toBe(409);
+    expect(readFileSync(join(d, "docs", "b.txt"), "utf8")).toBe("other");
+    expect(readFileSync(join(d, "b.txt"), "utf8")).toBe("b");
+    expect(await statusOf(() => renameEntry(join(d, "b.txt"), join(d, "b.txt")))).toBe(409);
+    // A folder into itself or one inside it.
+    expect(await statusOf(() => renameEntry(join(d, "docs"), join(d, "docs", "docs")))).toBe(400);
+    expect(await statusOf(() => renameEntry(join(d, "docs"), join(d, "docs", "deep", "docs")))).toBe(400);
+    // A folder moves with what's in it.
+    await renameEntry(join(d, "docs"), join(d, "papers"));
+    expect(readFileSync(join(d, "papers", "c.txt"), "utf8")).toBe("a");
+    // Gone: 404 (ENOENT, which the server answers with 404). A missing target folder isn't made.
+    expect(await statusOf(() => renameEntry(join(d, "nope"), join(d, "x")))).toBe("ENOENT");
+    expect(await statusOf(() => renameEntry(join(d, "b.txt"), join(d, "no", "b.txt")))).toBe("ENOENT");
+    expect(existsSync(join(d, "no"))).toBe(false);
+  });
+
+  test("renameEntry moves a link as a link", async () => {
+    const d = join(home, "l");
+    mkdirSync(d);
+    symlinkSync(join(away, "keep.txt"), join(d, "to-keep"));
+    await renameEntry(guardEntry(join(d, "to-keep"), home, blimp), guardEntry(join(d, "moved"), home, blimp));
+    expect(lstatSync(join(d, "moved")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(away, "keep.txt"), "utf8")).toBe("keep");
+  });
+
+  test("deleteEntry: a file, a folder with what's in it, a link but not what it points to", async () => {
+    const d = join(home, "del");
+    mkdirSync(join(d, "full", "deeper"), { recursive: true });
+    writeFileSync(join(d, "f.txt"), "f");
+    writeFileSync(join(d, "full", "deeper", "x"), "x");
+    symlinkSync(away, join(d, "full", "out")); // a link inside a deleted folder isn't followed
+    symlinkSync(away, join(d, "out"));
+    await deleteEntry(join(d, "f.txt"));
+    await deleteEntry(join(d, "full"));
+    await deleteEntry(guardEntry(join(d, "out"), home, blimp));
+    expect(existsSync(join(d, "f.txt")) || existsSync(join(d, "full")) || existsSync(join(d, "out"))).toBe(false);
+    expect(readFileSync(join(away, "keep.txt"), "utf8")).toBe("keep");
+    expect(await statusOf(() => deleteEntry(join(d, "f.txt")))).toBe("ENOENT");
   });
 });
 

@@ -12,7 +12,7 @@ import { newScan, readLast } from "./chat";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
-import { createFile, download, guard, guardFile, guardList, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, upload, writeFile } from "./files";
+import { createFile, deleteEntry, download, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, renameEntry, upload, writeFile } from "./files";
 import { conversations, projectFolderName, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { askHandoff, startHandoffs } from "./handoff";
@@ -312,6 +312,16 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (base !== null && !Number.isFinite(Number(base))) throw new HttpError(400, "baseMtime must be a number");
     const body = new Uint8Array(await req.arrayBuffer());
     return Response.json(writeFile(real, body, base === null ? undefined : Number(base)));
+  }
+  if (path === "/fs/file" && req.method === "DELETE") {
+    await deleteEntry(guardEntry(q.get("path")));
+    return new Response(null, { status: 204 });
+  }
+  // A rename, or a move into another folder.
+  if (path === "/fs/rename" && req.method === "POST") {
+    const { from, to } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (typeof from !== "string" || typeof to !== "string") throw new HttpError(400, "from and to are required");
+    return Response.json(await renameEntry(guardEntry(from), guardEntry(to)));
   }
   if (path === "/fs/download" && get) return download(guardFile(q.get("path")), req.signal);
   if (path === "/fs/upload" && req.method === "PUT") {

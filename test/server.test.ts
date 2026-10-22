@@ -1357,6 +1357,43 @@ describe("files over HTTP", () => {
     expect((await api("/fs/mkdir", { method: "POST", body: "{}" })).status).toBe(400);
   });
 
+  test("rename and move: never over a name that's there, never a folder into itself; delete: files and folders", async () => {
+    const q = (p: string) => encodeURIComponent(p);
+    const mv = (from: unknown, to: unknown) => api("/fs/rename", { method: "POST", body: JSON.stringify({ from, to }) });
+    const del = (p: string) => api(`/fs/file?path=${q(p)}`, { method: "DELETE" });
+    const dir = join(homeDir, "mv");
+    mkdirSync(join(dir, "docs"), { recursive: true });
+    writeFileSync(join(dir, "a.txt"), "a");
+    writeFileSync(join(dir, "docs", "b.txt"), "b");
+
+    const r = await mv(join(dir, "a.txt"), join(dir, "c.txt"));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ path: join(dir, "c.txt") });
+    expect(readFileSync(join(dir, "c.txt"), "utf8")).toBe("a");
+    expect((await mv(join(dir, "c.txt"), join(dir, "docs", "c.txt"))).status).toBe(200);
+    expect(readFileSync(join(dir, "docs", "c.txt"), "utf8")).toBe("a");
+
+    writeFileSync(join(dir, "b.txt"), "other b");
+    expect((await mv(join(dir, "b.txt"), join(dir, "docs", "b.txt"))).status).toBe(409);
+    expect(readFileSync(join(dir, "docs", "b.txt"), "utf8")).toBe("b");
+    expect((await mv(join(dir, "docs"), join(dir, "docs", "docs"))).status).toBe(400);
+    expect((await mv(join(dir, "missing"), join(dir, "x"))).status).toBe(404);
+    expect((await mv(join(dir, "b.txt"), join(dir, "no", "b.txt"))).status).toBe(404);
+    expect(existsSync(join(dir, "no"))).toBe(false);
+    expect((await mv(join(dir, "b.txt"), join(tmp, "b.txt"))).status).toBe(403);
+    expect((await mv(join(dir, "b.txt"), "b2.txt")).status).toBe(400);
+    expect((await mv(join(dir, "b.txt"), undefined)).status).toBe(400);
+
+    expect((await del(join(dir, "b.txt"))).status).toBe(204);
+    expect(existsSync(join(dir, "b.txt"))).toBe(false);
+    expect((await del(join(dir, "docs"))).status).toBe(204);
+    expect(existsSync(join(dir, "docs"))).toBe(false);
+    expect((await del(join(dir, "docs"))).status).toBe(404);
+    // Home itself and blimp's own files: the secrets tests below, on a blimpd with a home of its own.
+    expect((await del("/etc/passwd")).status).toBe(403);
+    expect((await api(`/fs/file?path=relative`, { method: "DELETE" })).status).toBe(400);
+  });
+
   test("download: a file as it is, a folder as .tar.gz; inside home only", async () => {
     const q = (p: string) => encodeURIComponent(p);
     const dir = join(homeDir, "dl");
@@ -2022,6 +2059,12 @@ describe("secrets", () => {
         expect((await sApi(`/fs/file?path=${q(file)}`, { method: "PUT", body: "mine" }, t)).status).toBe(403);
         for (const route of ["/fs/mkdir", "/fs/create"])
           expect((await sApi(route, { method: "POST", body: JSON.stringify({ path: join(secrets, "PLANTED") }) }, t)).status).toBe(403);
+        // Nor renames, moves or deletes one, the secrets folder or the folders that hold it.
+        expect((await sApi("/fs/rename", { method: "POST", body: JSON.stringify({ from: file, to: join(sHome, "out") }) }, t)).status).toBe(403);
+        expect((await sApi("/fs/rename", { method: "POST", body: JSON.stringify({ from: secrets, to: join(sHome, "out") }) }, t)).status).toBe(403);
+        writeFileSync(join(sHome, "plant"), "mine");
+        expect((await sApi("/fs/rename", { method: "POST", body: JSON.stringify({ from: join(sHome, "plant"), to: join(secrets, "PLANTED") }) }, t)).status).toBe(403);
+        for (const p of [file, secrets, sDir, sHome, join(sDir, "token")]) expect((await sApi(`/fs/file?path=${q(p)}`, { method: "DELETE" }, t)).status).toBe(403);
         // Nor lists its names.
         expect((await sApi(`/fs/list?path=${q(secrets)}`, {}, t)).status).toBe(403);
         expect((await sApi(`/fs/files?root=${q(secrets)}`, {}, t)).status).toBe(403);
