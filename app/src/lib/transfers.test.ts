@@ -30,9 +30,23 @@ test("pastedImages names a pasted screenshot like the Mac does, and leaves text 
 });
 
 test("dropPoint: a Mac's drag position is already in the page's pixels; elsewhere it is divided by the scale", () => {
-  // A Retina Mac, pointer near the bottom right of an 800 x 600 window: there, not at half the way.
-  expect(dropPoint({ x: 790, y: 590 }, { mac: true, dpr: 2 })).toEqual({ x: 790, y: 590 });
-  expect(dropPoint({ x: 790, y: 590 }, { mac: true, dpr: 1 })).toEqual({ x: 790, y: 590 });
-  expect(dropPoint({ x: 1580, y: 1180 }, { mac: false, dpr: 2 })).toEqual({ x: 790, y: 590 });
-  expect(dropPoint({ x: 300, y: 150 }, { mac: false, dpr: 1.5 })).toEqual({ x: 200, y: 100 });
+  // A Retina Mac, pointer near the bottom right of an 800 x 600 page with no title bar inset:
+  // there, not at half the way.
+  const flat = { frameH: 600, viewH: 600 };
+  expect(dropPoint({ x: 790, y: 590 }, { mac: true, dpr: 2, ...flat })).toEqual({ x: 790, y: 590 });
+  expect(dropPoint({ x: 790, y: 590 }, { mac: true, dpr: 1, ...flat })).toEqual({ x: 790, y: 590 });
+  expect(dropPoint({ x: 1580, y: 1180 }, { mac: false, dpr: 2, ...flat })).toEqual({ x: 790, y: 590 });
+  expect(dropPoint({ x: 300, y: 150 }, { mac: false, dpr: 1.5, ...flat })).toEqual({ x: 200, y: 100 });
+});
+
+test("dropPoint: on a Mac, y is measured from the bottom, since the web view's frame starts under the title bar", () => {
+  // A 900 pt frame, the top 28 pt under the title bar: the page is 872 high, and a pointer 500 pt
+  // below the frame's top is 472 below the page's.
+  const o = { mac: true, dpr: 2, frameH: 900, viewH: 872 };
+  expect(dropPoint({ x: 300, y: 500 }, o)).toEqual({ x: 300, y: 472 });
+  // The page's top and bottom rows, and the same 28 pt anywhere between.
+  expect(dropPoint({ x: 10, y: 29 }, o)).toEqual({ x: 10, y: 1 });
+  expect(dropPoint({ x: 10, y: 899 }, o)).toEqual({ x: 10, y: 871 });
+  // Windows and Linux: no change, from the top.
+  expect(dropPoint({ x: 600, y: 1000 }, { ...o, mac: false })).toEqual({ x: 300, y: 500 });
 });
