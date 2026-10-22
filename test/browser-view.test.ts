@@ -20,10 +20,13 @@ const PAGE = `<!doctype html><title>start</title>
 <button onclick="document.title='clicked'">b</button>
 <form style="position:absolute;top:80px" onsubmit="event.preventDefault();document.title='sent:'+document.querySelector('input').value"><input autofocus></form>
 <p style="position:absolute;top:140px" id="p">pick me</p>`;
+// A long page with a text field at its top, for a phone's touches.
+const TALL = `<!doctype html><meta name="viewport" content="width=device-width"><title>tall</title>
+<body style="margin:0"><input id="i" style="position:fixed;left:10px;top:10px;width:200px;height:30px"><div style="height:5000px"></div>`;
 const site = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
-  fetch: (r) => new Response(new URL(r.url).pathname === "/two" ? "<title>two</title>2" : PAGE, { headers: { "content-type": "text/html" } }),
+  fetch: (r) => new Response({ "/two": "<title>two</title>2", "/tall": TALL }[new URL(r.url).pathname] ?? PAGE, { headers: { "content-type": "text/html" } }),
 });
 const base = `http://127.0.0.1:${site.port}`;
 
@@ -233,4 +236,84 @@ live("frames are sharp, and at the page's size while it's being scrolled, clicke
   expect(w.frames.slice(m).every((f) => JSON.stringify(jpegSize(f)) === "[400,300]")).toBe(true);
   expect(await evalIn(id, "innerWidth")).toBe(400);
   w.v.close();
+}, 30_000);
+
+// The phone: a size with mobile set lays the page out as a phone (touch, a phone's user agent), and
+// the screen used last sets the size, so the Mac's comes back once the phone leaves or is used again.
+const PHONE = { type: "size", width: 390, height: 700, scale: 2, mobile: true };
+const layout = (id: string) => evalIn(id, "JSON.stringify({ w: innerWidth, coarse: matchMedia('(pointer: coarse)').matches, android: /Android/.test(navigator.userAgent) })");
+
+live("a phone view lays the page out as a phone; the Mac's size comes back when it leaves", async () => {
+  const id = await gate.createTab("/f", base + "/tall");
+  await until(async () => (await title(id)) === "tall", "the page");
+  const mac = await viewer(id);
+  mac.send({ type: "size", width: 800, height: 600, scale: 1 });
+  await until(async () => (await layout(id)) === JSON.stringify({ w: 800, coarse: false, android: false }), "the Mac's layout");
+  const phone = await viewer(id);
+  phone.send(PHONE);
+  await until(async () => (await layout(id)) === JSON.stringify({ w: 390, coarse: true, android: true }), "the phone's layout");
+  // Both still get frames, the Mac's at the phone's page size.
+  const n = mac.frames.length;
+  await evalIn(id, "document.body.style.background='red'");
+  await until(() => mac.frames.length > n, "a frame for the Mac");
+  expect(mac.msgs.filter((m) => m.type === "frame").at(-1)).toEqual({ type: "frame", width: 390, height: 700 });
+  phone.v.close();
+  await until(async () => (await layout(id)) === JSON.stringify({ w: 800, coarse: false, android: false }), "the Mac's layout again");
+  mac.v.close();
+}, 30_000);
+
+live("using a screen takes the size: a click on the Mac, then a touch on the phone", async () => {
+  const id = await gate.createTab("/f", base + "/tall");
+  await until(async () => (await title(id)) === "tall", "the page");
+  const mac = await viewer(id);
+  mac.send({ type: "size", width: 800, height: 600, scale: 1 });
+  const phone = await viewer(id);
+  phone.send(PHONE);
+  await until(async () => (await layout(id)).includes('"w":390'), "the phone's size");
+  // A pointer passing over the Mac's page isn't using it.
+  mac.send({ type: "mouse", event: "mouseMoved", x: 300, y: 300, button: "none", buttons: 0, clickCount: 0, modifiers: 0 });
+  await Bun.sleep(300);
+  expect(await layout(id)).toContain('"w":390');
+  mac.send({ type: "mouse", event: "mousePressed", x: 300, y: 300, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+  mac.send({ type: "mouse", event: "mouseReleased", x: 300, y: 300, button: "left", buttons: 0, clickCount: 1, modifiers: 0 });
+  await until(async () => (await layout(id)) === JSON.stringify({ w: 800, coarse: false, android: false }), "the Mac's size after its click");
+  phone.send({ type: "touch", event: "touchStart", points: [{ x: 200, y: 400, id: 1 }] });
+  phone.send({ type: "touch", event: "touchEnd", points: [] });
+  await until(async () => (await layout(id)) === JSON.stringify({ w: 390, coarse: true, android: true }), "the phone's size after its touch");
+  mac.v.close();
+  phone.v.close();
+}, 30_000);
+
+live("a swipe scrolls the page and keeps gliding; a tap says whether a text field took it", async () => {
+  const id = await gate.createTab("/f", base + "/tall");
+  await until(async () => (await title(id)) === "tall", "the page");
+  const phone = await viewer(id);
+  phone.send(PHONE);
+  await until(async () => (await layout(id)).includes('"w":390'), "the phone's size");
+  phone.send({ type: "touch", event: "touchStart", points: [{ x: 200, y: 600, id: 1 }] });
+  for (let y = 560; y >= 280; y -= 40) {
+    phone.send({ type: "touch", event: "touchMove", points: [{ x: 200, y, id: 1 }] });
+    await Bun.sleep(8);
+  }
+  phone.send({ type: "touch", event: "touchEnd", points: [] });
+  await until(async () => (await evalIn(id, "scrollY")) > 0, "a scroll");
+  const released = await evalIn(id, "scrollY");
+  await until(async () => (await evalIn(id, "scrollY")) > released + 50, "the glide after the finger lifts");
+
+  const tap = (x: number, y: number) => {
+    phone.send({ type: "touch", event: "touchStart", points: [{ x, y, id: 2 }] });
+    phone.send({ type: "touch", event: "touchEnd", points: [] });
+  };
+  // A tap while it glides only stops the glide, as on a phone: wait for it to settle.
+  let last = -1;
+  await until(async () => {
+    const y = await evalIn(id, "scrollY");
+    return y === last || ((last = y), (await Bun.sleep(200), false));
+  }, "the glide to stop");
+  tap(50, 25);
+  await until(() => phone.msgs.filter((m) => m.type === "focus").at(-1)?.editable === true, "a text field focused");
+  expect(await evalIn(id, "document.activeElement.id")).toBe("i");
+  tap(200, 400);
+  await until(() => phone.msgs.filter((m) => m.type === "focus").at(-1)?.editable === false, "no text field focused");
+  phone.v.close();
 }, 30_000);

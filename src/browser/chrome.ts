@@ -19,6 +19,9 @@ export function findChrome(home = homedir(), which: (n: string) => string | null
     const p = which(n);
     if (p) return p;
   }
+  // macOS: Google Chrome's app (the iPhone app's simulator tests run blimpd on GitHub's Mac).
+  const app = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  if (process.platform === "darwin" && existsSync(app)) return app;
   const root = browsers || join(home, ".cache", "ms-playwright");
   let dirs: string[] = [];
   try {
@@ -36,13 +39,20 @@ export function findChrome(home = homedir(), which: (n: string) => string | null
 // Chrome's own user agent says "HeadlessChrome", which sites like Google answer with robot
 // checks. This is the one a normal Chrome of that version sends (minor version zeroed, as Chrome
 // does). versionOutput: what `chrome --version` prints.
+const majorOf = (versionOutput: string) => versionOutput.match(/(\d+)\.\d+\.\d+\.\d+/)?.[1] ?? "140";
 export function userAgentFor(versionOutput: string): string {
-  const major = versionOutput.match(/(\d+)\.\d+\.\d+\.\d+/)?.[1] ?? "140";
-  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorOf(versionOutput)}.0.0.0 Safari/537.36`;
+}
+
+// What a phone's view (view.ts) makes the tab say instead: Chrome on Android, the same version, so
+// sites send their phone pages. versionOutput: `chrome --version`, or Browser.getVersion's product.
+export function phoneUserAgentFor(versionOutput: string): string {
+  return `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorOf(versionOutput)}.0.0.0 Mobile Safari/537.36`;
 }
 
 // --password-store=basic: on a server with no desktop, Chrome otherwise waits on a keyring for the
-// cookie key, and every page load hangs once its request is sent. Not --enable-automation (it
+// cookie key, and every page load hangs once its request is sent; --use-mock-keychain is the same
+// for macOS's Keychain. Not --enable-automation (it
 // marks the browser as automated); AutomationControlled off for the same reason.
 export function chromeArgs(profileDir: string, ua: string): string[] {
   return [
@@ -50,6 +60,7 @@ export function chromeArgs(profileDir: string, ua: string): string[] {
     "--remote-debugging-pipe",
     `--user-data-dir=${profileDir}`,
     "--password-store=basic",
+    "--use-mock-keychain",
     "--no-first-run",
     // Drawn at 2x, so a Retina Mac's view is sharp (the screencast ignores the emulated scale); a
     // view at 1x gets frames scaled down to its size (view.ts), and screenshots come at 2x.

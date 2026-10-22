@@ -5,7 +5,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromeArgs, findChrome, launchChrome, userAgentFor, type Chrome } from "../src/browser/chrome";
+import { chromeArgs, findChrome, launchChrome, phoneUserAgentFor, userAgentFor, type Chrome } from "../src/browser/chrome";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-chrome-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -14,6 +14,11 @@ test("sites see a normal Chrome of the same version", () => {
   expect(userAgentFor("Chromium 156.0.8078.4")).toBe("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36");
   expect(userAgentFor("Google Chrome 141.0.7390.54 \n")).toContain(" Chrome/141.0.0.0 ");
   expect(userAgentFor("nonsense")).toContain(" Chrome/140.0.0.0 ");
+});
+
+test("a phone sees a phone's Chrome of the same version", () => {
+  expect(phoneUserAgentFor("HeadlessChrome/156.0.8078.4")).toBe("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36");
+  expect(phoneUserAgentFor("nonsense")).toContain(" Chrome/140.0.0.0 Mobile ");
 });
 
 test("flags: headless over a pipe, no keyring, not marked as automated", () => {
