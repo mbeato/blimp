@@ -68,7 +68,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 
 // Opens a file in a tab, at a line (and column) if given. Set by the workbench for the
 // terminal's ⌘-click.
-export type Opener = (path: string, line?: number, col?: number) => void;
+export type Opener = (path: string, line?: number, col?: number, focus?: boolean) => void;
 
 // Opens a server port in a browser tab (or brings its tab forward); with none, a new browser tab;
 // with a server browser tab's address, that address (lib/browser.ts serverTabTarget).
@@ -103,6 +103,7 @@ type Doc = {
   deleted: boolean; // gone on the server; still open, and only an explicit Save writes it back
   notice: string; // why the last save failed
   reveal: { line: number; col?: number } | null; // where to put the cursor once it's in the editor
+  focus: boolean; // the editor takes the focus when it shows this; not after a click in the tree
   timer: ReturnType<typeof setTimeout> | undefined; // the pending autosave
   inflight: Promise<void> | null; // the save being sent
   unsub: () => void;
@@ -125,6 +126,7 @@ const newDoc = (path: string): Doc => ({
   deleted: false,
   notice: "",
   reveal: null,
+  focus: true,
   timer: undefined,
   inflight: null,
   unsub: () => {},
@@ -389,10 +391,12 @@ export function Workbench(props: {
   const setActive = (path: string | null) => {
     const prev = active ? docs.get(active) : undefined;
     if (prev && prev.path !== path && getSettings().autosave) flush(prev);
+    const next = path ? docs.get(path) : undefined;
+    if (next) next.focus = true;
     setActiveState(path);
   };
 
-  const openFile: Opener = (path, line, col) => {
+  const openFile: Opener = (path, line, col, focus = true) => {
     let doc = docs.get(path);
     if (!doc) {
       doc = newDoc(path);
@@ -404,6 +408,7 @@ export function Workbench(props: {
       if (hasPreview(doc.viewer)) doc.editing = true;
     }
     setActive(path);
+    doc.focus = focus;
     setClosing(null);
     rerender();
   };
@@ -998,8 +1003,9 @@ export function Workbench(props: {
       ed.setModel(doc.model);
       if (doc.viewState) ed.restoreViewState(doc.viewState);
       editorDoc.current = doc;
-      if (!doc.reveal) ed.focus();
+      if (!doc.reveal && doc.focus) ed.focus();
     }
+    doc.focus = true;
     if (doc.reveal) {
       const { line, col } = doc.reveal;
       doc.reveal = null;
@@ -1139,13 +1145,13 @@ export function Workbench(props: {
               onClick={(ev) => {
                 // The end of a drag isn't a click.
                 if (rowDragged.current) return void (rowDragged.current = false);
-                // For the tree's keys: WebKit doesn't focus a button that's clicked. (A text file
-                // opened here takes the focus to the editor.)
+                // For the tree's keys: WebKit doesn't focus a button that's clicked. A file opened
+                // here leaves it there, as VS Code's explorer does, so ⌘⌫ never reaches the editor.
                 ev.currentTarget.focus();
                 if (e.kind === "dir") toggleDir(path);
                 else {
                   setTarget(dir);
-                  openFile(path);
+                  openFile(path, undefined, undefined, false);
                 }
               }}
             >

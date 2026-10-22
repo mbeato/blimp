@@ -9,8 +9,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { fixtureDir, frontTab, killSession, openSessionTab, screenText, startSession } from "./helpers";
 
 const pid = process.pid;
-const sessions = ["copy", "send", "drag", "rename", "delete", "move", "tab"].map((t) => `blimpe2e-tree${t}-${pid}`);
-const [sCopy, sSend, sDrag, sRename, sDelete, sMove, sTab] = sessions;
+const sessions = ["copy", "send", "drag", "rename", "delete", "move", "tab", "focus"].map((t) => `blimpe2e-tree${t}-${pid}`);
+const [sCopy, sSend, sDrag, sRename, sDelete, sMove, sTab, sFocus] = sessions;
 test.afterAll(() => sessions.forEach(killSession));
 
 test.beforeEach(async ({ context }) => {
@@ -186,6 +186,26 @@ test("Delete asks first, naming it; a folder goes with everything in it, by ⌘�
   await page.keyboard.press("Enter");
   await expect(row(page, "old")).toHaveCount(0);
   expect(existsSync(join(dir, "old"))).toBe(false);
+});
+
+test("a text file clicked in the tree keeps the focus on its row, even once the editor is open, so the tree's keys act on it", async ({ page }) => {
+  const dir = fixtureDir("tree-focus");
+  writeFileSync(join(dir, "a.ts"), "const a = 1;\n");
+  writeFileSync(join(dir, "b.ts"), "const b = 2;\n");
+  startSession(sFocus, dir);
+  await openSessionTab(page, dir);
+  const ws = frontTab(page);
+  await row(page, "a.ts").click();
+  await expect(ws.locator(".monaco-editor")).toBeVisible();
+  await row(page, "b.ts").click();
+  await expect(ws.locator(".ftabs .tab")).toHaveCount(2);
+  await row(page, "a.ts").click();
+  await expect(row(page, "a.ts")).toBeFocused();
+  await page.keyboard.press("Meta+Backspace");
+  const ask = page.locator(".dialog.ask");
+  await expect(ask).toContainText("Delete a.ts from the server?");
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  expect(readFileSync(join(dir, "a.ts"), "utf8")).toBe("const a = 1;\n");
 });
 
 test("a row dragged onto a folder moves there after asking; never a folder into itself; New File… in a folder", async ({ page }) => {

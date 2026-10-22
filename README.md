@@ -187,7 +187,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
   - **Rename…** puts the name in a box in its row. The name without its extension is selected. Enter renames; Esc stops. A name that's already there is refused.
   - **Delete** asks first, with the name. A folder goes with everything in it. The server has no trash, so you can't undo it.
   - A folder also has **New File…** and **New Folder…** (they go in that folder), **Upload…**, **Download as .tar.gz** and **Show as Gallery**.
-- **Keys on the tree row that has the focus** (a folder you clicked, or a row you reach with Tab; a text file you click opens in the editor, which takes the focus): Enter or F2 renames, ⌘⌫ deletes (after asking), ⌥⌘C copies the path, ⌥⇧⌘C copies the relative path.
+- **Keys on the tree row that has the focus** (a file or folder you clicked, or a row you reach with Tab; a file you click opens in the editor and the focus stays on its row, as in VS Code, so click in the editor to type): Enter or F2 renames, ⌘⌫ deletes (after asking), ⌥⌘C copies the path, ⌥⇧⌘C copies the relative path.
 - **Drag a file or folder in the tree:**
   - Onto a session's terminal: its path is typed there, as with Send Path to Session.
   - Onto a folder (or a file in it): blimp asks "Move X into Y?", then moves it. Let go on the space below the rows to move it to the project folder. A folder can't go into itself.
