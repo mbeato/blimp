@@ -221,6 +221,12 @@ private struct ChatContent: View {
         }
         .onAppear(perform: appeared)
         .keepsDraft($draft, key: model.name)
+        // Words from elsewhere for this box (the browser's Send to Session): after what's typed.
+        .onChange(of: store.insert, initial: true) { _, insert in
+            guard let insert, insert.chat == model.name else { return }
+            draft = DraftText.joined(draft, insert.text)
+            store.insert = nil
+        }
         .onDisappear(perform: disappeared)
         .onChange(of: listener.partial) { _, heard in
             if micOn { draft = Self.joined(micBase, heard) }

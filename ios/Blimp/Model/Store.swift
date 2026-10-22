@@ -16,6 +16,11 @@ final class Store {
     var sessions: [Session] = []
     /// Each running folder's paragraph (Digest), from the same messages as the sessions.
     var digests: [String: Digest] = [:]
+    /// The server browser's tabs, every folder's (the drawer shows the project's).
+    var browserTabs: [BrowserTab] = []
+    /// Words for a chat's box from elsewhere (the browser's Send to Session): that chat adds them to its box
+    /// and sets this back.
+    var insert: DraftInsert?
     var connection: Connection = .connecting
     /// The events socket has been open since the server was paired or loaded: a new try is a reconnect.
     private(set) var everOnline = false
@@ -73,9 +78,16 @@ final class Store {
         let socket = Socket(
             url: API(server: server).socketURL("/events"),
             onMessage: { [weak self] data in
-                guard let self, case .sessions(let list) = EventsMessage.decode(data) else { return }
-                self.sessions = list
-                self.digests = EventsMessage.digests(data)
+                guard let self else { return }
+                switch EventsMessage.decode(data) {
+                case .sessions(let list):
+                    self.sessions = list
+                    self.digests = EventsMessage.digests(data)
+                case .browser(let tabs):
+                    self.browserTabs = tabs
+                case .other:
+                    break
+                }
             },
             onState: { [weak self] state in self?.update(state) })
         events = socket
@@ -94,6 +106,7 @@ final class Store {
         Keychain.clear()
         server = nil
         sessions = []
+        browserTabs = []
         connection = .connecting
         everOnline = false
         tailnetOff = false
@@ -108,6 +121,17 @@ final class Store {
     func end(name: String) async throws {
         guard let api else { throw APIError.offline }
         try await api.end(name: name)
+    }
+
+    /// Opens a server browser tab in `dir`; returns its id.
+    func openTab(dir: String, url: String = BrowserAddress.home) async throws -> String {
+        guard let api else { throw APIError.offline }
+        return try await api.openTab(dir: dir, url: url)
+    }
+
+    func closeTab(_ id: String) async throws {
+        guard let api else { throw APIError.offline }
+        try await api.closeTab(id)
     }
 
     /// An error in plain words for an alert.
@@ -142,4 +166,10 @@ final class Store {
         tailnetOff = Tailnet.looksOff(server: server?.url.host(), interfaces: Interfaces.ipv4())
         connection = .offline(LinkText.offline(tailnetOff: tailnetOff))
     }
+}
+
+/// Words for one chat's box (Store.insert).
+struct DraftInsert: Equatable {
+    let chat: String
+    let text: String
 }

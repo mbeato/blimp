@@ -4,7 +4,8 @@
 // its inbox, where the box at the bottom starts a session; the drawer's New session opens it with the keyboard up.
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
-// live here: End's question, a failure's alert, and the new session a handoff started, which opens.
+// live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
+// from the drawer opens full screen over all of it (BrowserView), and not under the lock's cover.
 import BlimpKit
 import SwiftUI
 
@@ -21,6 +22,8 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var opened: Opened = .inbox
     @State private var drawer = false
+    /// The server browser tab open over the chat (BrowserView), by id.
+    @State private var browserTab: String?
     /// The drawer's New session was tapped: the inbox's box takes the keyboard, and sets this back.
     @State private var newSession = false
     /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
@@ -110,11 +113,19 @@ struct HomeView: View {
             DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
                        onPick: pick, onInbox: { show(.inbox) }, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },
-                       needs: needs.count, actions: actions, onOpen: { show(.session($0)) })
+                       needs: needs.count, actions: actions, onOpen: { show(.session($0)) },
+                       tabs: store.dir.map { BrowserTab.inFolder(store.browserTabs, $0) } ?? [],
+                       onTab: { browserTab = $0.id; drawer = false }, onNewTab: newTab, onCloseTab: closeTab)
         }
         .overlay {
             if let recapChat {
                 RecapDrawer(open: $recapOpen, pull: recapPull, title: subtitle, chat: recapChat)
+            }
+        }
+        .overlay {
+            if !covered, let browserTab, let tab = store.browserTabs.first(where: { $0.id == browserTab }) {
+                BrowserView(tab: tab, onClose: { self.browserTab = nil }, onSend: sendToChat, onCloseTab: { closeTab(tab) })
+                    .id(tab.id)
             }
         }
         // The chat went (or isn't a Claude session any more): its drawer goes with it.
@@ -277,6 +288,35 @@ struct HomeView: View {
         switch item {
         case .running(let s): show(.session(s.name))
         case .past(let c): show(.past(c))
+        }
+    }
+
+    /// The drawer's New Tab: a tab at Google in this project, open full screen.
+    private func newTab() {
+        guard let dir = store.dir else { return }
+        Task {
+            do {
+                browserTab = try await store.openTab(dir: dir)
+                drawer = false
+            } catch {
+                actions.failure = Store.words(for: error)
+            }
+        }
+    }
+
+    private func closeTab(_ tab: BrowserTab) {
+        if browserTab == tab.id { browserTab = nil }
+        Task {
+            do { try await store.closeTab(tab.id) } catch { actions.failure = Store.words(for: error) }
+        }
+    }
+
+    /// The browser's Send to Session: the tab goes in the open session's box, and the chat comes back.
+    private var sendToChat: ((String) -> Void)? {
+        guard let name = onScreen else { return nil }
+        return { text in
+            store.insert = DraftInsert(chat: name, text: text)
+            browserTab = nil
         }
     }
 

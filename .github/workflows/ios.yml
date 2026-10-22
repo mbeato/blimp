@@ -93,6 +93,9 @@ jobs:
           # with the stand-in login shell and claude (ios/e2e/bin), for the sessions the app starts
           ios/e2e/blimpd.sh
           token="$(dirname "$BLIMPD_SOCKET")/token"
+          # the browser tab's page (setup.ts writes it), for blimpd's Chrome (Google Chrome's app on the runner)
+          mkdir -p "$E2E_DIR/site"
+          nohup python3 -m http.server 7431 --bind 127.0.0.1 --directory "$E2E_DIR/site" > "$E2E_DIR/site.log" 2>&1 &
           bun ios/e2e/setup.ts
           nohup socat TCP-LISTEN:7425,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:"$BLIMPD_SOCKET" > "$E2E_DIR/socat.log" 2>&1 &
           sleep 1

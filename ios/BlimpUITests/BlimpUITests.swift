@@ -4,7 +4,8 @@
 // message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
 // through it; two questions at once; unread and asking marks; a project's inbox and the chat's top bar; Allow from
-// Needs you, in its own project's inbox only; the drawer's New session; the recap drawer from the right. What reached the sessions is checked by the job afterwards.
+// Needs you, in its own project's inbox only; the drawer's New session; the recap drawer from the right; a server
+// browser tab from the drawer, tapped and typed into. What reached the sessions is checked by the job afterwards.
 // Screenshots stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
@@ -526,6 +527,37 @@ final class BlimpUITests: XCTestCase {
         try wait(drawer, "the recap drawer again")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
         try until(drawer, "exists == false", "the recap drawer to close on a tap beside it")
+    }
+
+    // MARK: - The server browser
+
+    /// blimp-demo's browser tab (setup.ts opens it on a page of its own): the drawer lists it by its title; it opens
+    /// full screen with the live page, laid out for the phone (a point here is a pixel there). A tap on the page's
+    /// button reaches it; a tap on its field brings the keyboard up by itself, and what's typed reaches the page.
+    /// × goes back, and the drawer's row has the title the page set from both. (By name after the recap drawer.)
+    func testServerBrowserTab() throws {
+        try launchPaired()
+        try pickProject("blimp-demo")
+        try openDrawer()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tab-'")).firstMatch
+        try wait(row, "the browser tab in the drawer")
+        try until(row, "label CONTAINS 'e2e page'", "the tab's title in the drawer")
+        shot("38a-drawer-browser")
+        row.tap()
+        let page = element("browserPage")
+        try wait(page, "the browser page")
+        try until(page, "value == 'drawn'", "a frame of the page", timeout: 60)
+        shot("38b-browser")
+        let origin = page.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: 150, dy: 75)).tap()
+        origin.withOffset(CGVector(dx: 150, dy: 225)).tap()
+        try wait(app.keyboards.firstMatch, "the keyboard for the page's field")
+        page.typeText("hi")
+        shot("38c-browser-typed")
+        element("browserClose").tap()
+        try until(page, "exists == false", "the chat after ×")
+        try openDrawer()
+        try until(row, "label CONTAINS 'tapped typed:hi'", "the tap and the typing to reach the page")
     }
 
     // MARK: - Helpers

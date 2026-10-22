@@ -83,6 +83,18 @@ struct API {
         return try await decode(call("GET", "/sessions/" + name + "/recap", query: query))
     }
 
+    /// Opens a server browser tab at `url` in `dir`; returns its id.
+    func openTab(dir: String, url: String) async throws -> String {
+        struct Body: Encodable { let dir: String; let url: String }
+        struct Opened: Decodable { let id: String }
+        let opened: Opened = try await decode(call("POST", "/browser/tabs", body: JSONEncoder().encode(Body(dir: dir, url: url))))
+        return opened.id
+    }
+
+    func closeTab(_ id: String) async throws {
+        _ = try await call("DELETE", "/browser/tabs/" + id)
+    }
+
     /// A WebSocket address on this server: ws for http, wss for https, the token in the query
     /// (a WebSocket handshake can't carry the Authorization header here).
     func socketURL(_ path: String) -> URL {

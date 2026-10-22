@@ -16,6 +16,8 @@
 //   demo-trust in api-server: Claude Code just started there and asks whether to trust the folder, with no
 //              status file yet (ios/e2e/fake-trust.ts); every key is appended to $E2E_DIR/trust.in
 //   a conversation in blimp-demo with no session running, for the project screen's Earlier list
+//   a server browser tab in blimp-demo on $E2E_DIR/site/index.html (the job serves it on 127.0.0.1:7431): a
+//              button and a field that put what reached them in the page's title, which the drawer's row shows
 // The folders are under the home folder: blimpd starts sessions only there. Sessions the app starts
 // run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for.
 
@@ -166,5 +168,19 @@ await until(() => parseZmxList(Bun.spawnSync([zmxPath(), "list"], { env }).stdou
 console.log("demo-trust: asking to trust " + trustDir);
 
 const token = readFileSync(join(dirname(sock), "token"), "utf8").trim();
+
+// The browser tab: its page is laid out for the phone once the phone opens it. A tap on the button, then
+// typing in the field, make the title "tapped typed:<what was typed>".
+mkdirSync(join(root, "site"), { recursive: true });
+writeFileSync(join(root, "site", "index.html"), `<!doctype html><meta name="viewport" content="width=device-width"><title>e2e page</title>
+<body style="margin:0;font:20px sans-serif">
+<button style="display:block;width:100%;height:150px" onclick="window.tapped=1;document.title='e2e page tapped'">Tap me</button>
+<input style="position:absolute;top:200px;left:0;width:100%;height:50px" oninput="document.title=(window.tapped?'tapped ':'')+'typed:'+this.value">`);
+const opened = await fetch("http://localhost/browser/tabs", {
+  unix: sock, method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: JSON.stringify({ dir: join(work, "blimp-demo"), url: "http://127.0.0.1:7431/" }),
+});
+if (!opened.ok) throw new Error(`couldn't open the browser tab: ${opened.status} ${await opened.text()}`);
+console.log(`browser tab ${(await opened.json()).id} in blimp-demo`);
 writeFileSync(join(root, "link"), `blimp://pair?url=${encodeURIComponent("http://127.0.0.1:7425")}&token=${token}`);
 console.log("stand-ins ready");

@@ -1,5 +1,6 @@
 // The drawer from the left: the project picker, the project's inbox (which says how many of its sessions need
-// you), New session (the inbox's box, ready to type into), its running sessions, then its past conversations
+// you), New session (the inbox's box, ready to type into), the project's browser tabs (a dot on ones a session
+// opened; a tap opens one full screen, New Tab opens one, a swipe right closes one), its running sessions, then its past conversations
 // folded under Earlier (each newest activity first, with its mark, and under its title its branch, jobs and
 // handoff), and Settings. A tap opens one; a swipe right on a row or press and hold has its actions (Stop, Mark
 // read, End; Resume a past one). It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`),
@@ -29,6 +30,11 @@ struct DrawerView: View {
     let actions: RowActions
     /// Opens a session: the one a row's Resume started.
     let onOpen: (String) -> Void
+    /// The project's server browser tabs.
+    let tabs: [BrowserTab]
+    let onTab: (BrowserTab) -> Void
+    let onNewTab: () -> Void
+    let onCloseTab: (BrowserTab) -> Void
     @Environment(Store.self) private var store
     /// Earlier folds away (folded at first), as on the Mac; kept on this phone.
     @AppStorage("drawerEarlierOpen") private var earlierOpen = false
@@ -111,6 +117,17 @@ struct DrawerView: View {
             .padding(.bottom, 8)
             .accessibilityIdentifier("drawerNewSession")
             List {
+                Section("Browser") {
+                    ForEach(tabs) { tabRow($0) }
+                    Button(action: onNewTab) {
+                        Label("New Tab", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("drawerNewTab")
+                }
+                if rows.isEmpty {
+                    Text("No sessions here yet.").foregroundStyle(.secondary).listRowSeparator(.hidden)
+                }
                 if !active.isEmpty {
                     Section("Active") { ForEach(active) { rowButton($0) } }
                 }
@@ -134,9 +151,6 @@ struct DrawerView: View {
                 }
             }
             .listStyle(.plain)
-            .overlay {
-                if rows.isEmpty { Text("No sessions here yet.").foregroundStyle(.secondary) }
-            }
             Divider()
             Button(action: onSettings) {
                 Label("Settings", systemImage: "gearshape").frame(maxWidth: .infinity, alignment: .leading)
@@ -157,6 +171,30 @@ struct DrawerView: View {
             .accessibilityIdentifier(row.id)
             // From the left: a swipe left closes the drawer.
             .modifier(RowMenu(item: row.item, edge: .leading, actions: actions, onOpen: onOpen))
+    }
+
+    /// A browser tab: a dot if a session opened it, its title, and under it its site.
+    private func tabRow(_ tab: BrowserTab) -> some View {
+        Button { onTab(tab) } label: {
+            HStack(spacing: 10) {
+                Circle().fill(tab.openedBy == nil ? Color.clear : Color.accentColor).frame(width: 8, height: 8)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(tab.label).lineLimit(1)
+                    Text(BrowserAddress.host(of: tab.url)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .foregroundStyle(.primary)
+        .accessibilityLabel(tab.openedBy == nil ? tab.label : "\(tab.label), opened by a session")
+        .accessibilityIdentifier("tab-" + tab.id)
+        // From the left, as the sessions' rows: a swipe left closes the drawer.
+        .swipeActions(edge: .leading) {
+            Button(role: .destructive) { onCloseTab(tab) } label: { Label("Close", systemImage: "xmark") }
+        }
+        .contextMenu {
+            Button(role: .destructive) { onCloseTab(tab) } label: { Label("Close Tab", systemImage: "xmark") }
+        }
     }
 
     /// The project's name with a chevron; a tap lists the projects to pick from, each with its top mark.

@@ -139,3 +139,20 @@ Items marked (phone) need a real iPhone: speech recognition may not run in the s
 - [ ] A whole conversation by voice. With read-aloud on: ask by voice, hear the reply, answer a permission by voice. No typing. (phone)
 - [ ] Read-aloud sounds good with a Premium voice. In the iPhone's Settings, Accessibility, Spoken Content, Voices, download a Premium voice. Claude's replies sound natural in blimp.
 - [ ] Read-aloud stops on tap. While it speaks, tap the reply being read. It stops.
+
+## Browser
+
+The server's browser tabs, from the drawer's Browser section. Items marked (phone) need a real iPhone: how it feels can't be checked in the simulator.
+
+- [ ] The tabs. Open a page on the Mac (or have Claude open one) in a project. The phone's drawer lists it under Browser in that project, with a dot if Claude opened it. New Tab opens one at Google, full screen.
+- [ ] A phone page. Open a site with a phone layout (github.com, say). It shows its phone layout, not a shrunken desktop page. A site that picks its page by browser shows its phone page after a Reload.
+- [ ] Scrolling. Swipe up and down a long page. It follows the finger, and a fast swipe keeps gliding after you let go. Try it on Wi-Fi, then on cellular; note how it feels on each. (phone)
+- [ ] Pinch. Pinch to zoom a page that allows it. (phone)
+- [ ] Typing. Tap a search box on a page. The keyboard comes up by itself; what you type shows in the box on the page, Delete deletes, Return submits. Tap the page outside the box: the keyboard goes. (phone)
+- [ ] The address. Tap the address at the top, type a word, Go: a Google search. Type `localhost:3000` (with something running there on the server): that page.
+- [ ] Back, Forward, Reload in ••• work.
+- [ ] A page's alert. On a page that asks something (a confirm), the phone shows it as an alert, and your answer reaches the page.
+- [ ] The Mac gets its size back. With the same tab open on the Mac, open it on the phone: the Mac's page turns narrow. Tap × on the phone: the Mac's page is desktop size again. Click the Mac's page while the phone has it open: the Mac's size comes back, and the phone's picture is scaled to fit until you touch it.
+- [ ] Send to Session. From a session's chat, open a tab, then ••• > Send to Session. The chat comes back with `Browser tab "<title>" <address>` in the box.
+- [ ] The lock. Open a tab, leave the app for over five minutes, come back. The lock covers everything, the page included; after unlocking, the chat shows.
+- [ ] Close Tab. ••• > Close Tab, or swipe a tab's row right in the drawer: it goes, on the Mac too.
