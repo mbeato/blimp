@@ -94,7 +94,10 @@ export function recapPrompt(p: { title?: string; first?: string; last: string[];
     "DOING | something Claude is in the middle of (at most 3 DOING lines)",
     'STUCK | something blocked, saying on what, as "Waiting on you: approve the deploy" or "Tests fail in auth.test.ts" (at most 3 STUCK lines)',
     "NEXT | something left to do after that (at most 3 NEXT lines)",
-    "Leave out a kind with nothing in it. Each line at most 100 characters, in plain words: no markdown.",
+    // Without this, haiku files a question Claude asked as DOING ("Waiting on your answer ..."), so the
+    // card puts what needs you under In progress.
+    'If Claude asked the user something or waits for their go-ahead, that is STUCK ("Waiting on you: ..."), never DOING; DOING is only work Claude is still running.',
+    "Leave out a kind with nothing in it: never write a line saying there is nothing. Each line at most 100 characters, in plain words: no markdown.",
     "",
   ];
   if (p.title) lines.push(`Session: ${clip(p.title)}`);
@@ -106,8 +109,14 @@ export function recapPrompt(p: { title?: string; first?: string; last: string[];
   return lines.join("\n") + "\n";
 }
 
+// An item that only says there's nothing ("Nothing left to do", "None", "No blockers"), which haiku
+// still writes at times; it would show a heading over nothing. One that goes on to say what ("Nothing
+// renders in Safari", "None of the tests pass") is an item.
+const NOTHING = /^(?:none|n\/a|nothing|no (?:blockers?|more work|further work|work left|next steps?))(?:[\s\W]*$|(?:\s+(?:is|currently))?\s+(?:left|more|else|running|pending|blocked|stuck|in progress|to do|right now|yet|for now|at the moment)\b)/i;
+
 // The model's answer as a card, or undefined if it isn't one: one GOAL line, then DONE, DOING, STUCK and
-// NEXT lines (the first 4 done and 3 of the others kept), nothing else. A line over 140 characters once markdown marks are off is
+// NEXT lines (the first 4 done and 3 of the others kept), nothing else. An item that only says there's
+// nothing is skipped. A line over 140 characters once markdown marks are off is
 // cut at a word, with "…" (haiku often goes past the 100 it's asked for). It's shown as plain text.
 export function checkRecap(out: string): Card | undefined {
   let goal: string | undefined;
@@ -126,7 +135,7 @@ export function checkRecap(out: string): Card | undefined {
     if (kind === "goal") {
       if (goal !== undefined) return;
       goal = text;
-    } else lists[kind as keyof typeof lists].push(text);
+    } else if (!NOTHING.test(text)) lists[kind as keyof typeof lists].push(text);
   }
   const { done, doing, stuck, next } = lists;
   return goal === undefined ? undefined : { goal, done: done.slice(0, 4), doing: doing.slice(0, 3), stuck: stuck.slice(0, 3), next: next.slice(0, 3) };

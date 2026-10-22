@@ -2634,13 +2634,14 @@ body.dragging-session * {
   line-height: 1.4;
 }
 
-/* At the bottom of the session list, always in view while the list above it scrolls. At most 40% of
-   the list's height; past that its body scrolls. */
+/* At the bottom of the session list, always in view while the list above it scrolls. At most half
+   the list's height; past that its body scrolls. Done comes last, so at 40% a card with all four parts
+   hid it at a 900 pt high window. */
 .recap-card.in-list {
   flex: none;
   display: flex;
   flex-direction: column;
-  max-height: 40%;
+  max-height: 50%;
   margin: 0 8px 8px;
   padding: 8px 10px 10px;
   font-size: 12px;
@@ -2720,7 +2721,7 @@ body.dragging-session * {
 
 /* Each part: a small heading with its mark, then its lines, one item each (a long one wraps). */
 .recap-part {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .recap-label {

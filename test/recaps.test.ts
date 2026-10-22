@@ -63,6 +63,28 @@ describe("checkRecap", () => {
     expect(checkRecap(`GOAL | ${"x".repeat(200)}`)!.goal).toBe("x".repeat(139) + "…");
   });
 
+  test("an item that only says there's nothing is skipped, not shown under a heading", () => {
+    // As haiku wrote them for a session with everything done.
+    const out = [
+      "GOAL | Fix typos in the README and commit them",
+      "DONE | Fixed 6 typos in README.md",
+      "DONE | Committed as a1b2c3d",
+      "DOING | Nothing running right now",
+      "STUCK | None",
+      "STUCK | No blockers.",
+      "NEXT | Nothing left. Ask for a new task if you want more work done here.",
+      "NEXT | Nothing left to do on this task",
+      "NEXT | **N/A**",
+    ].join("\n");
+    expect(checkRecap(out)).toEqual({ ...none, goal: "Fix typos in the README and commit them", done: ["Fixed 6 typos in README.md", "Committed as a1b2c3d"] });
+    // One that goes on to say what is an item; skipped ones don't count toward the 3.
+    const r = checkRecap("GOAL | a\nSTUCK | Nothing renders in Safari\nSTUCK | None of the tests pass on CI\nNEXT | Nothing else\nNEXT | x\nNEXT | y\nNEXT | z")!;
+    expect(r.stuck).toEqual(["Nothing renders in Safari", "None of the tests pass on CI"]);
+    expect(r.next).toEqual(["x", "y", "z"]);
+    // The goal is never skipped.
+    expect(checkRecap("GOAL | None")!.goal).toBe("None");
+  });
+
   test("anything else is ignored", () => {
     expect(checkRecap("")).toBeUndefined();
     expect(checkRecap("DONE | a")).toBeUndefined(); // no goal
@@ -96,7 +118,9 @@ test("recapPrompt: the format, the title, the first and latest requests and the 
   expect(p).toContain("DOING | ");
   expect(p).toContain("STUCK | ");
   expect(p).toContain("NEXT | ");
-  expect(p).toContain("Leave out a kind with nothing in it.");
+  expect(p).toContain("Leave out a kind with nothing in it: never write a line saying there is nothing.");
+  // Claude asking you something is stuck on you, not in progress.
+  expect(p).toContain('If Claude asked the user something or waits for their go-ahead, that is STUCK ("Waiting on you: ..."), never DOING');
   expect(p).toContain("Session: Login fix\n");
   expect(p).toContain("5 requests and 7 replies so far.\n");
   expect(p).toContain("First request: fix the login\n");
