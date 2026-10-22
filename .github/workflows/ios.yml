@@ -55,7 +55,8 @@ jobs:
   # it, as the SSH tunnel does on a Mac. Screenshots and logs go in the iphone-e2e artifact.
   app-e2e:
     runs-on: macos-latest
-    timeout-minutes: 25
+    # Passing runs take 15-17 min; a slow runner went past 25 three times (v0.3.1, v0.3.2, files-dnd).
+    timeout-minutes: 40
     env:
       E2E_DIR: /tmp/be
       # zmx 0.8 limits session names by the length of its socket folder's path: keep it short.
@@ -128,9 +129,13 @@ jobs:
           # restarts blimpd and drives Face ID when the test asks (ios/e2e/signals.sh)
           nohup ../ios/e2e/signals.sh > "$E2E_DIR/signals.log" 2>&1 &
           log="$E2E_DIR/xcodebuild.log"
+          # Each test's start and end print as they happen (the whole log still goes to $log), so a run that
+          # hits the job's time limit shows which test it was in; before, a cancelled run printed nothing.
+          set -o pipefail
           if xcodebuild -project Blimp.xcodeproj -scheme BlimpUITests -destination "platform=iOS Simulator,id=$SIM" \
-              -resultBundlePath "$E2E_DIR/e2e.xcresult" CODE_SIGN_IDENTITY=- SWIFT_TREAT_WARNINGS_AS_ERRORS=YES test > "$log" 2>&1; then
-            grep -E "Test Case|Executed|\*\* TEST" "$log"
+              -resultBundlePath "$E2E_DIR/e2e.xcresult" CODE_SIGN_IDENTITY=- SWIFT_TREAT_WARNINGS_AS_ERRORS=YES test 2>&1 \
+              | tee "$log" | grep --line-buffered -E "Test Case|Executed|\*\* TEST"; then
+            :
           else
             grep -E " error: | warning: |Test Case|timed out|failed|\*\* TEST" "$log" | head -120
             grep -A80 "^SCREEN at" "$log" | head -400
