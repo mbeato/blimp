@@ -199,6 +199,8 @@ struct InputBar: View {
         .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .fixedSize(horizontal: false, vertical: true)
+        // A swipe on the chips scrolls them and pulls neither drawer.
+        .scrollsSideways()
         // Sent once the Undo time has passed; Undo, typing, a prompt or leaving the chat cancels it (see body).
         .task(id: pendingChip) {
             guard let chip = pendingChip else { return }

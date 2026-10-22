@@ -32,6 +32,8 @@ struct HomeView: View {
     @State private var recapPull: CGFloat?
     /// Whether the swipe going on pulls the recap drawer (RecapCard.pulls, decided once at its start).
     @State private var pullingRecap: Bool?
+    /// Where the chat's sideways scrollers are, so a swipe that starts in one scrolls it and pulls no drawer.
+    @State private var sideScrollers = SideScrollers()
     @State private var folders: [RecentFolder] = []
     /// Each project's past conversations, kept while another one shows, and fetched again as below.
     @State private var earlierBy: [String: [Conversation]] = [:]
@@ -66,14 +68,17 @@ struct HomeView: View {
         // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
         // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. In a
         // Claude session's chat, a swipe left anywhere pulls the recap drawer out the same way, mirrored. While
-        // either drawer is open this does nothing: a swipe on it closes it (DrawerView, RecapDrawer).
+        // either drawer is open this does nothing: a swipe on it closes it (DrawerView, RecapDrawer). Nor does one that
+        // starts in something that scrolls sideways (a code box, the reply chips): it scrolls that instead, as this
+        // runs while a scroll view in the chat scrolls too.
         .simultaneousGesture(
-            DragGesture(minimumDistance: 10)
+            DragGesture(minimumDistance: 10, coordinateSpace: .global)
                 .onChanged { v in
                     if drawer || recapOpen { return }
                     if pulling == nil {
-                        pulling = v.translation.width > 0 && abs(v.translation.width) > abs(v.translation.height) * 1.5
-                        pullingRecap = recapChat != nil && RecapCard.pulls(dx: Double(v.translation.width), dy: Double(v.translation.height))
+                        let free = !sideScrollers.contain(v.startLocation)
+                        pulling = free && v.translation.width > 0 && abs(v.translation.width) > abs(v.translation.height) * 1.5
+                        pullingRecap = free && recapChat != nil && RecapCard.pulls(dx: Double(v.translation.width), dy: Double(v.translation.height))
                     }
                     if pulling == true { pull = max(0, v.translation.width) }
                     if pullingRecap == true { recapPull = max(0, -v.translation.width) }
@@ -113,6 +118,7 @@ struct HomeView: View {
         .onChange(of: recapChat == nil) { _, gone in if gone { recapOpen = false } }
         // A card came by itself while the drawer is open: it's seen.
         .onChange(of: recapChat?.recapNew == true) { _, new in if new, recapOpen { recapChat?.recapOpened() } }
+        .environment(\.sideScrollers, sideScrollers)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .modifier(KeepsPlace(opened: $opened, drawer: drawer))
         .endConfirmation(Binding(get: { actions.pendingEnd }, set: { actions.pendingEnd = $0 }), store: store)
@@ -350,5 +356,38 @@ private struct HomeBannerView: View {
         .padding(.horizontal)
         .padding(.top, 6)
         .accessibilityIdentifier("waitingBanner")
+    }
+}
+
+/// Where the chat's sideways scrollers (a code box, the reply chips) are on screen, so a sideways swipe that starts
+/// in one scrolls it instead of pulling a drawer out (HomeView's swipe). Not observed: the frames change on every
+/// step of a scroll, and only the start of a swipe reads them.
+@MainActor
+final class SideScrollers {
+    private var frames: [UUID: CGRect] = [:]
+
+    func set(_ id: UUID, _ frame: CGRect?) { frames[id] = frame }
+
+    func contain(_ point: CGPoint) -> Bool { frames.values.contains { $0.contains(point) } }
+}
+
+extension EnvironmentValues {
+    /// HomeView's SideScrollers; nil outside it, where no drawer is pulled.
+    @Entry var sideScrollers: SideScrollers? = nil
+}
+
+extension View {
+    /// Marks a view that scrolls sideways: a swipe that starts in it pulls no drawer (SideScrollers).
+    func scrollsSideways() -> some View { modifier(SideScroller()) }
+}
+
+private struct SideScroller: ViewModifier {
+    @Environment(\.sideScrollers) private var scrollers
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { scrollers?.set(id, $0) }
+            .onDisappear { scrollers?.set(id, nil) }
     }
 }
