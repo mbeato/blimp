@@ -2718,38 +2718,41 @@ body.dragging-session * {
   color: var(--fg-dim);
 }
 
+/* Each part: a small heading with its mark, then its lines, one item each (a long one wraps). */
 .recap-part {
-  display: flex;
-  gap: 10px;
   margin-top: 8px;
 }
 
 .recap-label {
-  flex: none;
-  width: 40px;
-  padding-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--fg-faint);
 }
 
-/* In the list there's no room for a column of labels: each sits over its lines. */
-.recap-card.in-list .recap-part {
-  flex-direction: column;
-  gap: 1px;
+.recap-label svg {
+  flex: none;
 }
 
-.recap-card.in-list .recap-label {
-  width: auto;
-  padding-top: 0;
+/* Stuck needs you: only its heading and mark are red. */
+.recap-part.stuck .recap-label {
+  color: var(--danger);
 }
 
+/* The lines start under the heading's word, not its mark. Lines of one item sit closer than two items,
+   so an item that wraps still reads as one. */
 .recap-part ul {
-  margin: 0;
-  padding: 0;
+  margin: 2px 0 0;
+  padding: 0 0 0 15px;
   list-style: none;
+  line-height: 1.3;
   color: var(--fg-dim);
 }
 
 .recap-part li + li {
-  margin-top: 2px;
+  margin-top: 4px;
 }

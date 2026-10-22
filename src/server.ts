@@ -194,7 +194,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   const handoff = path.match(/^\/sessions\/([^/]+)\/handoff$/);
   if (handoff && req.method === "POST") return Response.json(await askHandoff(decodeURIComponent(handoff[1])), { status: 202 });
 
-  // The return card: what a Claude session is for, what's done, what's open (recaps.ts). min: 404
+  // The return card: what a Claude session is for, what's done, in progress, stuck and next (recaps.ts). min: 404
   // unless it has had that many prompts.
   const recapOf = path.match(/^\/sessions\/([^/]+)\/recap$/);
   if (recapOf && get) {

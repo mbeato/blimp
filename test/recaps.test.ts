@@ -7,27 +7,56 @@ import { addToBrief, checkRecap, newBrief, readRecaps, recapper, recapPrompt, sa
 const MIN = 60_000;
 const now = 1_000_000_000_000;
 
+const none = { done: [], doing: [], stuck: [], next: [] };
+
 describe("checkRecap", () => {
-  test("one goal, then what's done and what's open, each one line", () => {
-    const out = "GOAL | Make the phone's login work again\nDONE | Token refresh fixed\nDONE | Tests added\n\nOPEN | Release v0.2.20\n";
-    expect(checkRecap(out)).toEqual({ goal: "Make the phone's login work again", done: ["Token refresh fixed", "Tests added"], open: ["Release v0.2.20"] });
-    expect(checkRecap("goal|Tidy the README\ndone | Install steps rewritten")).toEqual({ goal: "Tidy the README", done: ["Install steps rewritten"], open: [] });
+  test("one goal, then what's done, in progress, stuck and next, each one line", () => {
+    // As haiku answers: the kinds in its own order, a blank line between some.
+    const out = [
+      "GOAL | Make the phone's login work again",
+      "DONE | Token refresh fixed in src/auth.ts",
+      "DONE | Tests added for an expired token",
+      "",
+      "DOING | Running the full test suite",
+      "STUCK | Waiting on you: approve the deploy to production",
+      "STUCK | Tests fail in auth.test.ts on the clock skew case",
+      "NEXT | Release v0.2.20",
+      "NEXT | Tell the phone testers",
+      "",
+    ].join("\n");
+    expect(checkRecap(out)).toEqual({
+      goal: "Make the phone's login work again",
+      done: ["Token refresh fixed in src/auth.ts", "Tests added for an expired token"],
+      doing: ["Running the full test suite"],
+      stuck: ["Waiting on you: approve the deploy to production", "Tests fail in auth.test.ts on the clock skew case"],
+      next: ["Release v0.2.20", "Tell the phone testers"],
+    });
+    // A kind with nothing in it is left out; any case, any spaces round the bar.
+    expect(checkRecap("goal|Tidy the README\ndone | Install steps rewritten\nNext  |  Add a screenshot")).toEqual({ ...none, goal: "Tidy the README", done: ["Install steps rewritten"], next: ["Add a screenshot"] });
+    expect(checkRecap("GOAL | Tidy the README")).toEqual({ ...none, goal: "Tidy the README" });
   });
 
-  test("markdown marks are taken out, and only the first 4 done and 4 open are kept", () => {
-    const many = Array.from({ length: 6 }, (_, i) => `DONE | step ${i}`).join("\n");
-    const r = checkRecap(`GOAL | Fix **the** \`build\`\n${many}\nOPEN | - ship it`);
-    expect(r).toEqual({ goal: "Fix the build", done: ["step 0", "step 1", "step 2", "step 3"], open: ["ship it"] });
+  test("markdown marks are taken out, and only the first 4 done and 3 of each other kind are kept", () => {
+    const many = (kind: string) => Array.from({ length: 6 }, (_, i) => `${kind} | ${kind.toLowerCase()} ${i}`).join("\n");
+    const r = checkRecap(`GOAL | Fix **the** \`build\`\n${many("DONE")}\n${many("DOING")}\n${many("STUCK")}\n${many("NEXT")}\nNEXT | - ship it`);
+    expect(r).toEqual({
+      goal: "Fix the build",
+      done: ["done 0", "done 1", "done 2", "done 3"],
+      doing: ["doing 0", "doing 1", "doing 2"],
+      stuck: ["stuck 0", "stuck 1", "stuck 2"],
+      next: ["next 0", "next 1", "next 2"],
+    });
+    expect(checkRecap("GOAL | a\nSTUCK | **Waiting on you:** pick a name")!.stuck).toEqual(["Waiting on you: pick a name"]);
   });
 
   test("a line over 140 characters is cut at a word with …, and the rest of the card is kept", () => {
     const long = "Saving your testing rule to recense failed twice because its background cleanup is holding a lock. Decide whether to let it finish so I can retry.";
     const done150 = `${"word ".repeat(29)}abcd`.padEnd(150, "x");
-    const r = checkRecap(`GOAL | ${"goal ".repeat(40)}\nDONE | ${done150}\nDONE | Tests added\nOPEN | ${long}\nOPEN | Release it`)!;
+    const r = checkRecap(`GOAL | ${"goal ".repeat(40)}\nDONE | ${done150}\nDONE | Tests added\nSTUCK | ${long}\nNEXT | Release it`)!;
     expect(r.done[1]).toBe("Tests added");
-    expect(r.open[1]).toBe("Release it");
-    for (const l of [r.goal, r.done[0], r.open[0]]) expect(l.length).toBeLessThanOrEqual(140), expect(l.endsWith("…")).toBe(true);
-    expect(r.open[0]).toBe(long.slice(0, long.lastIndexOf(" ", 139)) + "…");
+    expect(r.next).toEqual(["Release it"]);
+    for (const l of [r.goal, r.done[0], r.stuck[0]]) expect(l.length).toBeLessThanOrEqual(140), expect(l.endsWith("…")).toBe(true);
+    expect(r.stuck[0]).toBe(long.slice(0, long.lastIndexOf(" ", 139)) + "…");
     expect(r.goal).toBe(`${"goal ".repeat(27)}goal…`);
     expect(r.done[0]).toBe(`${"word ".repeat(27)}word…`);
     // One long word: cut where it hits 140.
@@ -40,8 +69,13 @@ describe("checkRecap", () => {
     expect(checkRecap("GOAL | a\nGOAL | b")).toBeUndefined();
     expect(checkRecap("Here is the card:\nGOAL | a")).toBeUndefined();
     expect(checkRecap("GOAL | ")).toBeUndefined();
-    expect(checkRecap("GOAL | a\nOPEN | bell\x07")).toBeUndefined();
-    expect(checkRecap("GOAL | a\nNEXT | b")).toBeUndefined();
+    expect(checkRecap("GOAL | a\nSTUCK | bell\x07")).toBeUndefined();
+    expect(checkRecap("GOAL | a\nDOING | ")).toBeUndefined();
+    // The kinds from before, or ones made up.
+    expect(checkRecap("GOAL | a\nOPEN | b")).toBeUndefined();
+    expect(checkRecap("GOAL | a\nBLOCKED | b")).toBeUndefined();
+    // A colon instead of the bar.
+    expect(checkRecap("GOAL: a\nDONE: b")).toBeUndefined();
   });
 });
 
@@ -59,7 +93,10 @@ test("recapPrompt: the format, the title, the first and latest requests and the 
   const p = recapPrompt({ title: "Login fix", first: "fix the login", last: ["add tests", "b".repeat(1000)], said: ["Fixed it.", "Tests pass."], prompts: 5, replies: 7 });
   expect(p).toContain("GOAL | ");
   expect(p).toContain("DONE | ");
-  expect(p).toContain("OPEN | ");
+  expect(p).toContain("DOING | ");
+  expect(p).toContain("STUCK | ");
+  expect(p).toContain("NEXT | ");
+  expect(p).toContain("Leave out a kind with nothing in it.");
   expect(p).toContain("Session: Login fix\n");
   expect(p).toContain("5 requests and 7 replies so far.\n");
   expect(p).toContain("First request: fix the login\n");
@@ -74,12 +111,12 @@ describe("recaps.json", () => {
   test("600, through a temp file, the 200 newest kept", () => {
     const dir = mkdtempSync(join(tmpdir(), "blimp-recaps-"));
     const file = join(dir, "recaps.json");
-    for (let i = 0; i < 203; i++) saveRecap(`s${i}`, { goal: `g ${i}`, done: [], open: [], at: 1000 + i, replies: 1 }, file);
+    for (let i = 0; i < 203; i++) saveRecap(`s${i}`, { goal: `g ${i}`, ...none, at: 1000 + i, replies: 1 }, file);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     const all = readRecaps(file);
     expect(Object.keys(all).length).toBe(200);
     expect(all.s0).toBeUndefined();
-    expect(all.s202).toEqual({ goal: "g 202", done: [], open: [], at: 1202, replies: 1 });
+    expect(all.s202).toEqual({ goal: "g 202", ...none, at: 1202, replies: 1 });
     writeFileSync(file, "{ not json");
     expect(readRecaps(file)).toEqual({});
     rmSync(dir, { recursive: true, force: true });
@@ -89,7 +126,7 @@ describe("recaps.json", () => {
 const line = (o: object) => JSON.stringify(o) + "\n";
 const prompt = (t: string) => line({ type: "user", message: { role: "user", content: t } });
 const reply = (t: string) => line({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: t }] } });
-const CARD = "GOAL | Ship the login fix\nDONE | Token refresh fixed\nOPEN | Release it";
+const CARD = "GOAL | Ship the login fix\nDONE | Token refresh fixed\nDOING | Running the tests\nSTUCK | Waiting on you: approve the deploy\nNEXT | Release it";
 
 describe("recapper", () => {
   const setup = (lines = [prompt("fix the login"), reply("Fixed."), prompt("add tests"), reply("Added."), prompt("ship it"), reply("Shipping.")]) => {
@@ -109,12 +146,15 @@ describe("recapper", () => {
   test("the model's card, saved and given again until a new reply lands", async () => {
     const { dir, transcript, asked, deps, session } = setup();
     const recap = recapper(deps);
-    const want = { goal: "Ship the login fix", done: ["Token refresh fixed"], open: ["Release it"], at: now };
+    const card = { goal: "Ship the login fix", done: ["Token refresh fixed"], doing: ["Running the tests"], stuck: ["Waiting on you: approve the deploy"], next: ["Release it"] };
+    // open: doing, stuck and next in one, for the apps from 0.3.0.
+    const want = { ...card, open: ["Running the tests", "Waiting on you: approve the deploy", "Release it"], at: now };
     expect(await recap(session)).toEqual(want);
     expect(asked.length).toBe(1);
     expect(asked[0]).toContain("Session: Login\n");
     expect(asked[0]).toContain("- Shipping.\n");
-    expect(readRecaps(deps.file).s1).toEqual({ ...want, replies: 3 });
+    // open isn't kept: it's made from the others.
+    expect(readRecaps(deps.file).s1).toEqual({ ...card, at: now, replies: 3 });
     expect(await recap(session)).toEqual(want);
     // A fresh blimpd reads the saved one.
     expect(await recapper(deps)(session)).toEqual(want);
@@ -134,6 +174,17 @@ describe("recapper", () => {
     const [a, b] = await Promise.all([recap(session), recap(session)]);
     expect(a).toEqual(b);
     expect(asked.length).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("one kept by a blimpd from before doing, stuck and next is written again, not given as it was", async () => {
+    const { dir, asked, deps, session } = setup();
+    writeFileSync(deps.file, JSON.stringify({ s1: { goal: "Old goal", done: ["Old done"], open: ["Old open"], at: now - MIN, replies: 3 } }));
+    expect(readRecaps(deps.file)).toEqual({});
+    const r = await recapper(deps)(session);
+    expect(asked.length).toBe(1);
+    expect(r).toMatchObject({ goal: "Ship the login fix", next: ["Release it"], at: now });
+    expect(readRecaps(deps.file).s1).toMatchObject({ goal: "Ship the login fix", replies: 3 });
     rmSync(dir, { recursive: true, force: true });
   });
 

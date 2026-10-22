@@ -21,8 +21,9 @@ const right = `blimpe2e-recapt-${process.pid}`;
 const slow = `blimpe2e-recapw-${process.pid}`;
 const shown = `blimpe2e-recaph-${process.pid}`;
 const long = `blimpe2e-recapg-${process.pid}`;
+const parts = `blimpe2e-recapp-${process.pid}`;
 
-test.afterAll(() => [name, bare, failing, withRun, old, kept, other, left, right, slow, shown, long].forEach(killSession));
+test.afterAll(() => [name, bare, failing, withRun, old, kept, other, left, right, slow, shown, long, parts].forEach(killSession));
 
 // A session that looks like Claude to blimpd, with 3 prompts and replies.
 function fakeClaude(session: string, dir: string, last = "Shipped.") {
@@ -38,7 +39,17 @@ function fakeClaude(session: string, dir: string, last = "Shipped.") {
   writeFileSync(join(claude, "projects", "fake", `${sid}.jsonl`), lines.join("\n") + "\n");
 }
 
-const CARD = { goal: "Make the phone's login work again", done: ["Token refresh fixed", "Tests added"], open: ["Release v0.2.20"], at: Date.now() };
+const CARD = {
+  goal: "Make the phone's login work again",
+  done: ["Token refresh fixed", "Tests added"],
+  doing: ["Running the full test suite"],
+  stuck: ["Waiting on you: approve the deploy"],
+  next: ["Release v0.2.20"],
+  open: ["Running the full test suite", "Waiting on you: approve the deploy", "Release v0.2.20"],
+  at: Date.now(),
+};
+// What a blimpd before 0.3.1 sends.
+const OLD = { goal: "Tidy the README", done: ["Install steps rewritten"], open: ["Add a screenshot"], at: Date.now() };
 
 // blimpd's recap for `session`: the card, or a 404. Returns the queries the app asked with.
 async function stubRecap(page: Page, session: string, card: object | null) {
@@ -69,8 +80,12 @@ test("a session not on screen for an hour gets a card; dismissed, it stays away;
   await expect(c).toBeVisible({ timeout: 10_000 });
   await expect(c.locator(".recap-goal")).toHaveText(CARD.goal);
   await expect(c.locator(".recap-session")).toHaveText(`Recap · ${await titleOf(page, name)}`);
+  // Stuck first, then In progress, Next and Done; no Open.
+  await expect(c.locator(".recap-label")).toHaveText(["Stuck", "In progress", "Next", "Done"]);
+  await expect(c.getByRole("list", { name: "Stuck" }).locator("li")).toHaveText(CARD.stuck);
+  await expect(c.getByRole("list", { name: "In progress" }).locator("li")).toHaveText(CARD.doing);
+  await expect(c.getByRole("list", { name: "Next" }).locator("li")).toHaveText(CARD.next);
   await expect(c.getByRole("list", { name: "Done" }).locator("li")).toHaveText(CARD.done);
-  await expect(c.getByRole("list", { name: "Open" }).locator("li")).toHaveText(CARD.open);
   expect(asked).toEqual(["3"]); // asked on its own: only with 3 prompts or more
 
   // At the bottom of the session list, its width, and not over the terminal.
@@ -145,6 +160,24 @@ test("two splits: one card, for the session that came on screen last", async ({ 
   await expect(c).toHaveCount(1);
   await expect(c.locator(".recap-session")).toHaveText(`Recap · ${await titleOf(page, right)}`);
   await expect(frontTab(page).locator(".tsplit .recap-card")).toHaveCount(0);
+});
+
+test("a part with nothing in it is left out, and a blimpd before 0.3.1 gets Done and Open as before", async ({ page }) => {
+  const dir = fixtureDir("recapp");
+  fakeClaude(parts, dir);
+  let answer: object = { ...CARD, doing: [], stuck: [] };
+  await page.route(`**/sessions/${parts}/recap*`, (route) => route.fulfill({ json: answer, headers: { "Access-Control-Allow-Origin": "*" } }));
+  await openApp(page, { dir, session: parts });
+  await page.bringToFront();
+  const c = card(page);
+  await expect(c.locator(".recap-label")).toHaveText(["Next", "Done"], { timeout: 10_000 });
+
+  answer = OLD;
+  await sessionRow(page, parts).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Recap" }).click();
+  await expect(c.locator(".recap-goal")).toHaveText(OLD.goal);
+  await expect(c.locator(".recap-label")).toHaveText(["Done", "Open"]);
+  await expect(c.getByRole("list", { name: "Open" }).locator("li")).toHaveText(OLD.open);
 });
 
 test("nothing shows when blimpd has no card for the session", async ({ page }) => {

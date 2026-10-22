@@ -13,7 +13,7 @@ if [ "$1" = -p ]; then
     *"Say where this Claude Code session stands"*"Add a dark mode toggle to settings"*) echo "QUESTION | should the toggle follow the system setting?" && exit 0 ;;
     *"Say where this Claude Code session stands"*) exit 1 ;;
     *"coming back to this Claude Code session"*"Add a dark mode toggle to settings"*)
-      printf 'GOAL | A dark mode toggle in settings\nDONE | Toggle added to the Appearance section\nOPEN | Decide if it follows the system setting\n' && exit 0 ;;
+      printf 'GOAL | A dark mode toggle in settings\nDONE | Toggle added to the Appearance section\nSTUCK | Waiting on you: decide if it follows the system setting\nNEXT | Add a test for the toggle\n' && exit 0 ;;
     *"Set up the test pipeline"*) echo "Configure Integration Test Pipeline Runs" && exit 0 ;;
   esac
   exit 1

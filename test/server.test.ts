@@ -1769,8 +1769,8 @@ cat "${answer}"
   }, 20000);
 
   // The return card (recaps.ts): written by the model on request, kept until Claude replies again.
-  test("GET /sessions/<name>/recap: the model's goal, done and open, the same until a new reply lands", async () => {
-    writeFileSync(answer, "GOAL | Fix the phone login\nDONE | Token refresh fixed\nOPEN | Release it\n");
+  test("GET /sessions/<name>/recap: the model's goal, done, doing, stuck and next (and open for older apps), the same until a new reply lands", async () => {
+    writeFileSync(answer, "GOAL | Fix the phone login\nDONE | Token refresh fixed\nSTUCK | Waiting on you: approve the deploy\nNEXT | Release it\n");
     const sid = "99999999-9999-4999-8999-999999999999";
     const lines = [user("u1", "fix the phone login"), said("a1", "Fixed."), user("u2", "add tests"), said("a2", "Added."), user("u3", "ship it"), said("a3", "Shipping.")];
     const name = await fakeClaude("n5", sid, lines);
@@ -1779,7 +1779,7 @@ cat "${answer}"
     const r = await get(name, "?min=3");
     expect(r.status).toBe(200);
     const card = await r.json();
-    expect(card).toMatchObject({ goal: "Fix the phone login", done: ["Token refresh fixed"], open: ["Release it"] });
+    expect(card).toMatchObject({ goal: "Fix the phone login", done: ["Token refresh fixed"], doing: [], stuck: ["Waiting on you: approve the deploy"], next: ["Release it"], open: ["Waiting on you: approve the deploy", "Release it"] });
     expect(recapCalls()).toBe(1);
     expect(await (await get(name)).json()).toEqual(card);
     expect(recapCalls()).toBe(1);

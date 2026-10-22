@@ -1,5 +1,6 @@
 // Return cards ("where was I?"): when you come back to a Claude session after time away, the apps ask
-// GET /sessions/<name>/recap and show what it's for, what's done and what's still open. A small, fast
+// GET /sessions/<name>/recap and show what it's for, what's done, what Claude is in the middle of, what's
+// stuck and on what, and what's next. A small, fast
 // Claude model (haiku, on your own Claude sign-in, as for names) writes it from the conversation's
 // requests and replies. One is kept per conversation until Claude replies again. Recaps live in
 // <socket dir>/recaps.json; the names' switch (`{"names": false}` in config.json) turns them off too.
@@ -12,24 +13,34 @@ import { CLAUDE_KINDS } from "./kinds";
 import { askClaude, clip, namesOn } from "./names";
 import { blimpDir, claudeDir, type Session, transcriptPath } from "./sessions";
 
-// What the apps get. at: when it was written (ms).
-export type Recap = { goal: string; done: string[]; open: string[]; at: number };
+// The card: done is finished, doing is what Claude is in the middle of, stuck is what's blocked (each
+// saying on what), next is what's left after that.
+export type Card = { goal: string; done: string[]; doing: string[]; stuck: string[]; next: string[] };
+// What the apps get. open: doing, stuck and next in one, for the apps from 0.3.0, which show only done
+// and open. at: when it was written (ms).
+export type Recap = Card & { open: string[]; at: number };
 // replies: how many replies the conversation had then; one more and it's written again.
-export type Stored = Recap & { replies: number };
+export type Stored = Card & { at: number; replies: number };
 export type Recaps = Record<string, Stored>; // by Claude's sessionId
 
 export const recapsFile = () => join(blimpDir(), "recaps.json");
 
+const LISTS = ["done", "doing", "stuck", "next"] as const;
+
+// One kept by a blimpd from before doing, stuck and next ({ goal, done, open }) is left out: its open
+// mixed all three, so it's written again the next time it's asked for.
 export function readRecaps(file = recapsFile()): Recaps {
   const out: Recaps = {};
   try {
     const v = JSON.parse(readFileSync(file, "utf8"));
     for (const [id, r] of Object.entries(v && typeof v === "object" ? v : {}))
-      if (typeof (r as any)?.goal === "string" && Array.isArray((r as any).done) && Array.isArray((r as any).open) && typeof (r as any).at === "number")
+      if (typeof (r as any)?.goal === "string" && LISTS.every((k) => Array.isArray((r as any)[k])) && typeof (r as any).at === "number")
         out[id] = r as Stored;
   } catch {}
   return out;
 }
+
+const toRecap = (c: Card, at: number): Recap => ({ goal: c.goal, done: c.done, doing: c.doing, stuck: c.stuck, next: c.next, open: [...c.doing, ...c.stuck, ...c.next], at });
 
 const KEEP = 200;
 
@@ -80,8 +91,10 @@ export function recapPrompt(p: { title?: string; first?: string; last: string[];
     "Answer in exactly this format, one item per line, nothing else:",
     "GOAL | what the session is for, in one line",
     "DONE | something finished (at most 4 DONE lines, the most important first)",
-    "OPEN | something still to do or to decide (at most 4 OPEN lines; none if nothing is left)",
-    "Each line at most 100 characters, in plain words: no markdown.",
+    "DOING | something Claude is in the middle of (at most 3 DOING lines)",
+    'STUCK | something blocked, saying on what, as "Waiting on you: approve the deploy" or "Tests fail in auth.test.ts" (at most 3 STUCK lines)',
+    "NEXT | something left to do after that (at most 3 NEXT lines)",
+    "Leave out a kind with nothing in it. Each line at most 100 characters, in plain words: no markdown.",
     "",
   ];
   if (p.title) lines.push(`Session: ${clip(p.title)}`);
@@ -93,16 +106,15 @@ export function recapPrompt(p: { title?: string; first?: string; last: string[];
   return lines.join("\n") + "\n";
 }
 
-// The model's answer as a card, or undefined if it isn't one: one GOAL line, then DONE and OPEN lines
-// (the first 4 of each kept), nothing else. A line over 140 characters once markdown marks are off is
+// The model's answer as a card, or undefined if it isn't one: one GOAL line, then DONE, DOING, STUCK and
+// NEXT lines (the first 4 done and 3 of the others kept), nothing else. A line over 140 characters once markdown marks are off is
 // cut at a word, with "…" (haiku often goes past the 100 it's asked for). It's shown as plain text.
-export function checkRecap(out: string): Omit<Recap, "at"> | undefined {
+export function checkRecap(out: string): Card | undefined {
   let goal: string | undefined;
-  const done: string[] = [];
-  const open: string[] = [];
+  const lists: Record<(typeof LISTS)[number], string[]> = { done: [], doing: [], stuck: [], next: [] };
   for (const l of out.split("\n").map((l) => l.trim())) {
     if (!l) continue;
-    const m = l.match(/^(GOAL|DONE|OPEN)\s*\|\s*(.*)$/i);
+    const m = l.match(/^(GOAL|DONE|DOING|STUCK|NEXT)\s*\|\s*(.*)$/i);
     if (!m) return;
     let text = m[2].replace(/\*\*|__|`/g, "").replace(/^[-•]\s+/, "").replace(/\s+/g, " ").trim();
     if (!text || /[\x00-\x1f\x7f]/.test(text)) return;
@@ -110,13 +122,14 @@ export function checkRecap(out: string): Omit<Recap, "at"> | undefined {
       const at = text.lastIndexOf(" ", 139);
       text = text.slice(0, at > 0 ? at : /[\ud800-\udbff]/.test(text[138]) ? 138 : 139).trimEnd() + "…";
     }
-    const kind = m[1].toUpperCase();
-    if (kind === "GOAL") {
+    const kind = m[1].toLowerCase();
+    if (kind === "goal") {
       if (goal !== undefined) return;
       goal = text;
-    } else (kind === "DONE" ? done : open).push(text);
+    } else lists[kind as keyof typeof lists].push(text);
   }
-  return goal === undefined ? undefined : { goal, done: done.slice(0, 4), open: open.slice(0, 4) };
+  const { done, doing, stuck, next } = lists;
+  return goal === undefined ? undefined : { goal, done: done.slice(0, 4), doing: doing.slice(0, 3), stuck: stuck.slice(0, 3), next: next.slice(0, 3) };
 }
 
 type Deps = {
@@ -155,9 +168,9 @@ export function recapper(deps: Deps = live) {
     const replies = b.replies;
     const card = checkRecap((await deps.ask(recapPrompt({ title, ...b }))) ?? "");
     if (!card) throw new HttpError(502, "Couldn't write a recap");
-    const r: Recap = { ...card, at: deps.now() };
-    saveRecap(id, { ...r, replies }, deps.file);
-    return r;
+    const at = deps.now();
+    saveRecap(id, { ...card, at, replies }, deps.file);
+    return toRecap(card, at);
   }
 
   return async (s: Pick<Session, "kind" | "sessionId" | "title">, min = 0): Promise<Recap> => {
@@ -173,7 +186,7 @@ export function recapper(deps: Deps = live) {
     await follow(file, b);
     if (b.prompts < Math.max(min, 1) || b.replies < 1) throw new HttpError(404, "Not enough to recap yet");
     const had = readRecaps(deps.file)[id];
-    if (had?.replies === b.replies) return { goal: had.goal, done: had.done, open: had.open, at: had.at };
+    if (had?.replies === b.replies) return toRecap(had, had.at);
     let p = asking.get(id);
     if (!p) {
       asking.set(id, (p = write(id, b, s.title)));

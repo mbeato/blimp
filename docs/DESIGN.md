@@ -162,15 +162,16 @@ A run is a command Claude handed over, run when you click Run in an app, never b
 
 ### Recap
 
-The return card ("where was I?") says what a Claude session is for, what's done and what's still open (`src/recaps.ts`). A small, fast model writes it, with the same call as names (`askClaude`, haiku on your own Claude sign-in).
+The return card ("where was I?") says what a Claude session is for, what's done, what Claude is in the middle of, what's stuck and on what, and what's next (`src/recaps.ts`). A small, fast model writes it, with the same call as names (`askClaude`, haiku on your own Claude sign-in).
 
-`GET /sessions/<name>/recap?min=<n>` → `{ "goal": string, "done": string[], "open": string[], "at": number /* ms */ }`. `min` (default 0) is the fewest prompts the conversation must have had; the Mac asks on its own with `min=3`, and from the right-click menu's Recap without it.
+`GET /sessions/<name>/recap?min=<n>` → `{ "goal": string, "done": string[], "doing": string[], "stuck": string[], "next": string[], "open": string[], "at": number /* ms */ }`. `open` is `doing`, `stuck` and `next` in one, for the apps from 0.3.0, which show only Done and Open. A blimpd before 0.3.1 sends no `doing`, `stuck` or `next`. `min` (default 0) is the fewest prompts the conversation must have had; the Mac asks on its own with `min=3`, and from the right-click menu's Recap without it.
 - 400 when `min` isn't a whole number. 404 "no session named …"; 404 "Recaps are off" (`{ "names": false }` in `<socket dir>/config.json`, the names' switch); 404 "No conversation to recap" (not a Claude Code session, or no transcript yet); 404 "Not enough to recap yet" (fewer prompts than `min`, or no prompt or reply yet). A blimpd from before recaps answers the generic 404 "not found".
 - 429 "Too many recaps this hour": at most 30 model calls an hour, across blimpd. 502 "Couldn't write a recap": the model's answer wasn't a card.
 - **When it's written:** a recap is kept per conversation until Claude replies again. Until then the saved one comes back without a call. Two asks at once share one call.
 - **What the model reads:** the title, the first request (when it isn't one of the latest), the last 3 requests and Claude's last 6 replies, each cut to ~300 characters. No tool calls or tool output.
-- **The answer:** lines `GOAL | …` (exactly one), `DONE | …` and `OPEN | …` (the first 4 of each kept), nothing else. Markdown marks are taken off; a line over 140 characters is cut at a word, with "…". It's shown as plain text.
-- **Where:** `<socket dir>/recaps.json`, `{ [sessionId]: { goal, done, open, at, replies } }` (`replies`: how many replies the conversation had then), mode 600, through a temp file and a rename, the 200 newest kept.
+- **The answer:** lines `GOAL | …` (exactly one), then `DONE | …` (what's finished), `DOING | …` (what Claude is in the middle of), `STUCK | …` (what's blocked, each saying on what, as "Waiting on you: approve the deploy") and `NEXT | …` (what's left after that), nothing else. The first 4 DONE lines and the first 3 of each other kind are kept. The model leaves out a kind with nothing in it. Any other kind, `OPEN` too, means it isn't a card. Markdown marks are taken off; a line over 140 characters is cut at a word, with "…". It's shown as plain text.
+- **How the apps show it:** the goal in bold, then a section each for Stuck, In progress, Next and Done, in that order (Stuck first, as it needs you). An empty section is left out. Each section has a small heading with a mark; only Stuck's is red. The Mac's rule is `app/src/lib/recap.ts` `recapSections`, the phone's BlimpKit `Recap.sections`. From a blimpd before 0.3.1: Done and Open.
+- **Where:** `<socket dir>/recaps.json`, `{ [sessionId]: { goal, done, doing, stuck, next, at, replies } }` (`replies`: how many replies the conversation had then), mode 600, through a temp file and a rename, the 200 newest kept. `open` isn't kept: it's made from the three. One kept by a blimpd before 0.3.1 (`{ goal, done, open, at, replies }`) isn't read, so it's written again the next time it's asked for.
 
 ### Jobs, context and work
 

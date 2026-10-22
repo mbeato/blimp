@@ -78,8 +78,11 @@ export type Job = {
 };
 
 // The return card ("where was I?", GET /sessions/<name>/recap): what a Claude session is for, what's
-// done and what's still open, written by Haiku. at: when it was written (ms).
-export type Recap = { goal: string; done: string[]; open: string[]; at: number };
+// done, what Claude is in the middle of (doing), what's stuck and on what, and what's next, written by
+// Haiku. A blimpd before 0.3.1 sends only done and open; 0.3.1 still sends open (doing, stuck and next
+// in one) for the apps from 0.3.0. The parts to show are lib/recap.ts recapSections. at: when it was
+// written (ms).
+export type Recap = { goal: string; done: string[]; doing?: string[]; stuck?: string[]; next?: string[]; open: string[]; at: number };
 
 export type RecentFolder = { dir: string; lastUsed: number };
 // A secret given to sessions (GET /secrets): its name and when it was last saved (ms). Never its value.

@@ -88,8 +88,8 @@ struct API {
         _ = try await call("POST", "/secrets/" + name + "/tell", body: JSONEncoder().encode(Body(session: session)))
     }
 
-    /// The return card: what the session is for, what's done, what's open. min: only for a session with that
-    /// many prompts (RecapCard.autoMin when it shows by itself). On any error, show nothing.
+    /// The return card: what the session is for, then what's stuck, in progress, next and done. min: only for a
+    /// session with that many prompts (RecapCard.autoMin when it shows by itself). On any error, show nothing.
     func recap(name: String, min: Int? = nil) async throws -> Recap {
         let query = min.map { [URLQueryItem(name: "min", value: String($0))] } ?? []
         return try await decode(call("GET", "/sessions/" + name + "/recap", query: query))

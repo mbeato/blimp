@@ -112,8 +112,8 @@ enum RecapLoad: Equatable {
     case failed(String)
 }
 
-/// The chat's drawer from the right: "Recap" and the session's title, then what it's for, what's done and what's
-/// open, with refresh and ×. It never opens by itself: its toolbar button opens it, and so does a swipe left from
+/// The chat's drawer from the right: "Recap" and the session's title, then what it's for and a section each for
+/// Stuck, In progress, Next and Done (BlimpKit's Recap.sections), with refresh and ×. It never opens by itself: its toolbar button opens it, and so does a swipe left from
 /// the chat's right edge (HomeView's `recapPull`), which it follows as the left drawer does (DrawerView). A swipe
 /// right on it, a tap beside it or × closes it. Closed, it isn't there at all, so VoiceOver and the tests don't find it.
 struct RecapDrawer: View {
@@ -142,7 +142,7 @@ struct RecapDrawer: View {
                         .transition(.opacity)
                     panel
                         .frame(width: width)
-                        .background(Color(.systemBackground).ignoresSafeArea())
+                        .background(Color(.systemGroupedBackground).ignoresSafeArea())
                         .offset(x: width - out)
                         .transition(.move(edge: .trailing))
                 }
@@ -192,41 +192,44 @@ struct RecapDrawer: View {
             .padding(.horizontal)
             .padding(.top, 12)
             .padding(.bottom, 8)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    switch chat.recapLoad {
-                    case .loading, nil:
-                        Text("…").foregroundStyle(.secondary)
-                    case .failed(let why):
-                        Text(why).font(.subheadline).foregroundStyle(.secondary)
-                    case .shown(let r):
+            List {
+                switch chat.recapLoad {
+                case .loading, nil:
+                    Text("…").foregroundStyle(.secondary)
+                case .failed(let why):
+                    Text(why).font(.subheadline).foregroundStyle(.secondary)
+                case .shown(let r):
+                    Section {
                         Text(r.goal).font(.headline)
-                        part("Done", r.done)
-                        part("Open", r.open)
+                    }
+                    ForEach(r.sections, id: \.kind) { section in
+                        Section {
+                            ForEach(section.lines.indices, id: \.self) { i in
+                                Text(section.lines[i]).font(.subheadline)
+                            }
+                        } header: {
+                            Label(section.title, systemImage: Self.symbol(section.kind))
+                                .foregroundStyle(section.kind == .stuck ? Color.red : Color.secondary)
+                        }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
             }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("recapDrawer")
         .accessibilityAddTraits(.isModal)
     }
 
-    @ViewBuilder private func part(_ heading: String, _ lines: [String]) -> some View {
-        if !lines.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(heading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(lines.indices, id: \.self) { i in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("•").foregroundStyle(.secondary)
-                        Text(lines[i])
-                    }
-                    .font(.subheadline)
-                }
-            }
+    /// Each section's mark: Stuck a stop sign (only it is red, as it needs you), In progress a half-full circle,
+    /// Next and Open an empty one, Done a tick.
+    private static func symbol(_ kind: RecapSection.Kind) -> String {
+        switch kind {
+        case .stuck: "exclamationmark.octagon"
+        case .doing: "circle.lefthalf.filled"
+        case .next, .open: "circle"
+        case .done: "checkmark.circle"
         }
     }
 }

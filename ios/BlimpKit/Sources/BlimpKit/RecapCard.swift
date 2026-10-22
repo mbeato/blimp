@@ -40,3 +40,37 @@ public enum RecapCard {
         dx < -120 || predicted < -260
     }
 }
+
+/// A part of the return card, with its heading. The Mac's rule (app/src/lib/recap.ts `recapSections`).
+public struct RecapSection: Sendable, Equatable {
+    public enum Kind: String, Sendable, Equatable {
+        case stuck, doing, next, done, open
+    }
+
+    public let kind: Kind
+    public let lines: [String]
+
+    public var title: String {
+        switch kind {
+        case .stuck: "Stuck"
+        case .doing: "In progress"
+        case .next: "Next"
+        case .done: "Done"
+        case .open: "Open"
+        }
+    }
+}
+
+extension Recap {
+    /// The card's parts, with an empty one left out: Stuck first, as it needs you, then In progress, Next and Done.
+    /// From a blimpd before 0.3.1 (no doing, stuck or next): Done and Open, as it showed them.
+    public var sections: [RecapSection] {
+        let all: [(RecapSection.Kind, [String])]
+        if let doing, let stuck, let next {
+            all = [(.stuck, stuck), (.doing, doing), (.next, next), (.done, done)]
+        } else {
+            all = [(.done, done), (.open, open)]
+        }
+        return all.filter { !$0.1.isEmpty }.map { RecapSection(kind: $0.0, lines: $0.1) }
+    }
+}

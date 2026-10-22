@@ -83,8 +83,27 @@ private struct DecodeFailed: Error {}
 }
 
 @Test func decodesARecap() throws {
+    // What blimpd 0.3.1 sends: open is doing, stuck and next in one, for the apps from 0.3.0.
+    let json = #"{"goal":"Make the phone's login work again","done":["Token refresh fixed","Tests added"],"doing":["Running the full test suite"],"stuck":["Waiting on you: approve the deploy"],"next":["Release v0.2.20","Tell the testers"],"open":["Running the full test suite","Waiting on you: approve the deploy","Release v0.2.20","Tell the testers"],"at":1792624236489}"#
+    let r = try JSONDecoder().decode(Recap.self, from: Data(json.utf8))
+    #expect(r.goal == "Make the phone's login work again" && r.at == 1792624236489)
+    #expect(r.doing == ["Running the full test suite"] && r.stuck == ["Waiting on you: approve the deploy"] && r.next == ["Release v0.2.20", "Tell the testers"])
+    #expect(r.sections.map(\.title) == ["Stuck", "In progress", "Next", "Done"])
+    #expect(r.sections.map(\.lines) == [["Waiting on you: approve the deploy"], ["Running the full test suite"], ["Release v0.2.20", "Tell the testers"], ["Token refresh fixed", "Tests added"]])
+}
+
+@Test func aRecapFromABlimpdBefore031ShowsDoneAndOpen() throws {
     let r = try JSONDecoder().decode(Recap.self, from: Data(#"{"goal":"Make the phone's login work again","done":["Token refresh fixed","Tests added"],"open":["Release v0.2.20"],"at":1792624236489}"#.utf8))
     #expect(r == Recap(goal: "Make the phone's login work again", done: ["Token refresh fixed", "Tests added"], open: ["Release v0.2.20"], at: 1792624236489))
+    #expect(r.doing == nil && r.stuck == nil && r.next == nil)
+    #expect(r.sections == [RecapSection(kind: .done, lines: ["Token refresh fixed", "Tests added"]), RecapSection(kind: .open, lines: ["Release v0.2.20"])])
+    #expect(Recap(goal: "g", done: [], open: ["a"], at: 0).sections.map(\.title) == ["Open"])
+}
+
+@Test func aRecapLeavesOutAnEmptySection() {
+    let r = Recap(goal: "Tidy the README", done: ["Install steps rewritten"], doing: [], stuck: [], next: ["Add a screenshot"], open: ["Add a screenshot"], at: 0)
+    #expect(r.sections == [RecapSection(kind: .next, lines: ["Add a screenshot"]), RecapSection(kind: .done, lines: ["Install steps rewritten"])])
+    #expect(Recap(goal: "g", done: [], doing: [], stuck: [], next: [], open: [], at: 0).sections.isEmpty)
 }
 
 @Test func decodesAHandoffAsPostReturnsIt() throws {

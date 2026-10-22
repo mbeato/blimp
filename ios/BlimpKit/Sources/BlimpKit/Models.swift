@@ -305,10 +305,16 @@ public struct Work: Codable, Sendable, Equatable {
     public var prs: [PullRequest]? = nil
 }
 
-/// The return card ("where was I?"), GET /sessions/<name>/recap. at: when it was written (ms).
+/// The return card ("where was I?"), GET /sessions/<name>/recap. at: when it was written (ms). doing: what Claude
+/// is in the middle of; stuck: what's blocked, each saying on what; next: what's left after that. A blimpd from
+/// before 0.3.1 sends none of the three, only done and open (blimpd 0.3.1 still sends open: the three in one).
+/// The parts to show, in order, are `sections` (RecapCard.swift).
 public struct Recap: Codable, Sendable, Equatable {
     public let goal: String
     public let done: [String]
+    public var doing: [String]? = nil
+    public var stuck: [String]? = nil
+    public var next: [String]? = nil
     public let open: [String]
     public let at: Double
 }

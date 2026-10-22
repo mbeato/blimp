@@ -2,7 +2,7 @@
 // window, and this Mac hadn't shown it for an hour or more. Sessions are "<server key>/<session name>".
 // When each was last on screen is kept on this computer (localStorage), only for this.
 
-import { ApiError } from "./api";
+import { ApiError, type Recap } from "./api";
 
 export const AWAY = 60 * 60_000;
 const KEEP = 30 * 24 * 60 * 60_000;
@@ -46,4 +46,16 @@ export function writeLastShown(last: Record<string, number>) {
 // doesn't show). Undefined for every other failure.
 export function recapError(e: unknown): string | undefined {
   if (e instanceof ApiError && e.status === 404 && e.message === "not found") return "This server's blimpd is too old for recaps. Update it first.";
+}
+
+export type RecapKind = "stuck" | "doing" | "next" | "done" | "open";
+export type RecapSection = { kind: RecapKind; label: string; items: string[] };
+const LABELS: Record<RecapKind, string> = { stuck: "Stuck", doing: "In progress", next: "Next", done: "Done", open: "Open" };
+
+// The card's parts, with an empty one left out: Stuck first, as it needs you, then In progress, Next and
+// Done. From a blimpd before 0.3.1 (no doing, stuck or next): Done and Open, as the card showed them.
+// The phone's rule is BlimpKit's Recap.sections.
+export function recapSections(r: Recap): RecapSection[] {
+  const kinds: RecapKind[] = r.doing && r.stuck && r.next ? ["stuck", "doing", "next", "done"] : ["done", "open"];
+  return kinds.map((kind) => ({ kind, label: LABELS[kind], items: r[kind] ?? [] })).filter((s) => s.items.length > 0);
 }

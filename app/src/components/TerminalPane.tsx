@@ -902,7 +902,7 @@ export function TerminalPane(props: {
               </button>
             )}
             {isConversation(ctx.name) && (
-              <button role="menuitem" title="What this session is for, what's done and what's still open" onClick={() => (setCtx(null), p.panes.includes(ctx.name) || showHere(ctx.name), recaps.show(ctx.name))}>
+              <button role="menuitem" title="What this session is for, and what's stuck, in progress, next and done" onClick={() => (setCtx(null), p.panes.includes(ctx.name) || showHere(ctx.name), recaps.show(ctx.name))}>
                 Recap
               </button>
             )}

@@ -1,13 +1,13 @@
-// The return card ("where was I?") for a Claude session: what it is for, what's done and what's still
-// open, from blimpd (GET /sessions/<name>/recap). It sits at the bottom of the session list, out of the
+// The return card ("where was I?") for a Claude session: what it is for, then what's stuck, in progress,
+// next and done (lib/recap.ts recapSections), from blimpd (GET /sessions/<name>/recap). It sits at the bottom of the session list, out of the
 // terminal's way, or over the top of the session's terminal while the list is hidden. It shows by itself
 // when the session comes on screen in a focused window after an hour or more away (lib/recap.ts), and from
 // the right-click menu's Recap. One card at a time: the newest ask wins. If blimpd can't give one,
 // nothing shows (from the menu, a blimpd too old for recaps says so).
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Api, Recap } from "../lib/api";
-import { AWAY, cameBack, markShown, pickBack, readLastShown, recapError, writeLastShown } from "../lib/recap";
+import { AWAY, cameBack, markShown, pickBack, readLastShown, recapError, recapSections, type RecapKind, type RecapSection, writeLastShown } from "../lib/recap";
 
 export type Card = Recap | "loading";
 
@@ -129,8 +129,9 @@ export function RecapCard(props: { card: Card; title?: string; onSession?: () =>
         ) : (
           <>
             <p className="recap-goal">{card.goal}</p>
-            {card.done.length > 0 && <Part label="Done" items={card.done} />}
-            {card.open.length > 0 && <Part label="Open" items={card.open} />}
+            {recapSections(card).map((s) => (
+              <Part key={s.kind} section={s} />
+            ))}
           </>
         )}
       </div>
@@ -138,12 +139,33 @@ export function RecapCard(props: { card: Card; title?: string; onSession?: () =>
   );
 }
 
-function Part(props: { label: string; items: string[] }) {
+// Each part's mark, beside its heading: Stuck a stop, In progress a half-filled circle, Next and Open an
+// empty one, Done a tick.
+const MARKS: Record<RecapKind, ReactNode> = {
+  stuck: <path d="M5 1.5h6L14.5 5v6L11 14.5H5L1.5 11V5zM8 4.5v4.5M8 11v.5" />,
+  doing: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" />
+    </>
+  ),
+  next: <circle cx="8" cy="8" r="6" />,
+  open: <circle cx="8" cy="8" r="6" />,
+  done: <path d="M2.5 8.5l3.5 3.5 7.5-8" />,
+};
+
+function Part(props: { section: RecapSection }) {
+  const { kind, label, items } = props.section;
   return (
-    <div className="recap-part">
-      <span className="recap-label">{props.label}</span>
-      <ul aria-label={props.label}>
-        {props.items.map((t, i) => (
+    <div className={`recap-part ${kind}`}>
+      <span className="recap-label">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          {MARKS[kind]}
+        </svg>
+        {label}
+      </span>
+      <ul aria-label={label}>
+        {items.map((t, i) => (
           <li key={i}>{t}</li>
         ))}
       </ul>
