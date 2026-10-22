@@ -1919,7 +1919,7 @@ body.dragging-session * {
 /* Delete: there is no trash on the server. */
 .dialog-actions button.primary.danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--bg);
 }
 
 .dialog-actions button:disabled {
@@ -2309,6 +2309,10 @@ body.dragging-session * {
 .dialog.ask {
   width: 420px;
   padding: 18px 18px 14px;
+  /* Not the session list's amber "?" (.ask), whose class it shares. */
+  font: inherit;
+  color: inherit;
+  text-shadow: none;
 }
 
 .ask-text {
