@@ -26,7 +26,7 @@ struct MarkView: View {
 }
 
 /// A row's actions without opening it, as a swipe from `edge` and in its press-and-hold menu (which also says its
-/// branch and clashes): Stop while Claude works, Mark read, Continue in new session, End (after a question); a past
+/// branch): Stop while Claude works, Mark read, Continue in new session, End (after a question); a past
 /// conversation's Resume, with no first message.
 struct RowMenu: ViewModifier {
     let item: DrawerRow.Item
@@ -75,10 +75,10 @@ struct RowMenu: ViewModifier {
         }
     }
 
-    /// Its branch and what it may get in the way of, as lines at the top of the menu.
+    /// Its branch, as a line at the top of the menu.
     private func notes(_ s: Session) -> [String] {
         let c = RowCaption(s, all: store.sessions, now: Date().timeIntervalSince1970 * 1000)
-        return (c.branch.map { [$0] } ?? []) + c.clash
+        return c.branch.map { [$0] } ?? []
     }
 
     private func stop(_ s: Session) -> some View {

@@ -202,8 +202,8 @@ Each item says what to do, and what should happen. If the result is different, w
   Expect: a card shows at the top of its terminal, with a line on what the session is for, then Done and Open. It may show "…" for a few seconds first. × closes it, and it does not come back when you click another session and back. Recap shows it again at once. A session with fewer than 3 prompts gets no card by itself, and nothing shows if the server has `{ "names": false }`.
 
 - [ ] **Which session is on what.**
-  Do: in a git repo on the server with `gh` signed in, check out a branch that has a pull request. Start two Claude sessions there and ask each to edit the same file. Hover each row, then hover the red sign before its title. Right-click a row and pick **Open PR #n**. Press ⌘K.
-  Expect: within about a minute, each row shows a red (not amber) warning sign. Its tooltip says "Also on branch *x*: *other title*" and "Both edited *file* with *other title*". The row's tooltip says "On branch *x*". **Open PR #n** opens the pull request in your default browser. ⌘K shows the branch after the folder.
+  Do: in a git repo on the server with `gh` signed in, check out a branch that has a pull request. Start two Claude sessions there and ask each to edit the same file. Hover each row. Right-click a row and pick **Open PR #n**. Press ⌘K.
+  Expect: no row shows a warning sign. The row's tooltip says "On branch *x*". **Open PR #n** opens the pull request in your default browser. ⌘K shows the branch after the folder.
 
 - [ ] **Give a Secret.**
   Do: right-click a Claude session, pick Give a Secret…, type the name `TEST_SECRET` and paste any text as the value. Click Save and Tell Claude. Then ask Claude "is TEST_SECRET set up? don't show it".

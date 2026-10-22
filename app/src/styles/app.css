@@ -1077,17 +1077,6 @@ body.dragging-session * {
   place-items: center;
 }
 
-/* Another session on the same branch or files (TerminalPane's Clash): red, never amber. A fixed width,
-   so an empty one (on the rows without, while a row has one) keeps every title at the same x. */
-.srow-clash {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 12px;
-  margin-right: -3px;
-  color: var(--danger);
-}
-
 .srow-mark.shell {
   font: 600 10px ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--fg-dim);

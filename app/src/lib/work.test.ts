@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Session } from "./api";
-import { branchLine, clashLines } from "./work";
+import { branchLine } from "./work";
 
 const s = (name: string, extra: Partial<Session> = {}): Session => ({
   name,
@@ -21,22 +21,4 @@ test("the row tooltip names the branch, and says when its checkout is a worktree
   expect(branchLine(s("a", { work: { branch: "feat/x", root: "/p-wt", worktree: true } }))).toBe("On branch feat/x (worktree)");
   expect(branchLine(s("a", { work: { root: "/p" } }))).toBeUndefined();
   expect(branchLine(s("a"))).toBeUndefined();
-});
-
-test("each clash is one line naming the other session by its title", () => {
-  const a = s("a", {
-    work: {
-      branch: "feat",
-      clash: [
-        { session: "b", reason: "branch" },
-        { session: "b", reason: "files", files: ["a.ts", "src/b.ts"] },
-        { session: "gone", reason: "files", files: ["c.ts"] },
-      ],
-    },
-  });
-  const all = [a, s("b", { title: "Fix the list" })];
-  expect(clashLines(a, all)).toEqual(["Also on branch feat: Fix the list", "Both edited a.ts, src/b.ts with Fix the list", "Both edited c.ts with gone"]);
-  // A shell has no conversation title: its name.
-  expect(clashLines(s("c", { work: { branch: "x", clash: [{ session: "sh", reason: "branch" }] } }), [s("sh", { kind: "shell" })])).toEqual(["Also on branch x: sh"]);
-  expect(clashLines(s("d"), all)).toEqual([]);
 });

@@ -98,19 +98,18 @@ private let minute = 60_000.0
     #expect(Drawer.badge([done], needs: [], onScreen: nil) == .unread)
 }
 
-@Test func aRowsCaptionHasTheHandoffTheBranchAndTheJobsAndItsClashesAndParent() throws {
+@Test func aRowsCaptionHasTheHandoffTheBranchAndTheJobsAndItsParent() throws {
     guard case .sessions(let list) = EventsMessage.decode(Data(sessions03.utf8)) else { throw Failed() }
     let now = 1792624236489.0
     let web1 = RowCaption(list[0], all: list, now: now)
     // waiting: the handoff's words give way; 1 job running for 18m (a running one beats the failed one)
     #expect(web1.text == "feat-x · 1 job · 18m")
-    #expect(web1.clash == ["Also on branch feat-x: Tidy the README", "Both edited app/src/lib/browser.ts with Tidy the README"])
     #expect(web1.continued == nil)
     #expect(web1.branch == "On branch feat-x")
     #expect(RowCaption(list[1], all: list, now: now).branch == "On branch feat-x (worktree)")
     let child = RowCaption(list[3], all: list, now: now)
     #expect(child.continued == "Continued from Fix the phone login")
-    #expect(child.text == nil && child.clash.isEmpty)
+    #expect(child.text == nil)
     #expect(RowCaption(list[3], all: [], now: now).continued == "Continued from web-1")
     var writing = list[1]
     writing.handoff = Handoff(state: .writing)

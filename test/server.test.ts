@@ -404,7 +404,7 @@ describe("chat", () => {
     expect((await seen("not-an-id")).status).toBe(400);
   });
 
-  test("two Claude sessions on the same branch that edited the same file each show the other, with the branch's pull requests", async () => {
+  test("two Claude sessions on the same branch that edited the same file each show the checkout and the branch's pull requests, and nothing about the other", async () => {
     const repo = join(realpathSync(tmp), "work-repo");
     mkdirSync(repo);
     const git = (...args: string[]) => Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo, stdout: "ignore", stderr: "ignore" }).exitCode;
@@ -418,17 +418,15 @@ describe("chat", () => {
     const listed = async (name: string) => (await (await api("/sessions")).json()).find((s: any) => s.name === name);
     const work = await until(async () => {
       const w = (await listed(a.name)).work;
-      return w?.prs && w.clash && w;
-    }, "the checkout, pull requests and clash", 10000);
+      return w?.prs && w;
+    }, "the checkout and pull requests", 10000);
     expect(work).toEqual({
       branch: "feat",
       root: repo,
       prs: [{ number: 7, title: "in work-repo for feat", state: "OPEN", url: "https://github.com/o/r/pull/7" }],
-      clash: [{ session: b.name, reason: "branch" }, { session: b.name, reason: "files", files: ["a.ts"] }],
     });
-    expect((await listed(b.name)).work.clash).toEqual([{ session: a.name, reason: "branch" }, { session: a.name, reason: "files", files: ["a.ts"] }]);
-    // The files Claude edited stay on the server.
-    expect(JSON.stringify(await (await api("/sessions")).json())).not.toContain('"files":[{');
+    expect((await listed(b.name)).work).toEqual(work);
+    expect(JSON.stringify(await (await api("/sessions")).json())).not.toContain('"clash"');
   });
 
   test("GET /conversations/<id>/messages: a past conversation's messages, without starting Claude", async () => {

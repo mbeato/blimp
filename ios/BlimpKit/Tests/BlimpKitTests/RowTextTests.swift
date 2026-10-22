@@ -105,17 +105,8 @@ private func row(_ name: String, state: SessionState = .done, title: String? = n
     #expect(WorkText.branchLine(row("a", work: Work(branch: "feat-x", worktree: true))) == "On branch feat-x (worktree)")
 }
 
-@Test func clashLinesNameTheOtherSessionByItsTitleOrItsName() {
-    let s = row("a", work: Work(branch: "feat-x", clash: [Clash(session: "b", reason: .branch), Clash(session: "sh", reason: .files, files: ["src/a.ts", "README.md"]),
-                                                        Clash(session: "gone", reason: .branch)]))
-    let all = [s, row("b", title: "Tidy the README"), row("sh", id: nil)]
-    #expect(WorkText.clashLines(s, all: all) == ["Also on branch feat-x: Tidy the README", "Both edited src/a.ts, README.md with sh", "Also on branch feat-x: gone"])
-    #expect(WorkText.clashLines(row("b"), all: all) == [])
-}
-
-@Test func theRealListsClashesReadAsTheMacsDo() throws {
+@Test func theRealListsJobsAndContextReadAsTheMacsDo() throws {
     guard case .sessions(let list) = EventsMessage.decode(Data(sessions03.utf8)) else { Issue.record("no sessions"); return }
-    #expect(WorkText.clashLines(list[0], all: list) == ["Also on branch feat-x: Tidy the README", "Both edited app/src/lib/browser.ts with Tidy the README"])
     #expect(JobsText.caption(list[0].jobs, now: 1792624236489) == "1 job · 18m")
     #expect(ContextText.meter(list[0].context)?.label == "Context 62% (621k of 1M tokens)")
     #expect(ContextText.meter(list[1].context) == nil)

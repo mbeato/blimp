@@ -6,7 +6,6 @@ import {
   type ActivityEvent,
   branchOf,
   contextLimit,
-  editedFiles,
   fold,
   lastLine,
   lineEvents,
@@ -69,11 +68,6 @@ describe("lineEvents", () => {
   test("killed counts as stopped; a Monitor script's exit is read from 'script failed (exit N)'", () => {
     expect(lineEvents(R.killed)).toMatchObject([{ type: "end", status: "stopped" }]);
     expect(lineEvents(R.monitorFailed)).toMatchObject([{ type: "end", ids: ["buwontovi"], status: "failed", exit: 1 }]);
-  });
-
-  test("Edit and Write calls give the files Claude edited", () => {
-    expect(lineEvents(R.edit).filter((e) => e.type === "edit")).toEqual([{ type: "edit", at: tsOf("edit"), path: "/Users/u/blimp/app/src/lib/browser.ts" }]);
-    expect(lineEvents(R.write).filter((e) => e.type === "edit")).toHaveLength(1);
   });
 
   test("api-request copies, tool output that quotes a notification, and sidechain lines say nothing", () => {
@@ -219,16 +213,6 @@ describe("fold", () => {
     fold(a, [{ type: "where", cwd: "/w" }]);
     expect(a.cwd).toBe("/w");
   });
-
-  test("files: absolute paths, newest first, each once, at most 200", () => {
-    const a = newActivity();
-    const e = (path: string, at: number): ActivityEvent => ({ type: "edit", at, path });
-    fold(a, [e("/a", 1), e("/b", 2), e("rel/c", 3), e("/a", 4)]);
-    expect(a.files).toEqual([{ path: "/a", at: 4 }, { path: "/b", at: 2 }]);
-    fold(a, Array.from({ length: 300 }, (_, i) => e(`/f${i}`, 10 + i)));
-    expect(a.files).toHaveLength(200);
-    expect(a.files[0].path).toBe("/f299");
-  });
 });
 
 describe("branchOf", () => {
@@ -363,16 +347,6 @@ describe("transcriptActivity", () => {
     expect(transcriptActivity(f)!.jobs.get("b5bbkbpfm")).toMatchObject({ status: "running" });
     appendFileSync(f, R.failedQueued.slice(50) + "\n");
     expect(transcriptActivity(f)!.jobs.get("b5bbkbpfm")).toMatchObject({ status: "failed", exit: 1 });
-    expect(editedFiles(f)).toEqual([]);
-    appendFileSync(f, R.edit + "\n");
-    // The edited files are the last scan's (the session list scans just before it asks), not read again.
-    expect(editedFiles(f)).toEqual([]);
-    transcriptActivity(f);
-    expect(editedFiles(f)).toEqual([{ path: "/Users/u/blimp/app/src/lib/browser.ts", at: tsOf("edit") }]);
-    // A file not scanned yet is read.
-    const g = join(tmp, "edited-only.jsonl");
-    writeFileSync(g, R.edit + "\n");
-    expect(editedFiles(g)).toEqual([{ path: "/Users/u/blimp/app/src/lib/browser.ts", at: tsOf("edit") }]);
     // Rewritten shorter: read again from the start.
     writeFileSync(f, R.bashCall + "\n");
     const a = transcriptActivity(f)!;

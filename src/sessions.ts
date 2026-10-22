@@ -63,7 +63,7 @@ export type Session = ZmxSession & {
   runnableAt?: number; // when that reply began (ms): a run started before it is for an older reply
   // A run's command, the Claude session it's for, and once it ended, when and its exit code (runs.ts).
   run?: Omit<Run, "dir">;
-  // Its checkout, branch, pull requests and clashes with other sessions (work.ts), when known.
+  // Its checkout, branch and pull requests (work.ts), when known.
   work?: Work;
 };
 

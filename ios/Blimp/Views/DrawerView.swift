@@ -174,10 +174,10 @@ struct DrawerView: View {
 }
 
 /// A row: its mark, its title (a session a handoff started has an arrow before it), and under it how long ago,
-/// then its handoff, branch and jobs; a red warning when it may get in another session's way.
+/// then its handoff, branch and jobs.
 struct RowLabel: View {
     let row: DrawerRow
-    /// Every running session, for the other session's title in a clash and a handoff's parent.
+    /// Every running session, for a handoff's parent.
     var sessions: [Session] = []
 
     var body: some View {
@@ -210,22 +210,6 @@ struct RowLabel: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            if let clash = caption?.clash, !clash.isEmpty {
-                ClashMark(lines: clash)
-            }
         }
-    }
-}
-
-/// Another session may get in this one's way (the same branch, or the same files edited): red, never amber,
-/// which means "waiting for you". VoiceOver says with whom and why; so does the row's press-and-hold menu.
-struct ClashMark: View {
-    let lines: [String]
-
-    var body: some View {
-        Image(systemName: "exclamationmark.triangle.fill")
-            .font(.caption)
-            .foregroundStyle(.red)
-            .accessibilityLabel(lines.joined(separator: ". "))
     }
 }

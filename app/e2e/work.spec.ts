@@ -1,6 +1,5 @@
-// Which session is on what: a row's tooltip names its branch, a red warning shows another session on the
-// same branch or files (saying which and why), the right-click menu opens the branch's pull requests,
-// and ⌘K shows the branch beside the folder.
+// Which session is on what: a row's tooltip names its branch, the right-click menu opens the branch's pull
+// requests, and ⌘K shows the branch beside the folder. Two sessions on one branch show no warning.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -13,7 +12,7 @@ const b = `blimpe2e-workb-${process.pid}`;
 
 test.afterAll(() => (killSession(a), killSession(b)));
 
-test("two sessions on one branch that edited the same file each warn of the other; the PR opens from the menu", async ({ page }) => {
+test("two sessions on one branch that edited the same file show their branch and no warning; the PR opens from the menu", async ({ page }) => {
   const claude = process.env.BLIMP_E2E_CLAUDE!;
   // A stand-in gh, first on the test blimpd's PATH: three pull requests for the branch (gh's --limit 3).
   writeFileSync(
@@ -52,20 +51,11 @@ test("two sessions on one branch that edited the same file each warn of the othe
   });
   await openApp(page, { dir, session: b });
   const row = sessionRow(page, a);
-  const warning = row.locator(".srow-clash");
-  await expect(warning).toHaveAttribute("title", "Also on branch feat: Tidy the parser\nBoth edited a.ts with Tidy the parser", { timeout: 10_000 });
-  await expect(sessionRow(page, b).locator(".srow-clash")).toHaveAttribute("title", /^Also on branch feat: Fix the parser\n/);
-  // Red, not amber: amber means waiting for you.
-  const color = (v: string) => page.evaluate((v) => {
-    const el = document.createElement("span");
-    el.style.color = `var(${v})`;
-    document.body.append(el);
-    const c = getComputedStyle(el).color;
-    el.remove();
-    return c;
-  }, v);
-  expect(await warning.evaluate((el) => getComputedStyle(el).color)).toBe(await color("--danger"));
-  await expect(row).toHaveAttribute("title", /\nOn branch feat\n/);
+  await expect(row).toHaveAttribute("title", /\nOn branch feat\n/, { timeout: 10_000 });
+  await expect(sessionRow(page, b)).toHaveAttribute("title", /\nOn branch feat\n/);
+  // No warning about the other session, in the row or its tooltips.
+  for (const r of [row, sessionRow(page, b)]) await expect(r.locator('.srow-clash, [title*="Also on branch"], [title*="Both edited"]')).toHaveCount(0);
+  await expect(row).not.toHaveAttribute("title", /Also on branch|Both edited/);
 
   // The PR is looked up after the checkout is found: it can come a tick later.
   const { base, token } = e2e();

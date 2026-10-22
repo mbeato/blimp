@@ -156,7 +156,6 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - If you detach with `ctrl+\` (zmx's detach key), the terminal shows "Detached" and a **Reattach** button. If the connection drops, the terminal reconnects by itself.
 - **⌘K** searches all sessions on all servers, by title, folder and name. Pick one and blimp shows it in its folder's tab. If another window has that folder open, that window comes to the front; else the folder opens in a new tab here.
 - **Which session is on what.** blimp shows which git branch each Claude session works on. Hover a session to see its branch, and "(worktree)" when the folder is a git worktree. ⌘K shows the branch next to the folder.
-  - A red warning sign before a session's title means another session may get in its way. Either both are on the same branch in the same folder, or both edited the same file in the last 6 hours. Hover the sign to see which session and which files. Two sessions on `main` or `master` count only once one of them edits a file. A session and the one continued from it (**Continue in New Session**) don't count: they are one piece of work. Red, not amber: amber always means "waiting for you".
   - **Right-click a session** for **Open PR #12**: the branch's pull requests (the newest 3, open or closed) open in your browser. blimp asks GitHub's `gh` on the server, at most every 5 minutes. Without `gh`, or when you're not signed in to it, there are no PR items.
 
 **Running commands Claude gives you**
