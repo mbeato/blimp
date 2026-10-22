@@ -541,7 +541,7 @@ export function TerminalPane(props: {
   useEffect(() => void (jobsAt && !jobsKey && setJobsAt(null)), [jobsAt, jobsKey]);
   // Return cards, for the Claude sessions on screen here while this tab is in front.
   const isConversation = (name: string) => !!sessionOf(name)?.sessionId && isClaude(sessionOf(name)!);
-  const recaps = useRecaps(api, link.key, props.front ? p.panes.filter(isConversation) : []);
+  const recaps = useRecaps(api, link.key, props.front ? p.panes.filter(isConversation) : [], props.onNotice);
   const openMenu = (e: ReactMouseEvent, name: string) => {
     e.preventDefault();
     e.stopPropagation();

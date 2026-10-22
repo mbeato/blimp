@@ -1,17 +1,19 @@
 // The return card ("where was I?") over the top of a Claude session's terminal: what the session is for,
 // what's done and what's still open, from blimpd (GET /sessions/<name>/recap). It shows by itself when
 // the session comes on screen in a focused window after an hour or more away (lib/recap.ts), and from
-// the right-click menu's Recap. If blimpd can't give one, nothing shows.
+// the right-click menu's Recap. If blimpd can't give one, nothing shows (from the menu, a blimpd too old
+// for recaps says so).
 
 import { useEffect, useRef, useState } from "react";
 import type { Api, Recap } from "../lib/api";
-import { AWAY, cameBack, markShown, readLastShown, writeLastShown } from "../lib/recap";
+import { AWAY, cameBack, markShown, readLastShown, recapError, writeLastShown } from "../lib/recap";
 
 export type Card = Recap | "loading";
 
 // The cards of a pane's sessions, by session name. onScreen: the Claude sessions the pane shows while
 // its tab is in front. server: the link's key, so the same name on two servers is two sessions.
-export function useRecaps(api: Api | null, server: string, onScreen: string[]) {
+// onNotice: for a Recap from the menu that a too-old blimpd can't give.
+export function useRecaps(api: Api | null, server: string, onScreen: string[], onNotice: (msg: string) => void) {
   const [cards, setCards] = useState<Record<string, Card>>({});
   // Asks still out: session name -> its latest, so an older answer (or one dismissed) is dropped.
   const asking = useRef(new Map<string, number>()).current;
@@ -44,10 +46,14 @@ export function useRecaps(api: Api | null, server: string, onScreen: string[]) {
         clearTimeout(t);
         if (mine()) asking.delete(name), setCards((c) => ({ ...c, [name]: r }));
       },
-      () => {
+      (e) => {
         clearTimeout(t);
+        if (!mine()) return;
         // Only the "…" goes: a card already showing stays (one asked for again, or asked on its own).
-        if (mine()) asking.delete(name), setCards(({ [name]: was, ...rest }) => (was === undefined || was === "loading" ? rest : { ...rest, [name]: was }));
+        asking.delete(name);
+        setCards(({ [name]: was, ...rest }) => (was === undefined || was === "loading" ? rest : { ...rest, [name]: was }));
+        const notice = auto ? undefined : recapError(e);
+        if (notice) onNotice(notice);
       },
     );
   };

@@ -12,8 +12,9 @@ const name = `blimpe2e-recap-${process.pid}`;
 const bare = `blimpe2e-recapb-${process.pid}`;
 const failing = `blimpe2e-recapf-${process.pid}`;
 const withRun = `blimpe2e-recapr-${process.pid}`;
+const old = `blimpe2e-recapo-${process.pid}`;
 
-test.afterAll(() => (killSession(name), killSession(bare), killSession(failing), killSession(withRun)));
+test.afterAll(() => (killSession(name), killSession(bare), killSession(failing), killSession(withRun), killSession(old)));
 
 // A session that looks like Claude to blimpd, with 3 prompts and replies.
 function fakeClaude(session: string, dir: string, last = "Shipped.") {
@@ -109,6 +110,27 @@ test("a Recap that fails leaves the card already showing", async ({ page }) => {
   await expect.poll(() => asked.length).toBe(2);
   await page.waitForTimeout(500);
   await expect(card(page, failing).locator(".recap-goal")).toHaveText(CARD.goal);
+});
+
+test("a blimpd too old for recaps: no card on its own, and the menu's Recap says to update it", async ({ page }) => {
+  const dir = fixtureDir("recapo");
+  fakeClaude(old, dir);
+  const asked: string[] = [];
+  await page.route(`**/sessions/${old}/recap*`, (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get("min") ?? "");
+    return route.fulfill({ status: 404, json: { error: "not found" }, headers: { "Access-Control-Allow-Origin": "*" } });
+  });
+  await openApp(page, { dir, session: old });
+  await page.bringToFront();
+  await expect.poll(() => asked.length, { timeout: 10_000 }).toBe(1);
+  await page.waitForTimeout(800);
+  await expect(card(page, old)).toHaveCount(0);
+  await expect(page.locator(".toast")).toHaveCount(0);
+
+  await sessionRow(page, old).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Recap" }).click();
+  await expect(page.locator(".toast")).toHaveText("This server's blimpd is too old for recaps. Update it first.");
+  await expect(card(page, old)).toHaveCount(0);
 });
 
 test("with a Run bar over the terminal, the card shows under it, and its × still works", async ({ page }) => {

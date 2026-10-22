@@ -2,6 +2,8 @@
 // window, and this Mac hadn't shown it for an hour or more. Sessions are "<server key>/<session name>".
 // When each was last on screen is kept on this computer (localStorage), only for this.
 
+import { ApiError } from "./api";
+
 export const AWAY = 60 * 60_000;
 const KEEP = 30 * 24 * 60 * 60_000;
 const KEY = "blimp.lastShown";
@@ -33,4 +35,11 @@ export function writeLastShown(last: Record<string, number>) {
   try {
     localStorage.setItem(KEY, JSON.stringify(last));
   } catch {}
+}
+
+// The notice when a Recap asked for from the menu can't come from a blimpd from before recaps: it answers
+// the route with the generic "not found" (one that can't recap a session says why, and the card just
+// doesn't show). Undefined for every other failure.
+export function recapError(e: unknown): string | undefined {
+  if (e instanceof ApiError && e.status === 404 && e.message === "not found") return "This server's blimpd is too old for recaps. Update it first.";
 }

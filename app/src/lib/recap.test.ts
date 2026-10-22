@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { AWAY, cameBack, markShown } from "./recap";
+import { ApiError } from "./api";
+import { AWAY, cameBack, markShown, recapError } from "./recap";
 
 const now = 1_000_000_000_000;
 const MIN = 60_000;
@@ -28,4 +29,12 @@ test("one on screen all along gets a card when the last look was an hour or more
   // Even with nothing kept on this computer.
   expect(cameBack(["s/a"], ["s/a"], {}, now, now - 30_000)).toEqual([]);
   expect(cameBack(["s/a"], ["s/a"], {}, now, now - 61 * MIN)).toEqual(["s/a"]);
+});
+
+test("recapError: a blimpd from before recaps (its generic 404) says to update; one that can't recap stays silent", () => {
+  expect(recapError(new ApiError(404, "not found"))).toBe("This server's blimpd is too old for recaps. Update it first.");
+  expect(recapError(new ApiError(404, "Not enough to recap yet"))).toBeUndefined();
+  expect(recapError(new ApiError(404, "no session named web-1"))).toBeUndefined();
+  expect(recapError(new ApiError(429, "Too many recaps this hour"))).toBeUndefined();
+  expect(recapError(new Error("offline"))).toBeUndefined();
 });
