@@ -1,6 +1,6 @@
 [package]
 name = "blimp"
-version = "0.2.19"
+version = "0.3.0"
 description = "Run Claude Code on a remote server"
 license = "MIT"
 edition = "2021"
