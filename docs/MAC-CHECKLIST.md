@@ -94,8 +94,8 @@ Each item says what to do, and what should happen. If the result is different, w
   Expect: the lit folder is always the one under the pointer, down to the last row (not one about halfway up the window). Over the terminal, the split under the pointer is lit. The file lands in `~/.blimp/uploads` and its path is typed into that session, not into the tree.
 
 - [ ] **A picture that isn't a file.**
-  Do: drag a picture straight from a web page in Safari (or from Photos) onto a Claude session. Then take a screenshot (⌘⇧4), drag the screenshot file from the desktop onto the session.
-  Expect: the first drop lights nothing and blimp says only files can be dropped. The screenshot file uploads and its path is typed in.
+  Do: drag a picture straight from a web page in Safari (or from Photos) onto a Claude session. Then select some text in Safari and drag it onto the session. Then take a screenshot (⌘⇧4), drag the screenshot file from the desktop onto the session.
+  Expect: the first two drops light nothing and blimp says only files can be dropped, and how to save a picture as a file; nothing is typed. The screenshot file uploads and its path is typed in.
 
 - [ ] **Download and Upload….**
   Do: right-click a file and pick Download. Right-click a folder and pick Download as .tar.gz. Right-click a folder and pick Upload… and choose a file.

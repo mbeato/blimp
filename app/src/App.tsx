@@ -449,7 +449,8 @@ export function App() {
       // The Mac app: Tauri's own drag-drop event, with the files' paths (Rust may then read them).
       let off = () => {};
       // A picture dragged from a web page or Photos hands over no file, only its data, which Tauri
-      // doesn't pass on: nothing is lit for it, and letting go says how to get it in instead.
+      // doesn't pass on: nothing is lit for it, and letting go says how to get it in instead. So
+      // does any other drag that isn't files (text, a link), so the words don't assume a picture.
       let files = true;
       const mac = /Mac/.test(navigator.userAgent);
       void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
@@ -460,7 +461,7 @@ export function App() {
             if (p.type === "enter") files = p.paths.length > 0;
             if (p.type === "drop" && !p.paths.length) {
               clear();
-              return setNotice("Only files can be dropped here. Save the picture as a file, then drop the file.");
+              return setNotice("Only files can be dropped here. A picture from a web page or Photos: save it as a file first.");
             }
             if (!files) return;
             const { x, y } = dropPoint(p.position, { mac, dpr: devicePixelRatio });
