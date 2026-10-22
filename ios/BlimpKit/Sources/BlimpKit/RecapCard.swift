@@ -1,7 +1,8 @@
-// When the return card ("where was I?") shows by itself: a Claude session's chat opens, and the phone hadn't
+// When the return card ("where was I?") comes by itself: a Claude session's chat opens, and the phone hadn't
 // shown it for an hour or more (or never). The Mac's rule (app/src/lib/recap.ts). The card is blimpd's
 // Recap (GET /sessions/<name>/recap?min=3: only for a session with 3 prompts or more); any error shows
-// nothing. When each chat was last on screen is kept on the phone, by a key the app picks (the session's name).
+// nothing. On the phone it waits in the chat's drawer from the right, with a dot on its button; it never opens
+// by itself. When each chat was last on screen is kept on the phone, by a key the app picks (the session's name).
 import Foundation
 
 public enum RecapCard {
@@ -23,5 +24,19 @@ public enum RecapCard {
         var out = last.filter { now - $0.value < keep }
         for k in shown { out[k] = now }
         return out
+    }
+
+    /// A swipe that pulls the drawer out starts this close to the chat's right edge (points).
+    public static let edge: Double = 32
+
+    /// A swipe in the chat pulls the recap drawer out: it starts near the right edge and goes left, mostly
+    /// sideways (as the left drawer's swipe right), so scrolling never does. x: where it started; dx, dy: how far.
+    public static func pulls(from x: Double, width: Double, dx: Double, dy: Double) -> Bool {
+        x >= width - edge && dx < 0 && abs(dx) > abs(dy) * 1.5
+    }
+
+    /// Let go past 120 points, or flung left: it opens; else back closed. predicted: where the swipe would end.
+    public static func opens(dx: Double, predicted: Double) -> Bool {
+        dx < -120 || predicted < -260
     }
 }

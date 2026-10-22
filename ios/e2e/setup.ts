@@ -2,10 +2,11 @@
 // driven by ios/BlimpUITests). Run after blimpd has started: it makes three zmx sessions that look like
 // Claude to blimpd (the same way test/server.test.ts does), a past conversation, then writes the pairing link.
 //   demo-chat  in blimp-demo: a conversation; every line typed into it is appended to $E2E_DIR/chat.in
-//              and, with a reply, to its transcript
+//              and, with a reply, to its transcript. Its recap is the stand-in claude's (ios/e2e/bin)
 //   demo-ask   in api-server: waiting on a permission prompt; every key pressed is appended to $E2E_DIR/prompt.in
-//   demo-perm  in blimp-demo: waiting on a permission prompt with its command, answered from another project's
-//              inbox (Needs you) over POST /sessions/<name>/answer; every key is appended to $E2E_DIR/perm.in
+//   demo-perm  in blimp-demo: waiting on a permission prompt with its command, answered from blimp-demo's inbox
+//              (Needs you; api-server's doesn't list it) over POST /sessions/<name>/answer; every key is appended
+//              to $E2E_DIR/perm.in
 //   demo-busy  in api-server: working (Claude's status "busy"), its latest step "npm run lint"; every key pressed
 //              is appended to $E2E_DIR/stop.in, and an Esc makes it idle
 //   demo-quiz  in api-server: Claude's question dialog with two questions, the second multi-choice

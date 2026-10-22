@@ -1,7 +1,7 @@
 // A project's inbox (docs/DESIGN.md, "Inbox"): its sessions and unread Earlier conversations sorted under
 // Waiting on you, Done (finished, not read yet) and Working, each with a few words from what it asks or Haiku's
-// note on its last turn, and the rest as "other" (the phone folds them). Across every project, Needs you: each
-// waiting session, oldest first (the phone's top band). The phone builds the same (ios/BlimpKit Inbox.swift), by
+// note on its last turn, and the rest as "other" (the phone folds them). Needs you: the project's waiting
+// sessions, oldest first (the phone's top band; another project's are in its own inbox). The phone builds the same (ios/BlimpKit Inbox.swift), by
 // the same rules. The Mac's summary shows Waiting on you and Done.
 
 import type { Conversation, Session } from "./api";
@@ -46,9 +46,9 @@ export function inbox(running: Session[], past: Conversation[]): Inbox {
   return out;
 }
 
-// Needs you, across every project: each running session that waits on you, and the shown project's unread past
-// conversations with a question (past: those no running session has open), the oldest wait first.
-export function needsYou(sessions: Session[], past: Conversation[] = []): InboxLine[] {
-  const lines = sessions.map(waitingLine).filter((l): l is InboxLine => !!l);
+// Needs you, in dir: each of its running sessions that waits on you, and its unread past conversations with a
+// question (past: those no running session has open), the oldest wait first.
+export function needsYou(dir: string, sessions: Session[], past: Conversation[] = []): InboxLine[] {
+  const lines = sessions.filter((s) => s.dir === dir).map(waitingLine).filter((l): l is InboxLine => !!l);
   return oldestFirst([...lines, ...unreadPast(past).filter((c) => c.note?.status === "question").map(pastLine)]);
 }

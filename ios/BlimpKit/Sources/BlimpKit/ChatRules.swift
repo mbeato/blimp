@@ -22,7 +22,7 @@ public enum SinceYouLeft {
     }
 }
 
-/// After you answer in one chat, the next session waiting on you, so a backlog clears in a row.
+/// After you answer in one chat, the next session in its project waiting on you, so a backlog clears in a row.
 public struct NextWaiting: Equatable, Sendable {
     public let session: Session
     /// How many other sessions wait, this one included.
@@ -32,12 +32,12 @@ public struct NextWaiting: Equatable, Sendable {
         count > 1 ? "Next: \(session.title) is waiting (\(count) left)" : "Next: \(session.title) is waiting"
     }
 
-    /// The session other than `name` the inbox lists first under Needs you, across folders: by its rule (it
-    /// waits, or it's done with a question for you) and in its order (the oldest wait first, ties in the list's
-    /// order). Only those with Claude (or Claude Code's folder trust question) in them: the chip opens it to
-    /// answer. nil when none waits.
-    public static func after(_ name: String, in sessions: [Session]) -> NextWaiting? {
-        let others = Inbox.needsYou(sessions: sessions, dir: nil, earlier: []).compactMap(\.session).filter { s in
+    /// The session other than `name` the inbox lists first under Needs you, in dir (the chat's project): by its
+    /// rule (it waits, or it's done with a question for you) and in its order (the oldest wait first, ties in the
+    /// list's order). Only those with Claude (or Claude Code's folder trust question) in them: the chip opens it
+    /// to answer. nil when none waits.
+    public static func after(_ name: String, in sessions: [Session], dir: String) -> NextWaiting? {
+        let others = Inbox.needsYou(sessions: sessions, dir: dir, earlier: []).compactMap(\.session).filter { s in
             s.name != name && (s.isClaude || s.prompt != nil)
         }
         guard let first = others.first else { return nil }

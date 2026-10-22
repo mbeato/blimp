@@ -1,5 +1,5 @@
 // The parts of a chat beyond its messages: Run under a command Claude handed over (with a sheet that shows
-// the whole command before it runs, then "Send result to Claude" once it ended), the return card ("where
+// the whole command before it runs, then "Send result to Claude" once it ended), the recap drawer ("where
 // was I?"), the sheet that gives Claude a secret, the context gauge, the "since you left" line and the
 // chip to the next session waiting. The rules are in BlimpKit (ChatRules, RecapCard, ContextText, SecretRule,
 // SecretText).
@@ -103,63 +103,128 @@ struct RunConfirmSheet: View {
     }
 }
 
-// MARK: - Return card
+// MARK: - Recap drawer
 
 enum RecapLoad: Equatable {
     case loading
     case shown(Recap)
-    /// Asked for from the menu, and it didn't come: why, in blimpd's words.
+    /// Asked for from the drawer, and it didn't come: why, in blimpd's words.
     case failed(String)
 }
 
-/// At the top of the chat: what the session is for, what's done, what's open. A tap shows the lines in full.
-struct RecapCardView: View {
-    let load: RecapLoad
-    let onClose: () -> Void
-    @State private var full = false
+/// The chat's drawer from the right: "Recap" and the session's title, then what it's for, what's done and what's
+/// open, with refresh and ×. It never opens by itself: its toolbar button opens it, and so does a swipe left from
+/// the chat's right edge (HomeView's `recapPull`), which it follows as the left drawer does (DrawerView). A swipe
+/// right on it, a tap beside it or × closes it. Closed, it isn't there at all, so VoiceOver and the tests don't find it.
+struct RecapDrawer: View {
+    @Binding var open: Bool
+    /// How far a swipe in the chat that's opening it has gone (HomeView), nil while there's none.
+    let pull: CGFloat?
+    let title: String
+    let chat: ChatModel
+    /// A swipe right that's pushing it back: how far it has gone (at least 0), nil while there's none.
+    @State private var push: CGFloat?
+    /// Whether the swipe going on is sideways (decided once, at its start), so scrolling the card never moves it.
+    @State private var sideways: Bool?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Where this is").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        GeometryReader { geo in
+            let width = min(geo.size.width * 0.84, 340)
+            // How far out it is, 0 (closed) to width (open): where the finger has it while one moves it.
+            let out = pull.map { min(width, max(0, $0)) } ?? (open ? min(width, max(0, width - (push ?? 0))) : 0)
+            let still = pull == nil && push == nil
+            ZStack(alignment: .trailing) {
+                if open || pull != nil {
+                    Color.black.opacity(0.3 * out / width)
+                        .ignoresSafeArea()
+                        .onTapGesture { open = false }
+                        .accessibilityHidden(true)
+                        .transition(.opacity)
+                    panel
+                        .frame(width: width)
+                        .background(Color(.systemBackground).ignoresSafeArea())
+                        .offset(x: width - out)
+                        .transition(.move(edge: .trailing))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .simultaneousGesture(closing(width: width), including: open ? .all : .none)
+            .allowsHitTesting(open)
+            .animation(.snappy, value: open)
+            .animation(.snappy, value: still)
+        }
+    }
+
+    private func closing(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { v in
+                if sideways == nil { sideways = abs(v.translation.width) > abs(v.translation.height) }
+                if sideways == true { push = max(0, v.translation.width) }
+            }
+            .onEnded { v in
+                defer { sideways = nil }
+                guard sideways == true else { return }
+                // Let go past a third of the way, or flung right: it closes; else back open.
+                let close = v.translation.width > width / 3 || v.predictedEndTranslation.width > width * 0.6
+                withAnimation(.snappy) {
+                    if close { open = false }
+                    push = nil
+                }
+            }
+    }
+
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Recap").font(.title3.bold())
+                    Text(title).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                }
+                .accessibilityElement(children: .combine)
                 Spacer(minLength: 0)
-                Button("Close", systemImage: "xmark", action: onClose)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                Button("Refresh", systemImage: "arrow.clockwise") { chat.loadRecap(auto: false) }
+                    .disabled(chat.recapLoad == .loading)
+                    .accessibilityIdentifier("recapRefresh")
+                Button("Close", systemImage: "xmark") { open = false }
                     .accessibilityIdentifier("recapClose")
             }
-            switch load {
-            case .loading:
-                Text("…").foregroundStyle(.secondary)
-            case .failed(let why):
-                Text(why).font(.footnote).foregroundStyle(.secondary)
-            case .shown(let r):
-                Text(r.goal).font(.subheadline.weight(.semibold)).lineLimit(full ? nil : 2)
-                part("Done", r.done)
-                part("Open", r.open)
+            .labelStyle(.iconOnly)
+            .padding(.horizontal)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    switch chat.recapLoad {
+                    case .loading, nil:
+                        Text("…").foregroundStyle(.secondary)
+                    case .failed(let why):
+                        Text(why).font(.subheadline).foregroundStyle(.secondary)
+                    case .shown(let r):
+                        Text(r.goal).font(.headline)
+                        part("Done", r.done)
+                        part("Open", r.open)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
             }
         }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .contentShape(Rectangle())
-        .onTapGesture { full.toggle() }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("recapCard")
-        .padding(.horizontal)
-        .padding(.top, 6)
+        .accessibilityIdentifier("recapDrawer")
+        .accessibilityAddTraits(.isModal)
     }
 
     @ViewBuilder private func part(_ heading: String, _ lines: [String]) -> some View {
         if !lines.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(heading).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(lines.indices, id: \.self) { i in
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("•").foregroundStyle(.secondary)
-                        Text(lines[i]).lineLimit(full ? nil : 1)
+                        Text(lines[i])
                     }
-                    .font(.footnote)
+                    .font(.subheadline)
                 }
             }
         }

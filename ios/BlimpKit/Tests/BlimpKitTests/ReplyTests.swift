@@ -33,6 +33,21 @@ import Testing
     #expect(RecapCard.autoMin == 3)
 }
 
+@Test func aSwipeLeftFromTheRightEdgePullsTheRecapDrawerAndScrollingNever() {
+    let w = 390.0
+    // From the edge, going left, mostly sideways.
+    #expect(RecapCard.pulls(from: w - 10, width: w, dx: -20, dy: 4))
+    #expect(RecapCard.pulls(from: w - RecapCard.edge, width: w, dx: -20, dy: 0))
+    // Not from the middle of the chat, not going right (the left drawer's), not a scroll.
+    #expect(!RecapCard.pulls(from: w / 2, width: w, dx: -40, dy: 0))
+    #expect(!RecapCard.pulls(from: w - 10, width: w, dx: 20, dy: 0))
+    #expect(!RecapCard.pulls(from: w - 10, width: w, dx: -20, dy: 20))
+    // Let go past 120 points, or flung: it opens; else back closed.
+    #expect(RecapCard.opens(dx: -121, predicted: -121))
+    #expect(RecapCard.opens(dx: -40, predicted: -300))
+    #expect(!RecapCard.opens(dx: -100, predicted: -200))
+}
+
 @Test func markingChatsShownKeepsAMonthAndSetsTheOnesOnScreenToNow() {
     let day: Double = 24 * 3_600_000
     let last = ["old": 0, "recent": 20 * day, "open": 25 * day]

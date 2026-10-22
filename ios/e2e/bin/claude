@@ -5,12 +5,15 @@
 # blimpd's naming and noting calls (src/names.ts, src/notes.ts: claude -p, the conversation on stdin) aren't
 # sessions: naming gets a long-ish name for demo-quiz's conversation, to see how names fit on the phone, and
 # none for the others; noting gets a question note for demo-chat's (so the inbox lists it under Waiting on you, read or not),
-# and none for the others.
+# and none for the others; a recap (src/recaps.ts) gets a card for demo-chat's, for the phone's recap drawer, and none
+# for the others.
 if [ "$1" = -p ]; then
   in=$(cat)
   case "$in" in
     *"Say where this Claude Code session stands"*"Add a dark mode toggle to settings"*) echo "QUESTION | should the toggle follow the system setting?" && exit 0 ;;
     *"Say where this Claude Code session stands"*) exit 1 ;;
+    *"coming back to this Claude Code session"*"Add a dark mode toggle to settings"*)
+      printf 'GOAL | A dark mode toggle in settings\nDONE | Toggle added to the Appearance section\nOPEN | Decide if it follows the system setting\n' && exit 0 ;;
     *"Set up the test pipeline"*) echo "Configure Integration Test Pipeline Runs" && exit 0 ;;
   esac
   exit 1

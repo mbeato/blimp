@@ -3,8 +3,9 @@
 // for here). Pair, pick a project, open sessions from the drawer, read a chat, hide the keyboard, send a
 // message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
-// through it; two questions at once; unread and asking marks; a project's inbox; Allow from Needs you, in another
-// project's inbox. What reached the sessions is checked by the job afterwards. Screenshots stay in the .xcresult.
+// through it; two questions at once; unread and asking marks; a project's inbox; Allow from Needs you, in its own
+// project's inbox only; the recap drawer from the right. What reached the sessions is checked by the job afterwards.
+// Screenshots stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
 // Keychain keeps the server) and so locked: the job enrols Face ID first, and each unlocks with a
@@ -419,15 +420,17 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - Needs you
 
-    /// api-server's inbox lists blimp-demo's demo-perm under Needs you, with its project and command; Allow answers it
-    /// from the row (blimpd's answer route, no chat opened), and the row says Answered. The job checks demo-perm got 1.
-    /// (After testInbox, by name: nothing else reads demo-perm.)
+    /// blimp-demo's inbox lists its demo-perm under Needs you, with its command, and api-server's doesn't; Allow
+    /// answers it from the row (blimpd's answer route, no chat opened), and the row says Answered. The job checks
+    /// demo-perm got 1. (After testInbox, by name: nothing else reads demo-perm.)
     func testNeedsYouAllowFromTheInbox() throws {
         try launchPaired()
         try pickProject("api-server")
         let line = element("inbox-session-demo-perm")
-        try wait(line, "demo-perm under Needs you in another project's inbox")
-        try until(line, "label CONTAINS 'blimp-demo'", "demo-perm's project on its row")
+        // pickProject waited for api-server's inbox; the sessions were listed before that
+        if line.waitForExistence(timeout: 3) { throw failed("no blimp-demo session in api-server's inbox") }
+        try pickProject("blimp-demo")
+        try wait(line, "demo-perm under Needs you in its project's inbox")
         try until(line, "label CONTAINS 'npm run build'", "demo-perm's command on its row")
         let allow = element("inbox-allow-demo-perm")
         try wait(allow, "Allow on demo-perm's row")
@@ -438,6 +441,44 @@ final class BlimpUITests: XCTestCase {
         }
         try until(allow, "isEnabled == false", "Allow to stay off once answered")
         shot("36-needs-you-answered")
+    }
+
+    // MARK: - The recap drawer
+
+    /// demo-chat's recap is in a drawer from the right, never on top of the chat: Recap opens it (the stand-in
+    /// claude writes its card), × closes it, a swipe left from the right edge pulls it out and a swipe right
+    /// pushes it back, and a tap beside it closes it. Closed, it isn't there. (By name after Needs you.)
+    func testRecapDrawer() throws {
+        try launchPaired()
+        try openSession("demo-chat", in: "blimp-demo")
+        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat")
+        let drawer = element("recapDrawer")
+        if drawer.exists || labeled("Toggle added").exists { throw failed("no recap until asked for") }
+        let button = element("recapButton")
+        try wait(button, "Recap at the top right")
+        button.tap()
+        try wait(drawer, "the recap drawer from Recap")
+        try wait(labeled("Toggle added to the Appearance section"), "the recap's Done", timeout: 60)
+        try wait(labeled("Decide if it follows the system setting"), "the recap's Open")
+        shot("37-recap-drawer")
+        element("recapClose").tap()
+        try until(drawer, "exists == false", "the recap drawer to close on ×")
+
+        // From the right edge: it follows the finger; the left drawer stays shut
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)))
+        try wait(drawer, "the recap drawer after a swipe left from the edge")
+        if element("drawerInbox").exists { throw failed("the left drawer shut on a swipe left") }
+        try wait(labeled("Toggle added"), "the card kept in the drawer")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)))
+        try until(drawer, "exists == false", "the recap drawer to close on a swipe right")
+        if element("drawerInbox").exists { throw failed("the left drawer shut on the swipe that closed the recap") }
+
+        button.tap()
+        try wait(drawer, "the recap drawer again")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+        try until(drawer, "exists == false", "the recap drawer to close on a tap beside it")
     }
 
     // MARK: - Helpers

@@ -1,8 +1,8 @@
 // A project's inbox, what opening a project shows, above the box that starts a new chat (StartView). In a fixed
 // order: after a while away, one line on what changed since (a tap shows only that); Haiku's paragraph on where
 // the project's work stands (the sessions it names open), with how old it is, dimmed once a session it names has
-// moved on; Needs you, every session in every project waiting on you, oldest first, with its answers in the row
-// (Allow and Deny, a question's choices, or a button into the chat); then the project's sessions finished and
+// moved on; Needs you, the project's sessions waiting on you, oldest first, with its answers in the row (Allow and
+// Deny, a question's choices, or a button into the chat; another project's are in its own inbox); then the project's sessions finished and
 // not read yet, those working (how long, a clock after 30 minutes), and the rest folded as "+3 other". A tap
 // opens one; a swipe left or press and hold has its actions (RowMenu).
 import BlimpKit
@@ -11,7 +11,7 @@ import SwiftUI
 struct InboxView: View {
     let dir: String
     let inbox: Inbox
-    /// Every project's sessions waiting on you, oldest first (Inbox.needsYou).
+    /// The project's sessions waiting on you, oldest first (Inbox.needsYou).
     let needs: [InboxLine]
     let digest: Digest?
     /// Every running session: the paragraph's links, and the rows' clashes and parents.
@@ -44,7 +44,7 @@ struct InboxView: View {
             if !needs.isEmpty {
                 Section {
                     ForEach(needs) { line in
-                        NeedsRow(line: line, project: line.dir == dir ? nil : Drawer.name(of: line.dir), now: now, actions: actions, onPick: onPick)
+                        NeedsRow(line: line, now: now, actions: actions, onPick: onPick)
                             .modifier(RowMenu(item: line.item, edge: .trailing, actions: actions, onOpen: onOpen))
                     }
                 } header: {
@@ -206,13 +206,11 @@ private struct LineRow: View {
     }
 }
 
-/// A session waiting on you, from any project: what it asks, since when, its command (red when risky), and the
+/// A session waiting on you: what it asks, since when, its command (red when risky), and the
 /// answer in the row once blimpd has read the real options: Allow and Deny (a risky Allow asks once more), a
 /// question's choices as chips, or a button into its chat. A tap gives a haptic and "Sent…", then "Answered".
 private struct NeedsRow: View {
     let line: InboxLine
-    /// The project's name, when it isn't the one shown.
-    let project: String?
     let now: Double
     let actions: RowActions
     let onPick: (DrawerRow.Item) -> Void
@@ -252,9 +250,6 @@ private struct NeedsRow: View {
                 Text(line.title).lineLimit(2)
                 Spacer(minLength: 4)
                 Text(InboxText.asked(since: line.since, now: now)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            }
-            if let project {
-                Text(project).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
             if let words = line.words {
                 Text(Inline.summary(words)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)

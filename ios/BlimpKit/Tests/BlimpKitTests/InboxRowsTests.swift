@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BlimpKit
 
-// Needs you across projects, the inbox's ages, a row's caption, the banner's arrivals and following a handoff.
+// Needs you in a project, the inbox's ages, a row's caption, the banner's arrivals and following a handoff.
 
 private func live(_ name: String, dir: String = "/p", state: SessionState = .done, since: Double? = nil, prompt: Prompt? = nil,
                   note: Note? = nil) -> Session {
@@ -15,20 +15,23 @@ private func live(_ name: String, dir: String = "/p", state: SessionState = .don
 private let yesNo = Prompt(kind: .permission, at: 1, answerable: true, tool: "Bash", summary: "Ran `ls`", options: ["Yes", "No"], questions: nil)
 private let minute = 60_000.0
 
-@Test func needsYouIsEveryProjectsWaitingSessionsOldestFirstWithThisProjectsPastQuestions() {
+@Test func needsYouIsThisProjectsWaitingSessionsOldestFirstWithItsPastQuestions() {
     let sessions = [
         live("new", dir: "/p", state: .waiting, since: 9000, prompt: yesNo),
         live("far", dir: "/q", state: .waiting, since: 2000, prompt: yesNo),
-        live("asks", dir: "/q", since: 5000, note: Note(status: .question, text: "ship it?", at: 1)),
+        live("asks", dir: "/p", since: 5000, note: Note(status: .question, text: "ship it?", at: 1)),
+        live("away", dir: "/q", since: 1000, note: Note(status: .question, text: "which one?", at: 1)),
         live("busy", dir: "/p", state: .working, since: 1000),
     ]
     let earlier = [Conversation(sessionId: "c1", title: "OLD Q", updatedAt: 4000, unread: true, note: Note(status: .question, text: "which?", at: 1)),
                    Conversation(sessionId: "c2", title: "DONE", updatedAt: 3000, unread: true, note: Note(status: .done, text: "x", at: 1))]
     let band = Inbox.needsYou(sessions: sessions, dir: "/p", earlier: earlier)
-    #expect(band.map(\.id) == ["session-far", "past-c1", "session-asks", "session-new"])
-    #expect(band.map(\.dir) == ["/q", "/p", "/q", "/p"])
-    #expect(band.map(\.words) == ["Ran `ls`", "which?", "ship it?", "Ran `ls`"])
-    #expect(Inbox.needsYou(sessions: sessions, dir: nil, earlier: earlier).count == 3)
+    #expect(band.map(\.id) == ["past-c1", "session-asks", "session-new"])
+    #expect(band.map(\.words) == ["which?", "ship it?", "Ran `ls`"])
+    // Another project's waits are in its own inbox only.
+    #expect(Inbox.needsYou(sessions: sessions, dir: "/q", earlier: []).map(\.id) == ["session-away", "session-far"])
+    // The same as the project's Waiting on you, oldest first.
+    #expect(band.map(\.id) == Inbox(dir: "/p", sessions: sessions, earlier: earlier).waiting.reversed().map(\.id))
 }
 
 @Test func comingBackShowsOnlyWhatChangedSinceButEveryWait() {
@@ -44,7 +47,8 @@ private let minute = 60_000.0
 }
 
 @Test func theSinceLineCountsWhatShowTheseShows() {
-    // finished: this project's unread ones since then (not read, not another project's); asking: Needs you
+    // finished: this project's unread ones since then (not read, not another project's); asking: Needs you,
+    // this project's too
     var read = live("read", since: 9000)
     read.unread = false
     var far = live("far", dir: "/q", since: 9000)
@@ -53,7 +57,8 @@ private let minute = 60_000.0
     old.unread = true
     var new = live("new", since: 9000)
     new.unread = true
-    let sessions = [live("w", dir: "/q", state: .waiting, since: 2000, prompt: yesNo), old, new, read, far,
+    let sessions = [live("w", state: .waiting, since: 2000, prompt: yesNo), live("elsewhere", dir: "/q", state: .waiting, since: 2000, prompt: yesNo),
+                    old, new, read, far,
                     live("run", state: .working, since: 9500)]
     let earlier = [Conversation(sessionId: "c1", title: "PAST", updatedAt: 8000, unread: true, note: nil)]
     let inbox = Inbox(dir: "/p", sessions: sessions, earlier: earlier)
