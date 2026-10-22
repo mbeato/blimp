@@ -638,7 +638,10 @@ final class BlimpUITests: XCTestCase {
     /// state comes in, and a tap on the old one gives nothing focus).
     private func focus(_ field: XCUIElement) throws {
         for _ in 0..<5 {
-            field.tap()
+            // Near the trailing end, past the words, as a person taps to carry on typing, so the caret goes
+            // after them. A plain tap() lands on the field's activation point, 5 pt in from its leading edge,
+            // which puts the caret in front of any text (run 39701047535: 12 deletes in front of "continue").
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
             let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
             if XCTWaiter().wait(for: [focused], timeout: 3) == .completed { return }
         }
