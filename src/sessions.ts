@@ -224,13 +224,16 @@ export function deriveState(info: any, hook: any, createdSec = 0): { state: Stat
   else if (info.status === "idle") claude = { state: "done", at: 0 };
   if (claude) claude.at = info.statusUpdatedAt ?? info.updatedAt ?? 0;
 
-  let mine: { state: State; at: number } | undefined;
-  // A hook file older than the session was left by an earlier session with the same name.
+  let mine: { state: State; at: number; since: number } | undefined;
+  // A hook file older than the session was left by an earlier session with the same name. Its at is when
+  // it was last written, so it decides which file is newer; since (older files have none) is when its
+  // state began, never before this session did.
   if (["working", "waiting", "done"].includes(hook.state) && typeof hook.at === "number" && hook.at >= createdSec * 1000)
-    mine = { state: hook.state, at: hook.at };
+    mine = { state: hook.state, at: hook.at, since: typeof hook.since === "number" ? Math.max(hook.since, createdSec * 1000) : hook.at };
 
   const best = claude && mine ? (mine.at > claude.at ? mine : claude) : (claude ?? mine);
-  return best ? { state: best.state, stateSince: best.at || undefined } : { state: "unknown" };
+  const since = best && ("since" in best ? best.since : best.at);
+  return best ? { state: best.state, stateSince: since || undefined } : { state: "unknown" };
 }
 
 function readJson(path: string): any {

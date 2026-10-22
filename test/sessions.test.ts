@@ -238,6 +238,18 @@ describe("deriveState", () => {
     expect(deriveState(claude, { state: "working", at: 1000 })).toEqual({ state: "done", stateSince: 2000 });
   });
 
+  test("the hook's since is how long its state has lasted; its at (last written) still decides which file is newer", () => {
+    const claude = { status: "idle", statusUpdatedAt: 2000 };
+    // Working since before Claude's file was written, but a tool ran after it: the hook is newer.
+    expect(deriveState(claude, { state: "working", at: 3000, since: 1000 })).toEqual({ state: "working", stateSince: 1000 });
+    // A newer status file still wins over an older hook state.
+    expect(deriveState({ status: "idle", statusUpdatedAt: 4000 }, { state: "working", at: 3000, since: 1000 })).toEqual({ state: "done", stateSince: 4000 });
+    // No since (an older hook file): at, as before.
+    expect(deriveState({}, { state: "working", at: 3000 })).toEqual({ state: "working", stateSince: 3000 });
+    // A since from before this zmx session started (an older file carried over) counts from the start.
+    expect(deriveState({}, { state: "working", at: 9000, since: 1000 }, 5)).toEqual({ state: "working", stateSince: 5000 });
+  });
+
   test("a hook file from before the session started is ignored", () => {
     expect(deriveState({}, { state: "waiting", at: 1000 }, 5)).toEqual({ state: "unknown" });
     expect(deriveState({}, { state: "waiting", at: 6000 }, 5)).toEqual({ state: "waiting", stateSince: 6000 });
