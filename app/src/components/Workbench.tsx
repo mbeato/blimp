@@ -732,12 +732,14 @@ export function Workbench(props: {
     rerender();
   };
 
-  // Renames or moves, after saving any edits waiting in the files it takes along (a save sent later
-  // would make the old file again). fail: why it didn't happen.
+  // Renames or moves, after the saves already on their way in the files it takes along (a pending
+  // autosave, or one in flight, sent later would make the old file again). Edits not saved, with
+  // Autosave off, stay unsaved: follow() moves the tab, and ⌘S writes the new name (a rename keeps
+  // the mtime, so the save isn't taken for a change on the server). fail: why it didn't happen.
   const moveTo = async (from: string, to: string, fail: (why: string) => void): Promise<boolean> => {
     try {
       if (!link.api) throw new Error("Not connected.");
-      for (const d of [...docs.values()]) if (isInside(d.path, from)) await (d.timer || d.sync.dirty ? save(d) : d.inflight);
+      for (const d of [...docs.values()]) if (isInside(d.path, from)) await (d.timer ? save(d) : d.inflight);
       await link.api.fsRename(from, to);
     } catch (e) {
       fail(e instanceof ApiError && e.status === 409 ? `${baseName(to)} is already there.` : errorText(e));

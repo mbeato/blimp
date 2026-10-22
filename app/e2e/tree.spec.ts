@@ -9,8 +9,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { fixtureDir, frontTab, killSession, openSessionTab, screenText, startSession } from "./helpers";
 
 const pid = process.pid;
-const sessions = ["copy", "send", "drag", "rename", "delete", "move", "tab", "focus"].map((t) => `blimpe2e-tree${t}-${pid}`);
-const [sCopy, sSend, sDrag, sRename, sDelete, sMove, sTab, sFocus] = sessions;
+const sessions = ["copy", "send", "drag", "rename", "delete", "move", "tab", "focus", "unsaved"].map((t) => `blimpe2e-tree${t}-${pid}`);
+const [sCopy, sSend, sDrag, sRename, sDelete, sMove, sTab, sFocus, sUnsaved] = sessions;
 test.afterAll(() => sessions.forEach(killSession));
 
 test.beforeEach(async ({ context }) => {
@@ -155,6 +155,36 @@ test("Rename… and Enter rename in the row, a file's name selected without its 
   await page.keyboard.press("Enter");
   await expect(row(page, "papers")).toBeVisible();
   expect(readFileSync(join(dir, "papers", "inner.txt"), "utf8")).toBe("inner");
+});
+
+test("with Autosave off, a rename leaves unsaved edits unsaved: the tab follows, still dirty, and ⌘S saves to the new name", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("blimp.settings", JSON.stringify({ autosave: false })));
+  const dir = fixtureDir("tree-unsaved");
+  writeFileSync(join(dir, "a.ts"), "const a = 1;\n");
+  startSession(sUnsaved, dir);
+  await openSessionTab(page, dir);
+  const ws = frontTab(page);
+  await row(page, "a.ts").click();
+  const editor = ws.locator(".monaco-editor .view-lines");
+  await expect(editor).toContainText("const a = 1;");
+  await editor.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("// unsaved");
+  await expect(ws.locator(".tab.active .tab-close.dirty")).toHaveCount(1);
+
+  await menu(page, row(page, "a.ts"), "Rename…");
+  await ws.getByLabel("New name for a.ts").fill("b.ts");
+  await page.keyboard.press("Enter");
+  await expect(row(page, "b.ts")).toBeVisible();
+  await expect(ws.locator(".ftabs .tab.active")).toHaveText(/b\.ts/);
+  await expect(ws.locator(".tab.active .tab-close.dirty")).toHaveCount(1);
+  expect(readFileSync(join(dir, "b.ts"), "utf8")).toBe("const a = 1;\n");
+
+  await editor.click();
+  await page.keyboard.press("Meta+s");
+  await expect.poll(() => readFileSync(join(dir, "b.ts"), "utf8")).toBe("const a = 1;\n// unsaved");
+  expect(existsSync(join(dir, "a.ts"))).toBe(false);
+  await expect(ws.locator(".tab.active .tab-close.dirty")).toHaveCount(0);
 });
 
 test("Delete asks first, naming it; a folder goes with everything in it, by ⌘⌫ too; an open tab closes", async ({ page }) => {
