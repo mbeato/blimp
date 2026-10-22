@@ -212,4 +212,23 @@ describe("listFiles", () => {
     Bun.spawnSync(["git", "init", "-q"], { cwd: r });
     expect((await listFiles(r)).files.sort()).toEqual([".gitignore", "main.ts"]);
   });
+
+  // ⌘P from the socket folder or one above it (a socket folder without a dot, or a git repo
+  // that holds it) must not list a secret's name: guardList only refuses the secrets folder as the root.
+  test("never lists the secrets folder, walked or from git", async () => {
+    const r = realpathSync(mkdtempSync(join(tmpdir(), "blimp-lf-")));
+    try {
+      const dir = join(r, "state");
+      mkdirSync(join(dir, "secrets"), { recursive: true });
+      writeFileSync(join(dir, "secrets", "API_KEY"), "sk-secret");
+      writeFileSync(join(dir, "token"), "t");
+      writeFileSync(join(dir, "secrets-notes.txt"), "");
+      expect((await listFiles(dir, dir)).files).toEqual(["secrets-notes.txt", "token"]);
+      expect((await listFiles(r, dir)).files).toEqual(["state/secrets-notes.txt", "state/token"]);
+      Bun.spawnSync(["git", "init", "-q"], { cwd: r });
+      expect((await listFiles(r, dir)).files.sort()).toEqual(["state/secrets-notes.txt", "state/token"]);
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
+  });
 });

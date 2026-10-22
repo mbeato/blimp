@@ -217,9 +217,11 @@ export function createFile(path: string): { path: string; mtime: number } {
 const MAX_FILES = 20_000;
 
 // For ⌘P. In a git repo, git's own list (respects .gitignore). Otherwise a walk that skips the usual noise.
+// Never anything in the secrets folder, as guardList: a root above it would list the secrets' names.
 // Async, so a big repo doesn't stall every open terminal while git or the walk runs.
-export async function listFiles(root: string): Promise<{ files: string[]; truncated: boolean }> {
-  const files = (await gitFiles(root)) ?? (await walk(root));
+export async function listFiles(root: string, dir = socketDir()): Promise<{ files: string[]; truncated: boolean }> {
+  const secrets = realPath(join(dir, "secrets"));
+  const files = ((await gitFiles(root)) ?? (await walk(root))).filter((f) => !inside(join(root, f), secrets));
   return files.length > MAX_FILES ? { files: files.slice(0, MAX_FILES), truncated: true } : { files, truncated: false };
 }
 
