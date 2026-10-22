@@ -245,10 +245,10 @@ struct HomeView: View {
     }
 
     /// A new session list: the titles kept, a banner and a haptic for what started waiting or finished (only while
-    /// the app is in front), and the new session of a handoff asked for here.
+    /// the app is in front and not under the lock cover), and the new session of a handoff asked for here.
     private func changed(_ sessions: [Session]) {
         for s in sessions where titles[s.name] != s.title { titles[s.name] = s.title }
-        let news = scenePhase == .active ? Arrivals.news(before: lastStates, sessions: sessions, onScreen: onScreen) : []
+        let news = scenePhase == .active && !covered ? Arrivals.news(before: lastStates, sessions: sessions, onScreen: onScreen) : []
         lastStates = Arrivals.states(sessions)
         if let w = news.last(where: \.waiting) {
             waitingTicks += 1

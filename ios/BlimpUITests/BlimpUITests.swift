@@ -432,12 +432,12 @@ final class BlimpUITests: XCTestCase {
         let allow = element("inbox-allow-demo-perm")
         try wait(allow, "Allow on demo-perm's row")
         try wait(element("inbox-deny-demo-perm"), "Deny on demo-perm's row")
-        shot("33-needs-you")
+        shot("35-needs-you")
         try tap(allow, until: "exists == true", on: labeled("Answered"), "the answer from the row to be typed") {
             allow.isEnabled && self.hostFile("perm.in").isEmpty && !self.labeled("Not sent").exists
         }
         try until(allow, "isEnabled == false", "Allow to stay off once answered")
-        shot("34-needs-you-answered")
+        shot("36-needs-you-answered")
     }
 
     // MARK: - Helpers
