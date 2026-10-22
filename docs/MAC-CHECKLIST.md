@@ -207,7 +207,7 @@ Each item says what to do, and what should happen. If the result is different, w
 
 - [ ] **Give a Secret.**
   Do: right-click a Claude session, pick Give a Secret…, type the name `TEST_SECRET` and paste any text as the value. Click Save and Tell Claude. Then ask Claude "is TEST_SECRET set up? don't show it".
-  Expect: the dialog closes. Claude gets a note saying where the file is, and the note does not have the value. Claude reads the file without printing the value. Settings > Models lists TEST_SECRET. Remove takes it away. In the files on the left, opening `~/.blimp/secrets/TEST_SECRET` shows "that's one of blimp's own files".
+  Expect: the dialog closes. Claude gets a note saying where the file is, and the note does not have the value. Claude reads the file without printing the value. Settings > Models lists TEST_SECRET. Remove takes it away. blimp refuses to list `~/.blimp/secrets`: in the files on the left (Home), unfolding `.blimp` then `secrets` folds it back at once, and nothing in it shows. ⌘P from a folder above it does not list `TEST_SECRET`. In Open Folder (⌘O), Browse into `.blimp` then `secrets` shows "that's one of blimp's own files".
 
 ## Notifications and Dock
 

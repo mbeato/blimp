@@ -8,16 +8,22 @@ The inbox lists what needs you in every project at the top. You can answer a per
 
 In a chat, with blimpd 0.3: Stop stays above the box while Claude works, and "Stop and send" stops it with a new instruction. Claude's newest reply is never folded, and a "Since you left" line marks what came while you were away. The last few chats stay loaded, so switching back is instant, and after you answer a prompt a chip opens the next session waiting on you. A command in Claude's latest reply gets Run: a sheet shows the whole command first, and once it ended, "Send result to Claude" types the result in. After an hour away, a card at the top says what the session is for, what's done and what's open (also from the ••• menu, Recap). The ••• menu's Give a Secret saves a key on the server and tells Claude where it is, never what it is (a key with line breaks, PEM or SSH, needs the Mac). From half full, a ring in the top bar shows how full Claude's context is, with Continue in New Session.
 
-It talks to `blimpd`, the small program that runs on your server. The chat features need a blimpd from the phone-chat branch, or the next release. An older blimpd will show the session list but not the chat. The chat then says "This server's blimpd can't show chats yet."
+It talks to `blimpd`, the small program that runs on your server. The newest features need blimpd 0.3.0. The chat needs 0.2.9 or later. An older blimpd will show the session list but not the chat. The chat then says "This server's blimpd can't show chats yet."
 
-## Put this branch's blimpd on your server
+## Update blimpd on your server
 
-Do this once, on the server, and again after each pull that changes the server code. Released blimpd (0.2.6 and older) has no chat. Its hooks also don't record what Claude is asking. So every chat would fail.
-
-1. Go to where the phone-chat branch is checked out, and get the latest. For Max, that is `~/blimp-phone`.
+Run the installer on the server. It puts the latest release in place and restarts the service. Running sessions keep running.
 
 ```
-cd ~/blimp-phone
+curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh | sh
+```
+
+To try server code that isn't released yet, build blimpd from a checkout instead. Do this on the server, and again after each pull that changes the server code.
+
+1. Go to your checkout of the branch, and get the latest.
+
+```
+cd <your checkout>
 ```
 
 ```
@@ -44,7 +50,7 @@ systemctl --user restart blimpd
 
 This is safe. The service uses `KillMode=process`, so running sessions keep running. The Mac app reconnects by itself.
 
-Claude's hooks run this same file, `~/.local/bin/blimpd`. So from now on, they record what Claude asks, and the phone shows it as buttons.
+Claude's hooks run this same file, `~/.local/bin/blimpd`. So they use the new code too.
 
 To go back to the release, run the installer again:
 
@@ -80,10 +86,10 @@ ssh <server> cat .blimp/token
 
 Max: `ssh claude1 cat .blimp/token`
 
-4. In your blimp folder on the Mac, switch to the phone-chat branch. Then build the project and open it.
+4. In your blimp folder on the Mac, get the latest. Then build the project and open it.
 
 ```
-git fetch origin && git checkout phone-chat && git pull
+git pull
 ```
 
 ```
@@ -126,7 +132,7 @@ Run `blimpd pair` again to show the same code again. Run `blimpd pair --revoke` 
 
 ## The real phone
 
-A real phone cannot reach `127.0.0.1` on your Mac. It needs Tailscale. That is the next step (step 4 in `docs/superpowers/specs/2026-10-19-phone-app-design.md`).
+A real phone cannot reach `127.0.0.1` on your Mac. It reaches the server over Tailscale instead. Put Tailscale on the server and on the iPhone, on the same tailnet. Then pair by QR code (above): `blimpd pair` puts the server's Tailscale address in the link. How the server takes the phone's requests over Tailscale: the Connection part of `docs/superpowers/specs/2026-10-19-phone-app-design.md`.
 
 ## TestFlight
 
