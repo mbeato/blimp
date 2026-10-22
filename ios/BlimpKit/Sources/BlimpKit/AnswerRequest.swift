@@ -42,17 +42,3 @@ public struct AnswerRequest: Encodable, Sendable, Equatable {
         }
     }
 }
-
-/// A secret for a session (PUT /secrets/<NAME>): what blimpd takes, so the sheet can say so before sending.
-public enum SecretRule {
-    /// A letter, then letters, digits or _, at most 64 in all: OPENAI_API_KEY.
-    public static func validName(_ name: String) -> Bool {
-        guard let f = name.first, f.isASCII, f.isLetter, name.count <= 64 else { return false }
-        return name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
-    }
-
-    /// 1 to 16384 characters, no NUL.
-    public static func validValue(_ value: String) -> Bool {
-        (1...16384).contains(value.utf16.count) && !value.contains("\u{0}")
-    }
-}

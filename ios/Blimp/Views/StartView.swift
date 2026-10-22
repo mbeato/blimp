@@ -9,6 +9,8 @@ struct StartView: View {
     /// nil: the project's inbox, above the box.
     let past: Conversation?
     var inbox: InboxView? = nil
+    /// Set: the box takes the keyboard (the drawer's New session), and it's set back.
+    var takeFocus: Binding<Bool>? = nil
     /// The session Send started: the chat becomes it.
     let onStarted: (String) -> Void
     @Environment(Store.self) private var store
@@ -35,7 +37,8 @@ struct StartView: View {
                     InputBar(text: $draft, sending: starting, listening: dictation.listening, onSend: send,
                              onMicDown: { dictation.down(text: draft, vocabulary: vocabulary) },
                              onMicUp: { _ in micUp() },
-                             placeholder: past == nil ? "Ask Claude in \(Drawer.name(of: dir))" : "Message to pick it up again")
+                             placeholder: past == nil ? "Ask Claude in \(Drawer.name(of: dir))" : "Message to pick it up again",
+                             takeFocus: takeFocus)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 10)

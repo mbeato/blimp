@@ -68,20 +68,3 @@ import Testing
     // Each request gets its own id unless given one, so a retry of the same one is typed once.
     #expect(AnswerRequest(answer: .stop(at: nil)).id != AnswerRequest(answer: .stop(at: nil)).id)
 }
-
-@Test func aSecretsNameAndValueFollowBlimpdsRules() {
-    #expect(SecretRule.validName("OPENAI_API_KEY"))
-    #expect(SecretRule.validName("a"))
-    #expect(SecretRule.validName("A" + String(repeating: "b", count: 63)))
-    #expect(!SecretRule.validName("A" + String(repeating: "b", count: 64)))
-    #expect(!SecretRule.validName(""))
-    #expect(!SecretRule.validName("1KEY"))
-    #expect(!SecretRule.validName("_KEY"))
-    #expect(!SecretRule.validName("MY-KEY"))
-    #expect(!SecretRule.validName("KÉY"))
-    #expect(SecretRule.validValue("sk-123"))
-    #expect(!SecretRule.validValue(""))
-    #expect(!SecretRule.validValue("a\u{0}b"))
-    #expect(SecretRule.validValue(String(repeating: "x", count: 16384)))
-    #expect(!SecretRule.validValue(String(repeating: "x", count: 16385)))
-}

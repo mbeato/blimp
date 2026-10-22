@@ -2,7 +2,7 @@
 // (docs/DESIGN.md "Chat"). The session itself (state, prompt) comes live from the Store's /events.
 // The last few chats opened stay loaded (`warm`): switching back shows their messages at once, and the
 // socket's new history replaces them. Also what a chat does over blimpd's HTTP routes: run a command Claude
-// handed over and send its result back, give Claude a secret, hand off to a new session.
+// handed over and send its result back, hand off to a new session.
 import BlimpKit
 import Foundation
 import Observation
@@ -348,22 +348,6 @@ final class ChatModel {
             runsSent.insert(run)
         } catch {
             lastError = Store.words(for: error)
-        }
-    }
-
-    /// Saves a secret on the server and tells Claude here where it is (never what it is). nil once done, else why not.
-    func giveSecret(name secret: String, value: String) async -> String? {
-        guard let api = store.api else { return Store.words(for: APIError.offline) }
-        do {
-            try await api.saveSecret(name: secret, value: value)
-        } catch {
-            return SecretText.notSaved(Store.words(for: error))
-        }
-        do {
-            try await api.tellSecret(name: secret, session: name)
-            return nil
-        } catch {
-            return "Saved, but Claude wasn't told: " + Store.words(for: error)
         }
     }
 

@@ -3,8 +3,8 @@
 // for here). Pair, pick a project, open sessions from the drawer, read a chat, hide the keyboard, send a
 // message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
-// through it; two questions at once; unread and asking marks; a project's inbox; Allow from Needs you, in its own
-// project's inbox only; the recap drawer from the right. What reached the sessions is checked by the job afterwards.
+// through it; two questions at once; unread and asking marks; a project's inbox and the chat's top bar; Allow from
+// Needs you, in its own project's inbox only; the drawer's New session; the recap drawer from the right. What reached the sessions is checked by the job afterwards.
 // Screenshots stay in the .xcresult.
 //
 // The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
@@ -394,8 +394,9 @@ final class BlimpUITests: XCTestCase {
     // MARK: - The inbox
 
     /// A project opens to its inbox: blimp-demo's demo-chat waits on you, in the words blimpd's note call got from
-    /// the stand-in claude (a question), and a tap opens its chat. The drawer's Inbox goes back to it. (Last: it runs
-    /// after test1 has read demo-chat, which a question note keeps listed.)
+    /// the stand-in claude (a question), and a tap opens its chat. Its top right is the context gauge (when it shows),
+    /// the speaker, then Recap at the far right, and no Inbox or ••• menu. The drawer's Inbox goes back. (Last: it
+    /// runs after test1 has read demo-chat, which a question note keeps listed.)
     func testInbox() throws {
         try launchPaired()
         try pickProject("blimp-demo")
@@ -408,13 +409,19 @@ final class BlimpUITests: XCTestCase {
         shot("31-inbox")
         line.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the inbox")
-        // The top right: the speaker, then Inbox, which goes back
-        let speaker = app.buttons["Read aloud"].exists ? app.buttons["Read aloud"] : app.buttons["Stop reading aloud"]
-        let inbox = element("inboxButton")
-        try wait(inbox, "Inbox at the top right")
-        if speaker.frame.minX >= inbox.frame.minX { throw failed("the speaker left of Inbox") }
+        // The top right: the gauge (from half full), the speaker, then Recap at the far right
+        let recap = element("recapButton")
+        try wait(recap, "Recap at the top right")
+        let speaker = app.buttons.matching(NSPredicate(format: "label == 'Read aloud' OR label == 'Stop reading aloud'")).firstMatch
+        try wait(speaker, "the speaker at the top right")
+        if speaker.frame.minX >= recap.frame.minX { throw failed("the speaker left of Recap") }
+        let gauge = element("contextGauge")
+        if gauge.exists, gauge.frame.minX >= speaker.frame.minX { throw failed("the context gauge left of the speaker") }
+        if element("inboxButton").exists || element("chatMenu").exists { throw failed("no Inbox or ••• menu in the top bar") }
         shot("32-chat-top-right")
-        inbox.tap()
+        // The drawer's Inbox goes back
+        try openDrawer()
+        element("drawerInbox").tap()
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox again from the chat")
     }
 
@@ -441,6 +448,28 @@ final class BlimpUITests: XCTestCase {
         }
         try until(allow, "isEnabled == false", "Allow to stay off once answered")
         shot("36-needs-you-answered")
+    }
+
+    // MARK: - New session
+
+    /// The drawer's New session, from a chat: the drawer closes and the project's inbox shows with its box ready to
+    /// type into (the keyboard up). Nothing starts until Send, so the job's count of sessions started holds. (By name
+    /// after Needs you.)
+    func testNewSessionFromTheDrawer() throws {
+        try launchPaired()
+        try openSession("demo-chat", in: "blimp-demo")
+        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat")
+        let started = hostFile("claude.args")
+        try openDrawer()
+        let new = element("drawerNewSession")
+        try wait(new, "New session in the drawer")
+        shot("36a-drawer-new-session")
+        new.tap()
+        try until(element("drawerInbox"), "exists == false", "the drawer to close on New session")
+        try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox from New session")
+        try until(element("messageField"), "hasKeyboardFocus == true", "the inbox's box to take the keyboard")
+        shot("36b-new-session-box")
+        if hostFile("claude.args") != started { throw failed("nothing started by New session") }
     }
 
     // MARK: - The recap drawer

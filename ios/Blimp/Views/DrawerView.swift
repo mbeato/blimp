@@ -1,10 +1,10 @@
-// The drawer from the left: the project picker, the project's inbox (where a new chat starts, and which says how
-// many of its sessions need you), its running sessions, then its past conversations folded under Earlier
-// (each newest activity first, with its mark, and under its title its branch, jobs and handoff), and Settings. A tap
-// opens one; a swipe right on a row or press and hold has its actions (Stop, Mark read, End; Resume a past one).
-// It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`), a swipe left on it or beside
-// it pushes it back, and letting go settles it open or closed by where it is and how fast it went. A tap beside it
-// closes it too.
+// The drawer from the left: the project picker, the project's inbox (which says how many of its sessions need
+// you), New session (the inbox's box, ready to type into), its running sessions, then its past conversations
+// folded under Earlier (each newest activity first, with its mark, and under its title its branch, jobs and
+// handoff), and Settings. A tap opens one; a swipe right on a row or press and hold has its actions (Stop, Mark
+// read, End; Resume a past one). It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`),
+// a swipe left on it or beside it pushes it back, and letting go settles it open or closed by where it is and how
+// fast it went. A tap beside it closes it too.
 import BlimpKit
 import SwiftUI
 
@@ -21,6 +21,8 @@ struct DrawerView: View {
     let selected: String?
     let onPick: (DrawerRow) -> Void
     let onInbox: () -> Void
+    /// Opens the box that starts a session in this project.
+    let onNewSession: () -> Void
     let onSettings: () -> Void
     /// How many of the project's sessions wait on you: the inbox's Needs you.
     let needs: Int
@@ -98,6 +100,16 @@ struct DrawerView: View {
             .padding(.horizontal)
             .padding(.vertical, 10)
             .accessibilityIdentifier("drawerInbox")
+            Button(action: onNewSession) {
+                Label("New session", systemImage: "plus")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+            .accessibilityIdentifier("drawerNewSession")
             List {
                 if !active.isEmpty {
                     Section("Active") { ForEach(active) { rowButton($0) } }

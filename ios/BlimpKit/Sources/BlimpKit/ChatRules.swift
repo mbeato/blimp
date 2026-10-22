@@ -1,7 +1,7 @@
 // Rules for a chat open on the phone: which reply never folds, where the "since you left" line goes, which
 // session to answer next, what a code block's Run button says (feature 2: blimpd runs a command Claude
 // handed over in a run session of its own, then can type its result back to Claude), and the words when a
-// secret or a recap didn't come through.
+// recap didn't come through.
 import Foundation
 
 public enum ChatFold {
@@ -90,21 +90,6 @@ public enum RunStatus: Equatable, Sendable {
     public var canSend: Bool {
         if case .ended = self { return true }
         return false
-    }
-}
-
-/// Give a Secret's words.
-public enum SecretText {
-    /// A PEM or SSH key that came through without its line breaks (the phone's secure field drops them):
-    /// saved like that, Claude's command would fail with it.
-    public static func lostLineBreaks(_ value: String) -> Bool {
-        value.contains("-----BEGIN") && !value.contains(where: \.isNewline)
-    }
-
-    /// The words when PUT /secrets/<name> failed with blimpd's `message`. A blimpd from before secrets answers
-    /// the route with a bare "not found".
-    public static func notSaved(_ message: String) -> String {
-        message == "not found" ? "This server's blimpd is too old for secrets. Update it first." : "Not saved: \(message)"
     }
 }
 

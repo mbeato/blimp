@@ -76,18 +76,6 @@ struct API {
         _ = try await call("POST", "/runs/" + name + "/send")
     }
 
-    /// Saves a secret blimpd keeps for sessions. The value goes only in this body, never in the chat.
-    func saveSecret(name: String, value: String) async throws {
-        struct Body: Encodable { let value: String }
-        _ = try await call("PUT", "/secrets/" + name, body: JSONEncoder().encode(Body(value: value)))
-    }
-
-    /// Tells Claude in that session where the secret is, without its value.
-    func tellSecret(name: String, session: String) async throws {
-        struct Body: Encodable { let session: String }
-        _ = try await call("POST", "/secrets/" + name + "/tell", body: JSONEncoder().encode(Body(session: session)))
-    }
-
     /// The return card: what the session is for, then what's stuck, in progress, next and done. min: only for a
     /// session with that many prompts (RecapCard.autoMin when it shows by itself). On any error, show nothing.
     func recap(name: String, min: Int? = nil) async throws -> Recap {

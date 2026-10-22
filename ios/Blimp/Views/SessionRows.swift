@@ -1,5 +1,5 @@
 // Small pieces shared by the chat screen, the inbox and the drawer: a row's mark, its swipe and press-and-hold actions,
-// the Inbox button, "2 min. ago", the "end it?" question, a plain-words alert.
+// "2 min. ago", the "end it?" question, a plain-words alert.
 import BlimpKit
 import SwiftUI
 
@@ -97,15 +97,6 @@ struct RowMenu: ViewModifier {
             Task { if let name = await actions.resume(c, dir: dir, store: store) { onOpen(name) } }
         }
         .tint(.green)
-    }
-}
-
-/// The top right's way back to the project's inbox, where a new chat starts.
-struct InboxButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button("Inbox", systemImage: "tray", action: action).accessibilityIdentifier("inboxButton")
     }
 }
 

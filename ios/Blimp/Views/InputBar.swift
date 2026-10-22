@@ -30,6 +30,8 @@ struct InputBar: View {
     var chips: [String] = []
     /// Sends a chip's words, once its Undo time has passed.
     var onChip: ((String) -> Void)? = nil
+    /// Set: the box takes the keyboard (now, or as it appears) and sets it back (the drawer's New session).
+    var takeFocus: Binding<Bool>? = nil
 
     @State private var pressedAt: Date?
     /// A tap started it: it listens until the next tap.
@@ -80,6 +82,11 @@ struct InputBar: View {
                 .focused($focused)
                 .onChange(of: text, initial: true) { _, now in
                     if !focused { selection = TextSelection(insertionPoint: now.endIndex) }
+                }
+                .onChange(of: takeFocus?.wrappedValue == true, initial: true) { _, take in
+                    guard take, let takeFocus else { return }
+                    focused = true
+                    takeFocus.wrappedValue = false
                 }
                 .lineLimit(1...6)
                 .padding(.leading, 14)

@@ -1,10 +1,10 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
-// anywhere, or its button) with the project picker and the project's sessions, running and past. In a Claude
-// session's chat, a drawer from the right (a swipe left anywhere, or Recap) has its recap. A project opens to
-// its inbox, where the box at the bottom starts a session. On any screen, a session in any project that starts
-// waiting gives a double haptic, and away from a chat a banner that opens it (a chat has its own); one that finishes
-// working gives a light tick. A row's actions (RowActions) live here: End's question, a failure's alert, and the
-// new session a handoff started, which opens.
+// anywhere, or its button) with the project picker, New session and the project's sessions, running and past. In a
+// Claude session's chat, a drawer from the right (a swipe left anywhere, or Recap) has its recap. A project opens to
+// its inbox, where the box at the bottom starts a session; the drawer's New session opens it with the keyboard up.
+// On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
+// that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
+// live here: End's question, a failure's alert, and the new session a handoff started, which opens.
 import BlimpKit
 import SwiftUI
 
@@ -21,6 +21,8 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var opened: Opened = .inbox
     @State private var drawer = false
+    /// The drawer's New session was tapped: the inbox's box takes the keyboard, and sets this back.
+    @State private var newSession = false
     /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
     @State private var pull: CGFloat?
     /// Whether the swipe going on pulls the drawer (sideways and right, decided once at its start).
@@ -106,7 +108,8 @@ struct HomeView: View {
         )
         .overlay {
             DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
-                       onPick: pick, onInbox: { show(.inbox) }, onSettings: { drawer = false; showSettings = true },
+                       onPick: pick, onInbox: { show(.inbox) }, onNewSession: startNew,
+                       onSettings: { drawer = false; showSettings = true },
                        needs: needs.count, actions: actions, onOpen: { show(.session($0)) })
         }
         .overlay {
@@ -164,7 +167,8 @@ struct HomeView: View {
                 StartView(dir: dir, past: nil,
                           inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), needs: needs,
                                            digest: store.digests[dir], sessions: store.sessions, left: away, actions: actions,
-                                           onPick: open, onOpen: { show(.session($0)) })) {
+                                           onPick: open, onOpen: { show(.session($0)) }),
+                          takeFocus: $newSession) {
                     show(.session($0))
                 }
                 .id(dir)
@@ -172,7 +176,7 @@ struct HomeView: View {
                 Text("No projects yet. Start Claude in a folder on the Mac first.").foregroundStyle(.secondary).padding()
             }
         case .session(let name):
-            SessionView(name: name, onInbox: { show(.inbox) }, onOpen: { show(.session($0)) }, onRecap: openRecap, onModel: { chatModel = $0 })
+            SessionView(name: name, onOpen: { show(.session($0)) }, onRecap: openRecap, onModel: { chatModel = $0 })
         case .past(let c):
             if let dir = store.dir { StartView(dir: dir, past: c) { show(.session($0)) }.id(c.sessionId) }
         }
@@ -189,10 +193,6 @@ struct HomeView: View {
             .accessibilityHidden(covered)
         }
         ToolbarItem(placement: .principal) { title }
-        // In a session, its own toolbar has Inbox, after the speaker.
-        if case .past = opened {
-            ToolbarItem(placement: .topBarTrailing) { InboxButton { show(.inbox) } }
-        }
     }
 
     /// What the chat is, and under it the project's name (the drawer has the picker).
@@ -278,6 +278,12 @@ struct HomeView: View {
         case .running(let s): show(.session(s.name))
         case .past(let c): show(.past(c))
         }
+    }
+
+    /// The drawer's New session: the project's inbox, its box ready to type into.
+    private func startNew() {
+        show(.inbox)
+        newSession = store.dir != nil
     }
 
     private func pickProject(_ dir: String) {

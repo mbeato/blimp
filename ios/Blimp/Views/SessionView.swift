@@ -3,15 +3,14 @@
 // and a banner says when another session starts waiting or finishes. While Claude works, Stop (and Stop and
 // send, with text in the box) is pinned above the box. Opened (or come back to) after time away: a "since you left" line, and
 // after an hour a dot on Recap, whose drawer from the right (HomeView has it) has the return card. The toolbar has
-// the context gauge (from half full), Recap and a menu with Give a Secret; Run is under the commands of Claude's
-// latest reply (ChatExtras.swift).
+// the context gauge (from half full), the speaker, then Recap at the far right; Run is under the commands of
+// Claude's latest reply (ChatExtras.swift).
 import AudioToolbox
 import BlimpKit
 import SwiftUI
 
 struct SessionView: View {
     let name: String
-    let onInbox: () -> Void
     /// Shows another session in this one's place: the one Resume started, or a banner's.
     let onOpen: (String) -> Void
     /// Opens the recap drawer.
@@ -20,7 +19,7 @@ struct SessionView: View {
     let onModel: (ChatModel) -> Void
 
     var body: some View {
-        ChatScreen(name: name, onInbox: onInbox, onResumed: onOpen, onRecap: onRecap, onModel: onModel)
+        ChatScreen(name: name, onResumed: onOpen, onRecap: onRecap, onModel: onModel)
             .id(name)
     }
 }
@@ -29,7 +28,6 @@ struct SessionView: View {
 /// its socket closed when the screen goes.
 private struct ChatScreen: View {
     let name: String
-    let onInbox: () -> Void
     let onResumed: (String) -> Void
     let onRecap: () -> Void
     let onModel: (ChatModel) -> Void
@@ -39,7 +37,7 @@ private struct ChatScreen: View {
     var body: some View {
         Group {
             if let model {
-                ChatContent(model: model, onInbox: onInbox, onResumed: onResumed, onRecap: onRecap)
+                ChatContent(model: model, onResumed: onResumed, onRecap: onRecap)
             } else {
                 Color.clear
             }
@@ -56,7 +54,6 @@ private struct ChatScreen: View {
 
 private struct ChatContent: View {
     let model: ChatModel
-    let onInbox: () -> Void
     let onResumed: (String) -> Void
     let onRecap: () -> Void
     @Environment(Store.self) private var store
@@ -95,8 +92,6 @@ private struct ChatContent: View {
     /// It opened under the lock (a cold launch back into it): the first unlock is its first look, not a return.
     @State private var openedLocked = false
     @State private var confirming: RunConfirm?
-    @State private var givingSecret = false
-    @State private var secretsGiven = 0
 
     private static let bottom = "bottom"
     /// The screen's height (less the keyboard), so Claude's questions can take most of it.
@@ -179,7 +174,7 @@ private struct ChatContent: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
         .toolbar {
-            // The speaker, then Inbox at the far right.
+            // The context gauge, the speaker, then Recap at the far right.
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if let meter = ContextText.meter(model.session?.context) {
                     Menu {
@@ -195,6 +190,8 @@ private struct ChatContent: View {
                     .accessibilityLabel(meter.label)
                     .accessibilityIdentifier("contextGauge")
                 }
+                Button(readAloud ? "Stop reading aloud" : "Read aloud",
+                       systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
                 if model.canRecap {
                     Button(action: onRecap) {
                         Image(systemName: "text.alignleft")
@@ -205,17 +202,6 @@ private struct ChatContent: View {
                     .accessibilityLabel(model.recapNew ? "Recap, new" : "Recap")
                     .accessibilityIdentifier("recapButton")
                 }
-                if canAct {
-                    Menu {
-                        Button("Give a Secret…", systemImage: "key") { givingSecret = true }
-                    } label: {
-                        Label("More", systemImage: "ellipsis.circle")
-                    }
-                    .accessibilityIdentifier("chatMenu")
-                }
-                Button(readAloud ? "Stop reading aloud" : "Read aloud",
-                       systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
-                InboxButton(action: onInbox)
             }
         }
         // Back with this chat up. After 5 minutes away the lock comes first (Root sets it as the app comes back,
@@ -258,14 +244,6 @@ private struct ChatContent: View {
         .sheet(item: $confirming) { c in
             RunConfirmSheet(command: c.command, folder: runFolder) { Task { await model.run(c.command) } }
         }
-        .sheet(isPresented: $givingSecret) {
-            SecretSheet { name, value in
-                let failed = await model.giveSecret(name: name, value: value)
-                if failed == nil { secretsGiven += 1 }
-                return failed
-            }
-        }
-        .sensoryFeedback(.success, trigger: secretsGiven)
         .task(id: banner) {
             guard banner != nil else { return }
             try? await Task.sleep(for: .seconds(4))
@@ -355,7 +333,7 @@ private struct ChatContent: View {
     /// The input box shows (controls' last case), and so does Stop on the working row.
     private var typable: Bool { !model.ended && !model.noChat && !model.starting && !model.macOnly }
 
-    /// Claude runs in it and the phone can type into it: Run, a secret, a handoff.
+    /// Claude runs in it and the phone can type into it: Run, a handoff.
     private var canAct: Bool { typable && model.session?.isClaude == true }
 
     /// In the scroll where the phone can't type into the session (no Stop); pinned above the box where it can.

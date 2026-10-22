@@ -1,8 +1,7 @@
 // The parts of a chat beyond its messages: Run under a command Claude handed over (with a sheet that shows
 // the whole command before it runs, then "Send result to Claude" once it ended), the recap drawer ("where
-// was I?"), the sheet that gives Claude a secret, the context gauge, the "since you left" line and the
-// chip to the next session waiting. The rules are in BlimpKit (ChatRules, RecapCard, ContextText, SecretRule,
-// SecretText).
+// was I?"), the context gauge, the "since you left" line and the chip to the next session waiting. The rules
+// are in BlimpKit (ChatRules, RecapCard, ContextText).
 import BlimpKit
 import SwiftUI
 
@@ -231,117 +230,6 @@ struct RecapDrawer: View {
         case .next, .open: "circle"
         case .done: "checkmark.circle"
         }
-    }
-}
-
-// MARK: - Secret
-
-/// Give Claude a secret: blimpd saves it in a file on the server and tells Claude where, never what it is.
-/// The value lives only in this sheet's state and the one request, and is cleared when the sheet goes.
-struct SecretSheet: View {
-    /// Saves and tells; nil once done (the chat gives the haptic), else why not.
-    let onSave: @MainActor (String, String) async -> String?
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var value = ""
-    @State private var saving = false
-    @State private var error: String?
-    @State private var recent = SecretSheet.recentNames()
-
-    nonisolated private static let recentKey = "secrets.recentNames"
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("OPENAI_API_KEY", text: $name)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                        .accessibilityIdentifier("secretName")
-                    if !recent.isEmpty {
-                        ScrollView(.horizontal) {
-                            HStack {
-                                ForEach(recent, id: \.self) { n in
-                                    Button(n) { name = n }
-                                        .buttonStyle(.bordered)
-                                        .buttonBorderShape(.capsule)
-                                        .controlSize(.small)
-                                }
-                            }
-                        }
-                        .scrollIndicators(.hidden)
-                    }
-                } header: {
-                    Text("Name")
-                } footer: {
-                    if !name.isEmpty, !SecretRule.validName(name) {
-                        Text("A letter first, then letters, digits or _, at most 64.")
-                    }
-                }
-                Section {
-                    SecureField("Value", text: $value)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("secretValue")
-                } header: {
-                    Text("Value")
-                } footer: {
-                    if brokenKey {
-                        Text("This key needs its line breaks. Give it from the Mac.").foregroundStyle(.red)
-                    } else {
-                        Text("Saved in a file on your server (~/.blimp/secrets). Claude is told where it is, not what it is.")
-                    }
-                }
-                Section {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        if saving { ProgressView() } else { Text("Save and Tell Claude") }
-                    }
-                    .disabled(!SecretRule.validName(name) || !SecretRule.validValue(value) || brokenKey || saving)
-                    .accessibilityIdentifier("secretSave")
-                    if let error {
-                        Text(error).font(.footnote).foregroundStyle(.red)
-                    }
-                }
-            }
-            .navigationTitle("Give a Secret")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-        }
-        .onDisappear { value = "" }
-    }
-
-    /// A PEM or SSH key pasted here: this field drops its line breaks, so it would be saved broken.
-    private var brokenKey: Bool { SecretText.lostLineBreaks(value) }
-
-    private func save() async {
-        saving = true
-        error = nil
-        let n = name
-        let failed = await onSave(n, value)
-        saving = false
-        if let failed {
-            error = failed
-            return
-        }
-        value = ""
-        Self.remember(n)
-        dismiss()
-    }
-
-    // Names used before, newest first: names only, never values.
-    nonisolated private static func recentNames() -> [String] {
-        UserDefaults.standard.stringArray(forKey: recentKey) ?? []
-    }
-
-    private static func remember(_ n: String) {
-        UserDefaults.standard.set(Array(([n] + recentNames().filter { $0 != n }).prefix(5)), forKey: recentKey)
     }
 }
 

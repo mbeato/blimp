@@ -137,18 +137,9 @@ private struct NoSessions: Error {}
     #expect(RunStatus.ended("r", exit: 0).canSend && !RunStatus.running("r").canSend && !RunStatus.sent("r").canSend)
 }
 
-// MARK: - Secrets and recaps
+// MARK: - Recaps
 
-@Test func aKeyThatLostItsLineBreaksIsRefusedAndOneThatKeptThemOrAnyOtherValueIsNot() {
-    #expect(SecretText.lostLineBreaks("-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1rZXk -----END OPENSSH PRIVATE KEY-----"))
-    #expect(!SecretText.lostLineBreaks("-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n"))
-    #expect(!SecretText.lostLineBreaks("-----BEGIN RSA PRIVATE KEY-----\r\nMIIE\r\n-----END RSA PRIVATE KEY-----"))
-    #expect(!SecretText.lostLineBreaks("sk-proj-abc123"))
-}
-
-@Test func anOlderBlimpdsNotFoundSaysToUpdateItForSecretsAndRecaps() {
-    #expect(SecretText.notSaved("not found") == "This server's blimpd is too old for secrets. Update it first.")
-    #expect(SecretText.notSaved("a secret is 1 to 16384 characters") == "Not saved: a secret is 1 to 16384 characters")
+@Test func anOlderBlimpdsNotFoundSaysToUpdateItForRecaps() {
     #expect(RecapText.failure("not found") == "This server's blimpd is too old for recaps. Update it first.")
     #expect(RecapText.failure("no session named web-1") == "no session named web-1")
     #expect(RecapText.failure("Recaps are off") == "Recaps are off")
