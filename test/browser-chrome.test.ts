@@ -71,7 +71,9 @@ live("a launched Chrome answers over the pipe, loads a page, and passes for a no
     await chrome?.exited;
     site.stop();
   }
-}, 20_000);
+  // The first Chrome launch on a fresh CI runner takes 8 to over 20 s (cold start; 0.4 s warm). The 5 s
+  // race on the page load above is what catches a keyring hang, so this long budget doesn't weaken it.
+}, 60_000);
 
 live("text past a pipe chunk keeps its accents; calls to a Chrome that's gone answer with an error", async () => {
   const chrome = launchChrome(path!, join(tmp, "profile-2"));
