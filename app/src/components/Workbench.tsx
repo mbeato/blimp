@@ -1136,9 +1136,12 @@ export function Workbench(props: {
                 setMenu({ x: ev.clientX, y: ev.clientY, path, kind, on: "tree" });
               }}
               onPointerDown={(ev) => startRowDrag(ev, path)}
-              onClick={() => {
+              onClick={(ev) => {
                 // The end of a drag isn't a click.
                 if (rowDragged.current) return void (rowDragged.current = false);
+                // For the tree's keys: WebKit doesn't focus a button that's clicked. (A text file
+                // opened here takes the focus to the editor.)
+                ev.currentTarget.focus();
                 if (e.kind === "dir") toggleDir(path);
                 else {
                   setTarget(dir);
