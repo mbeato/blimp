@@ -170,7 +170,7 @@ The return card ("where was I?") says what a Claude session is for, what's done,
 - **When it's written:** a recap is kept per conversation until Claude replies again. Until then the saved one comes back without a call. Two asks at once share one call.
 - **What the model reads:** the title, the first request (when it isn't one of the latest), the last 3 requests and Claude's last 6 replies, each cut to ~300 characters. No tool calls or tool output.
 - **The answer:** lines `GOAL | …` (exactly one), then `DONE | …` (what's finished), `DOING | …` (what Claude is in the middle of), `STUCK | …` (what's blocked, each saying on what, as "Waiting on you: approve the deploy") and `NEXT | …` (what's left after that), nothing else. Claude asking the user something, or waiting for a go-ahead, is STUCK ("Waiting on you: …"), never DOING; the prompt says so, as without it haiku put that under DOING. The first 4 DONE lines and the first 3 of each other kind are kept. The model leaves out a kind with nothing in it. An item that only says there is nothing ("Nothing left to do", "None", "No blockers") is skipped, as haiku still writes one at times; one that goes on to say what ("Nothing renders in Safari") is kept. Any other kind, `OPEN` too, means it isn't a card. Markdown marks are taken off; a line over 140 characters is cut at a word, with "…". It's shown as plain text.
-- **How the apps show it:** the goal in bold, then a section each for Stuck, In progress, Next and Done, in that order (Stuck first, as it needs you). An empty section is left out. Each section has a small heading with a mark; only Stuck's is red. The Mac's rule is `app/src/lib/recap.ts` `recapSections`, the phone's BlimpKit `Recap.sections`. From a blimpd before 0.3.1: Done and Open.
+- **The apps** don't show recaps (since 2026-10-23: nobody read them). The route stays, for later.
 - **Where:** `<socket dir>/recaps.json`, `{ [sessionId]: { goal, done, doing, stuck, next, at, replies } }` (`replies`: how many replies the conversation had then), mode 600, through a temp file and a rename, the 200 newest kept. `open` isn't kept: it's made from the three. One kept by a blimpd before 0.3.1 (`{ goal, done, open, at, replies }`) isn't read, so it's written again the next time it's asked for.
 
 ### Jobs, context and work
@@ -323,13 +323,12 @@ Each line is the title, then its words; newest activity first within Waiting on 
 
 ### Digests
 
-On the phone the inbox starts with a paragraph on where the project's work stands (`src/digests.ts`), with the same model call as names.
+A paragraph on where each project's work stands (`src/digests.ts`), with the same model call as names. No app shows it now (since 2026-10-23); blimpd still writes it and sends it with the session list.
 
 - **When:** every 5 s, for each folder with `claude` or `claude-glm` sessions running, once what they are has changed since its last paragraph (a session started or ended, changed state or got a new note) and stayed so for 15 s. One call at a time, at most 60 an hour; a folder whose call failed waits 10 minutes.
 - **What the model reads:** the folder's name, and each session numbered, with its title (~100 characters) and where it stands: waiting on the user (and its note), working now (and its latest request, ~200 characters), asking the user, stopped part way, finished (each with its note), or idle.
 - **The answer:** one paragraph, 2 to 4 sentences, at most 600 characters, no lists or control characters. Each session it mentions is a link, `[a few words](n)`, n its number; a number it doesn't have, or a square bracket outside a link, is a failed try. A single line break is a space.
 - **Where:** `<socket dir>/digests.json`, `{ [folder]: { text, sessions, at, key } }` (`sessions`: the names its links point at, link n at `sessions[n - 1]`; `key`: what it was written from), through a temp file and a rename, 600, the 200 newest kept. The events socket's `sessions` message carries `digests: { [folder]: { text, sessions, at } }` for the folders with sessions running, so a new one reaches the phone as the list does.
-- **The phone** (`Digest` in BlimpKit, `InboxView`): the paragraph on top, each link's words a link that opens its session's chat while it runs (else plain words), "as of 2m ago" under it, dimmed once a session it links has changed state since `at`.
 - **Off:** with names (`{ "names": false }`): nothing is called and no paragraphs are sent.
 
 ### Hooks (status backup)
