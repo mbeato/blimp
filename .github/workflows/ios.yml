@@ -294,11 +294,31 @@ jobs:
           for t in $TESTS; do only+=("-only-testing:BlimpUITests/BlimpUITests/$t"); done
           # Each test's start and end print as they happen (the whole log still goes to $log), so a run that
           # hits the job's time limit shows which test it was in; before, a cancelled run printed nothing.
-          set -o pipefail
-          if xcodebuild -project Blimp.xcodeproj -scheme BlimpUITests -destination "platform=iOS Simulator,id=$SIM" \
-              -derivedDataPath "$DD" -resultBundlePath "$E2E_DIR/e2e.xcresult" "${only[@]}" \
-              -retry-tests-on-failure -test-iterations 2 test-without-building 2>&1 \
-              | tee "$log" | grep --line-buffered -E "Test Case|Executed|\*\* TEST"; then
+          xcodebuild -project Blimp.xcodeproj -scheme BlimpUITests -destination "platform=iOS Simulator,id=$SIM" \
+            -derivedDataPath "$DD" -resultBundlePath "$E2E_DIR/e2e.xcresult" "${only[@]}" \
+            -retry-tests-on-failure -test-iterations 2 test-without-building > "$log" 2>&1 &
+          xb=$!
+          tail -n +1 -f "$log" | grep --line-buffered -E "Test Case|Executed|\*\* TEST" &
+          shown=$!
+          # Xcode 27.1 on the Mac once sat idle for 10 minutes after the last test without ending (run
+          # 40013319082): once every test has its last word and the log has been quiet for a minute, it's
+          # stopped, and the tests' results decide (ios/e2e/results.py).
+          verdict=
+          while kill -0 "$xb" 2>/dev/null; do
+            sleep 5
+            [ "$(python3 ../ios/e2e/results.py "$log" $TESTS)" != running ] || continue
+            [ $(( $(date +%s) - $(stat -f %m "$log") )) -ge 60 ] || continue
+            echo "::warning title=iPhone e2e::xcodebuild still ran a minute after the last test's result: stopped, and the results decide"
+            kill "$xb"
+            verdict=$(python3 ../ios/e2e/results.py "$log" $TESTS)
+            break
+          done
+          code=0
+          wait "$xb" || code=$?
+          sleep 1
+          kill "$shown" 2>/dev/null || true
+          [ -n "$verdict" ] || { [ "$code" = 0 ] && verdict=passed || verdict=failed; }
+          if [ "$verdict" = passed ]; then
             # Passed on its second go: said, so a flaky test stays in sight.
             { grep -oE "Test Case '-\[BlimpUITests\.BlimpUITests [A-Za-z0-9]+\]' failed" "$log" || true; } | sed -E 's/.*BlimpUITests ([A-Za-z0-9]+)\].*/\1/' | sort -u |
               while read -r t; do echo "::warning title=iPhone e2e::$t failed, then passed when run again"; done
@@ -316,7 +336,8 @@ jobs:
           [ -d "$E2E_DIR/e2e.xcresult" ] || exit 0
           out="$E2E_DIR/screenshots"
           mkdir -p "$out"
-          xcrun xcresulttool export attachments --path "$E2E_DIR/e2e.xcresult" --output-path "$out"
+          # A bundle xcodebuild didn't finish (stopped after a hang, UI test) has none to give
+          xcrun xcresulttool export attachments --path "$E2E_DIR/e2e.xcresult" --output-path "$out" || { echo "no screenshots: the result bundle isn't complete"; exit 0; }
           # Name each file as the test named it.
           python3 -c '
           import json, os, re, shutil, sys
