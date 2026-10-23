@@ -423,6 +423,7 @@ final class BlimpUITests: XCTestCase {
         try wait(back, "the back arrow at the top left")
         if element("drawerButton").exists { throw failed("no ☰ in a chat") }
         try until(back, "label CONTAINS 'blimp-demo'", "the back arrow to name the project")
+        if back.frame.maxX > element("screenTitle").frame.minX { throw failed("the back arrow left of the title") }
         back.tap()
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox again from the chat")
     }
@@ -547,9 +548,10 @@ final class BlimpUITests: XCTestCase {
         if element("drawerButton").exists {
             element("drawerButton").tap()
         } else {
-            // In a chat there's no ☰: a swipe right from the middle opens the drawer.
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
-                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+            // In a chat there's no ☰: a swipe right opens the drawer. It starts high (dy 0.3), above the keyboard
+            // and the reply chips, which scroll sideways and would take the swipe.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.3))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3)))
         }
         try wait(strip, "the drawer")
     }
