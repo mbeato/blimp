@@ -7,7 +7,7 @@ import Foundation
 public enum Mark: Equatable, Sendable {
     case asking, unread, working, none
 
-    /// The one that needs you most among several (a project's, or the drawer button's): asking, else unread.
+    /// The one that needs you most among several (a project's, or the top-left button's, ☰ on the inbox, ‹ in a chat): asking, else unread.
     public static func top(_ marks: [Mark]) -> Mark {
         marks.contains(.asking) ? .asking : marks.contains(.unread) ? .unread : .none
     }
@@ -70,12 +70,12 @@ public enum Drawer {
         return (running + idle).sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.dir < $1.dir }
     }
 
-    /// The drawer button's mark: the top one of every session but the one on screen.
+    /// The top-left button's mark: the top one of every session but the one on screen.
     public static func others(_ sessions: [Session], onScreen: String?) -> Mark {
         Mark.top(sessions.filter { $0.name != onScreen }.map(\.mark))
     }
 
-    /// The drawer button's badge, by Needs you's rule so the two agree: asking while Needs you has a line that
+    /// The top-left button's badge, by Needs you's rule so the two agree: asking while Needs you has a line that
     /// isn't the session on screen (a past question, or a finished turn that ends in a question, counts), else
     /// a reply you haven't seen.
     public static func badge(_ sessions: [Session], needs: [InboxLine], onScreen: String?) -> Mark {

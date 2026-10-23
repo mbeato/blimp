@@ -186,7 +186,7 @@ private struct ListView: View {
 }
 
 /// Monospace text in a rounded box that scrolls sideways, so long lines keep their shape. A swipe in it scrolls it
-/// and pulls neither drawer.
+/// and doesn't pull the drawer.
 struct CodeBox<Content: View>: View {
     @ViewBuilder let content: Content
 
