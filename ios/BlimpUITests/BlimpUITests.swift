@@ -4,7 +4,7 @@
 // message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
 // through it; two questions at once; unread and asking marks; a project's inbox and the chat's top bar; Allow from
-// Needs you, in its own project's inbox only; the drawer's New session; a server
+// Needs you, in its own project's inbox only; the drawer's New session; a project from the drawer's strip; a server
 // browser tab from the drawer, tapped and typed into. What reached the sessions is checked by the job afterwards.
 // Screenshots stay in the .xcresult.
 //
@@ -35,7 +35,7 @@ final class BlimpUITests: XCTestCase {
 
         // A project's inbox; the drawer lists blimp-demo's session by title, with a reply not seen yet
         // (the stand-ins' replies came after blimpd started)
-        try wait(element("drawerButton"), "Home")
+        try wait(homeButton(), "Home")
         shot("1-inbox")
         try pickProject("blimp-demo")
         try openDrawer()
@@ -125,7 +125,7 @@ final class BlimpUITests: XCTestCase {
         app = XCUIApplication()
         app.launch()
         let unlock = app.buttons["Unlock"].firstMatch
-        let home = element("drawerButton")
+        let home = homeButton()
         try wait(unlock, "the lock screen")
         if home.exists { throw failed("Home showing behind the lock") }
         allowFaceID()
@@ -179,7 +179,7 @@ final class BlimpUITests: XCTestCase {
         try pickProject("blimp-demo")
         try openDrawer()
         let before = Set(newRows().map(\.identifier))
-        element("drawerInbox").tap()
+        try closeDrawer()
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox")
         try wait(app.buttons["Talk"], "the mic in the inbox's box")
         shot("10-blank")
@@ -350,7 +350,7 @@ final class BlimpUITests: XCTestCase {
     /// A swipe right, from the middle of the screen too, opens the drawer; a swipe left closes it.
     func test9DrawerFromASwipe() throws {
         try launchPaired()
-        let new = element("drawerInbox")
+        let new = element("drawerStrip")
         if new.exists { throw failed("the drawer closed at launch") }
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
@@ -396,13 +396,11 @@ final class BlimpUITests: XCTestCase {
 
     /// A project opens to its inbox: blimp-demo's demo-chat waits on you, in the words blimpd's note call got from
     /// the stand-in claude (a question), and a tap opens its chat. Its top right is the context gauge (when it shows),
-    /// then the speaker, and no Recap, Inbox or ••• menu. The drawer's Inbox goes back. (Last: it
+    /// then the speaker, and no Recap, Inbox or ••• menu. ‹ goes back. (Last: it
     /// runs after test1 has read demo-chat, which a question note keeps listed.)
     func testInbox() throws {
         try launchPaired()
         try pickProject("blimp-demo")
-        try openDrawer()
-        element("drawerInbox").tap()
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox")
         let line = element("inbox-session-demo-chat")
         try wait(line, "demo-chat in the inbox", timeout: 60)
@@ -420,9 +418,12 @@ final class BlimpUITests: XCTestCase {
             throw failed("no Recap, Inbox or ••• menu in the top bar")
         }
         shot("32-chat-top-right")
-        // The drawer's Inbox goes back
-        try openDrawer()
-        element("drawerInbox").tap()
+        // ‹ at the top left, naming the project, goes back to its inbox; there's no ☰ in a chat
+        let back = element("backButton")
+        try wait(back, "the back arrow at the top left")
+        if element("drawerButton").exists { throw failed("no ☰ in a chat") }
+        try until(back, "label CONTAINS 'blimp-demo'", "the back arrow to name the project")
+        back.tap()
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox again from the chat")
     }
 
@@ -453,7 +454,7 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - New session
 
-    /// The drawer's New session, from a chat: the drawer closes and the project's inbox shows with its box ready to
+    /// The drawer's +, from a chat: the drawer closes and the project's inbox shows with its box ready to
     /// type into (the keyboard up). Nothing starts until Send, so the job's count of sessions started holds. (By name
     /// after Needs you.)
     func testNewSessionFromTheDrawer() throws {
@@ -466,7 +467,7 @@ final class BlimpUITests: XCTestCase {
         try wait(new, "New session in the drawer")
         shot("36a-drawer-new-session")
         new.tap()
-        try until(element("drawerInbox"), "exists == false", "the drawer to close on New session")
+        try until(element("drawerStrip"), "exists == false", "the drawer to close on New session")
         try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "the inbox from New session")
         try until(element("messageField"), "hasKeyboardFocus == true", "the inbox's box to take the keyboard")
         shot("36b-new-session-box")
@@ -504,35 +505,59 @@ final class BlimpUITests: XCTestCase {
         try until(row, "label CONTAINS 'tapped typed:hi'", "the tap and the typing to reach the page")
     }
 
+    // MARK: - The project strip
+
+    /// From a chat in blimp-demo, api-server's icon in the drawer's strip: the drawer stays open with
+    /// api-server's sessions, and behind it is api-server's inbox. (By name after the server browser.)
+    func testSwitchProjectFromTheStrip() throws {
+        try launchPaired()
+        try openSession("demo-chat", in: "blimp-demo")
+        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat")
+        try openDrawer()
+        let icon = element("strip-api-server")
+        try wait(icon, "api-server in the strip")
+        icon.tap()
+        try until(element("drawerProject"), "label == 'api-server'", "the drawer to show api-server")
+        if !element("drawerStrip").exists { throw failed("the drawer to stay open on a project") }
+        if element("session-demo-chat").exists { throw failed("blimp-demo's sessions to leave the drawer") }
+        shot("39-strip")
+        try closeDrawer()
+        try until(element("screenTitle"), "label BEGINSWITH 'Inbox'", "an inbox behind the drawer, not the chat")
+        try until(element("screenTitle"), "label CONTAINS 'api-server'", "api-server's inbox")
+    }
+
     // MARK: - Helpers
 
-    /// Picks a project from the picker at the top of the drawer, unless it's the one showing; it opens to its inbox,
-    /// and the drawer is closed after.
+    /// Picks a project from the drawer's strip; its inbox shows behind the drawer, which stays open with its
+    /// sessions, and is closed after.
     private func pickProject(_ name: String) throws {
         try openDrawer()
-        let picker = element("projectPicker")
-        try wait(picker, "the project picker")
-        if picker.label.hasPrefix(name) { return try closeDrawer() }
-        picker.tap()
-        let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
-        try wait(item, "\(name) in the project picker")
-        item.tap()
-        try until(element("drawerInbox"), "exists == false", "the drawer to close on \(name)'s inbox")
+        let icon = element("strip-" + name)
+        try wait(icon, "\(name) in the project strip")
+        icon.tap()
+        try until(element("drawerProject"), "label == '\(name)'", "the drawer to show \(name)'s sessions")
+        try closeDrawer()
         try until(element("screenTitle"), "label CONTAINS '\(name)'", "the title to show \(name)")
     }
 
     private func openDrawer() throws {
-        if element("drawerInbox").exists { return }
-        let button = element("drawerButton")
-        try wait(button, "the drawer button")
-        button.tap()
-        try wait(element("drawerInbox"), "the drawer")
+        let strip = element("drawerStrip")
+        if strip.exists { return }
+        try wait(homeButton(), "Home's top-left button")
+        if element("drawerButton").exists {
+            element("drawerButton").tap()
+        } else {
+            // In a chat there's no ☰: a swipe right from the middle opens the drawer.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        }
+        try wait(strip, "the drawer")
     }
 
     /// A tap beside the open drawer closes it.
     private func closeDrawer() throws {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        try until(element("drawerInbox"), "exists == false", "the drawer to close")
+        try until(element("drawerStrip"), "exists == false", "the drawer to close")
     }
 
     /// Unfolds Earlier in the open drawer (folded at first, and kept as it was left).
@@ -567,7 +592,7 @@ final class BlimpUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments += arguments
         app.launch()
-        let home = element("drawerButton")
+        let home = homeButton()
         let field = element("pairField")
         let unlock = app.buttons["Unlock"].firstMatch
         let end = Date().addingTimeInterval(30)
@@ -586,7 +611,7 @@ final class BlimpUITests: XCTestCase {
     /// Locked: a matching face (signals.sh), again if the first came before Face ID was looking. Unlocked
     /// means the cover went: Home is there under it all along.
     private func unlockWithFace() throws {
-        let home = element("drawerButton")
+        let home = homeButton()
         let unlock = app.buttons["Unlock"].firstMatch
         for _ in 0..<3 {
             allowFaceID()
@@ -667,6 +692,11 @@ final class BlimpUITests: XCTestCase {
 
     private func element(_ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    /// Home's top-left button: ☰ on a project's inbox, ‹ in a chat (a launch can reopen the last chat).
+    private func homeButton() -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["drawerButton", "backButton"])).firstMatch
     }
 
     private func message(_ id: String, _ text: String) -> XCUIElement {

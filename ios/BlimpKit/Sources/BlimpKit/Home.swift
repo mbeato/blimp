@@ -1,5 +1,5 @@
 // The phone's one screen, as chat apps have it: a project's sessions for the drawer (running and past,
-// newest activity first), the projects for the picker, and the mark beside each; what a row says under its
+// newest activity first), the projects for the strip, and the mark beside each; what a row says under its
 // title; which sessions just started waiting or finished (the banner); and handoffs asked for from the phone.
 import Foundation
 
@@ -57,7 +57,7 @@ public enum Drawer {
         return rows.sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.id < $1.id }
     }
 
-    /// The picker's projects: folders with sessions running and recent folders, newest activity first, each with
+    /// The strip's projects: folders with sessions running and recent folders, newest activity first, each with
     /// the top mark of its sessions.
     public static func projects(sessions: [Session], recent: [RecentFolder]) -> [ProjectChoice] {
         let running = Dictionary(grouping: sessions, by: \.dir).map { dir, list in

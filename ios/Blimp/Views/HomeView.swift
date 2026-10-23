@@ -1,6 +1,7 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
-// anywhere, or its button) with the project picker, New session and the project's sessions, running and past. A project opens to
-// its inbox, where the box at the bottom starts a session; the drawer's New session opens it with the keyboard up.
+// anywhere, or ☰ on the inbox) with the project strip, New session and the project's sessions, running and past. A
+// chat's top left goes back to its project's inbox. A project opens to its inbox, where the box at the bottom starts
+// a session; the drawer's New session opens it with the keyboard up.
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
 // live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
@@ -89,9 +90,9 @@ struct HomeView: View {
         )
         .overlay {
             DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
-                       onPick: pick, onInbox: { show(.inbox) }, onNewSession: startNew,
+                       onPick: pick, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },
-                       needs: needs.count, actions: actions, onOpen: { show(.session($0)) },
+                       actions: actions, onOpen: { show(.session($0)) },
                        tabs: store.dir.map { BrowserTab.inFolder(store.browserTabs, $0) } ?? [],
                        onTab: { browserTab = $0.id; drawer = false }, onNewTab: newTab, onCloseTab: closeTab)
         }
@@ -164,28 +165,46 @@ struct HomeView: View {
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Button { drawer = true } label: {
-                Image(systemName: "line.3.horizontal")
-                    .overlay(alignment: .topTrailing) { badge.offset(x: 5, y: -3) }
+            if opened == .inbox {
+                Button { drawer = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .overlay(alignment: .topTrailing) { badge.offset(x: 5, y: -3) }
+                }
+                .accessibilityLabel(badgeLabel.map { "Sessions, \($0)" } ?? "Sessions")
+                .accessibilityIdentifier("drawerButton")
+                .accessibilityHidden(covered)
+            } else {
+                // In a chat: back to the project's inbox, with the same mark. A swipe right opens the drawer.
+                Button { show(.inbox) } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                        Text(projectName).lineLimit(1).frame(maxWidth: 120, alignment: .leading)
+                    }
+                    .overlay(alignment: .topTrailing) { badge.offset(x: 8, y: -3) }
+                }
+                .accessibilityLabel(badgeLabel.map { "Back to \(projectName), \($0)" } ?? "Back to \(projectName)")
+                .accessibilityIdentifier("backButton")
+                .accessibilityHidden(covered)
             }
-            .accessibilityLabel(badgeLabel.map { "Sessions, \($0)" } ?? "Sessions")
-            .accessibilityIdentifier("drawerButton")
-            .accessibilityHidden(covered)
         }
         ToolbarItem(placement: .principal) { title }
     }
 
-    /// What the chat is, and under it the project's name (the drawer has the picker).
+    /// What the screen shows; on the inbox the project's name under it (in a chat the back arrow has it).
     private var title: some View {
         VStack(spacing: 0) {
             // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
             Text(subtitle).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
-            Text(store.dir.map(Drawer.name(of:)) ?? "blimp").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if opened == .inbox {
+                Text(projectName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("screenTitle")
         .accessibilityHidden(covered)
     }
+
+    private var projectName: String { store.dir.map(Drawer.name(of:)) ?? "blimp" }
 
     /// Needs you's rule (Drawer.badge), so the badge and the band agree.
     private var mark: Mark { Drawer.badge(store.sessions, needs: needs, onScreen: onScreen) }
@@ -223,7 +242,7 @@ struct HomeView: View {
 
     private var earlier: [Conversation] { store.dir.flatMap { earlierBy[$0] } ?? [] }
 
-    /// The project's sessions waiting on you, oldest first: the inbox's top, and the drawer's count.
+    /// The project's sessions waiting on you, oldest first: the inbox's top, and the top-left button's mark.
     private var needs: [InboxLine] { store.dir.map { Inbox.needsYou(sessions: store.sessions, dir: $0, earlier: earlier) } ?? [] }
 
     private var rows: [DrawerRow] {
@@ -283,9 +302,10 @@ struct HomeView: View {
         newSession = store.dir != nil
     }
 
+    /// A project from the strip: its inbox, behind the drawer, which stays open with its sessions.
     private func pickProject(_ dir: String) {
         store.dir = dir
-        show(.inbox)
+        opened = .inbox
     }
 
     /// A session from another project (a banner's) brings its project along. Opening one

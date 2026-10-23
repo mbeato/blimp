@@ -1,11 +1,13 @@
-// The drawer from the left: the project picker, the project's inbox (which says how many of its sessions need
-// you), New session (the inbox's box, ready to type into), its running sessions, the project's browser tabs (a
-// dot on ones a session opened; a tap opens one full screen, New Tab opens one, a swipe right closes one), then its past conversations
+// The drawer from the left: a strip of the projects down its left side (two letters each, with the mark of the
+// session there that needs you most; a tap shows that project's inbox behind the drawer and its sessions in it,
+// and the drawer stays open; Settings at its foot), and beside it the project's name with + (New session: the
+// inbox's box, ready to type into), its running sessions, the project's browser tabs (a dot on ones a session
+// opened; a tap opens one full screen, New Tab opens one, a swipe right closes one), then its past conversations
 // folded under Earlier (each newest activity first, with its mark, and under its title its branch, jobs and
-// handoff), and Settings. A tap opens one; a swipe right on a row or press and hold has its actions (Stop, Mark
-// read, End; Resume a past one). It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`),
-// a swipe left on it or beside it pushes it back, and letting go settles it open or closed by where it is and how
-// fast it went. A tap beside it closes it too.
+// handoff). A tap opens one; a swipe right on a row or press and hold has its actions (Stop, Mark read, End;
+// Resume a past one). It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`), a swipe
+// left on it or beside it pushes it back, and letting go settles it open or closed by where it is and how fast
+// it went. A tap beside it closes it too.
 import BlimpKit
 import SwiftUI
 
@@ -13,20 +15,18 @@ struct DrawerView: View {
     @Binding var open: Bool
     /// How far a swipe in the chat that's opening it has gone (HomeView), nil while there's none.
     let pull: CGFloat?
-    /// The project shown, and the ones the picker lists.
+    /// The project shown, and the ones the strip lists.
     let dir: String?
     let projects: [ProjectChoice]
+    /// Shows a project's inbox behind the drawer, which stays open with its sessions.
     let onProject: (String) -> Void
     let rows: [DrawerRow]
     /// The row of what the chat shows.
     let selected: String?
     let onPick: (DrawerRow) -> Void
-    let onInbox: () -> Void
     /// Opens the box that starts a session in this project.
     let onNewSession: () -> Void
     let onSettings: () -> Void
-    /// How many of the project's sessions wait on you: the inbox's Needs you.
-    let needs: Int
     let actions: RowActions
     /// Opens a session: the one a row's Resume started.
     let onOpen: (String) -> Void
@@ -42,6 +42,8 @@ struct DrawerView: View {
     @State private var push: CGFloat?
     /// Whether the swipe going on is sideways (decided once, at its start), so scrolling the list never moves it.
     @State private var sideways: Bool?
+    /// The strip's order, read as the drawer comes out (Strip.held), so an icon never moves under a finger.
+    @State private var order: [String] = []
 
     var body: some View {
         GeometryReader { geo in
@@ -91,75 +93,115 @@ struct DrawerView: View {
     }
 
     private var panel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            picker.padding(.horizontal).padding(.top, 12).padding(.bottom, 8)
-            Button(action: onInbox) {
-                HStack {
-                    Label("Inbox", systemImage: "tray")
-                    Spacer()
-                    if needs > 0 {
-                        Text(needs == 1 ? "1 needs you" : "\(needs) need you").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+        HStack(spacing: 0) {
+            strip
+            Divider()
+            VStack(alignment: .leading, spacing: 0) {
+                header.padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+                List {
+                    if rows.isEmpty {
+                        Text("No sessions here yet.").foregroundStyle(.secondary).listRowSeparator(.hidden)
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 10)
-            .accessibilityIdentifier("drawerInbox")
-            Button(action: onNewSession) {
-                Label("New session", systemImage: "plus")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding(.horizontal)
-            .padding(.bottom, 8)
-            .accessibilityIdentifier("drawerNewSession")
-            List {
-                if rows.isEmpty {
-                    Text("No sessions here yet.").foregroundStyle(.secondary).listRowSeparator(.hidden)
-                }
-                if !active.isEmpty {
-                    Section("Active") { ForEach(active) { rowButton($0) } }
-                }
-                // After the running sessions, so they stay in sight when the keyboard leaves the drawer short.
-                Section("Browser") {
-                    ForEach(tabs) { tabRow($0) }
-                    Button(action: onNewTab) {
-                        Label("New Tab", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading)
+                    if !active.isEmpty {
+                        Section("Active") { ForEach(active) { rowButton($0) } }
                     }
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("drawerNewTab")
-                }
-                if !past.isEmpty {
-                    Section {
-                        // A row, not the section's header: a header doesn't reliably take taps.
-                        Button { earlierOpen.toggle() } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.right").font(.caption2.weight(.bold)).rotationEffect(.degrees(earlierOpen ? 90 : 0))
-                                Text("Earlier")
-                                Text("\(past.count)").foregroundStyle(.tertiary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    // After the running sessions, so they stay in sight when the keyboard leaves the drawer short.
+                    Section("Browser") {
+                        ForEach(tabs) { tabRow($0) }
+                        Button(action: onNewTab) {
+                            Label("New Tab", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .foregroundStyle(.secondary)
-                        .listRowSeparator(.hidden)
-                        .accessibilityLabel(earlierOpen ? "Earlier, \(past.count), open" : "Earlier, \(past.count), folded")
-                        .accessibilityIdentifier("drawerEarlier")
-                        if earlierOpen { ForEach(past) { rowButton($0) } }
+                        .accessibilityIdentifier("drawerNewTab")
+                    }
+                    if !past.isEmpty {
+                        Section {
+                            // A row, not the section's header: a header doesn't reliably take taps.
+                            Button { earlierOpen.toggle() } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chevron.right").font(.caption2.weight(.bold)).rotationEffect(.degrees(earlierOpen ? 90 : 0))
+                                    Text("Earlier")
+                                    Text("\(past.count)").foregroundStyle(.tertiary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                            .accessibilityLabel(earlierOpen ? "Earlier, \(past.count), open" : "Earlier, \(past.count), folded")
+                            .accessibilityIdentifier("drawerEarlier")
+                            if earlierOpen { ForEach(past) { rowButton($0) } }
+                        }
                     }
                 }
+                .listStyle(.plain)
             }
-            .listStyle(.plain)
-            Divider()
-            Button(action: onSettings) {
-                Label("Settings", systemImage: "gearshape").frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding()
-            .accessibilityIdentifier("settingsButton")
         }
+        .onAppear { order = projects.map(\.dir) }
         .accessibilityAddTraits(.isModal)
+    }
+
+    /// The projects, two letters each with their mark, the one shown lit; Settings at the foot.
+    private var strip: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(Strip.held(projects, order: order)) { stripIcon($0) }
+                }
+                .padding(.vertical, 12)
+            }
+            .scrollIndicators(.hidden)
+            Button(action: onSettings) {
+                Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44)
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Settings")
+            .accessibilityIdentifier("settingsButton")
+            .padding(.bottom, 8)
+        }
+        .frame(width: 60)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("drawerStrip")
+    }
+
+    private func stripIcon(_ p: ProjectChoice) -> some View {
+        Button { onProject(p.dir) } label: {
+            Text(Strip.letters(p.name))
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 40, height: 40)
+                .background(p.dir == dir ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.12),
+                            in: RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .topTrailing) { MarkView(mark: p.mark).offset(x: 4, y: -4) }
+        }
+        .foregroundStyle(.primary)
+        .accessibilityLabel(Self.label(p))
+        .accessibilityAddTraits(p.dir == dir ? .isSelected : [])
+        .accessibilityIdentifier("strip-" + p.name)
+    }
+
+    /// "blimp, asking you something", "mbeato, new reply", "api-server".
+    private static func label(_ p: ProjectChoice) -> String {
+        switch p.mark {
+        case .asking: "\(p.name), asking you something"
+        case .unread: "\(p.name), new reply"
+        case .working, .none: p.name
+        }
+    }
+
+    /// The project's name, and + for New session.
+    private var header: some View {
+        HStack {
+            Text(dir.map(Drawer.name(of:)) ?? "Projects")
+                .font(.title3.bold())
+                .lineLimit(1)
+                .accessibilityIdentifier("drawerProject")
+            Spacer(minLength: 8)
+            Button(action: onNewSession) {
+                Image(systemName: "plus").font(.title3.weight(.semibold)).frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("New session")
+            .accessibilityIdentifier("drawerNewSession")
+            .disabled(dir == nil)
+        }
     }
 
     private var active: [DrawerRow] { rows.filter { if case .running = $0.item { true } else { false } } }
@@ -196,31 +238,6 @@ struct DrawerView: View {
         .contextMenu {
             Button(role: .destructive) { onCloseTab(tab) } label: { Label("Close Tab", systemImage: "xmark") }
         }
-    }
-
-    /// The project's name with a chevron; a tap lists the projects to pick from, each with its top mark.
-    private var picker: some View {
-        Menu {
-            ForEach(projects) { p in
-                Button { onProject(p.dir) } label: {
-                    if p.dir == dir { Label(p.name, systemImage: "checkmark") } else { Text(p.name) }
-                    switch p.mark {
-                    case .asking: Text("Asking you something")
-                    case .unread: Text("New reply")
-                    case .working, .none: Text(p.dir)
-                    }
-                }
-                .accessibilityIdentifier("project-" + p.name)
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Text(dir.map(Drawer.name(of:)) ?? "Projects").font(.title3.bold()).lineLimit(1)
-                Image(systemName: "chevron.down").font(.caption.weight(.bold))
-            }
-            .foregroundStyle(.primary)
-        }
-        .tint(.primary)
-        .accessibilityIdentifier("projectPicker")
     }
 }
 
