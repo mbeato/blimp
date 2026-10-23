@@ -162,6 +162,16 @@ The icon is `Blimp/Assets.xcassets/AppIcon.appiconset/AppIcon.png`, drawn from `
 
 After that, each release tag uploads a build. The build number is the workflow's run number. The build shows in App Store Connect under TestFlight once Apple has processed it (often 10 to 30 minutes). Add yourself as an internal tester there, and install it on the iPhone with the TestFlight app.
 
+## The e2e test on your own Mac
+
+The iOS workflow's end-to-end test (app-e2e) runs on Max's MacBook Pro when it's online, on three self-hosted runners labeled `blimp-e2e` (`mbp-a`, `mbp-b`, `mbp-c`), one per shard. Otherwise it runs on GitHub's Macs. The Mac starts from what the last run left (the simulators, the compiled app), so a run there takes minutes less than on a fresh GitHub Mac.
+
+- Only the repo owner's own pushes and manual runs go to the Mac (the repo is public). Run workflow has a choice: auto, mac or github.
+- Whether the Mac is online comes from the `RUNNERS_TOKEN` secret: a fine-grained token for this repo with Administration: Read-only. Without it, the owner's runs wait for the Mac. To set it, make the token on GitHub (Settings > Developer settings > Fine-grained tokens), then run `gh secret set RUNNERS_TOKEN -R mbeato/blimp` and paste it.
+- On the Mac: the runners are in `~/actions-runner/{a,b,c}`, each a login item (`~/Library/LaunchAgents/actions.runner.mbeato-blimp.mbp-*.plist`) that starts when you log in. Each shard has its own simulator (`blimp-e2e-a` …, wiped before each run and shut down after) and its compiled app in `~/Library/Caches/blimp-e2e/<shard>/dd`.
+- Once per Xcode update, in Terminal on the Mac: `sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch && sudo DevToolsSecurity -enable && sudo automationmodetool enable-automationmode-without-authentication` (UI tests then run without asking for a password).
+- To stop them for a while: `for s in a b c; do launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/actions.runner.mbeato-blimp.mbp-$s.plist; done` (runs go to GitHub's Macs once the runners show offline). To remove them for good: `cd ~/actions-runner/<shard> && ./svc.sh uninstall && ./config.sh remove --token <a removal token from gh api -X POST repos/mbeato/blimp/actions/runners/remove-token -q .token>`.
+
 ## Check list
 
 `docs/PHONE-CHECKLIST.md` lists what to try by hand.

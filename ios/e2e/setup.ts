@@ -16,10 +16,11 @@
 //   demo-trust in api-server: Claude Code just started there and asks whether to trust the folder, with no
 //              status file yet (ios/e2e/fake-trust.ts); every key is appended to $E2E_DIR/trust.in
 //   a conversation in blimp-demo with no session running, for the project screen's Earlier list
-//   a server browser tab in blimp-demo on $E2E_DIR/site/index.html (the job serves it on 127.0.0.1:7431): a
+//   a server browser tab in blimp-demo on $E2E_DIR/site/index.html (the job serves it on 127.0.0.1:$E2E_SITE_PORT): a
 //              button and a field that put what reached them in the page's title, which the drawer's row shows
-// The folders are under the home folder: blimpd starts sessions only there. Sessions the app starts
-// run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for.
+// The folders are under the home folder ($E2E_WORK, else ~/e2e-work): blimpd starts sessions only there. Sessions
+// the app starts run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for. The ports
+// ($E2E_PORT for the app's link, $E2E_SITE_PORT for the page) are each shard's own when shards share a Mac.
 
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -30,7 +31,9 @@ import { parseZmxList, zmxPath } from "../../src/sessions";
 const root = process.env.E2E_DIR!;
 const sock = process.env.BLIMPD_SOCKET!;
 const claude = process.env.CLAUDE_CONFIG_DIR!;
-const work = join(process.env.HOME!, "e2e-work");
+const work = process.env.E2E_WORK || join(process.env.HOME!, "e2e-work");
+const port = process.env.E2E_PORT || "7425";
+const sitePort = process.env.E2E_SITE_PORT || "7431";
 const env: Record<string, string | undefined> = { ...process.env };
 delete env.ZMX_SESSION;
 
@@ -178,9 +181,9 @@ writeFileSync(join(root, "site", "index.html"), `<!doctype html><meta name="view
 <input style="position:absolute;top:200px;left:0;width:100%;height:50px" oninput="document.title=(window.tapped?'tapped ':'')+'typed:'+this.value">`);
 const opened = await fetch("http://localhost/browser/tabs", {
   unix: sock, method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-  body: JSON.stringify({ dir: join(work, "blimp-demo"), url: "http://127.0.0.1:7431/" }),
+  body: JSON.stringify({ dir: join(work, "blimp-demo"), url: `http://127.0.0.1:${sitePort}/` }),
 });
 if (!opened.ok) throw new Error(`couldn't open the browser tab: ${opened.status} ${await opened.text()}`);
 console.log(`browser tab ${(await opened.json()).id} in blimp-demo`);
-writeFileSync(join(root, "link"), `blimp://pair?url=${encodeURIComponent("http://127.0.0.1:7425")}&token=${token}`);
+writeFileSync(join(root, "link"), `blimp://pair?url=${encodeURIComponent(`http://127.0.0.1:${port}`)}&token=${token}`);
 console.log("stand-ins ready");

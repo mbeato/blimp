@@ -43,12 +43,14 @@ async function until<T>(f: () => T | Promise<T>, what: string, ms = 8000): Promi
   }
 }
 
+// 60 s: a fresh CI runner's first Chrome launch takes 8 to over 20 s, and with test files run side by side
+// (--parallel) this file's can be it, not browser-chrome.test.ts's.
 beforeAll(async () => {
   if (!findChrome()) return;
   Bun.spawnSync([zmxPath(), "attach", session, "sh"], { env: zmxEnv(), cwd: folder, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
   await until(() => parseZmxList(Bun.spawnSync([zmxPath(), "list"], { env: zmxEnv() }).stdout.toString()).some((s) => s.name === session), "the zmx session");
   port = await startBrowserGate();
-});
+}, 60_000);
 afterAll(async () => {
   site.stop();
   await stopBrowser();

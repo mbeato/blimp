@@ -11,6 +11,12 @@ on:
     tags: ["v*"]
     paths: ["ios/**", "src/**", ".github/workflows/ios.yml"]
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Where the e2e runs: auto (the Mac if it's online), mac, or github"
+        type: choice
+        options: [auto, mac, github]
+        default: auto
 
 permissions:
   contents: read
@@ -24,14 +30,20 @@ jobs:
   # Whether this run has the end-to-end test (app-e2e): main and manual runs always; a branch only if it
   # changes the iPhone app (ios/ or this file, against main), since main runs it on every merge anyway; a
   # tag never, since its commit was tested on main (and testflight doesn't wait for it).
+  # And where: Max's MacBook Pro (three self-hosted runners labeled blimp-e2e, ios/README.md) when it's online
+  # and the run is the owner's own push or manual run; else GitHub's Macs. Whether it's online needs the
+  # RUNNERS_TOKEN secret (read-only Administration); without it, the owner's runs wait for the Mac.
   e2e-check:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.check.outputs.run }}
+      runs-on: ${{ steps.check.outputs.runs-on }}
     steps:
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          RUNNERS_TOKEN: ${{ secrets.RUNNERS_TOKEN }}
+          PICK: ${{ inputs.runner || 'auto' }}
         run: |
           run=false
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$GITHUB_REF" = refs/heads/main ]; then
@@ -42,6 +54,21 @@ jobs:
           fi
           [ "$run" = true ] || echo "::notice title=iPhone e2e::Skipped: this branch doesn't change ios/ (main runs it after the merge; Run workflow runs it now)."
           echo "run=$run" >> "$GITHUB_OUTPUT"
+          mac='["self-hosted","blimp-e2e"]'
+          on='"macos-latest"'
+          if [ "$PICK" = mac ]; then
+            on=$mac
+          elif [ "$PICK" = auto ] && [ "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" ]; then
+            if [ -z "$RUNNERS_TOKEN" ]; then
+              on=$mac
+            else
+              n=$(GH_TOKEN="$RUNNERS_TOKEN" gh api "repos/$GITHUB_REPOSITORY/actions/runners" \
+                -q '[.runners[] | select(.status == "online" and ([.labels[].name] | index("blimp-e2e")))] | length' || echo 0)
+              if [ "$n" -gt 0 ]; then on=$mac; else echo "::notice title=iPhone e2e::The Mac's runners are offline: on GitHub's Macs."; fi
+            fi
+          fi
+          echo "runs-on=$on" >> "$GITHUB_OUTPUT"
+          echo "the e2e runs on $on"
 
   kit-linux:
     runs-on: ubuntu-latest
@@ -78,16 +105,17 @@ jobs:
           xcodebuild -project Blimp.xcodeproj -scheme Blimp -configuration Debug \
             -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build | tail -80
 
-  # The app in the simulator, driven by ios/BlimpUITests, against this branch's blimpd with stand-in
-  # Claude sessions (ios/e2e/setup.ts) and a stand-in claude for the sessions it starts (ios/e2e/bin). blimpd listens on a unix socket; ios/e2e/forward.py forwards 127.0.0.1:7425 to
-  # it, as the SSH tunnel does on a Mac. Three Macs at once (shards), each with its own blimpd, stand-ins and
-  # simulator, each running some of the tests in name order; a test that fails is run once more before it fails
-  # the job. Screenshots and logs go in the iphone-e2e-<shard> artifact.
+  # The app in the simulator, driven by ios/BlimpUITests, against this branch's blimpd with stand-in Claude
+  # sessions (ios/e2e/setup.ts) and a stand-in claude for the sessions it starts (ios/e2e/bin). blimpd listens
+  # on a unix socket; ios/e2e/forward.py forwards 127.0.0.1:$E2E_PORT to it, as the SSH tunnel does on a Mac.
+  # Three shards at once, each with its own blimpd, stand-ins, simulator, folders and ports (so all three can
+  # share Max's Mac), each running some of the tests in name order; a test that fails is run once more before
+  # it fails the job. Screenshots and logs go in the iphone-e2e-<shard> artifact.
   app-e2e:
     name: app-e2e (${{ matrix.shard }})
     needs: e2e-check
     if: needs.e2e-check.outputs.run == 'true'
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(needs.e2e-check.outputs.runs-on) }}
     # All 15 tests on one Mac took 25-28 min (a slow runner went past 25 three times); a shard runs a third.
     timeout-minutes: 30
     strategy:
@@ -96,44 +124,82 @@ jobs:
         include:
           # test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
           # demo-chat: they stay together. Each shard's first test pairs (launchPaired does when it isn't).
-          # 5-5.5 min of tests each, by the times in run 39997381577.
+          # 5-5.5 min of tests each on GitHub's Macs, by the times in run 39997381577.
           - shard: a
+            port: 7425
+            site: 7431
             tests: test1PairChatAndAnswer test2FaceIDLock test9DrawerFromASwipe testInbox testNewSessionFromTheDrawer
           - shard: b
+            port: 7426
+            site: 7432
             tests: test4StartAndEnd test6Reconnect test7AnswerQuestions testNeedsYouAllowFromTheInbox
           - shard: c
+            port: 7427
+            site: 7433
             tests: test3Stop test5Resume test8TrustFolder testDraftKeptThroughRelock testRecapDrawer testServerBrowserTab
     env:
-      E2E_DIR: /tmp/be
+      SHARD: ${{ matrix.shard }}
+      E2E_DIR: /tmp/be-${{ matrix.shard }}
       # zmx 0.8 limits session names by the length of its socket folder's path: keep it short.
-      ZMX_DIR: /tmp/zx
-      BLIMPD_SOCKET: /tmp/be/b/blimpd.sock
-      CLAUDE_CONFIG_DIR: /tmp/be/claude
+      ZMX_DIR: /tmp/zx-${{ matrix.shard }}
+      BLIMPD_SOCKET: /tmp/be-${{ matrix.shard }}/b/blimpd.sock
+      CLAUDE_CONFIG_DIR: /tmp/be-${{ matrix.shard }}/claude
+      E2E_PORT: ${{ matrix.port }}
+      E2E_SITE_PORT: ${{ matrix.site }}
       TESTS: ${{ matrix.tests }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install zmx
+        run: |
+          f=zmx-0.8.1-macos-aarch64.tar.gz
+          curl -fsSL -o "$RUNNER_TEMP/$f" "https://github.com/neurosnap/zmx/releases/download/v0.8.1/$f"
+          echo "1d86b1c9fba47fa707a6f0e976b20510b07c1c26d0ed010b9414b2a2c5e6beef  $RUNNER_TEMP/$f" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/zmx-bin"
+          tar xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/zmx-bin" zmx
+          echo "$RUNNER_TEMP/zmx-bin" >> "$GITHUB_PATH"
+      # On the Mac, the last run's folders and anything a cancelled run left. Its compiled app stays (DD), so
+      # only what changed is built again.
+      - name: Start clean
+        run: |
+          ios/e2e/stop.sh
+          cache="$HOME/Library/Caches/blimp-e2e/$SHARD"
+          rm -rf "$E2E_DIR" "$ZMX_DIR" "$cache/e2e-work"
+          mkdir -p "$E2E_DIR" "$ZMX_DIR" "$cache"
+          chmod 700 "$ZMX_DIR"
+          echo "E2E_WORK=$cache/e2e-work" >> "$GITHUB_ENV"
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then dd="$cache/dd"; else dd="$RUNNER_TEMP/dd"; fi
+          echo "DD=$dd" >> "$GITHUB_ENV"
       - name: Pick Xcode
         run: |
           x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$x" ] && sudo xcode-select -s "$x"
           xcodebuild -version
-      # A fresh runner's simulator takes about 5 minutes to boot: it boots while the tests build.
+      # The shard's own iPhone, wiped (or made), booting while the tests build: a fresh GitHub runner's takes
+      # minutes. The newest iOS there is, on the first iPhone model it lists.
       - name: Start an iPhone simulator booting
         run: |
-          sim=$(xcrun simctl list devices available -j | python3 -c '
+          read -r have id rt <<< "$(xcrun simctl list devices available -j | python3 -c '
           import json, re, sys
+          name = "blimp-e2e-" + sys.argv[1]
           devs = json.load(sys.stdin)["devices"]
           ver = lambda r: [int(x) for x in re.findall(r"\d+", r.split("iOS-")[1])]
           for r in sorted((r for r in devs if "SimRuntime.iOS-" in r), key=ver, reverse=True):
               phones = [d for d in devs[r] if d["name"].startswith("iPhone")]
-              if phones:
-                  print(phones[0]["udid"]); print(phones[0]["name"], r, file=sys.stderr); break
-          ')
-          [ -n "$sim" ]
+              mine = [d for d in devs[r] if d["name"] == name]
+              if mine: print("have", mine[0]["udid"], r); break
+              if phones: print("new", phones[0]["deviceTypeIdentifier"], r); break
+          ' "$SHARD")"
+          if [ "$have" = have ]; then
+            sim=$id
+            xcrun simctl shutdown "$sim" 2>/dev/null || true
+            xcrun simctl erase "$sim"
+          else
+            sim=$(xcrun simctl create "blimp-e2e-$SHARD" "$id" "$rt")
+          fi
+          echo "SIM=$sim ($rt)"
           echo "SIM=$sim" >> "$GITHUB_ENV"
-          mkdir -p "$E2E_DIR"
           nohup xcrun simctl boot "$sim" > "$E2E_DIR/boot.log" 2>&1 &
       - run: ios/install-xcodegen.sh
       # Swift warnings fail the build, for good (5a9b30a said "reverted next"; it stays).
@@ -143,34 +209,31 @@ jobs:
           set -o pipefail
           xcodegen generate
           xcodebuild -project Blimp.xcodeproj -scheme BlimpUITests -destination "platform=iOS Simulator,id=$SIM" \
-            -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGN_IDENTITY=- SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build-for-testing 2>&1 | tail -40
+            -derivedDataPath "$DD" CODE_SIGN_IDENTITY=- SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build-for-testing 2>&1 | tail -40
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
       - run: bun install
-      - name: Install zmx
-        run: |
-          f=zmx-0.8.1-macos-aarch64.tar.gz
-          curl -fsSL -o "$RUNNER_TEMP/$f" "https://github.com/neurosnap/zmx/releases/download/v0.8.1/$f"
-          echo "1d86b1c9fba47fa707a6f0e976b20510b07c1c26d0ed010b9414b2a2c5e6beef  $RUNNER_TEMP/$f" | shasum -a 256 -c -
-          tar xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP" zmx
-          mkdir -p "$HOME/.local/bin"
-          install -m 755 "$RUNNER_TEMP/zmx" "$HOME/.local/bin/zmx"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Start blimpd, the stand-in sessions and the forward
         run: |
-          mkdir -p "$E2E_DIR" "$ZMX_DIR"
-          chmod 700 "$ZMX_DIR"
           # with the stand-in login shell and claude (ios/e2e/bin), for the sessions the app starts
           ios/e2e/blimpd.sh
           token="$(dirname "$BLIMPD_SOCKET")/token"
-          # the browser tab's page (setup.ts writes it), for blimpd's Chrome (Google Chrome's app on the runner)
+          # the browser tab's page (setup.ts writes it), for blimpd's Chrome (Google Chrome's app on the Mac)
           mkdir -p "$E2E_DIR/site"
-          nohup python3 -m http.server 7431 --bind 127.0.0.1 --directory "$E2E_DIR/site" > "$E2E_DIR/site.log" 2>&1 &
+          nohup python3 -m http.server "$E2E_SITE_PORT" --bind 127.0.0.1 --directory "$E2E_DIR/site" > "$E2E_DIR/site.log" 2>&1 &
+          echo $! > "$E2E_DIR/site.pid"
           bun ios/e2e/setup.ts
-          nohup python3 ios/e2e/forward.py 7425 "$BLIMPD_SOCKET" > "$E2E_DIR/forward.log" 2>&1 &
-          sleep 1
-          curl -fsS -H "Authorization: Bearer $(cat "$token")" http://127.0.0.1:7425/sessions
+          nohup python3 ios/e2e/forward.py "$E2E_PORT" "$BLIMPD_SOCKET" > "$E2E_DIR/forward.log" 2>&1 &
+          echo $! > "$E2E_DIR/forward.pid"
+          # Python can take a few seconds to start on a busy runner
+          for _ in $(seq 50); do
+            code=0
+            curl -fsS -o /dev/null "http://127.0.0.1:$E2E_PORT/" 2>/dev/null || code=$?
+            [ "$code" = 7 ] || break # 7: nothing listening yet; anything else is the forward answering
+            sleep 0.2
+          done
+          curl -fsS -H "Authorization: Bearer $(cat "$token")" "http://127.0.0.1:$E2E_PORT/sessions" || { cat "$E2E_DIR/forward.log"; exit 1; }
           echo
       - name: Wait for the simulator
         run: |
@@ -190,6 +253,7 @@ jobs:
           export TEST_RUNNER_BLIMP_LINK="$(cat "$E2E_DIR/link")" TEST_RUNNER_E2E_DIR="$E2E_DIR"
           # restarts blimpd and drives Face ID when the test asks (ios/e2e/signals.sh)
           nohup ../ios/e2e/signals.sh > "$E2E_DIR/signals.log" 2>&1 &
+          echo $! > "$E2E_DIR/signals.pid"
           log="$E2E_DIR/xcodebuild.log"
           only=()
           for t in $TESTS; do only+=("-only-testing:BlimpUITests/BlimpUITests/$t"); done
@@ -197,7 +261,7 @@ jobs:
           # hits the job's time limit shows which test it was in; before, a cancelled run printed nothing.
           set -o pipefail
           if xcodebuild -project Blimp.xcodeproj -scheme BlimpUITests -destination "platform=iOS Simulator,id=$SIM" \
-              -derivedDataPath "$RUNNER_TEMP/dd" -resultBundlePath "$E2E_DIR/e2e.xcresult" "${only[@]}" \
+              -derivedDataPath "$DD" -resultBundlePath "$E2E_DIR/e2e.xcresult" "${only[@]}" \
               -retry-tests-on-failure -test-iterations 2 test-without-building 2>&1 \
               | tee "$log" | grep --line-buffered -E "Test Case|Executed|\*\* TEST"; then
             # Passed on its second go: said, so a flaky test stays in sight.
@@ -250,27 +314,23 @@ jobs:
         with:
           name: iphone-e2e-${{ matrix.shard }}
           path: |
-            /tmp/be/screenshots
-            /tmp/be/e2e.xcresult
-            /tmp/be/xcodebuild.log
-            /tmp/be/blimpd.log
-            /tmp/be/signals.log
-            /tmp/be/claude.args
-            /tmp/be/quiz.in
-            /tmp/be/trust.in
-            /tmp/be/perm.in
-            /tmp/be/zmx-logs
+            ${{ env.E2E_DIR }}/screenshots
+            ${{ env.E2E_DIR }}/e2e.xcresult
+            ${{ env.E2E_DIR }}/xcodebuild.log
+            ${{ env.E2E_DIR }}/blimpd.log
+            ${{ env.E2E_DIR }}/signals.log
+            ${{ env.E2E_DIR }}/claude.args
+            ${{ env.E2E_DIR }}/quiz.in
+            ${{ env.E2E_DIR }}/trust.in
+            ${{ env.E2E_DIR }}/perm.in
+            ${{ env.E2E_DIR }}/zmx-logs
           if-no-files-found: warn
-      # All at once: the runner ends what's left one process at a time (blimpd, Chrome, the stand-ins: about
-      # 40), which took 41 s after every passing run.
+      # On the Mac, its simulator off again, for the memory.
       - name: Stop what the test started
         if: always()
         run: |
-          pkill -9 -f "Google Chrome" || true
-          pkill -9 -f "src/main.ts serve" || true
-          pkill -9 -f "ios/e2e/" || true
-          pkill -9 -f "http.server 7431" || true
-          pkill -9 zmx || true
+          ios/e2e/stop.sh
+          [ "$RUNNER_ENVIRONMENT" != self-hosted ] || [ -z "$SIM" ] || xcrun simctl shutdown "$SIM" || true
 
   # Says whether this run uploads to TestFlight: only a v* tag, and only with all four secrets set
   # (ios/README.md, TestFlight). Otherwise a notice says why, and the testflight job is skipped.

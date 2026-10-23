@@ -15,13 +15,15 @@ let chrome: Chrome;
 let gate: Gate;
 let site: ReturnType<typeof Bun.serve>;
 
+// 60 s: a fresh CI runner's first Chrome launch takes 8 to over 20 s, and with test files run side by side
+// (--parallel) this file's can be it, not browser-chrome.test.ts's.
 beforeAll(async () => {
   site = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => new Response(`<title>${new URL(r.url).pathname}</title>hi`, { headers: { "content-type": "text/html" } }) });
   if (!path) return;
   chrome = launchChrome(path, join(tmp, "profile"));
   gate = new Gate(chrome);
   await gate.ready();
-});
+}, 60_000);
 afterAll(async () => {
   site.stop();
   chrome?.kill();
