@@ -8,10 +8,11 @@
 // browser tab from the drawer, tapped and typed into. What reached the sessions is checked by the job afterwards.
 // Screenshots stay in the .xcresult.
 //
-// The tests run in name order and share the simulator: test1 pairs, the rest launch paired (the
-// Keychain keeps the server) and so locked: the job enrols Face ID first, and each unlocks with a
-// matching face. What the test can't do from inside the simulator (restart blimpd, a face) it asks
-// ios/e2e/signals.sh for, with a file.
+// The job runs them on three Macs at once (ios.yml lists which on each), in name order, sharing each Mac's
+// simulator and stand-ins: the first pairs (test1, or launchPaired), the rest launch paired (the Keychain
+// keeps the server) and so locked: the job enrols Face ID first, and each unlocks with a matching face. What
+// reached the stand-ins is checked per test (ios/e2e/check.sh). What the test can't do from inside the
+// simulator (restart blimpd, a face) it asks ios/e2e/signals.sh for, with a file.
 import XCTest
 
 @MainActor
@@ -647,7 +648,10 @@ final class BlimpUITests: XCTestCase {
         for _ in 0..<3 {
             allowFaceID()
             try signal("faceid-match")
-            if unlock.waitForNonExistence(timeout: 10), home.waitForExistence(timeout: 5) { return }
+            if unlock.waitForNonExistence(timeout: 10), home.waitForExistence(timeout: 5) {
+                Self.faceIDAllowed = true
+                return
+            }
             screen("still-locked")
             // the ask ended (or never started): Unlock asks again
             if unlock.exists && unlock.isHittable { unlock.tap() }
@@ -670,8 +674,11 @@ final class BlimpUITests: XCTestCase {
         last.tap()
     }
 
-    /// The first Face ID use asks "Do you want to allow blimp to use Face ID?".
+    /// The first Face ID use asks "Do you want to allow blimp to use Face ID?", once: after it's answered, or
+    /// Face ID unlocked without it, it isn't looked for again (4 looks of 2 s each, on every unlock).
+    private static var faceIDAllowed = false
     private func allowFaceID() {
+        if Self.faceIDAllowed { return }
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for owner in [springboard, app!] {
             for label in ["OK", "Allow"] {
@@ -679,6 +686,7 @@ final class BlimpUITests: XCTestCase {
                 if b.waitForExistence(timeout: 2) {
                     screen("faceid-permission")
                     b.tap()
+                    Self.faceIDAllowed = true
                     return
                 }
             }

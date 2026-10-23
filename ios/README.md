@@ -30,22 +30,10 @@ cd <your checkout>
 git pull
 ```
 
-2. Build blimpd from it.
+2. Build blimpd from it, put it in place of the installed one, and restart the service. One script does all three, in seconds. It keeps the one it replaced as `~/.local/bin/blimpd.prev`.
 
 ```
-~/.bun/bin/bun build src/main.ts --compile --outfile /tmp/blimpd
-```
-
-3. Put it in place of the installed one.
-
-```
-install -m 755 /tmp/blimpd ~/.local/bin/blimpd
-```
-
-4. Restart the service.
-
-```
-systemctl --user restart blimpd
+scripts/install-here.sh
 ```
 
 This is safe. The service uses `KillMode=process`, so running sessions keep running. The Mac app reconnects by itself.

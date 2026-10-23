@@ -67,10 +67,25 @@ jobs:
         with:
           toolchain: 1.99.1
           components: clippy
+      # The packages (64 MB) come from the Actions cache: a slow Ubuntu mirror once took 27 min to send them
+      # (run 39841707069, 39 kB/s). A new cache each month, from the last one; apt fetches only what changed.
+      - id: debs
+        run: |
+          echo "prefix=tauri-debs-$ImageOS-" >> "$GITHUB_OUTPUT"
+          echo "key=tauri-debs-$ImageOS-$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-archives
+          key: ${{ steps.debs.outputs.key }}
+          restore-keys: ${{ steps.debs.outputs.prefix }}
       - name: Install Tauri's Linux libraries
         run: |
+          mkdir -p ~/apt-archives/partial
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          # apt's own files out, and the rest readable by the cache's save (it runs as the runner's user)
+          sudo rm -rf ~/apt-archives/partial ~/apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
       # tauri::generate_context! needs frontendDist to exist; this job checks only the Rust side.
       - name: Placeholder UI build
         run: mkdir -p app/dist && echo '<!doctype html><title>blimp</title>' > app/dist/index.html
