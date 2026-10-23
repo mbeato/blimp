@@ -84,7 +84,7 @@ jobs:
           echo "the e2e runs on $on"
           # The shards: core tests always (what reaches Claude's sessions, starting, ending, resuming and
           # reconnecting, the lock), about 3.8 min each on GitHub's Macs by run 39997381577; the layout and gesture
-          # tests (the drawers' swipes, the inbox's top bar, New session, the browser tab) only when asked, before a
+          # tests (the drawer's swipe, the inbox's top bar, New session, the browser tab, the project strip) only when asked, before a
           # release. test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
           # demo-chat: they stay together. Each shard's first test pairs (launchPaired does when it isn't). Each
           # has its own ports, so shards can share a Mac. Three on GitHub's Macs; two on the Mac, a laptop that
@@ -96,14 +96,23 @@ jobs:
           }
           if [ "$on" = "$mac" ]; then
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test3Stop test7AnswerQuestions test8TrustFolder" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testNewSessionFromTheDrawer testRecapDrawer testServerBrowserTab"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testServerBrowserTab"
           else
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test8TrustFolder" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect" "testNewSessionFromTheDrawer testRecapDrawer"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip"
             shard c 7427 7433 "test3Stop test7AnswerQuestions testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testServerBrowserTab"
           fi | jq -sc '{include: .}' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
           cat matrix.json
+          # Every UI test is in a shard's list (core or layout): a new one that isn't would never run.
+          if [ "$run" = true ]; then
+            raw=(-H "Accept: application/vnd.github.raw")
+            gh api "${raw[@]}" "repos/$GITHUB_REPOSITORY/contents/.github/workflows/ios.yml?ref=$GITHUB_SHA" > ios.yml
+            gh api "${raw[@]}" "repos/$GITHUB_REPOSITORY/contents/ios/BlimpUITests/BlimpUITests.swift?ref=$GITHUB_SHA" > ui.swift
+            listed=$(grep -E '^ +shard [a-z] ' ios.yml | grep -oE 'test[A-Za-z0-9]+' | sort -u)
+            missing=$(grep -oE 'func test[A-Za-z0-9]+' ui.swift | cut -c6- | sort -u | comm -23 - <(echo "$listed"))
+            [ -z "$missing" ] || { echo "::error title=iPhone e2e::In no shard's list in e2e-check (ios.yml), so never run: $(echo $missing)"; exit 1; }
+          fi
 
   kit-linux:
     runs-on: ubuntu-latest
