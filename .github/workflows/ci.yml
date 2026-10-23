@@ -30,7 +30,9 @@ jobs:
           install -D -m 755 "$RUNNER_TEMP/zmx" "$HOME/.local/bin/zmx"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # Only blimpd's tests; the app's tests run in app-macos, where its packages are installed.
-      - run: bun test --parallel ./test
+      # One file at a time: with --parallel on this 4-core runner, two timing-sensitive tests failed (run
+      # 40015725124). It's 1.6 min, and the iPhone e2e takes longer anyway; bun run test is parallel on yours.
+      - run: bun test ./test
       - run: bun run build
 
   app-macos:
