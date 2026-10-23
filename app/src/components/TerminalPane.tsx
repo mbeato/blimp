@@ -10,7 +10,6 @@ import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
 import { InboxSummary } from "./InboxSummary";
-import { RecapCard, useRecaps } from "./RecapCard";
 import { SecretDialog } from "./SecretDialog";
 import { inbox } from "../lib/inbox";
 import { jobsOpen, jobsWords } from "../lib/jobs";
@@ -546,12 +545,6 @@ export function TerminalPane(props: {
   }, [jobsKey]);
   // Gone for good, so a job there later doesn't bring it (and its scrim) back without a click.
   useEffect(() => void (jobsAt && !jobsKey && setJobsAt(null)), [jobsAt, jobsKey]);
-  // Return cards, for the Claude sessions on screen here while this tab is in front.
-  const isConversation = (name: string) => !!sessionOf(name)?.sessionId && isClaude(sessionOf(name)!);
-  const recaps = useRecaps(api, link.key, props.front ? p.panes.filter(isConversation) : [], p.panes[p.focus], props.onNotice);
-  // While its session runs and is listed here (one moved to another window isn't), on screen here or
-  // not. Over the terminal only while the list is hidden.
-  const recap = recaps.card && sessionOf(recaps.card.name) && (p.panes.includes(recaps.card.name) || !props.elsewhere(recaps.card.name)) ? recaps.card : null;
   const openMenu = (e: ReactMouseEvent, name: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -702,7 +695,6 @@ export function TerminalPane(props: {
                     onHide={() => setHiddenRuns((h) => [...h.slice(-50), bar.key])}
                   />
                 )}
-                {!props.showList && recap?.name === name && <RecapCard card={recap.card} onClose={() => recaps.dismiss(name)} />}
                 <TerminalView
                   link={link}
                   name={name}
@@ -870,11 +862,6 @@ export function TerminalPane(props: {
             </button>
           ))}
         </div>
-        {/* Under the list, not in it: rows don't move when it comes and goes, and a drag between them
-            (data-item) never sees it. */}
-        {recap && (
-          <RecapCard card={recap.card} title={titleOf(recap.name)} onSession={() => showHere(recap.name)} onClose={() => recaps.dismiss(recap.name)} />
-        )}
       </nav>
       {drag && !drag.out && <DragGhost s={drag.s} label={drag.label} x={drag.x - drag.dx} y={drag.y - drag.dy} w={drag.w} h={drag.h} tall={drag.row} />}
       {jobsAt && jobsKey && <JobsPopover jobs={popJobs!} at={jobsAt.at} now={now} onClose={() => setJobsAt(null)} />}
@@ -906,11 +893,6 @@ export function TerminalPane(props: {
             {sessionOf(ctx.name) && (
               <button role="menuitem" title="For another session: its Claude can read this one's conversation and send it a message" onClick={() => (setCtx(null), void navigator.clipboard.writeText(sessionReference(sessionOf(ctx.name)!)).catch(() => {}))}>
                 Copy Reference
-              </button>
-            )}
-            {isConversation(ctx.name) && (
-              <button role="menuitem" title="What this session is for, and what's stuck, in progress, next and done" onClick={() => (setCtx(null), p.panes.includes(ctx.name) || showHere(ctx.name), recaps.show(ctx.name))}>
-                Recap
               </button>
             )}
             {sessionOf(ctx.name) && isClaude(sessionOf(ctx.name)!) && (
