@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "Where the e2e runs: auto (the Mac if it's online), mac, or github"
+        description: "Where the e2e runs: auto (GitHub's Macs, or the Mac when E2E_ON_MAC is set and it's online), mac, or github"
         type: choice
         options: [auto, mac, github]
         default: auto
@@ -21,6 +21,10 @@ on:
         description: "Upload to TestFlight too"
         type: boolean
         default: true
+      layout:
+        description: "The layout and gesture tests too (before a release)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,20 +39,24 @@ jobs:
   # Whether this run has the end-to-end test (app-e2e): main and manual runs always; a branch only if it
   # changes the iPhone app (ios/ or this file, against main), since main runs it on every merge anyway; a
   # tag never, since its commit was tested on main (and testflight doesn't wait for it).
-  # And where: Max's MacBook Pro (three self-hosted runners labeled blimp-e2e, ios/README.md) when it's online
-  # and the run is the owner's own push or manual run; else GitHub's Macs. Whether it's online needs the
-  # RUNNERS_TOKEN secret (read-only Administration); without it, the owner's runs wait for the Mac.
+  # And where: GitHub's Macs, unless a manual run picks the Mac, or the repository variable E2E_ON_MAC is true
+  # (gh variable set E2E_ON_MAC --body true). Then Max's MacBook Pro (three self-hosted runners labeled
+  # blimp-e2e, ios/README.md), for the owner's own pushes and manual runs, when it's online. Whether it's online
+  # needs the RUNNERS_TOKEN secret (read-only Administration); without it, those runs wait for the Mac.
   e2e-check:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.check.outputs.run }}
       runs-on: ${{ steps.check.outputs.runs-on }}
+      matrix: ${{ steps.check.outputs.matrix }}
     steps:
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
           RUNNERS_TOKEN: ${{ secrets.RUNNERS_TOKEN }}
           PICK: ${{ inputs.runner || 'auto' }}
+          ON_MAC: ${{ vars.E2E_ON_MAC }}
+          LAYOUT: ${{ inputs.layout || false }}
         run: |
           run=false
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$GITHUB_REF" = refs/heads/main ]; then
@@ -63,7 +71,7 @@ jobs:
           on='"macos-latest"'
           if [ "$PICK" = mac ]; then
             on=$mac
-          elif [ "$PICK" = auto ] && [ "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" ]; then
+          elif [ "$PICK" = auto ] && [ "$ON_MAC" = true ] && [ "$GITHUB_ACTOR" = "$GITHUB_REPOSITORY_OWNER" ]; then
             if [ -z "$RUNNERS_TOKEN" ]; then
               on=$mac
             else
@@ -74,6 +82,24 @@ jobs:
           fi
           echo "runs-on=$on" >> "$GITHUB_OUTPUT"
           echo "the e2e runs on $on"
+          # The shards: core tests always (what reaches Claude's sessions, starting, ending, resuming and
+          # reconnecting, the lock), about 3.8 min each on GitHub's Macs by run 39997381577; the layout and gesture
+          # tests (the drawers' swipes, the inbox's top bar, New session, the browser tab) only when asked, before a
+          # release. test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
+          # demo-chat: they stay together. Each shard's first test pairs (launchPaired does when it isn't). Each
+          # has its own ports, so shards can share a Mac.
+          shard() { # name port site core-tests layout-tests
+            t=$4
+            [ "$LAYOUT" != true ] || t="$t $5"
+            jq -nc --arg s "$1" --argjson p "$2" --argjson w "$3" --arg t "$t" '{shard: $s, port: $p, site: $w, tests: $t}'
+          }
+          {
+            shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test8TrustFolder" "test9DrawerFromASwipe testInbox"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect" "testNewSessionFromTheDrawer testRecapDrawer"
+            shard c 7427 7433 "test3Stop test7AnswerQuestions testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testServerBrowserTab"
+          } | jq -sc '{include: .}' > matrix.json
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+          cat matrix.json
 
   kit-linux:
     runs-on: ubuntu-latest
@@ -125,23 +151,8 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
-          # demo-chat: they stay together. Each shard's first test pairs (launchPaired does when it isn't).
-          # 5-5.5 min of tests each on GitHub's Macs, by the times in run 39997381577.
-          - shard: a
-            port: 7425
-            site: 7431
-            tests: test1PairChatAndAnswer test2FaceIDLock test9DrawerFromASwipe testInbox testNewSessionFromTheDrawer
-          - shard: b
-            port: 7426
-            site: 7432
-            tests: test4StartAndEnd test6Reconnect test7AnswerQuestions testNeedsYouAllowFromTheInbox
-          - shard: c
-            port: 7427
-            site: 7433
-            tests: test3Stop test5Resume test8TrustFolder testDraftKeptThroughRelock testRecapDrawer testServerBrowserTab
+      # which tests each shard runs, and its ports: e2e-check
+      matrix: ${{ fromJSON(needs.e2e-check.outputs.matrix) }}
     env:
       SHARD: ${{ matrix.shard }}
       E2E_DIR: /tmp/be-${{ matrix.shard }}
@@ -169,7 +180,8 @@ jobs:
       - name: Start clean
         run: |
           ios/e2e/stop.sh
-          cache="$HOME/Library/Caches/blimp-e2e/$SHARD"
+          # .noindex: Spotlight leaves it alone (it indexed the first run's build at full speed)
+          cache="$HOME/Library/Caches/blimp-e2e.noindex/$SHARD"
           rm -rf "$E2E_DIR" "$ZMX_DIR" "$cache/e2e-work"
           mkdir -p "$E2E_DIR" "$ZMX_DIR" "$cache"
           chmod 700 "$ZMX_DIR"
@@ -218,6 +230,12 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
+      # npx: blimpd gives the sessions it starts the server browser's tools only when the login shell finds it
+      # (the check expects them). GitHub's Macs have it; the Mac's runners start with a bare PATH.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
       - run: bun install
       - name: Start blimpd, the stand-in sessions and the forward
         run: |

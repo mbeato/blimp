@@ -448,7 +448,8 @@ install.sh      server setup
 **Releasing:**
 
 1. Set the version: `sh scripts/version.sh 0.3.0`. This sets the same version in five places: `package.json`, `app/package.json`, `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml` and the iPhone app's `MARKETING_VERSION` in `ios/project.yml`. Then it refreshes `Cargo.lock`. With no version, it prints the current one, or lists all five if they differ. Commit the change.
-2. Push a tag for that version: `git tag v0.3.0 && git push origin v0.3.0`.
+2. If the iPhone app changed since the last release, run its layout and gesture tests first (every other run has only the core ones): `gh workflow run iOS --ref main -f layout=true -f testflight=false`, and wait for it to pass.
+   Then push a tag for that version: `git tag v0.3.0 && git push origin v0.3.0`.
 3. The release workflow stops if the tag is not `vX.Y.Z` or `vX.Y.Z-rc.N`, or if it does not match the version in the five places. Then it builds both blimpd binaries, `SHA256SUMS`, the Mac `.dmg`, and the app's update (`blimp.app.tar.gz`, its signature, and `latest.json`), and publishes them with `install.sh` as a GitHub release. Installed apps find it through `latest.json` and offer to update.
    A `v*` tag also runs the iOS workflow. It uploads the iPhone app to TestFlight once the App Store Connect secrets are set ([ios/README.md](ios/README.md#testflight)).
 4. A tag like `v0.3.0-rc.1` makes a prerelease. The installer and the app's update check both skip prereleases, so put out each version you want installed apps to get as a plain `vX.Y.Z`.
