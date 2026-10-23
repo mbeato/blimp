@@ -1,9 +1,8 @@
 // A session as a chat: the messages, what Claude is waiting on as buttons, and a box to type into.
 // Voice: the mic types (or answers the prompt), the speaker toggle reads new replies and prompts aloud,
 // and a banner says when another session starts waiting or finishes. While Claude works, Stop (and Stop and
-// send, with text in the box) is pinned above the box. Opened (or come back to) after time away: a "since you left" line, and
-// after an hour a dot on Recap, whose drawer from the right (HomeView has it) has the return card. The toolbar has
-// the context gauge (from half full), the speaker, then Recap at the far right; Run is under the commands of
+// send, with text in the box) is pinned above the box. Opened (or come back to) after time away: a "since you
+// left" line. The toolbar has the context gauge (from half full), then the speaker; Run is under the commands of
 // Claude's latest reply (ChatExtras.swift).
 import AudioToolbox
 import BlimpKit
@@ -13,13 +12,9 @@ struct SessionView: View {
     let name: String
     /// Shows another session in this one's place: the one Resume started, or a banner's.
     let onOpen: (String) -> Void
-    /// Opens the recap drawer.
-    let onRecap: () -> Void
-    /// The chat's model, once there is one: the recap drawer's card is in it.
-    let onModel: (ChatModel) -> Void
 
     var body: some View {
-        ChatScreen(name: name, onResumed: onOpen, onRecap: onRecap, onModel: onModel)
+        ChatScreen(name: name, onResumed: onOpen)
             .id(name)
     }
 }
@@ -29,15 +24,13 @@ struct SessionView: View {
 private struct ChatScreen: View {
     let name: String
     let onResumed: (String) -> Void
-    let onRecap: () -> Void
-    let onModel: (ChatModel) -> Void
     @Environment(Store.self) private var store
     @State private var model: ChatModel?
 
     var body: some View {
         Group {
             if let model {
-                ChatContent(model: model, onResumed: onResumed, onRecap: onRecap)
+                ChatContent(model: model, onResumed: onResumed)
             } else {
                 Color.clear
             }
@@ -45,7 +38,6 @@ private struct ChatScreen: View {
         .onAppear {
             let m = model ?? ChatModel.warm(name, store: store)
             model = m
-            onModel(m)
             m.open()
         }
         .onDisappear { model?.close() }
@@ -55,7 +47,6 @@ private struct ChatScreen: View {
 private struct ChatContent: View {
     let model: ChatModel
     let onResumed: (String) -> Void
-    let onRecap: () -> Void
     @Environment(Store.self) private var store
     @Environment(Lock.self) private var lock
     @Environment(\.scenePhase) private var scenePhase
@@ -174,7 +165,7 @@ private struct ChatContent: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { screenHeight = $0 }
         .toolbar {
-            // The context gauge, the speaker, then Recap at the far right.
+            // The context gauge, then the speaker.
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if let meter = ContextText.meter(model.session?.context) {
                     Menu {
@@ -192,16 +183,6 @@ private struct ChatContent: View {
                 }
                 Button(readAloud ? "Stop reading aloud" : "Read aloud",
                        systemImage: readAloud ? "speaker.wave.2" : "speaker.slash") { setReadAloud(!readAloud) }
-                if model.canRecap {
-                    Button(action: onRecap) {
-                        Image(systemName: "text.alignleft")
-                            .overlay(alignment: .topTrailing) {
-                                if model.recapNew { Circle().fill(.blue).frame(width: 8, height: 8).offset(x: 5, y: -3) }
-                            }
-                    }
-                    .accessibilityLabel(model.recapNew ? "Recap, new" : "Recap")
-                    .accessibilityIdentifier("recapButton")
-                }
             }
         }
         // Back with this chat up. After 5 minutes away the lock comes first (Root sets it as the app comes back,
@@ -397,8 +378,7 @@ private struct ChatContent: View {
     }
 
     /// Back to this chat from the background or the lock: a new visit from when it was last on screen, so the
-    /// reconnect's history (or, with the link still up, the messages there) places it again ("since you left"),
-    /// and the return card waits in the recap drawer if it's been an hour.
+    /// reconnect's history (or, with the link still up, the messages there) places it again ("since you left").
     private func cameBack() {
         let last = ChatModel.lastShown(model.name)
         ChatModel.markShown(model.name)
@@ -407,14 +387,6 @@ private struct ChatContent: View {
         returned = true
         since = nil
         model.reconnectNow()
-        recapIfDue(last)
-    }
-
-    /// The return card by itself, into the recap drawer (a dot on its button): for a Claude session not on
-    /// screen here for an hour (or ever). The drawer never opens by itself.
-    private func recapIfDue(_ lastShown: Double?) {
-        guard model.canRecap, RecapCard.due(lastShown: lastShown, now: Date.now.timeIntervalSince1970 * 1000) else { return }
-        model.loadRecap(auto: true)
     }
 
     private func hideKeyboard() {
@@ -465,7 +437,6 @@ private struct ChatContent: View {
     private func appeared() {
         onScreen = true
         openedLocked = lock.locked
-        recapIfDue(model.visitFrom)
         readAloud = UserDefaults.standard.bool(forKey: readAloudKey)
         if let prompt = model.prompt { promptsSeen.append(prompt) }
         lastStates = Dictionary(store.sessions.map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })

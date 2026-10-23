@@ -25,34 +25,10 @@ import Testing
     #expect(ReplyChips.chips(after: nine) == (1...9).map(String.init) + ["all"])
 }
 
-@Test func theReturnCardShowsAfterAnHourAwayOrForAChatNeverShown() {
-    let hour: Double = 3_600_000
-    #expect(RecapCard.due(lastShown: nil, now: 10 * hour))
-    #expect(RecapCard.due(lastShown: 9 * hour, now: 10 * hour))
-    #expect(!RecapCard.due(lastShown: 9 * hour + 1, now: 10 * hour))
-    #expect(RecapCard.autoMin == 3)
-}
-
-@Test func aSwipeLeftFromAnywherePullsTheRecapDrawerAndScrollingNever() {
-    // Going left, mostly sideways: wherever it starts (it isn't asked), as the left drawer's swipe right.
-    #expect(RecapCard.pulls(dx: -20, dy: 4))
-    #expect(RecapCard.pulls(dx: -40, dy: 0))
-    #expect(RecapCard.pulls(dx: -16, dy: -10))
-    // Not going right (the left drawer's), not a scroll, not one only a little more sideways than up or down.
-    #expect(!RecapCard.pulls(dx: 20, dy: 0))
-    #expect(!RecapCard.pulls(dx: 0, dy: -30))
-    #expect(!RecapCard.pulls(dx: -20, dy: 20))
-    #expect(!RecapCard.pulls(dx: -15, dy: 10))
-    // Let go past 120 points, or flung: it opens; else back closed.
-    #expect(RecapCard.opens(dx: -121, predicted: -121))
-    #expect(RecapCard.opens(dx: -40, predicted: -300))
-    #expect(!RecapCard.opens(dx: -100, predicted: -200))
-}
-
 @Test func markingChatsShownKeepsAMonthAndSetsTheOnesOnScreenToNow() {
     let day: Double = 24 * 3_600_000
     let last = ["old": 0, "recent": 20 * day, "open": 25 * day]
-    #expect(RecapCard.markShown(last, ["open", "new"], now: 31 * day) == ["recent": 20 * day, "open": 31 * day, "new": 31 * day])
+    #expect(LastShown.markShown(last, ["open", "new"], now: 31 * day) == ["recent": 20 * day, "open": 31 * day, "new": 31 * day])
 }
 
 @Test func answersEncodeAsTheAnswerRouteReadsThem() throws {

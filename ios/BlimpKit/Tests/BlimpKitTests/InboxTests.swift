@@ -95,19 +95,3 @@ private func lines(_ l: [InboxLine]) -> [String] { l.map { "\($0.title): \($0.wo
     let odd = try JSONDecoder().decode(Note.self, from: Data(#"{"status":"later","text":"x","at":1}"#.utf8))
     #expect(odd.status == .done)
 }
-
-@Test func aDigestsLinksNameItsSessions() {
-    let d = Digest(text: "[The login fix](1) needs you; [the limiter](2) is still going, and [x](9) is gone.", sessions: ["s1", "s2"], at: 1)
-    #expect(d.parts == [
-        .init(text: "The login fix", session: "s1"), .init(text: " needs you; ", session: nil),
-        .init(text: "the limiter", session: "s2"), .init(text: " is still going, and ", session: nil),
-        .init(text: "x", session: nil), .init(text: " is gone.", session: nil),
-    ])
-    #expect(Digest(text: "No links [here] (1).", sessions: ["s1"], at: 1).parts == [.init(text: "No links [here] (1).", session: nil)])
-}
-
-@Test func theSessionsEventCarriesEachFoldersDigest() {
-    let data = Data(#"{"type":"sessions","sessions":[],"digests":{"/p":{"text":"[A](1) is done.","sessions":["s1"],"at":5},"/bad":{"text":1}}}"#.utf8)
-    #expect(EventsMessage.digests(data) == ["/p": Digest(text: "[A](1) is done.", sessions: ["s1"], at: 5)])
-    #expect(EventsMessage.digests(Data(#"{"type":"sessions","sessions":[]}"#.utf8)) == [:])
-}

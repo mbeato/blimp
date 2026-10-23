@@ -1,5 +1,5 @@
 // The phone's one screen, as chat apps have it: a project's sessions for the drawer (running and past,
-// newest activity first), the projects for the picker, and the mark beside each; what a row says under its
+// newest activity first), the projects for the strip, and the mark beside each; what a row says under its
 // title; which sessions just started waiting or finished (the banner); and handoffs asked for from the phone.
 import Foundation
 
@@ -7,7 +7,7 @@ import Foundation
 public enum Mark: Equatable, Sendable {
     case asking, unread, working, none
 
-    /// The one that needs you most among several (a project's, or the drawer button's): asking, else unread.
+    /// The one that needs you most among several (a project's, or the top-left button's, ☰ on the inbox, ‹ in a chat): asking, else unread.
     public static func top(_ marks: [Mark]) -> Mark {
         marks.contains(.asking) ? .asking : marks.contains(.unread) ? .unread : .none
     }
@@ -57,7 +57,7 @@ public enum Drawer {
         return rows.sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.id < $1.id }
     }
 
-    /// The picker's projects: folders with sessions running and recent folders, newest activity first, each with
+    /// The strip's projects: folders with sessions running and recent folders, newest activity first, each with
     /// the top mark of its sessions.
     public static func projects(sessions: [Session], recent: [RecentFolder]) -> [ProjectChoice] {
         let running = Dictionary(grouping: sessions, by: \.dir).map { dir, list in
@@ -70,12 +70,12 @@ public enum Drawer {
         return (running + idle).sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.dir < $1.dir }
     }
 
-    /// The drawer button's mark: the top one of every session but the one on screen.
+    /// The top-left button's mark: the top one of every session but the one on screen.
     public static func others(_ sessions: [Session], onScreen: String?) -> Mark {
         Mark.top(sessions.filter { $0.name != onScreen }.map(\.mark))
     }
 
-    /// The drawer button's badge, by Needs you's rule so the two agree: asking while Needs you has a line that
+    /// The top-left button's badge, by Needs you's rule so the two agree: asking while Needs you has a line that
     /// isn't the session on screen (a past question, or a finished turn that ends in a question, counts), else
     /// a reply you haven't seen.
     public static func badge(_ sessions: [Session], needs: [InboxLine], onScreen: String?) -> Mark {

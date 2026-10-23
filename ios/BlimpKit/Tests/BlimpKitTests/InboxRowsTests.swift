@@ -75,15 +75,8 @@ private let minute = 60_000.0
     #expect(InboxText.finished(since: now - 65 * minute, now: now) == "finished 1h 5m ago")
     #expect(InboxText.working(since: now - 14 * minute, now: now) == "working 14m")
     #expect(InboxText.working(since: now - 10_000, now: now) == "working <1m")
-    #expect(InboxText.asOf(now - 2 * minute, now: now) == "as of 2m ago")
     // the phone's clock a little behind the server's
     #expect(InboxText.ago(now + 5000, now: now) == "just now")
-}
-
-@Test func theParagraphIsStaleOnceASessionItLinksChangedStateAfterIt() {
-    let d = Digest(text: "[A](1) is going.", sessions: ["a"], at: 5000)
-    #expect(!InboxText.stale(d, sessions: [live("a", since: 4000), live("b", since: 9000)]))
-    #expect(InboxText.stale(d, sessions: [live("a", since: 6000)]))
 }
 
 @Test func theDrawerButtonSaysAskingWhenNeedsYouHasALineNotOnScreen() {

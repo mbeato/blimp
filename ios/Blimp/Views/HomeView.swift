@@ -1,7 +1,7 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
-// anywhere, or its button) with the project picker, New session and the project's sessions, running and past. In a
-// Claude session's chat, a drawer from the right (a swipe left anywhere, or Recap) has its recap. A project opens to
-// its inbox, where the box at the bottom starts a session; the drawer's New session opens it with the keyboard up.
+// anywhere, or ☰ on the inbox) with the project strip, New session and the project's sessions, running and past. A
+// chat's top left goes back to its project's inbox. A project opens to its inbox, where the box at the bottom starts
+// a session; the drawer's New session opens it with the keyboard up.
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
 // live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
@@ -30,13 +30,6 @@ struct HomeView: View {
     @State private var pull: CGFloat?
     /// Whether the swipe going on pulls the drawer (sideways and right, decided once at its start).
     @State private var pulling: Bool?
-    /// The open chat's model (SessionView): its recap is in it.
-    @State private var chatModel: ChatModel?
-    @State private var recapOpen = false
-    /// A swipe left that's pulling the recap drawer out: how far it has gone; nil while there's none.
-    @State private var recapPull: CGFloat?
-    /// Whether the swipe going on pulls the recap drawer (RecapCard.pulls, decided once at its start).
-    @State private var pullingRecap: Bool?
     /// Where the chat's sideways scrollers are, so a swipe that starts in one scrolls it and pulls no drawer.
     @State private var sideScrollers = SideScrollers()
     @State private var folders: [RecentFolder] = []
@@ -71,36 +64,22 @@ struct HomeView: View {
                 .animation(.snappy, value: banner)
         }
         // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
-        // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. In a
-        // Claude session's chat, a swipe left anywhere pulls the recap drawer out the same way, mirrored. While
-        // either drawer is open this does nothing: a swipe on it closes it (DrawerView, RecapDrawer). Nor does one that
-        // starts in something that scrolls sideways (a code box, the reply chips): it scrolls that instead, as this
-        // runs while a scroll view in the chat scrolls too.
+        // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. While
+        // the drawer is open this does nothing: a swipe on it closes it (DrawerView). Nor does one that starts in
+        // something that scrolls sideways (a code box, the reply chips): it scrolls that instead, as this runs
+        // while a scroll view in the chat scrolls too.
         .simultaneousGesture(
             DragGesture(minimumDistance: 10, coordinateSpace: .global)
                 .onChanged { v in
-                    if drawer || recapOpen { return }
+                    if drawer { return }
                     if pulling == nil {
                         let free = !sideScrollers.contain(v.startLocation)
                         pulling = free && v.translation.width > 0 && abs(v.translation.width) > abs(v.translation.height) * 1.5
-                        pullingRecap = free && recapChat != nil && RecapCard.pulls(dx: Double(v.translation.width), dy: Double(v.translation.height))
                     }
                     if pulling == true { pull = max(0, v.translation.width) }
-                    if pullingRecap == true { recapPull = max(0, -v.translation.width) }
                 }
                 .onEnded { v in
-                    defer {
-                        pulling = nil
-                        pullingRecap = nil
-                    }
-                    if pullingRecap == true, !recapOpen {
-                        let open = RecapCard.opens(dx: Double(v.translation.width), predicted: Double(v.predictedEndTranslation.width))
-                        withAnimation(.snappy) {
-                            if open { openRecap() }
-                            recapPull = nil
-                        }
-                        return
-                    }
+                    defer { pulling = nil }
                     guard pulling == true, !drawer else { return }
                     let open = v.translation.width > 120 || v.predictedEndTranslation.width > 260
                     withAnimation(.snappy) {
@@ -111,16 +90,11 @@ struct HomeView: View {
         )
         .overlay {
             DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
-                       onPick: pick, onInbox: { show(.inbox) }, onNewSession: startNew,
+                       onPick: pick, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },
-                       needs: needs.count, actions: actions, onOpen: { show(.session($0)) },
+                       actions: actions, onOpen: { show(.session($0)) },
                        tabs: store.dir.map { BrowserTab.inFolder(store.browserTabs, $0) } ?? [],
                        onTab: { browserTab = $0.id; drawer = false }, onNewTab: newTab, onCloseTab: closeTab)
-        }
-        .overlay {
-            if let recapChat {
-                RecapDrawer(open: $recapOpen, pull: recapPull, title: subtitle, chat: recapChat)
-            }
         }
         .overlay {
             if !covered, let browserTab, let tab = store.browserTabs.first(where: { $0.id == browserTab }) {
@@ -128,10 +102,6 @@ struct HomeView: View {
                     .id(tab.id)
             }
         }
-        // The chat went (or isn't a Claude session any more): its drawer goes with it.
-        .onChange(of: recapChat == nil) { _, gone in if gone { recapOpen = false } }
-        // A card came by itself while the drawer is open: it's seen.
-        .onChange(of: recapChat?.recapNew == true) { _, new in if new, recapOpen { recapChat?.recapOpened() } }
         .environment(\.sideScrollers, sideScrollers)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .modifier(KeepsPlace(opened: $opened, drawer: drawer))
@@ -177,7 +147,7 @@ struct HomeView: View {
             if let dir = store.dir {
                 StartView(dir: dir, past: nil,
                           inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), needs: needs,
-                                           digest: store.digests[dir], sessions: store.sessions, left: away, actions: actions,
+                                           sessions: store.sessions, left: away, actions: actions,
                                            onPick: open, onOpen: { show(.session($0)) }),
                           takeFocus: $newSession) {
                     show(.session($0))
@@ -187,7 +157,7 @@ struct HomeView: View {
                 Text("No projects yet. Start Claude in a folder on the Mac first.").foregroundStyle(.secondary).padding()
             }
         case .session(let name):
-            SessionView(name: name, onOpen: { show(.session($0)) }, onRecap: openRecap, onModel: { chatModel = $0 })
+            SessionView(name: name, onOpen: { show(.session($0)) })
         case .past(let c):
             if let dir = store.dir { StartView(dir: dir, past: c) { show(.session($0)) }.id(c.sessionId) }
         }
@@ -195,28 +165,46 @@ struct HomeView: View {
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Button { drawer = true } label: {
-                Image(systemName: "line.3.horizontal")
-                    .overlay(alignment: .topTrailing) { badge.offset(x: 5, y: -3) }
+            if opened == .inbox {
+                Button { drawer = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .overlay(alignment: .topTrailing) { badge.offset(x: 5, y: -3) }
+                }
+                .accessibilityLabel(badgeLabel.map { "Sessions, \($0)" } ?? "Sessions")
+                .accessibilityIdentifier("drawerButton")
+                .accessibilityHidden(covered)
+            } else {
+                // In a chat: back to the project's inbox, with the same mark. A swipe right opens the drawer.
+                Button { show(.inbox) } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                        Text(projectName).lineLimit(1).frame(maxWidth: 120, alignment: .leading)
+                    }
+                    .overlay(alignment: .topTrailing) { badge.offset(x: 8, y: -3) }
+                }
+                .accessibilityLabel(badgeLabel.map { "Back to \(projectName), \($0)" } ?? "Back to \(projectName)")
+                .accessibilityIdentifier("inboxBack")
+                .accessibilityHidden(covered)
             }
-            .accessibilityLabel(badgeLabel.map { "Sessions, \($0)" } ?? "Sessions")
-            .accessibilityIdentifier("drawerButton")
-            .accessibilityHidden(covered)
         }
         ToolbarItem(placement: .principal) { title }
     }
 
-    /// What the chat is, and under it the project's name (the drawer has the picker).
+    /// What the screen shows; on the inbox the project's name under it (in a chat the back arrow has it).
     private var title: some View {
         VStack(spacing: 0) {
             // A long name (blimpd's go up to 40 characters) gets a little smaller to fit, rather than cut off.
             Text(subtitle).font(.headline).lineLimit(1).minimumScaleFactor(0.75)
-            Text(store.dir.map(Drawer.name(of:)) ?? "blimp").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if opened == .inbox {
+                Text(projectName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("screenTitle")
         .accessibilityHidden(covered)
     }
+
+    private var projectName: String { store.dir.map(Drawer.name(of:)) ?? "blimp" }
 
     /// Needs you's rule (Drawer.badge), so the badge and the band agree.
     private var mark: Mark { Drawer.badge(store.sessions, needs: needs, onScreen: onScreen) }
@@ -254,20 +242,8 @@ struct HomeView: View {
 
     private var earlier: [Conversation] { store.dir.flatMap { earlierBy[$0] } ?? [] }
 
-    /// The project's sessions waiting on you, oldest first: the inbox's top, and the drawer's count.
+    /// The project's sessions waiting on you, oldest first: the inbox's top, and the top-left button's mark.
     private var needs: [InboxLine] { store.dir.map { Inbox.needsYou(sessions: store.sessions, dir: $0, earlier: earlier) } ?? [] }
-
-    /// The open chat's model, while its recap drawer can open: a Claude session's.
-    private var recapChat: ChatModel? {
-        guard case .session(let name) = opened, let chatModel, chatModel.name == name, chatModel.canRecap else { return nil }
-        return chatModel
-    }
-
-    private func openRecap() {
-        guard let recapChat else { return }
-        recapChat.recapOpened()
-        recapOpen = true
-    }
 
     private var rows: [DrawerRow] {
         guard let dir = store.dir else { return [] }
@@ -326,9 +302,10 @@ struct HomeView: View {
         newSession = store.dir != nil
     }
 
+    /// A project from the strip: its inbox, behind the drawer, which stays open with its sessions.
     private func pickProject(_ dir: String) {
         store.dir = dir
-        show(.inbox)
+        opened = .inbox
     }
 
     /// A session from another project (a banner's) brings its project along. Opening one
@@ -340,7 +317,6 @@ struct HomeView: View {
         }
         opened = o
         drawer = false
-        recapOpen = false
     }
 
     /// A new session list: the titles kept, a banner and a haptic for what started waiting or finished (only while

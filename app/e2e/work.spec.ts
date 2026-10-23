@@ -85,7 +85,8 @@ test("two sessions on one branch that edited the same file show their branch and
   await row.evaluate((el, y) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 100, clientY: y })), h - 10);
   const menu = page.locator(".context-menu");
   await expect(page.getByRole("menuitem", { name: "Open PR #40" })).toBeVisible();
-  for (const name of ["Recap", "Continue in New Session", "Give a Secret…"]) await expect(page.getByRole("menuitem", { name })).toBeVisible();
+  for (const name of ["Continue in New Session", "Give a Secret…"]) await expect(page.getByRole("menuitem", { name })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Recap" })).toHaveCount(0);
   const box = (await menu.boundingBox())!;
   expect(box.height).toBeGreaterThan(200);
   expect(box.y).toBeGreaterThanOrEqual(0);
