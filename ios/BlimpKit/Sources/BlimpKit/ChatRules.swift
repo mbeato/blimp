@@ -1,7 +1,6 @@
 // Rules for a chat open on the phone: which reply never folds, where the "since you left" line goes, which
 // session to answer next, what a code block's Run button says (feature 2: blimpd runs a command Claude
-// handed over in a run session of its own, then can type its result back to Claude), and the words when a
-// recap didn't come through.
+// handed over in a run session of its own, then can type its result back to Claude).
 import Foundation
 
 public enum ChatFold {
@@ -93,10 +92,15 @@ public enum RunStatus: Equatable, Sendable {
     }
 }
 
-public enum RecapText {
-    /// The words when GET /sessions/<name>/recap failed with blimpd's `message`. A blimpd from before recaps
-    /// answers the route with a bare "not found" (a missing session says "no session named …").
-    public static func failure(_ message: String) -> String {
-        message == "not found" ? "This server's blimpd is too old for recaps. Update it first." : message
+/// When each chat was last on screen on this phone, for "since you left" (ChatModel.lastShown).
+public enum LastShown {
+    /// A chat not on screen for this long is forgotten.
+    static let keep: Double = 30 * 24 * 60 * 60_000
+
+    /// last, with `shown` on screen until now; ones not on screen for a month are dropped.
+    public static func markShown(_ last: [String: Double], _ shown: [String], now: Double) -> [String: Double] {
+        var out = last.filter { now - $0.value < keep }
+        for k in shown { out[k] = now }
+        return out
     }
 }

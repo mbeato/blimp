@@ -4,7 +4,7 @@
 // message, answer a permission prompt; Stop and a folded long reply; start a session from the inbox and
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
 // through it; two questions at once; unread and asking marks; a project's inbox and the chat's top bar; Allow from
-// Needs you, in its own project's inbox only; the drawer's New session; the recap drawer from the right; a server
+// Needs you, in its own project's inbox only; the drawer's New session; a server
 // browser tab from the drawer, tapped and typed into. What reached the sessions is checked by the job afterwards.
 // Screenshots stay in the .xcresult.
 //
@@ -396,7 +396,7 @@ final class BlimpUITests: XCTestCase {
 
     /// A project opens to its inbox: blimp-demo's demo-chat waits on you, in the words blimpd's note call got from
     /// the stand-in claude (a question), and a tap opens its chat. Its top right is the context gauge (when it shows),
-    /// the speaker, then Recap at the far right, and no Inbox or ••• menu. The drawer's Inbox goes back. (Last: it
+    /// then the speaker, and no Recap, Inbox or ••• menu. The drawer's Inbox goes back. (Last: it
     /// runs after test1 has read demo-chat, which a question note keeps listed.)
     func testInbox() throws {
         try launchPaired()
@@ -410,15 +410,14 @@ final class BlimpUITests: XCTestCase {
         shot("31-inbox")
         line.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the inbox")
-        // The top right: the gauge (from half full), the speaker, then Recap at the far right
-        let recap = element("recapButton")
-        try wait(recap, "Recap at the top right")
+        // The top right: the gauge (from half full), then the speaker; no Recap, Inbox or ••• menu
         let speaker = app.buttons.matching(NSPredicate(format: "label == 'Read aloud' OR label == 'Stop reading aloud'")).firstMatch
         try wait(speaker, "the speaker at the top right")
-        if speaker.frame.minX >= recap.frame.minX { throw failed("the speaker left of Recap") }
         let gauge = element("contextGauge")
         if gauge.exists, gauge.frame.minX >= speaker.frame.minX { throw failed("the context gauge left of the speaker") }
-        if element("inboxButton").exists || element("chatMenu").exists { throw failed("no Inbox or ••• menu in the top bar") }
+        if element("recapButton").exists || element("inboxButton").exists || element("chatMenu").exists {
+            throw failed("no Recap, Inbox or ••• menu in the top bar")
+        }
         shot("32-chat-top-right")
         // The drawer's Inbox goes back
         try openDrawer()
@@ -473,68 +472,12 @@ final class BlimpUITests: XCTestCase {
         if hostFile("claude.args") != started { throw failed("nothing started by New session") }
     }
 
-    // MARK: - The recap drawer
-
-    /// demo-chat's recap is in a drawer from the right, never on top of the chat: Recap opens it (the stand-in
-    /// claude writes its card), × closes it, a swipe left from the middle of the chat (as the left drawer's swipe
-    /// right, not only from the edge) pulls it out and a swipe right pushes it back, and a tap beside it closes it.
-    /// Scrolling moves neither drawer, and a swipe left on the open left drawer only closes it. Closed, it isn't
-    /// there. (By name after Needs you.)
-    func testRecapDrawer() throws {
-        try launchPaired()
-        try openSession("demo-chat", in: "blimp-demo")
-        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat")
-        let drawer = element("recapDrawer")
-        if drawer.exists || labeled("Toggle added").exists { throw failed("no recap until asked for") }
-        let button = element("recapButton")
-        try wait(button, "Recap at the top right")
-        button.tap()
-        try wait(drawer, "the recap drawer from Recap")
-        try wait(labeled("Toggle added to the Appearance section"), "the recap's Done", timeout: 60)
-        try wait(labeled("Waiting on you: decide if it follows the system setting"), "the recap's Stuck")
-        try wait(labeled("Add a test for the toggle"), "the recap's Next")
-        shot("37-recap-drawer")
-        element("recapClose").tap()
-        try until(drawer, "exists == false", "the recap drawer to close on ×")
-
-        // Scrolling the chat up: neither drawer
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.3)))
-        if drawer.exists || element("drawerInbox").exists { throw failed("a drawer moved on a scroll") }
-
-        // From the middle of the chat: it follows the finger; the left drawer stays shut
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
-        try wait(drawer, "the recap drawer after a swipe left from the middle of the chat")
-        if element("drawerInbox").exists { throw failed("the left drawer shut on a swipe left") }
-        try wait(labeled("Toggle added"), "the card kept in the drawer")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)))
-        try until(drawer, "exists == false", "the recap drawer to close on a swipe right")
-        if element("drawerInbox").exists { throw failed("the left drawer shut on the swipe that closed the recap") }
-
-        // The left drawer open, a swipe left closes it, and the recap stays shut
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
-        try wait(element("drawerInbox"), "the left drawer after a swipe right in the chat")
-        if drawer.exists { throw failed("the recap shut on a swipe right") }
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
-        try until(element("drawerInbox"), "exists == false", "the left drawer to close on a swipe left")
-        if drawer.exists { throw failed("the recap shut on the swipe that closed the left drawer") }
-
-        button.tap()
-        try wait(drawer, "the recap drawer again")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
-        try until(drawer, "exists == false", "the recap drawer to close on a tap beside it")
-    }
-
     // MARK: - The server browser
 
     /// blimp-demo's browser tab (setup.ts opens it on a page of its own): the drawer lists it by its title; it opens
     /// full screen with the live page, laid out for the phone (a point here is a pixel there). A tap on the page's
     /// button reaches it; a tap on its field brings the keyboard up by itself, and what's typed reaches the page.
-    /// × goes back, and the drawer's row has the title the page set from both. (By name after the recap drawer.)
+    /// × goes back, and the drawer's row has the title the page set from both. (By name after New session.)
     func testServerBrowserTab() throws {
         try launchPaired()
         try pickProject("blimp-demo")

@@ -136,11 +136,3 @@ private struct NoSessions: Error {}
     #expect(RunStatus.sent("r").words == "Result sent to Claude")
     #expect(RunStatus.ended("r", exit: 0).canSend && !RunStatus.running("r").canSend && !RunStatus.sent("r").canSend)
 }
-
-// MARK: - Recaps
-
-@Test func anOlderBlimpdsNotFoundSaysToUpdateItForRecaps() {
-    #expect(RecapText.failure("not found") == "This server's blimpd is too old for recaps. Update it first.")
-    #expect(RecapText.failure("no session named web-1") == "no session named web-1")
-    #expect(RecapText.failure("Recaps are off") == "Recaps are off")
-}

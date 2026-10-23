@@ -1,6 +1,5 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
-// anywhere, or its button) with the project picker, New session and the project's sessions, running and past. In a
-// Claude session's chat, a drawer from the right (a swipe left anywhere, or Recap) has its recap. A project opens to
+// anywhere, or its button) with the project picker, New session and the project's sessions, running and past. A project opens to
 // its inbox, where the box at the bottom starts a session; the drawer's New session opens it with the keyboard up.
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
@@ -30,13 +29,6 @@ struct HomeView: View {
     @State private var pull: CGFloat?
     /// Whether the swipe going on pulls the drawer (sideways and right, decided once at its start).
     @State private var pulling: Bool?
-    /// The open chat's model (SessionView): its recap is in it.
-    @State private var chatModel: ChatModel?
-    @State private var recapOpen = false
-    /// A swipe left that's pulling the recap drawer out: how far it has gone; nil while there's none.
-    @State private var recapPull: CGFloat?
-    /// Whether the swipe going on pulls the recap drawer (RecapCard.pulls, decided once at its start).
-    @State private var pullingRecap: Bool?
     /// Where the chat's sideways scrollers are, so a swipe that starts in one scrolls it and pulls no drawer.
     @State private var sideScrollers = SideScrollers()
     @State private var folders: [RecentFolder] = []
@@ -71,36 +63,22 @@ struct HomeView: View {
                 .animation(.snappy, value: banner)
         }
         // A swipe right anywhere pulls the drawer out, following the finger: one that starts mostly sideways, so
-        // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. In a
-        // Claude session's chat, a swipe left anywhere pulls the recap drawer out the same way, mirrored. While
-        // either drawer is open this does nothing: a swipe on it closes it (DrawerView, RecapDrawer). Nor does one that
-        // starts in something that scrolls sideways (a code box, the reply chips): it scrolls that instead, as this
-        // runs while a scroll view in the chat scrolls too.
+        // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. While
+        // the drawer is open this does nothing: a swipe on it closes it (DrawerView). Nor does one that starts in
+        // something that scrolls sideways (a code box, the reply chips): it scrolls that instead, as this runs
+        // while a scroll view in the chat scrolls too.
         .simultaneousGesture(
             DragGesture(minimumDistance: 10, coordinateSpace: .global)
                 .onChanged { v in
-                    if drawer || recapOpen { return }
+                    if drawer { return }
                     if pulling == nil {
                         let free = !sideScrollers.contain(v.startLocation)
                         pulling = free && v.translation.width > 0 && abs(v.translation.width) > abs(v.translation.height) * 1.5
-                        pullingRecap = free && recapChat != nil && RecapCard.pulls(dx: Double(v.translation.width), dy: Double(v.translation.height))
                     }
                     if pulling == true { pull = max(0, v.translation.width) }
-                    if pullingRecap == true { recapPull = max(0, -v.translation.width) }
                 }
                 .onEnded { v in
-                    defer {
-                        pulling = nil
-                        pullingRecap = nil
-                    }
-                    if pullingRecap == true, !recapOpen {
-                        let open = RecapCard.opens(dx: Double(v.translation.width), predicted: Double(v.predictedEndTranslation.width))
-                        withAnimation(.snappy) {
-                            if open { openRecap() }
-                            recapPull = nil
-                        }
-                        return
-                    }
+                    defer { pulling = nil }
                     guard pulling == true, !drawer else { return }
                     let open = v.translation.width > 120 || v.predictedEndTranslation.width > 260
                     withAnimation(.snappy) {
@@ -118,20 +96,11 @@ struct HomeView: View {
                        onTab: { browserTab = $0.id; drawer = false }, onNewTab: newTab, onCloseTab: closeTab)
         }
         .overlay {
-            if let recapChat {
-                RecapDrawer(open: $recapOpen, pull: recapPull, title: subtitle, chat: recapChat)
-            }
-        }
-        .overlay {
             if !covered, let browserTab, let tab = store.browserTabs.first(where: { $0.id == browserTab }) {
                 BrowserView(tab: tab, onClose: { self.browserTab = nil }, onSend: sendToChat, onCloseTab: { closeTab(tab) })
                     .id(tab.id)
             }
         }
-        // The chat went (or isn't a Claude session any more): its drawer goes with it.
-        .onChange(of: recapChat == nil) { _, gone in if gone { recapOpen = false } }
-        // A card came by itself while the drawer is open: it's seen.
-        .onChange(of: recapChat?.recapNew == true) { _, new in if new, recapOpen { recapChat?.recapOpened() } }
         .environment(\.sideScrollers, sideScrollers)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .modifier(KeepsPlace(opened: $opened, drawer: drawer))
@@ -187,7 +156,7 @@ struct HomeView: View {
                 Text("No projects yet. Start Claude in a folder on the Mac first.").foregroundStyle(.secondary).padding()
             }
         case .session(let name):
-            SessionView(name: name, onOpen: { show(.session($0)) }, onRecap: openRecap, onModel: { chatModel = $0 })
+            SessionView(name: name, onOpen: { show(.session($0)) })
         case .past(let c):
             if let dir = store.dir { StartView(dir: dir, past: c) { show(.session($0)) }.id(c.sessionId) }
         }
@@ -256,18 +225,6 @@ struct HomeView: View {
 
     /// The project's sessions waiting on you, oldest first: the inbox's top, and the drawer's count.
     private var needs: [InboxLine] { store.dir.map { Inbox.needsYou(sessions: store.sessions, dir: $0, earlier: earlier) } ?? [] }
-
-    /// The open chat's model, while its recap drawer can open: a Claude session's.
-    private var recapChat: ChatModel? {
-        guard case .session(let name) = opened, let chatModel, chatModel.name == name, chatModel.canRecap else { return nil }
-        return chatModel
-    }
-
-    private func openRecap() {
-        guard let recapChat else { return }
-        recapChat.recapOpened()
-        recapOpen = true
-    }
 
     private var rows: [DrawerRow] {
         guard let dir = store.dir else { return [] }
@@ -340,7 +297,6 @@ struct HomeView: View {
         }
         opened = o
         drawer = false
-        recapOpen = false
     }
 
     /// A new session list: the titles kept, a banner and a haptic for what started waiting or finished (only while

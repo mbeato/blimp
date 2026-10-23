@@ -76,13 +76,6 @@ struct API {
         _ = try await call("POST", "/runs/" + name + "/send")
     }
 
-    /// The return card: what the session is for, then what's stuck, in progress, next and done. min: only for a
-    /// session with that many prompts (RecapCard.autoMin when it shows by itself). On any error, show nothing.
-    func recap(name: String, min: Int? = nil) async throws -> Recap {
-        let query = min.map { [URLQueryItem(name: "min", value: String($0))] } ?? []
-        return try await decode(call("GET", "/sessions/" + name + "/recap", query: query))
-    }
-
     /// Opens a server browser tab at `url` in `dir`; returns its id.
     func openTab(dir: String, url: String) async throws -> String {
         struct Body: Encodable { let dir: String; let url: String }
