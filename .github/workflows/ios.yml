@@ -200,8 +200,11 @@ jobs:
           x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$x" ] && sudo xcode-select -s "$x"
           xcodebuild -version
-      # The shard's own iPhone, wiped (or made), booting while the tests build: a fresh GitHub runner's takes
-      # minutes. The newest iOS $IOS there is, on the first iPhone model it lists.
+      # The shard's own iPhone, booting while the tests build. Made on a fresh GitHub runner (minutes to boot);
+      # on the Mac, kept from the last run and not wiped: a boot after a wipe took 2 min and set Apple's own apps'
+      # first-boot crashes off on the Mac's screen, one without takes 10 s. Only blimp's app and the Keychain
+      # (the pairing) are reset, once it's up (Wait for the simulator). The newest iOS $IOS there is, on the
+      # first iPhone model it lists.
       - name: Start an iPhone simulator booting
         run: |
           read -r have id rt <<< "$(xcrun simctl list devices available -j | python3 -c '
@@ -218,8 +221,6 @@ jobs:
           [ -n "$have" ] || { echo "::error::No iOS $IOS simulator with an iPhone here (xcodebuild -downloadPlatform iOS -buildVersion $IOS.x)"; xcrun simctl list runtimes; exit 1; }
           if [ "$have" = have ]; then
             sim=$id
-            xcrun simctl shutdown "$sim" 2>/dev/null || true
-            xcrun simctl erase "$sim"
           else
             sim=$(xcrun simctl create "blimp-e2e-$SHARD" "$id" "$rt")
           fi
@@ -271,6 +272,9 @@ jobs:
           # -b: boots it, if the boot started above didn't
           xcrun simctl bootstatus "$SIM" -b
           cat "$E2E_DIR/boot.log"
+          # What the last run left on a kept simulator (the Mac's): the app, with its settings, and the pairing
+          xcrun simctl uninstall "$SIM" dev.blimp.phone 2>/dev/null || true
+          xcrun simctl keychain "$SIM" reset
           # The keyboard's swipe-typing introduction would cover the keys the test types with.
           xcrun simctl spawn "$SIM" defaults write com.apple.Preferences DidShowContinuousPathIntroduction -bool true
           # Face ID enrolled: the simulator counts as having a passcode, so a paired launch is locked, and
