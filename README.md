@@ -75,7 +75,7 @@ To check the service: `systemctl --user status blimpd`. To list sessions from th
 
 ## Install the app
 
-Download the `.dmg` file from [GitHub Releases](https://github.com/mbeato/blimp/releases). Open it and drag **blimp** to Applications. It is a universal build, so it runs on Apple silicon and Intel Macs.
+Download the `.dmg` file from [GitHub Releases](https://github.com/mbeato/blimp/releases). Open it and drag **blimp** to Applications. It runs on Macs with Apple chips (M1 and later), not Intel Macs.
 
 The release notes say whether the app is signed and notarized. If it is not, it has only an ad-hoc signature.
 

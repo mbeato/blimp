@@ -3,15 +3,24 @@
 // covers the sessions without ending them, and unlocking keeps the link that's up.
 import BlimpKit
 import SwiftUI
+import UIKit
 
 @main
 struct BlimpApp: App {
     @State private var store = Store()
     @State private var lock = Lock()
 
+    /// The UI tests launch it with `-noAnimations YES`: every tap then settles without waiting out a transition.
+    private static let noAnimations = UserDefaults.standard.bool(forKey: "noAnimations")
+
+    init() {
+        if Self.noAnimations { UIView.setAnimationsEnabled(false) }
+    }
+
     var body: some Scene {
         WindowGroup {
             Root().environment(store).environment(lock)
+                .transaction { if Self.noAnimations { $0.animation = nil; $0.disablesAnimations = true } }
         }
     }
 }

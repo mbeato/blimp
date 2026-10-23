@@ -1,6 +1,6 @@
 // latest.json for the Mac app's updater (tauri.conf.json > plugins.updater): the version, the
-// signed update bundle's address on this release, and its signature. One universal bundle for
-// both Mac architectures.
+// signed update bundle's address on this release, and its signature. Apple chips only: an Intel Mac finds
+// no update for it here (there's no "darwin-universal" either, which it would take), not one it can't run.
 //   bun scripts/latest-json.ts <tag> <path to blimp.app.tar.gz.sig>
 import { readFileSync } from "node:fs";
 
@@ -18,7 +18,7 @@ console.log(
       version: tag.slice(1),
       notes: `blimp ${tag}: https://github.com/mbeato/blimp/releases/tag/${tag}`,
       pub_date: new Date().toISOString(),
-      platforms: { "darwin-aarch64": platform, "darwin-x86_64": platform, "darwin-universal": platform },
+      platforms: { "darwin-aarch64": platform },
     },
     null,
     2,

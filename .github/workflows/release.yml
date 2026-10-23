@@ -47,7 +47,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (master, 2026-10-16)
         with:
           toolchain: 1.99.1
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          # Apple chips only: an Intel build too took the Mac app's build from 2.7 to 4.9 min
+          targets: aarch64-apple-darwin
 
       # bun build --compile for bun-linux-x64 and bun-linux-arm64 (the root "build" script).
       - name: Build blimpd
@@ -76,7 +77,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: bun run tauri build --target universal-apple-darwin --bundles app,dmg -- --locked
+        run: bun run tauri build --target aarch64-apple-darwin --bundles app,dmg -- --locked
 
       - name: Build the Mac app (unsigned)
         if: env.SIGNED != 'true'
@@ -89,13 +90,13 @@ jobs:
           # apps check updates against its public half in tauri.conf.json.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: bun run tauri build --target universal-apple-darwin --bundles app,dmg -- --locked
+        run: bun run tauri build --target aarch64-apple-darwin --bundles app,dmg -- --locked
 
       - name: Write latest.json for the app's updater
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          bundle=app/src-tauri/target/universal-apple-darwin/release/bundle/macos
+          bundle=app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos
           ls -la "$bundle"
           bun scripts/latest-json.ts "$TAG" "$bundle/blimp.app.tar.gz.sig" > dist/latest.json
           cat dist/latest.json
@@ -109,9 +110,9 @@ jobs:
             dist/blimpd-linux-arm64
             dist/SHA256SUMS
             install.sh
-            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz
-            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz.sig
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/blimp.app.tar.gz
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/blimp.app.tar.gz.sig
             dist/latest.json
           if-no-files-found: error
 
@@ -153,7 +154,7 @@ jobs:
           case "$tag" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$tag" $prerelease --title "blimp $tag" --notes-file "$notes" \
             dist/blimpd-linux-x64 dist/blimpd-linux-arm64 dist/SHA256SUMS install.sh \
-            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg \
-            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz \
-            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/blimp.app.tar.gz.sig \
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg \
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/blimp.app.tar.gz \
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/blimp.app.tar.gz.sig \
             dist/latest.json

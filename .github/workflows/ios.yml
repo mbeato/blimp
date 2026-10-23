@@ -87,17 +87,21 @@ jobs:
           # tests (the drawers' swipes, the inbox's top bar, New session, the browser tab) only when asked, before a
           # release. test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
           # demo-chat: they stay together. Each shard's first test pairs (launchPaired does when it isn't). Each
-          # has its own ports, so shards can share a Mac.
+          # has its own ports, so shards can share a Mac. Three on GitHub's Macs; two on the Mac, a laptop that
+          # also runs its owner's apps (three slowed its tests to half speed).
           shard() { # name port site core-tests layout-tests
             t=$4
             [ "$LAYOUT" != true ] || t="$t $5"
             jq -nc --arg s "$1" --argjson p "$2" --argjson w "$3" --arg t "$t" '{shard: $s, port: $p, site: $w, tests: $t}'
           }
-          {
+          if [ "$on" = "$mac" ]; then
+            shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test3Stop test7AnswerQuestions test8TrustFolder" "test9DrawerFromASwipe testInbox"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testNewSessionFromTheDrawer testRecapDrawer testServerBrowserTab"
+          else
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test8TrustFolder" "test9DrawerFromASwipe testInbox"
             shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect" "testNewSessionFromTheDrawer testRecapDrawer"
             shard c 7427 7433 "test3Stop test7AnswerQuestions testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testServerBrowserTab"
-          } | jq -sc '{include: .}' > matrix.json
+          fi | jq -sc '{include: .}' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
           cat matrix.json
 
@@ -155,6 +159,9 @@ jobs:
       matrix: ${{ fromJSON(needs.e2e-check.outputs.matrix) }}
     env:
       SHARD: ${{ matrix.shard }}
+      # The simulator's iOS, on GitHub's Macs (Xcode 26) and the Mac (Xcode 27) alike: what TestFlight builds for.
+      # The Mac's first run, on iOS 27, failed the lock tests (iOS 27 still shows Home under the cover to them).
+      IOS: "26"
       E2E_DIR: /tmp/be-${{ matrix.shard }}
       # zmx 0.8 limits session names by the length of its socket folder's path: keep it short.
       ZMX_DIR: /tmp/zx-${{ matrix.shard }}
@@ -194,7 +201,7 @@ jobs:
           [ -n "$x" ] && sudo xcode-select -s "$x"
           xcodebuild -version
       # The shard's own iPhone, wiped (or made), booting while the tests build: a fresh GitHub runner's takes
-      # minutes. The newest iOS there is, on the first iPhone model it lists.
+      # minutes. The newest iOS $IOS there is, on the first iPhone model it lists.
       - name: Start an iPhone simulator booting
         run: |
           read -r have id rt <<< "$(xcrun simctl list devices available -j | python3 -c '
@@ -202,12 +209,13 @@ jobs:
           name = "blimp-e2e-" + sys.argv[1]
           devs = json.load(sys.stdin)["devices"]
           ver = lambda r: [int(x) for x in re.findall(r"\d+", r.split("iOS-")[1])]
-          for r in sorted((r for r in devs if "SimRuntime.iOS-" in r), key=ver, reverse=True):
+          for r in sorted((r for r in devs if "SimRuntime.iOS-" + sys.argv[2] + "-" in r), key=ver, reverse=True):
               phones = [d for d in devs[r] if d["name"].startswith("iPhone")]
               mine = [d for d in devs[r] if d["name"] == name]
               if mine: print("have", mine[0]["udid"], r); break
               if phones: print("new", phones[0]["deviceTypeIdentifier"], r); break
-          ' "$SHARD")"
+          ' "$SHARD" "$IOS")"
+          [ -n "$have" ] || { echo "::error::No iOS $IOS simulator with an iPhone here (xcodebuild -downloadPlatform iOS -buildVersion $IOS.x)"; xcrun simctl list runtimes; exit 1; }
           if [ "$have" = have ]; then
             sim=$id
             xcrun simctl shutdown "$sim" 2>/dev/null || true

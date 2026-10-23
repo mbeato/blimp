@@ -22,7 +22,7 @@ final class BlimpUITests: XCTestCase {
     func test1PairChatAndAnswer() throws {
         continueAfterFailure = false
         let link = try pairLink()
-        app = XCUIApplication()
+        app = launchable()
         app.launch()
 
         // Pair
@@ -123,7 +123,7 @@ final class BlimpUITests: XCTestCase {
     /// sees a matching face. The simulator counts as having a passcode, so without Face ID it would ask for that.
     func test2FaceIDLock() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
+        app = launchable()
         app.launch()
         let unlock = app.buttons["Unlock"].firstMatch
         let home = element("drawerButton")
@@ -618,10 +618,17 @@ final class BlimpUITests: XCTestCase {
         }
     }
 
+    /// The app, with its animations off (BlimpApp: `noAnimations`): each tap settles without waiting out a transition.
+    private func launchable() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-noAnimations", "YES"]
+        return app
+    }
+
     /// Launches the app and waits for Home, pairing first if it isn't (test1 failed before pairing).
     private func launchPaired(arguments: [String] = []) throws {
         continueAfterFailure = false
-        app = XCUIApplication()
+        app = launchable()
         app.launchArguments += arguments
         app.launch()
         let home = element("drawerButton")
