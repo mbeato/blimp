@@ -65,7 +65,7 @@ jobs:
           x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$x" ] && sudo xcode-select -s "$x"
           xcodebuild -version
-      - run: brew install xcodegen
+      - run: ios/install-xcodegen.sh
       - name: BlimpKit tests on macOS
         working-directory: ios/BlimpKit
         run: swift test
@@ -79,11 +79,12 @@ jobs:
             -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO SWIFT_TREAT_WARNINGS_AS_ERRORS=YES build | tail -80
 
   # The app in the simulator, driven by ios/BlimpUITests, against this branch's blimpd with stand-in
-  # Claude sessions (ios/e2e/setup.ts) and a stand-in claude for the sessions it starts (ios/e2e/bin). blimpd listens on a unix socket; socat forwards 127.0.0.1:7425 to
+  # Claude sessions (ios/e2e/setup.ts) and a stand-in claude for the sessions it starts (ios/e2e/bin). blimpd listens on a unix socket; ios/e2e/forward.py forwards 127.0.0.1:7425 to
   # it, as the SSH tunnel does on a Mac. Three Macs at once (shards), each with its own blimpd, stand-ins and
   # simulator, each running some of the tests in name order; a test that fails is run once more before it fails
   # the job. Screenshots and logs go in the iphone-e2e-<shard> artifact.
   app-e2e:
+    name: app-e2e (${{ matrix.shard }})
     needs: e2e-check
     if: needs.e2e-check.outputs.run == 'true'
     runs-on: macos-latest
@@ -95,20 +96,19 @@ jobs:
         include:
           # test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
           # demo-chat: they stay together. Each shard's first test pairs (launchPaired does when it isn't).
-          # About 5.5 min of tests each, by the times in run 39861508832.
+          # 5-5.5 min of tests each, by the times in run 39997381577.
           - shard: a
             tests: test1PairChatAndAnswer test2FaceIDLock test9DrawerFromASwipe testInbox testNewSessionFromTheDrawer
           - shard: b
-            tests: test4StartAndEnd test6Reconnect test7AnswerQuestions testNeedsYouAllowFromTheInbox testServerBrowserTab
+            tests: test4StartAndEnd test6Reconnect test7AnswerQuestions testNeedsYouAllowFromTheInbox
           - shard: c
-            tests: test3Stop test5Resume test8TrustFolder testDraftKeptThroughRelock testRecapDrawer
+            tests: test3Stop test5Resume test8TrustFolder testDraftKeptThroughRelock testRecapDrawer testServerBrowserTab
     env:
       E2E_DIR: /tmp/be
       # zmx 0.8 limits session names by the length of its socket folder's path: keep it short.
       ZMX_DIR: /tmp/zx
       BLIMPD_SOCKET: /tmp/be/b/blimpd.sock
       CLAUDE_CONFIG_DIR: /tmp/be/claude
-      HOMEBREW_NO_AUTO_UPDATE: "1"
       TESTS: ${{ matrix.tests }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -135,7 +135,7 @@ jobs:
           echo "SIM=$sim" >> "$GITHUB_ENV"
           mkdir -p "$E2E_DIR"
           nohup xcrun simctl boot "$sim" > "$E2E_DIR/boot.log" 2>&1 &
-      - run: brew install xcodegen socat
+      - run: ios/install-xcodegen.sh
       # Swift warnings fail the build, for good (5a9b30a said "reverted next"; it stays).
       - name: Build the UI tests
         working-directory: ios
@@ -168,7 +168,7 @@ jobs:
           mkdir -p "$E2E_DIR/site"
           nohup python3 -m http.server 7431 --bind 127.0.0.1 --directory "$E2E_DIR/site" > "$E2E_DIR/site.log" 2>&1 &
           bun ios/e2e/setup.ts
-          nohup socat TCP-LISTEN:7425,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:"$BLIMPD_SOCKET" > "$E2E_DIR/socat.log" 2>&1 &
+          nohup python3 ios/e2e/forward.py 7425 "$BLIMPD_SOCKET" > "$E2E_DIR/forward.log" 2>&1 &
           sleep 1
           curl -fsS -H "Authorization: Bearer $(cat "$token")" http://127.0.0.1:7425/sessions
           echo
@@ -201,7 +201,7 @@ jobs:
               -retry-tests-on-failure -test-iterations 2 test-without-building 2>&1 \
               | tee "$log" | grep --line-buffered -E "Test Case|Executed|\*\* TEST"; then
             # Passed on its second go: said, so a flaky test stays in sight.
-            grep -oE "Test Case '-\[BlimpUITests\.BlimpUITests [A-Za-z0-9]+\]' failed" "$log" | sed -E 's/.*BlimpUITests ([A-Za-z0-9]+)\].*/\1/' | sort -u |
+            { grep -oE "Test Case '-\[BlimpUITests\.BlimpUITests [A-Za-z0-9]+\]' failed" "$log" || true; } | sed -E 's/.*BlimpUITests ([A-Za-z0-9]+)\].*/\1/' | sort -u |
               while read -r t; do echo "::warning title=iPhone e2e::$t failed, then passed when run again"; done
           else
             grep -E " error: | warning: |Test Case|timed out|failed|\*\* TEST" "$log" | head -120
@@ -241,7 +241,7 @@ jobs:
         if: failure()
         run: |
           cat "$E2E_DIR/blimpd.log" || true
-          cat "$E2E_DIR/socat.log" || true
+          cat "$E2E_DIR/forward.log" || true
           cat "$E2E_DIR/signals.log" || true
           mkdir -p "$E2E_DIR/zmx-logs"
           find "$ZMX_DIR" -name "*.log" -exec cp {} "$E2E_DIR/zmx-logs/" \; || true
@@ -261,6 +261,16 @@ jobs:
             /tmp/be/perm.in
             /tmp/be/zmx-logs
           if-no-files-found: warn
+      # All at once: the runner ends what's left one process at a time (blimpd, Chrome, the stand-ins: about
+      # 40), which took 41 s after every passing run.
+      - name: Stop what the test started
+        if: always()
+        run: |
+          pkill -9 -f "Google Chrome" || true
+          pkill -9 -f "src/main.ts serve" || true
+          pkill -9 -f "ios/e2e/" || true
+          pkill -9 -f "http.server 7431" || true
+          pkill -9 zmx || true
 
   # Says whether this run uploads to TestFlight: only a v* tag, and only with all four secrets set
   # (ios/README.md, TestFlight). Otherwise a notice says why, and the testflight job is skipped.
@@ -314,7 +324,7 @@ jobs:
           x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$x" ] && sudo xcode-select -s "$x"
           xcodebuild -version
-      - run: brew install xcodegen
+      - run: ios/install-xcodegen.sh
       # The .p8 key, base64 in the secret, as a file only this job can read; deleted at the end, whatever happens.
       - name: Write the API key
         env:

@@ -30,7 +30,7 @@ jobs:
           install -D -m 755 "$RUNNER_TEMP/zmx" "$HOME/.local/bin/zmx"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # Only blimpd's tests; the app's tests run in app-macos, where its packages are installed.
-      - run: bun test ./test
+      - run: bun test --parallel ./test
       - run: bun run build
 
   app-macos:
@@ -45,6 +45,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (master, 2026-10-16)
         with:
           toolchain: 1.99.1
+      # The crates compiled by the last run with this Cargo.lock, from the Actions cache (CI only:
+      # release.yml builds from nothing, so nothing a CI run left can reach what ships).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            app/src-tauri/target
+          key: cargo-app-macos-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-app-macos-
       - name: Test and build the app
         working-directory: app
         run: |
@@ -67,6 +78,17 @@ jobs:
         with:
           toolchain: 1.99.1
           components: clippy
+      # The crates compiled by the last run with this Cargo.lock, from the Actions cache (CI only:
+      # release.yml builds from nothing, so nothing a CI run left can reach what ships).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            app/src-tauri/target
+          key: cargo-app-linux-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-app-linux-
       # The packages (64 MB) come from the Actions cache: a slow Ubuntu mirror once took 27 min to send them
       # (run 39841707069, 39 kB/s). A new cache each month, from the last one; apt fetches only what changed.
       - id: debs

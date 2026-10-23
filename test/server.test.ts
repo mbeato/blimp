@@ -34,6 +34,20 @@ async function until<T>(f: () => T | Promise<T>, what: string, ms = 5000): Promi
   }
 }
 
+// What a stand-in has read into `file`, once keys typed at it stop coming: a loop that types until the
+// screen shows the change can have one more key on its way (a busy machine, tests running side by side).
+async function settled(file: string): Promise<string> {
+  let last = readFileSync(file, "utf8");
+  await until(async () => {
+    await Bun.sleep(300);
+    const now = readFileSync(file, "utf8");
+    const same = now === last;
+    last = now;
+    return same;
+  }, `the keys typed into ${file} to stop coming`);
+  return last;
+}
+
 // A zmx session running sh (or cmd). No pipes: the session daemon would inherit them.
 async function shSession(suffix: string, cmd = ["sh"]): Promise<string> {
   const name = `${tag}-${suffix}`;
@@ -918,7 +932,7 @@ describe("chat", () => {
     // Someone on the Mac moved the cursor to Yes (again until it shows: zmx can drop a new client's first ESC)
     const viewer = await socket(`/sessions/${name}/attach?cols=120&rows=36`);
     await until(() => (type(viewer.ws, "\x1b[B"), zmx("history", name).stdout.toString().includes("❯ Yes")), "the cursor on Yes");
-    const typed = readFileSync(cfg.keys, "utf8");
+    const typed = await settled(cfg.keys);
     const c = await socket(`/sessions/${name}/chat`);
     await until(() => c.messages.find((m) => m.type === "history"), "history");
     c.ws.send(JSON.stringify({ type: "answer", id: "u1", at: s.prompt.at, pick: 1, label: "No, exit" }));
@@ -927,7 +941,7 @@ describe("chat", () => {
     expect(readFileSync(cfg.keys, "utf8")).toBe(typed);
 
     await until(() => (type(viewer.ws, "\x1b[A"), zmx("history", name).stdout.toString().includes("❯ No")), "the cursor back on No");
-    const before = readFileSync(cfg.keys, "utf8").length;
+    const before = (await settled(cfg.keys)).length;
     c.ws.send(JSON.stringify({ type: "answer", id: "u2", at: s.prompt.at, pick: 1, label: "No, exit" }));
     await until(() => c.messages.find((m) => m.id === "u2"), "reply", 10000);
     expect(c.messages.find((m) => m.id === "u2")).toEqual({ type: "ack", id: "u2" });

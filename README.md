@@ -420,7 +420,7 @@ install.sh      server setup
 **blimpd** (in the repo root, on Linux):
 
 - `bun install`
-- `bun test` runs the blimpd tests in `test/`. They need zmx on your `PATH`. They start real zmx sessions named `blimptest-*` and kill them at the end.
+- `bun test --parallel` (or `bun run test`) runs the blimpd tests in `test/`, a file per CPU core at once: about 1 minute, against 1.5 one at a time. They need zmx on your `PATH`. They start real zmx sessions named `blimptest-*` and kill them at the end.
 - `bun run build` builds `dist/blimpd-linux-x64` and `dist/blimpd-linux-arm64`.
 - `bun src/main.ts sessions` runs blimpd from source. `install-hooks` works only from a built binary, because the hooks run that exact file.
 - `sh test/install-debian.sh` runs `install.sh` on a fresh Debian 13 in systemd-nspawn. It needs sudo, debootstrap and systemd-container. Run `bun run build` first.
