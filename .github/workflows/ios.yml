@@ -17,13 +17,18 @@ on:
         type: choice
         options: [auto, mac, github]
         default: auto
+      testflight:
+        description: "Upload to TestFlight too"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
-# A newer push to a branch cancels the branch's run still going. Main and tags never: each run is its own.
+# A newer push to a branch cancels the branch's push run still going. Main, tags and manual runs never: each
+# run is its own.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ (github.ref_type == 'branch' && github.ref != 'refs/heads/main') && github.ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'push' && github.ref_type == 'branch' && github.ref != 'refs/heads/main') && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -346,6 +351,7 @@ jobs:
           HAS_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID != '' }}
           HAS_KEY: ${{ secrets.APP_STORE_CONNECT_KEY != '' }}
           HAS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+          WANT: ${{ inputs.testflight }}
         run: |
           missing=""
           [ "$HAS_KEY_ID" = true ] || missing="$missing APP_STORE_CONNECT_KEY_ID"
@@ -356,6 +362,8 @@ jobs:
           # A manual run ("Run workflow") uploads too, so a branch can go to TestFlight before a release.
           if [[ "$GITHUB_REF" != refs/tags/v* && "$GITHUB_EVENT_NAME" != workflow_dispatch ]]; then
             echo "::notice title=TestFlight::Not uploaded: only release tags (v*) and manual runs upload to TestFlight."
+          elif [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$WANT" = false ]; then
+            echo "::notice title=TestFlight::Not uploaded: this manual run said not to."
           elif [ -n "$missing" ]; then
             echo "::notice title=TestFlight::Not uploaded: these repository secrets aren't set:$missing. ios/README.md (TestFlight) says how."
           else
