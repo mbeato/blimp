@@ -407,6 +407,7 @@ final class BlimpUITests: XCTestCase {
         let line = element("inbox-session-demo-chat")
         try wait(line, "demo-chat in the inbox", timeout: 60)
         try until(line, "label CONTAINS 'follow the system setting'", "demo-chat's note", timeout: 60)
+        if element("inbox-digest").exists { throw failed("no paragraph on top of the inbox") }
         shot("31-inbox")
         line.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the inbox")

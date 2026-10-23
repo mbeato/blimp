@@ -14,8 +14,6 @@ enum Connection: Equatable, Sendable {
 final class Store {
     var server: ServerLink?
     var sessions: [Session] = []
-    /// Each running folder's paragraph (Digest), from the same messages as the sessions.
-    var digests: [String: Digest] = [:]
     /// The server browser's tabs, every folder's (the drawer shows the project's).
     var browserTabs: [BrowserTab] = []
     /// Words for a chat's box from elsewhere (the browser's Send to Session): that chat adds them to its box
@@ -82,7 +80,6 @@ final class Store {
                 switch EventsMessage.decode(data) {
                 case .sessions(let list):
                     self.sessions = list
-                    self.digests = EventsMessage.digests(data)
                 case .browser(let tabs):
                     self.browserTabs = tabs
                 case .other:

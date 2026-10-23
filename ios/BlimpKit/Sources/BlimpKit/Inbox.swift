@@ -132,17 +132,10 @@ public enum InboxText {
     public static func finished(since: Double, now: Double) -> String { "finished " + ago(since, now: now) }
     /// "working <1m", "working 14m".
     public static func working(since: Double, now: Double) -> String { "working " + JobsText.duration(now - since) }
-    /// "as of just now", "as of 2m ago": when the project's paragraph was written.
-    public static func asOf(_ at: Double, now: Double) -> String { "as of " + ago(at, now: now) }
 
     /// "just now" under a minute, else "6m ago", "1h 5m ago", "2d ago".
     public static func ago(_ at: Double, now: Double) -> String {
         now - at < 60_000 ? "just now" : JobsText.duration(now - at) + " ago"
-    }
-
-    /// The paragraph is older than what it tells: a session it links to has changed state since it was written.
-    public static func stale(_ d: Digest, sessions: [Session]) -> Bool {
-        sessions.contains { s in d.sessions.contains(s.name) && (s.stateSince ?? 0) > d.at }
     }
 
     /// Coming back after a while: "4 finished, 1 asking, 2 working", leaving out a count of none. The rows that

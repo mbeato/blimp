@@ -146,7 +146,7 @@ struct HomeView: View {
             if let dir = store.dir {
                 StartView(dir: dir, past: nil,
                           inbox: InboxView(dir: dir, inbox: Inbox(dir: dir, sessions: store.sessions, earlier: earlier), needs: needs,
-                                           digest: store.digests[dir], sessions: store.sessions, left: away, actions: actions,
+                                           sessions: store.sessions, left: away, actions: actions,
                                            onPick: open, onOpen: { show(.session($0)) }),
                           takeFocus: $newSession) {
                     show(.session($0))

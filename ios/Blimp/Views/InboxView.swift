@@ -1,10 +1,9 @@
 // A project's inbox, what opening a project shows, above the box that starts a new chat (StartView). In a fixed
-// order: after a while away, one line on what changed since (a tap shows only that); Haiku's paragraph on where
-// the project's work stands (the sessions it names open), with how old it is, dimmed once a session it names has
-// moved on; Needs you, the project's sessions waiting on you, oldest first, with its answers in the row (Allow and
-// Deny, a question's choices, or a button into the chat; another project's are in its own inbox); then the project's sessions finished and
-// not read yet, those working (how long, a clock after 30 minutes), and the rest folded as "+3 other". A tap
-// opens one; a swipe left or press and hold has its actions (RowMenu).
+// order: after a while away, one line on what changed since (a tap shows only that); Needs you, the project's
+// sessions waiting on you, oldest first, with its answers in the row (Allow and Deny, a question's choices, or a
+// button into the chat; another project's are in its own inbox); then the project's sessions finished and not
+// read yet, those working (how long, a clock after 30 minutes), and the rest folded as "+3 other". A tap opens
+// one; a swipe left or press and hold has its actions (RowMenu).
 import BlimpKit
 import SwiftUI
 
@@ -13,8 +12,7 @@ struct InboxView: View {
     let inbox: Inbox
     /// The project's sessions waiting on you, oldest first (Inbox.needsYou).
     let needs: [InboxLine]
-    let digest: Digest?
-    /// Every running session: the paragraph's links, and the rows' parents.
+    /// Every running session: the rows' parents.
     let sessions: [Session]
     /// Back after a while away: when the app went to the background (ms). nil: not long enough to say.
     let left: Double?
@@ -37,9 +35,6 @@ struct InboxView: View {
         return List {
             if let left, let words = InboxText.since(left, inbox: inbox, needs: needs) {
                 Section { since(left, words) }
-            }
-            if let digest {
-                Section { paragraphSection(digest, now: now) }
             }
             if !needs.isEmpty {
                 Section {
@@ -74,7 +69,7 @@ struct InboxView: View {
         .listStyle(.insetGrouped)
         .animation(.snappy, value: showOther)
         .overlay {
-            if inbox.isEmpty && needs.isEmpty && digest == nil {
+            if inbox.isEmpty && needs.isEmpty {
                 VStack(spacing: 6) {
                     Text(Drawer.name(of: dir)).font(.title2.bold())
                     Text("What should Claude do here?").foregroundStyle(.secondary)
@@ -95,40 +90,6 @@ struct InboxView: View {
         }
         .foregroundStyle(.primary)
         .accessibilityIdentifier("inbox-since")
-    }
-
-    private func paragraphSection(_ d: Digest, now: Double) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            paragraph(d)
-                .environment(\.openURL, OpenURLAction { url in
-                    guard url.scheme == Self.scheme,
-                          let name = String(url.absoluteString.dropFirst(Self.scheme.count + 1)).removingPercentEncoding,
-                          let s = sessions.first(where: { $0.name == name }) else { return .discarded }
-                    onPick(.running(s))
-                    return .handled
-                })
-                .accessibilityIdentifier("inbox-digest")
-            Text(InboxText.asOf(d.at, now: now)).font(.caption).foregroundStyle(.secondary)
-        }
-        // A session it tells of has moved on since: it reads as older.
-        .opacity(InboxText.stale(d, sessions: sessions) ? 0.55 : 1)
-    }
-
-    private static let scheme = "blimp-session"
-
-    /// The paragraph, each link's words a link to its session while that session runs (else plain words).
-    private func paragraph(_ d: Digest) -> Text {
-        var a = AttributedString()
-        for p in d.parts {
-            var piece = AttributedString(p.text)
-            if let name = p.session, sessions.contains(where: { $0.name == name }),
-               let enc = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
-               let url = URL(string: "\(Self.scheme):\(enc)") {
-                piece.link = url
-            }
-            a += piece
-        }
-        return Text(a)
     }
 
     @ViewBuilder private func heading(_ title: String, _ lines: [InboxLine], kind: LineRow.Kind, now: Double) -> some View {
