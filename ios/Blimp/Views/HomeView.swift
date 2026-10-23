@@ -183,7 +183,7 @@ struct HomeView: View {
                     .overlay(alignment: .topTrailing) { badge.offset(x: 8, y: -3) }
                 }
                 .accessibilityLabel(badgeLabel.map { "Back to \(projectName), \($0)" } ?? "Back to \(projectName)")
-                .accessibilityIdentifier("backButton")
+                .accessibilityIdentifier("inboxBack")
                 .accessibilityHidden(covered)
             }
         }

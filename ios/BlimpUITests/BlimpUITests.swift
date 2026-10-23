@@ -419,7 +419,7 @@ final class BlimpUITests: XCTestCase {
         }
         shot("32-chat-top-right")
         // ‹ at the top left, naming the project, goes back to its inbox; there's no ☰ in a chat
-        let back = element("backButton")
+        let back = element("inboxBack")
         try wait(back, "the back arrow at the top left")
         if element("drawerButton").exists { throw failed("no ☰ in a chat") }
         try until(back, "label CONTAINS 'blimp-demo'", "the back arrow to name the project")
@@ -696,7 +696,7 @@ final class BlimpUITests: XCTestCase {
 
     /// Home's top-left button: ☰ on a project's inbox, ‹ in a chat (a launch can reopen the last chat).
     private func homeButton() -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["drawerButton", "backButton"])).firstMatch
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["drawerButton", "inboxBack"])).firstMatch
     }
 
     private func message(_ id: String, _ text: String) -> XCUIElement {

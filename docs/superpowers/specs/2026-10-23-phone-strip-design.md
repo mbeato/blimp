@@ -93,7 +93,7 @@ Continue in New Session, the context meter, "Since you left" (on the page and in
 - iPhone UI tests (CI job app-e2e):
   - `testRecapDrawer` goes.
   - Tests that check the drawer is open or closed by `drawerInbox` existing check the strip (`drawerStrip`) instead.
-  - Tests that go back by the drawer's Inbox (`test4StartAndEnd`, `testInbox` and others) use the back arrow (`backButton`); the page's `screenTitle` still begins with "Inbox".
+  - Tests that go back by the drawer's Inbox (`test4StartAndEnd`, `testInbox` and others) use the back arrow (`inboxBack`); the page's `screenTitle` still begins with "Inbox".
   - Tests that pick a project from the menu (`project-<name>`) tap its strip icon (`strip-<name>`).
   - `testNewSessionFromTheDrawer` uses the drawer's + (`drawerNewSession`, kept as its identifier).
   - A new test: from a chat in one project, open the drawer, tap another project's icon: the drawer stays open with that project's sessions, and the page behind is that project's.
