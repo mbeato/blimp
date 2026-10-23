@@ -45,26 +45,29 @@ if ran test8TrustFolder; then
 fi
 
 # The stand-in claude's record of each session the app started: "<zmx name> <pid> [<arguments>]". test4 starts
-# one and ends it, test5 resumes the past conversation; no other test starts one.
-want=0
-ran test4StartAndEnd && want=$((want + 1))
-ran test5Resume && want=$((want + 1))
+# one and ends it, test5 resumes the past conversation; no other test starts one. A test run a second time (the
+# job's retry) can have started one on its first go too: each go's line is there, and the last is the one checked.
 touch "$E2E_DIR/claude.args"
 echo "claude started:"; cat "$E2E_DIR/claude.args"
-[ "$(wc -l < "$E2E_DIR/claude.args")" -eq "$want" ] || { echo "expected $want sessions started"; exit 1; }
+new_lines=$(grep -cF -- "-- Write the changelog]" "$E2E_DIR/claude.args")
+resume_lines=$(grep -cF -- "--resume" "$E2E_DIR/claude.args")
+other=$(( $(wc -l < "$E2E_DIR/claude.args") - new_lines - resume_lines ))
+[ "$other" -eq 0 ] || { echo "$other sessions started that no test starts"; exit 1; }
+if ran test4StartAndEnd; then [ "$new_lines" -ge 1 ]; else [ "$new_lines" -eq 0 ]; fi || { echo "$new_lines blank-chat sessions started"; exit 1; }
+if ran test5Resume; then [ "$resume_lines" -ge 1 ]; else [ "$resume_lines" -eq 0 ]; fi || { echo "$resume_lines resumed sessions started"; exit 1; }
 # with the server browser's tools first: the runner has a Chrome
 mcp="--mcp-config $(dirname "$BLIMPD_SOCKET")/browser/mcp.json"
 zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
 if ran test4StartAndEnd; then
-  read -r new _ newargs <<< "$(grep -F -- "-- Write the changelog]" "$E2E_DIR/claude.args")"
-  [ -n "$new" ] || { echo "the blank chat started no claude, or the stand-in saw no ZMX_SESSION"; exit 1; }
+  read -r new _ newargs <<< "$(grep -F -- "-- Write the changelog]" "$E2E_DIR/claude.args" | tail -1)"
+  [ -n "$new" ] || { echo "the stand-in saw no ZMX_SESSION"; exit 1; }
   [ "$newargs" = "[$mcp -- Write the changelog]" ] || { echo "the blank chat started claude with $newargs"; exit 1; }
   ! grep -qE "name=$new([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "$new was ended but zmx still lists it"; exit 1; }
   said+=("$new started with its first message and ended")
 fi
 if ran test5Resume; then
-  read -r resumed _ resumedargs <<< "$(grep -F -- "--resume" "$E2E_DIR/claude.args")"
-  [ -n "$resumed" ] || { echo "the past conversation started no claude, or the stand-in saw no ZMX_SESSION"; exit 1; }
+  read -r resumed _ resumedargs <<< "$(grep -F -- "--resume" "$E2E_DIR/claude.args" | tail -1)"
+  [ -n "$resumed" ] || { echo "the stand-in saw no ZMX_SESSION"; exit 1; }
   [ "$resumedargs" = "[$mcp --resume e2e00000-0000-0000-0000-000000000004 -- Pick it up again]" ] || { echo "the past conversation started claude with $resumedargs"; exit 1; }
   grep -qE "name=$resumed([[:space:]]|$)" "$E2E_DIR/zmx.list" || { echo "the resumed $resumed isn't running"; exit 1; }
   said+=("$resumed resumed the past conversation with a message")
