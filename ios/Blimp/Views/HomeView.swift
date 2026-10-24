@@ -144,6 +144,17 @@ struct HomeView: View {
             if store.dir == nil { store.dir = projects.first?.dir }
             changed(sessions)
         }
+        // A tapped notification: its session's chat, once the session list has it (a cold launch waits for the first
+        // list); one that has ended since opens nothing.
+        .onChange(of: PushTarget(name: Push.shared.open, sessions: store.sessions.map(\.name)), initial: true) { _, target in
+            guard let name = target.name, !target.sessions.isEmpty else { return }
+            Push.shared.open = nil
+            if target.sessions.contains(name) { show(.session(name)) }
+        }
+        // Opening a chat takes its notifications away.
+        .onChange(of: opened) { _, now in
+            if case .session(let name) = now { Task { await Push.clear(session: name) } }
+        }
         .onAppear {
             lastStates = Arrivals.states(store.sessions)
             cameBack()
@@ -383,6 +394,11 @@ struct HomeView: View {
     }
 
     private static func now() -> Double { Date().timeIntervalSince1970 * 1000 }
+}
+
+private struct PushTarget: Equatable {
+    let name: String?
+    let sessions: [String]
 }
 
 private struct EarlierKey: Equatable {

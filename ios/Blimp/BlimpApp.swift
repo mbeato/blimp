@@ -9,6 +9,8 @@ import UIKit
 struct BlimpApp: App {
     @State private var store = Store()
     @State private var lock = Lock()
+    /// iOS's notification side (Push.swift): the device token and what a tapped notification opens.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     /// The UI tests launch it with `-noAnimations YES`: every tap then settles without waiting out a transition.
     private static let noAnimations = UserDefaults.standard.bool(forKey: "noAnimations")
@@ -57,6 +59,14 @@ private struct Root: View {
         }
         // Nothing is read aloud in the background, behind the lock cover, or while locked.
         .onChange(of: scenePhase == .active && !lock.locked, initial: true) { _, open in Speaker.shared.allowed = open }
+        // Notifications: iOS's question and the device token each time the app is online and unlocked (not over
+        // the lock or Face ID), and the token again whenever iOS gives a new one.
+        .task(id: store.connection == .online && !lock.locked) {
+            if store.connection == .online && !lock.locked { store.startPush() }
+        }
+        .onChange(of: Push.shared.token) { _, token in
+            if let token { store.sendPushToken(token) }
+        }
     }
 
     /// The cover is up while locked, and in the background, where the app switcher takes its snapshot. Not

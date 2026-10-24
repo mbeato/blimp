@@ -99,7 +99,28 @@ final class Store {
         events?.reconnectNow()
     }
 
+    /// Notifications, unless off in Settings: the token iOS already gave goes to blimpd, and iOS is asked again
+    /// (it shows its question only the first time), which gives the token again.
+    func startPush() {
+        guard !Push.off else { return }
+        if let token = Push.shared.token { sendPushToken(token) }
+        Task { await Push.shared.start() }
+    }
+
+    /// An older blimpd has no /push/device: this phone then just gets no notifications from it.
+    func sendPushToken(_ token: String) {
+        guard !Push.off, let api else { return }
+        Task { try? await api.registerDevice(token: token, env: Push.env) }
+    }
+
+    /// The Settings switch turned off, or signing out: blimpd forgets this phone.
+    func stopPush() {
+        guard let token = Push.shared.token, let api else { return }
+        Task { try? await api.unregisterDevice(token: token) }
+    }
+
     func signOut() {
+        stopPush()
         events?.stop()
         events = nil
         Keychain.clear()

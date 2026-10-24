@@ -604,9 +604,11 @@ final class BlimpUITests: XCTestCase {
     }
 
     /// The app, with its animations off (BlimpApp: `noAnimations`): each tap settles without waiting out a transition.
-    private func launchable() -> XCUIApplication {
+    /// Notifications off (Push: `pushOff`), so iOS's question never covers a test's screen, unless `push`.
+    private func launchable(push: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-noAnimations", "YES"]
+        if !push { app.launchArguments += ["-pushOff", "YES"] }
         return app
     }
 

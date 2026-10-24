@@ -33,6 +33,19 @@ struct API {
         return try await decode(call("POST", "/folders/hidden", body: JSONEncoder().encode(Body(dir: dir, hidden: hidden))))
     }
 
+    /// Notifications to this phone: its device token, and which of Apple's services it's on (development for a build
+    /// from Xcode, production for TestFlight). Sending it again is harmless. An older blimpd answers 404.
+    func registerDevice(token: String, env: String) async throws {
+        struct Body: Encodable { let token: String; let env: String }
+        _ = try await call("POST", "/push/device", body: JSONEncoder().encode(Body(token: token, env: env)))
+    }
+
+    /// No more notifications to this phone from this server.
+    func unregisterDevice(token: String) async throws {
+        struct Body: Encodable { let token: String }
+        _ = try await call("DELETE", "/push/device", body: JSONEncoder().encode(Body(token: token)))
+    }
+
     func conversations(dir: String) async throws -> [Conversation] {
         try await decode(call("GET", "/conversations", query: [URLQueryItem(name: "dir", value: dir)]))
     }
