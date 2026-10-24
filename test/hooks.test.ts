@@ -236,6 +236,37 @@ describe("writeHookStatus", () => {
     expect(read("p1").prompt).toBeUndefined();
   });
 
+  // As recorded with Claude Code 2.1.300: a background agent's tool calls fire PostToolUse in the same
+  // session, with its agent_id, while Claude itself still shows the question.
+  test("a subagent's tool call doesn't end a wait that isn't its own; the main thread's and its own do", () => {
+    const ask = JSON.stringify({ hook_event_name: "PermissionRequest", session_id: "s4", tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Color?", options: [{ label: "Red" }] }] } });
+    const agentStep = (agent_id: string) => JSON.stringify({ hook_event_name: "PostToolUse", session_id: "s4", agent_id, agent_type: "general-purpose", tool_name: "Bash" });
+    writeHookStatus(ask, "a1", dir);
+    const asked = read("a1");
+    writeHookStatus(agentStep("agent1"), "a1", dir);
+    expect(read("a1")).toEqual(asked);
+    // The Notification that follows still finds the question to keep.
+    writeHookStatus(JSON.stringify({ hook_event_name: "Notification", session_id: "s4", notification_type: "permission_prompt" }), "a1", dir);
+    writeHookStatus(agentStep("agent1"), "a1", dir);
+    expect(read("a1")).toMatchObject({ state: "waiting", at: asked.at, prompt: asked.prompt });
+    // Answered: the main thread's own tool call ends it.
+    writeHookStatus(JSON.stringify({ hook_event_name: "PostToolUse", session_id: "s4", tool_name: "AskUserQuestion" }), "a1", dir);
+    expect(read("a1").state).toBe("working");
+
+    // A subagent's own permission prompt, then its tool runs: that ends its wait, even after the Notification.
+    const agentAsk = JSON.stringify({ hook_event_name: "PermissionRequest", session_id: "s4", agent_id: "agent2", tool_name: "Bash", tool_input: { command: "ls" } });
+    writeHookStatus(agentAsk, "a1", dir);
+    writeHookStatus(JSON.stringify({ hook_event_name: "Notification", session_id: "s4", notification_type: "permission_prompt" }), "a1", dir);
+    writeHookStatus(agentStep("agent1"), "a1", dir);
+    expect(read("a1").state).toBe("waiting");
+    writeHookStatus(agentStep("agent2"), "a1", dir);
+    expect(read("a1").state).toBe("working");
+    // While working (or done), a subagent's tool call is work, as before.
+    writeHookStatus(ev("Stop"), "a1", dir);
+    writeHookStatus(JSON.stringify({ hook_event_name: "PostToolUse", session_id: "abc", agent_id: "agent1" }), "a1", dir);
+    expect(read("a1").state).toBe("working");
+  });
+
   test("a question's PreToolUse then PermissionRequest (default mode) is one wait, with one time", async () => {
     const ask = (event: string, session_id = "s2") =>
       JSON.stringify({ hook_event_name: event, session_id, tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Color?", options: [{ label: "Red" }] }] } });
