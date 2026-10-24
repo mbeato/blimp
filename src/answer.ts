@@ -6,7 +6,7 @@
 
 import { HttpError } from "./files";
 import { answerKeys, answerSteps, choiceLabel, cleanText, type Expect, type Prompt, parseDialog, parseTrust, screenMeets, trustSteps } from "./prompt";
-import { zmxEnv, zmxPath } from "./sessions";
+import { zmxOutput } from "./sessions";
 import { Asking, findSession, release, typed, type Typist, typist, wasTyped } from "./typing";
 
 // How long a deny waits after its Esc for Claude to stop asking: well under a second, unless it didn't take the Esc.
@@ -109,8 +109,7 @@ async function answered(name: string) {
 async function untilScreen(name: string, where: string, want: string, meets: (screen: string) => boolean, read: (screen: string) => unknown) {
   const end = Date.now() + 3000;
   for (;;) {
-    const r = Bun.spawn([zmxPath(), "history", name], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-    const screen = (await new Response(r.stdout).text()).split("\n").slice(-120).join("\n");
+    const screen = (await zmxOutput("history", name)).split("\n").slice(-120).join("\n");
     if (meets(screen)) return;
     if (Date.now() > end) {
       // What it saw, so a stopped answer can be told apart from a new dialog layout.
