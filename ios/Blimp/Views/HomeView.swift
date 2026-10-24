@@ -144,6 +144,34 @@ struct HomeView: View {
             if store.dir == nil { store.dir = projects.first?.dir }
             changed(sessions)
         }
+        // A tapped notification: its session's chat once the session list has it. The list can be a little behind
+        // after the app was in the background (a session started on the Mac since), so it waits for 10 s of being
+        // online (a cold launch connects first); a session that has ended by then opens nothing.
+        .task(id: Push.shared.open) {
+            guard let name = Push.shared.open else { return }
+            var online = 0
+            while online < 40 {
+                if store.sessions.contains(where: { $0.name == name }) {
+                    Push.shared.open = nil
+                    // Close what could cover the chat.
+                    browserTab = nil
+                    showSettings = false
+                    show(.session(name))
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+                if Task.isCancelled { return }
+                if store.connection == .online { online += 1 }
+            }
+            Push.shared.open = nil
+        }
+        // Opening a chat takes its notifications away.
+        .onChange(of: opened) { _, now in
+            if case .session(let name) = now { Task { await Push.clear(session: name) } }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, case .session(let name) = opened { Task { await Push.clear(session: name) } }
+        }
         .onAppear {
             lastStates = Arrivals.states(store.sessions)
             cameBack()

@@ -1,4 +1,4 @@
-// Settings: which server this phone is paired with, the voice replies are read in, and sign out.
+// Settings: which server this phone is paired with, notifications, the voice replies are read in, and sign out.
 import AVFoundation
 import SwiftUI
 
@@ -8,12 +8,26 @@ struct SettingsView: View {
     @State private var voices: [AVSpeechSynthesisVoice] = []
     /// The picked voice's identifier; nil is the best one installed.
     @State private var chosen = UserDefaults.standard.string(forKey: Speaker.voiceKey)
+    /// Notifications from this server (Push.off is the opposite).
+    @State private var notify = !Push.off
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Server") {
                     Text(store.server?.url.absoluteString ?? "Not paired").textSelection(.enabled)
+                }
+                Section {
+                    Toggle("Notifications", isOn: $notify)
+                        .accessibilityIdentifier("pushSwitch")
+                        .onChange(of: notify) { _, on in
+                            Push.off = !on
+                            if on { store.startPush() } else { store.stopPush() }
+                        }
+                } footer: {
+                    Text(Push.shared.denied
+                        ? "iOS has them off for blimp: Settings > Notifications > blimp."
+                        : "When a session waits on you or a long turn ends, even with blimp closed. The server needs its push key first (blimpd push-key).")
                 }
                 Section {
                     voiceRow("Automatic", detail: "The best one installed", id: nil)
@@ -31,7 +45,7 @@ struct SettingsView: View {
                         dismiss()
                     }
                 } footer: {
-                    Text("Forgets this server on this phone. The token stays valid on the server.")
+                    Text("Forgets this server on this phone and stops its notifications. The token stays valid on the server.")
                 }
             }
             .navigationTitle("Settings")

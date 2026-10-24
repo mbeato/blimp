@@ -1,0 +1,9 @@
+{
+  "aps": {
+    "alert": { "title": "Add a dark mode toggle to settings is waiting", "body": "Should it follow the system setting?" },
+    "sound": "default",
+    "thread-id": "demo-chat"
+  },
+  "session": "demo-chat",
+  "kind": "ask"
+}

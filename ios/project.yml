@@ -23,6 +23,17 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
+    # Notifications: Apple's sandbox service for a build from Xcode or the simulator, production for TestFlight.
+    # XcodeGen writes the file (it's ignored, as Info.plist is).
+    entitlements:
+      path: Blimp/Blimp.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
     info:
       path: Blimp/Info.plist
       properties:

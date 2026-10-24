@@ -96,10 +96,10 @@ jobs:
           }
           if [ "$on" = "$mac" ]; then
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test3Stop test7AnswerQuestions test8TrustFolder testStuckStart" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testServerBrowserTab"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testServerBrowserTab"
           else
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test8TrustFolder testStuckStart" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip"
             shard c 7427 7433 "test3Stop test7AnswerQuestions testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testServerBrowserTab"
           fi | jq -sc '{include: .}' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
@@ -474,6 +474,14 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             archive | tail -80
+          # The export signs only the entitlements the archived app's signature lists, and an unsigned archive lists
+          # none: an ad-hoc signature with Release's (aps-environment production) carries notifications over, or the
+          # TestFlight build could never get one. Checked 2026-10-24: with it, the exported app has aps-environment.
+          app="$RUNNER_TEMP/blimp.xcarchive/Products/Applications/blimp.app"
+          ent="$RUNNER_TEMP/release.entitlements"
+          cp Blimp/Blimp.entitlements "$ent"
+          plutil -replace aps-environment -string production "$ent"
+          codesign --force --sign - --entitlements "$ent" --timestamp=none --generate-entitlement-der "$app"
       - name: Upload to TestFlight
         run: |
           set -o pipefail
@@ -484,6 +492,10 @@ jobs:
             -exportOptionsPlist "$opts" -exportPath "$RUNNER_TEMP/export" \
             -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
             -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" | tail -80
+          # The export writes what it signed with; without aps-environment the TestFlight build can't get notifications.
+          if ! grep -q aps-environment "$RUNNER_TEMP/export/DistributionSummary.plist" 2>/dev/null; then
+            echo "::warning title=TestFlight::The export's DistributionSummary.plist doesn't list aps-environment: this build may get no notifications."
+          fi
           echo "::notice title=TestFlight::Uploaded build $GITHUB_RUN_NUMBER of ${GITHUB_REF_NAME}. App Store Connect shows it once it has processed it."
       - name: Delete the API key
         if: always()

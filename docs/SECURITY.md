@@ -35,6 +35,7 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 | A tampered app update | Get the app to install a different build | Updates must be signed with the updater key, which only the release workflow has (a repository secret); the app checks the signature against the public key built into it before installing. The update comes from this repository's GitHub releases over HTTPS. **Update server** runs the latest release's `install.sh` over your SSH connection, the same as installing by hand. |
 | A tampered download | Install a different blimpd or zmx | zmx is pinned to a version and SHA-256 in `install.sh`. Releases publish SHA-256 sums. Dependencies are locked (`bun.lock`, `Cargo.lock`) and CI builds with `--frozen-lockfile` / `--locked`. Release builds run read-only, with every action pinned to a commit; only a separate publish step can write the release. |
 | Anyone but you | Send your phone fake notifications | Only the holder of the push key can. It stays on the server in `~/.blimp/apns.p8` (600), and no file route serves, replaces or downloads it. |
+| Someone who sees your locked phone | Read commands, questions or replies | A notification's text shows on the lock screen. iOS Settings > Notifications > Show Previews > When Unlocked hides it until Face ID. The README says so. |
 
 ## Accepted
 

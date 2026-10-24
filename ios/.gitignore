@@ -3,3 +3,4 @@ Blimp.xcodeproj/
 .swiftpm/
 DerivedData/
 Blimp/Info.plist
+Blimp/Blimp.entitlements
