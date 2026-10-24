@@ -36,7 +36,7 @@ async function printed(f: () => number | Promise<number>) {
 
 // Apple's stand-in: 410 for the phone whose token is all b's, 200 for the rest.
 const apple = http2.createServer();
-apple.on("stream", (stream, headers) => {
+apple.on("stream", (stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders) => {
   stream.on("data", () => {});
   stream.on("end", () => {
     const gone = String(headers[":path"]).endsWith("b".repeat(64));

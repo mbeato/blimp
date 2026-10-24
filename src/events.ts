@@ -80,7 +80,8 @@ export function eventsMessage(ws: ServerWebSocket<EventsData>, msg: string | Buf
   } catch {
     return;
   }
-  if (m?.type === "active") return markActive();
+  // Only the Mac says it is in use: a socket opened with the phone's token (server.ts sets `phone`) can't mute pushes.
+  if (m?.type === "active") return (ws.data as { phone?: string }).phone ? undefined : markActive();
   if (m?.type !== "watch" || !Array.isArray(m.paths)) return;
   const d = ws.data;
   const want = new Set<string>(m.paths.filter((p: unknown) => typeof p === "string").slice(0, MAX_WATCHES));

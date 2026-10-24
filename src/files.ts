@@ -93,6 +93,7 @@ export function secretPaths(home = realHome(), dir = socketDir()): string[] {
     join(dir, "phone-token"),
     join(dir, "browser", "key"),
     join(dir, "apns.p8"),
+    join(dir, "apns.p8.tmp"),
     join(home, ".config", "zai", "key"),
     join(dir, "secrets"),
   ].map(realPath);

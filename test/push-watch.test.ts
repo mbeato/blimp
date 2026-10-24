@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { eventsData, eventsMessage } from "../src/events";
 import type { Sent } from "../src/push/apns";
 import type { Creds, Device } from "../src/push/store";
-import { lastActiveAt, type PushDeps, PushWatcher, type WatchedSession } from "../src/push/watch";
+import { lastActiveAt, markActive, type PushDeps, PushWatcher, type WatchedSession } from "../src/push/watch";
 
 const T = 1_800_000_000_000;
 const key: Creds = { key: "k", keyId: "ABC123DEFG", teamId: "1A2B3C4D5E" };
@@ -184,4 +184,12 @@ test("`active` on the events socket is when the Mac was last in use; other messa
   expect(Date.now() - lastActiveAt()).toBeLessThan(1000);
   expect(() => eventsMessage(ws, JSON.stringify({ type: "bogus" }))).not.toThrow();
   expect(ws.data.watches.size).toBe(0);
+});
+
+test("`active` from a socket opened with the phone's token doesn't count: only the Mac can say the Mac is in use", () => {
+  markActive(1234);
+  eventsMessage({ data: { ...eventsData(), phone: "x" }, send() {} } as any, JSON.stringify({ type: "active" }));
+  expect(lastActiveAt()).toBe(1234);
+  eventsMessage({ data: eventsData(), send() {} } as any, JSON.stringify({ type: "active" }));
+  expect(lastActiveAt()).toBeGreaterThan(1234);
 });

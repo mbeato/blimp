@@ -48,11 +48,12 @@ export class PushWatcher {
         this.held = [];
         return;
       }
+      // The clock first: building the list can take seconds, and a wait read late would look longer than it was.
+      const now = this.deps.now();
       const list = await this.deps.sessions();
       // An empty list after sessions is more likely a zmx list that failed than every session gone, and forgetting
       // them would tell their waits again.
       if (!list.length && this.seen?.size) return;
-      const now = this.deps.now();
       const { seen, events } = pushChanges(this.seen, list, now);
       this.seen = seen;
       const due = dueAt(now, this.deps.active());

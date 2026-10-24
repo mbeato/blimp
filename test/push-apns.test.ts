@@ -23,7 +23,7 @@ const reset = (a = ok) => {
   answer = a;
 };
 const apple = http2.createServer();
-apple.on("stream", (stream, headers) => {
+apple.on("stream", (stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders) => {
   let body = "";
   stream.on("data", (c) => (body += c));
   stream.on("end", () => {
