@@ -14,6 +14,7 @@ import { findChrome, launchChrome, type Chrome } from "./chrome";
 import { Gate, type Tab } from "./gate";
 import { timingSafeEqual } from "node:crypto";
 import { browserDir, gateKey, mcpConfig, mcpConfigPath, portFile, selfCommand } from "./mcp";
+import { keepPasskeyDialogsOff } from "./passkeys";
 import { peerUid } from "./peer";
 import { openView, type ViewSocket } from "./view";
 
@@ -82,6 +83,7 @@ const NO_CHROME = "No Chrome or Chromium on the server. Install one: npx playwri
 async function launch(path: string, tries = 2): Promise<{ c: Chrome; g: Gate }> {
   const c = launchChrome(path, join(browserDir(), "profile"));
   const g = new Gate(c);
+  keepPasskeyDialogsOff(c, (t) => g.attachDirect(t));
   const died = c.exited.then((code) => Promise.reject(new Error(`Chrome exited as it started (code ${code}). Run it by hand to see why: ${path} --headless=new`)));
   try {
     await Promise.race([g.ready(), died]);

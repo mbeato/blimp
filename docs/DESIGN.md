@@ -380,6 +380,11 @@ One Chrome on the server that sessions drive through Google's Chrome DevTools MC
 - When Chrome exits, every call waiting for it gets an error. The gate's WebSockets close (1012); the MCP doesn't reconnect, so a session's browser tools work again after the session restarts.
 - Titles: Chrome doesn't announce a page's own title, so blimpd reads `Target.getTargets` every 2 s.
 
+**Passkeys** (`src/browser/passkeys.ts`): a page that asks for a passkey gets Chrome's own passkey dialog, which headless Chrome never draws, and while it's open the page takes no clicks or keys (a Google sign-in's "Try another way" couldn't be clicked). Your phone's or Mac's passkeys can't reach the server's Chrome anyway (that needs Bluetooth near it).
+- blimpd keeps a session of its own on every page target (`attachDirect`, from its `targetCreated`) with `WebAuthn.enable { enableUI: false }` and no virtual authenticators: the ask is never answered, no passkey is made or used, the page stays usable, and it hears `NotAllowedError` when its own timeout ends.
+- Chrome turns that off for the whole tab whenever any session on it detaches (a view closing, an MCP quitting), so blimpd turns it on again from each other session's `detachedFromTarget`, sent at once so it reaches Chrome before anything sent after.
+- It must be on before the ask: turning it on doesn't close a dialog already open.
+
 **Listener** (`src/browser/service.ts`): `ws://127.0.0.1:<port>/s/<session>`.
 - The port is the last one if it's free (so MCPs from before a restart still find it), written to `~/.blimp/browser/port`.
 - Admitted only if all of these hold:
