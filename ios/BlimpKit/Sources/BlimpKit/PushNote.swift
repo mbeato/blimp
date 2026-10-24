@@ -50,9 +50,10 @@ public struct PushNote: Equatable, Sendable {
     }
 
     private static func choice(_ v: Any?) -> Choice? {
-        guard let d = v as? [AnyHashable: Any], let pick = number(d["pick"]), pick >= 0, pick == pick.rounded(),
+        // Int(exactly:) is nil for 0.5, infinity or 1e30, where Int(_:) would crash the app on a malformed push.
+        guard let d = v as? [AnyHashable: Any], let pick = number(d["pick"]).flatMap({ Int(exactly: $0) }), pick >= 0,
               let label = d["label"] as? String else { return nil }
-        return Choice(pick: Int(pick), label: label)
+        return Choice(pick: pick, label: label)
     }
 }
 

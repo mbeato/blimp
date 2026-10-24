@@ -46,3 +46,14 @@ private func choice(_ pick: Int, _ label: String) -> [String: Any] { ["pick": pi
     #expect(DeviceToken.hex(Data([0x00, 0x0f, 0xa5, 0xff])) == "000fa5ff")
     #expect(DeviceToken.hex(Data()) == "")
 }
+
+@Test func aPickThatIsntAWholeNumberFromZeroGivesNoButtons() {
+    for pick in [-1.0, 0.5, 1e30] {
+        let note = PushNote(["session": "s", "kind": "ask", "at": 5.0,
+                             "yes": ["pick": pick, "label": "Yes"], "no": choice(2, "No")])
+        #expect(note?.session == "s")
+        #expect(note?.at == nil)
+        #expect(note?.yes == nil)
+        #expect(note?.no == nil)
+    }
+}
