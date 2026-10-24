@@ -16,7 +16,7 @@ mkdirSync(folder);
 
 const { findChrome } = await import("../src/browser/chrome");
 const { browserTabs, startBrowserGate, stopBrowser, openTab } = await import("../src/browser/service");
-const { gateKey, mcpConfigPath, portFile } = await import("../src/browser/mcp");
+const { browserDir, gateKey, mcpConfigPath, portFile } = await import("../src/browser/mcp");
 const { zmxPath, zmxEnv, parseZmxList } = await import("../src/sessions");
 
 const live = findChrome() ? test : test.skip;
@@ -178,7 +178,9 @@ mcpTest("the MCP a session runs reads pages, their network and their source thro
 live("tabs outlive a restart of blimpd and its Chrome", async () => {
   const id = await openTab(folder, `${base}/kept`);
   await until(() => browserTabs().some((t) => t.id === id), "the tab");
-  await Bun.sleep(700); // tabs.json is written half a second after a change
+  // tabs.json is written half a second after the last change, and a title that comes in late puts it
+  // off; a stop drops a write still to come (runs 40137489265 and 40137899113).
+  await until(() => readFileSync(join(browserDir(), "tabs.json"), "utf8").includes(`${base}/kept`), "the tab in tabs.json");
   await stopBrowser();
   expect(browserTabs()).toEqual([]);
   port = await startBrowserGate();
@@ -193,7 +195,6 @@ live("tabs outlive a restart of blimpd and its Chrome", async () => {
 live("tabs come back when the last blimpd's Chrome still holds the profile as this one starts", async () => {
   await stopBrowser();
   const { launchChrome } = await import("../src/browser/chrome");
-  const { browserDir } = await import("../src/browser/mcp");
   const old = launchChrome(findChrome()!, join(browserDir(), "profile"));
   await Bun.sleep(500);
   setTimeout(() => old.kill(), 2000);
@@ -205,7 +206,6 @@ live("tabs come back when the last blimpd's Chrome still holds the profile as th
 // something to need it.
 live("tabs come back after Chrome dies by itself", async () => {
   await until(() => browserTabs().some((t) => t.url === `${base}/kept`), "the tab");
-  const { browserDir } = await import("../src/browser/mcp");
   const pids = Bun.spawnSync(["pgrep", "-f", `user-data-dir=${join(browserDir(), "profile")}`]).stdout.toString().trim().split("\n").filter(Boolean);
   expect(pids.length).toBeGreaterThan(0);
   for (const pid of pids) Bun.spawnSync(["kill", "-9", pid]);

@@ -30,13 +30,15 @@ const site = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Respon
 // localhost, not 127.0.0.1: a passkey's site has to be a name.
 const base = `http://localhost:${site.port}`;
 
+// 60 s, as in browser-service.test.ts: a fresh CI runner's first Chrome launch takes 8 to over 20 s, and
+// on ubuntu-26.04 this file runs first (runs 40135907280 and 40137069033).
 beforeAll(async () => {
   if (!path) return;
   chrome = launchChrome(path, join(tmp, "profile"));
   gate = new Gate(chrome);
   keepPasskeyDialogsOff(chrome, (t) => gate.attachDirect(t));
   await gate.ready();
-});
+}, 60_000);
 afterAll(async () => {
   site.stop();
   chrome?.kill();
