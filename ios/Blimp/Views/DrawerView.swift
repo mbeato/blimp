@@ -1,11 +1,11 @@
-// The drawer from the left: the project's name with + (New session: the inbox's box, ready to type into), its
-// running sessions, the project's browser tabs (a dot on ones a session opened; a tap opens one full screen, New
-// Tab opens one, a swipe right closes one), then its past conversations folded under Earlier (each newest activity
-// first, with its mark, and under its title its branch, jobs and handoff). A tap opens one; a swipe right on a row
-// or press and hold has its actions (Stop, Mark read, End; Resume a past one). Along the bottom, the projects in a
-// row that scrolls sideways (two letters each, with the mark of the session there that needs you most; a tap shows
-// that project's inbox behind the drawer and its sessions in it, and the drawer stays open; press and hold one to
-// hide it), and Settings at its right end. It follows the finger: a swipe right in the chat pulls it out
+// The drawer from the left: the project's name with + (New session: the inbox's box, ready to type into); under
+// it the projects in a row that scrolls sideways (two letters each, with the mark of the session there that needs
+// you most; a tap shows that project's inbox behind the drawer and its sessions in it, and the drawer stays open;
+// press and hold one to hide it), and Settings at its right end; then its running sessions, the project's browser
+// tabs (a dot on ones a session opened; a tap opens one full screen, New Tab opens one, a swipe right closes one),
+// then its past conversations folded under Earlier (each newest activity first, with its mark, and under its title
+// its branch, jobs and handoff). A tap opens one; a swipe right on a row or press and hold has its actions (Stop,
+// Mark read, End; Resume a past one). It follows the finger: a swipe right in the chat pulls it out
 // (HomeView's `pull`), a swipe left on it or beside it pushes it back (not one in the project row, which scrolls
 // it), and letting go settles it open or closed by where it is and how fast it went. A tap beside it closes it too.
 import BlimpKit
@@ -100,61 +100,60 @@ struct DrawerView: View {
     }
 
     private var panel: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                header.padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
-                List {
-                    if rows.isEmpty {
-                        Text("No sessions here yet.").foregroundStyle(.secondary).listRowSeparator(.hidden)
+        VStack(alignment: .leading, spacing: 0) {
+            header.padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
+            strip
+            Divider()
+            List {
+                if rows.isEmpty {
+                    Text("No sessions here yet.").foregroundStyle(.secondary).listRowSeparator(.hidden)
+                }
+                if !active.isEmpty {
+                    Section("Active") { ForEach(active) { rowButton($0) } }
+                }
+                Section("Browser") {
+                    ForEach(tabs) { tabRow($0) }
+                    Button(action: onNewTab) {
+                        Label("New Tab", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if !active.isEmpty {
-                        Section("Active") { ForEach(active) { rowButton($0) } }
-                    }
-                    Section("Browser") {
-                        ForEach(tabs) { tabRow($0) }
-                        Button(action: onNewTab) {
-                            Label("New Tab", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("drawerNewTab")
+                }
+                if !past.isEmpty {
+                    Section {
+                        // A row, not the section's header: a header doesn't reliably take taps.
+                        Button { earlierOpen.toggle() } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.right").font(.caption2.weight(.bold)).rotationEffect(.degrees(earlierOpen ? 90 : 0))
+                                Text("Earlier")
+                                Text("\(past.count)").foregroundStyle(.tertiary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("drawerNewTab")
-                    }
-                    if !past.isEmpty {
-                        Section {
-                            // A row, not the section's header: a header doesn't reliably take taps.
-                            Button { earlierOpen.toggle() } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "chevron.right").font(.caption2.weight(.bold)).rotationEffect(.degrees(earlierOpen ? 90 : 0))
-                                    Text("Earlier")
-                                    Text("\(past.count)").foregroundStyle(.tertiary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .foregroundStyle(.secondary)
-                            .listRowSeparator(.hidden)
-                            .accessibilityLabel(earlierOpen ? "Earlier, \(past.count), open" : "Earlier, \(past.count), folded")
-                            .accessibilityIdentifier("drawerEarlier")
-                            if earlierOpen { ForEach(past) { rowButton($0) } }
-                        }
+                        .listRowSeparator(.hidden)
+                        .accessibilityLabel(earlierOpen ? "Earlier, \(past.count), open" : "Earlier, \(past.count), folded")
+                        .accessibilityIdentifier("drawerEarlier")
+                        if earlierOpen { ForEach(past) { rowButton($0) } }
                     }
                 }
-                .listStyle(.plain)
             }
-            Divider()
-            strip
+            .listStyle(.plain)
         }
         .onAppear { order = projects.map(\.dir) }
         .accessibilityAddTraits(.isModal)
     }
 
-    /// The projects in a row along the bottom, two letters each with their mark, the one shown lit; the row
-    /// scrolls sideways when they don't all fit. Settings stays at its right end.
+    /// The projects in a row under the project's name, two letters each with their mark, the one shown lit; the
+    /// row scrolls sideways when they don't all fit. Settings stays at its right end.
     private var strip: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal) {
                 HStack(spacing: 10) {
                     ForEach(Strip.held(projects, order: order)) { stripIcon($0) }
                 }
-                .padding(.horizontal, 12)
+                // in line with the name above
+                .padding(.horizontal)
                 .padding(.vertical, 10)
             }
             .scrollIndicators(.hidden)
