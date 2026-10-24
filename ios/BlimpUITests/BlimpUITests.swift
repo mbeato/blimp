@@ -542,6 +542,31 @@ final class BlimpUITests: XCTestCase {
         try until(element("screenTitle"), "label CONTAINS 'api-server'", "api-server's inbox")
     }
 
+    // MARK: - Notifications
+
+    /// Notifications on: iOS asks once (Allow), and the phone signs up with blimpd, whose push.json then lists a
+    /// development phone (no push key here, so blimpd sends nothing itself). With the app in the background, a
+    /// notification for demo-chat (signals.sh pushes it to the simulator, as Apple would) opens its chat when tapped.
+    /// (Last in shard b, after the tests that read demo-chat.)
+    func testPushOpensTheChat() throws {
+        try launchPaired(push: true)
+        allowNotifications()
+        let end = Date().addingTimeInterval(30)
+        while !hostFile("b/push.json").contains("\"development\"") {
+            if Date() > end { throw failed("the phone to sign up for notifications (b/push.json: \(hostFile("b/push.json")))") }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCUIDevice.shared.press(.home)
+        try signal("push-demo-chat")
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "is waiting")).firstMatch
+        try wait(banner, "the notification over the home screen", timeout: 20)
+        screen("41-push-banner")
+        banner.tap()
+        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the notification", timeout: 30)
+        shot("42-push-opened")
+    }
+
     // MARK: - Helpers
 
     /// Picks a project from the drawer's strip; its inbox shows behind the drawer, which stays open with its
@@ -613,9 +638,9 @@ final class BlimpUITests: XCTestCase {
     }
 
     /// Launches the app and waits for Home, pairing first if it isn't (test1 failed before pairing).
-    private func launchPaired(arguments: [String] = []) throws {
+    private func launchPaired(arguments: [String] = [], push: Bool = false) throws {
         continueAfterFailure = false
-        app = launchable()
+        app = launchable(push: push)
         app.launchArguments += arguments
         app.launch()
         let home = homeButton()
@@ -666,6 +691,15 @@ final class BlimpUITests: XCTestCase {
         let all = app.buttons.matching(NSPredicate(format: "label == 'End'")).allElementsBoundByIndex.filter(\.isHittable)
         guard let last = all.last else { throw failed("the question's End") }
         last.tap()
+    }
+
+    /// iOS asks once whether blimp may send notifications.
+    private func allowNotifications() {
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Allow"]
+        if allow.waitForExistence(timeout: 15) {
+            screen("push-permission")
+            allow.tap()
+        }
     }
 
     /// The first Face ID use asks "Do you want to allow blimp to use Face ID?", once: after it's answered, or

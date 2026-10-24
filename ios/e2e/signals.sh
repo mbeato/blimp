@@ -4,6 +4,7 @@
 #   restart       stop blimpd, wait a few seconds, start it again
 #   faceid-enrol  enrol Face ID in the simulator (the job also does it before the test)
 #   faceid-match  a matching face
+#   push-<name>   push ios/e2e/push-<name>.json to the simulator's blimp, as Apple would deliver it
 sig="$E2E_DIR/sig"
 mkdir -p "$sig"
 here="$(dirname "$0")"
@@ -19,6 +20,7 @@ while :; do
         xcrun simctl spawn "$SIM" notifyutil -s com.apple.BiometricKit.enrollmentChanged 1
         xcrun simctl spawn "$SIM" notifyutil -p com.apple.BiometricKit.enrollmentChanged ;;
       faceid-match) xcrun simctl spawn "$SIM" notifyutil -p com.apple.BiometricKit_Sim.pearl.match ;;
+      push-*) xcrun simctl push "$SIM" dev.blimp.phone "$here/$name.json" ;;
       *) echo "unknown signal $name" ;;
     esac
     echo "$(date -u +%T) done: $name"
