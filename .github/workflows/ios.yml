@@ -492,6 +492,10 @@ jobs:
             -exportOptionsPlist "$opts" -exportPath "$RUNNER_TEMP/export" \
             -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
             -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" | tail -80
+          # The export writes what it signed with; without aps-environment the TestFlight build can't get notifications.
+          if ! grep -q aps-environment "$RUNNER_TEMP/export/DistributionSummary.plist" 2>/dev/null; then
+            echo "::warning title=TestFlight::The export's DistributionSummary.plist doesn't list aps-environment: this build may get no notifications."
+          fi
           echo "::notice title=TestFlight::Uploaded build $GITHUB_RUN_NUMBER of ${GITHUB_REF_NAME}. App Store Connect shows it once it has processed it."
       - name: Delete the API key
         if: always()
