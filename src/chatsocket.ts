@@ -159,16 +159,12 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       // presses, ctrl+\ detaches zmx's client, ctrl+C interrupts. Newlines and tabs stay; \r is a newline.
       const text = cleanText(m.text);
       // Not while Claude asks something: the Enter after the paste would confirm its highlighted choice.
-      // Checked before the paste and again before Enter. A question that starts in between leaves the
-      // paste in Claude's input box without Enter: it isn't sent, and the id doesn't count as typed.
-      const notWaiting = async () => {
+      // Checked right before the paste, which goes in one write with its Enter (Claude 2.1.300 sends it,
+      // queues it while working): a question can't start between them and leave the text in Claude's box.
+      await typed(d.typist, id, async () => {
         if ((await find(d.name))?.state === "waiting") throw new Asking();
-      };
-      const keys = async () => {
-        await notWaiting();
-        return ["\x1b[200~" + text + "\x1b[201~", "\r"];
-      };
-      await typed(d.typist, id, keys, notWaiting);
+        return ["\x1b[200~" + text + "\x1b[201~\r"];
+      });
       return send(ws, { type: "ack", id });
     }
     // answer, interrupt and deny (answer.ts); anything else is "unknown message".

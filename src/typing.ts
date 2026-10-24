@@ -1,9 +1,10 @@
 // Typing into a session, for the chat socket (chatsocket.ts) and for blimpd's own messages to Claude.
-// Text goes in as a bracketed paste, then Enter 50 ms later, as a person would press it. Not while
-// Claude asks something: the Enter would confirm its highlighted choice. The keys go through a zmx
-// client of our own (a Typist), attached at the size the session is shown at elsewhere: a client of
-// another size resizes the session for everyone. One thing is typed at a time per session, whoever
-// types it, so two messages close together never interleave.
+// Text goes in as a bracketed paste, then Enter: 50 ms later for blimpd's own, as a person would press
+// it, and in the same write for the phone's (chatsocket.ts). Not while Claude asks something: the
+// Enter would confirm its highlighted choice. The keys go through a zmx client of our own (a Typist),
+// attached at the size the session is shown at elsewhere: a client of another size resizes the session
+// for everyone. One thing is typed at a time per session, whoever types it, so two messages close
+// together never interleave.
 
 import type { Subprocess } from "bun";
 import { cleanText } from "./prompt";
@@ -59,7 +60,7 @@ function client(t: Typist) {
 }
 
 // keys says what to type when its turn comes (an answer checks its question is still up); recheck
-// runs again before each part after the first (input's Enter, each step of a dialog).
+// runs again before each part after the first (an Enter typed apart from its paste, each step of a dialog).
 export type Recheck = (part: number) => Promise<void>;
 export async function write(t: Typist, keys: () => Promise<string[]>, recheck?: Recheck) {
   const fresh = !t.proc || t.proc.exitCode !== null;
