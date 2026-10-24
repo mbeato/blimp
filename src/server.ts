@@ -21,6 +21,7 @@ import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
+import { startPush } from "./push/watch";
 import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
@@ -447,6 +448,7 @@ export function serve(): Server {
   startNotes(); // the same switch
   startDigests(); // and again
   startHandoffs();
+  startPush(); // phone notifications: nothing runs until there's a push key and a phone that asked (push/watch.ts)
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

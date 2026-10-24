@@ -1,6 +1,7 @@
 // The events socket: the session list whenever it changes, the ports programs in sessions listen
 // on (ports.ts), the server browser's tabs (browser/service.ts), and changes to the paths the app
-// watches.
+// watches. The Mac app also says here when a blimp window is in front, so the phone's notifications wait
+// (push/watch.ts).
 
 import { type FSWatcher, statSync, watch } from "node:fs";
 import type { Server, ServerWebSocket } from "bun";
@@ -8,6 +9,7 @@ import { browserTabs } from "./browser/service";
 import { shownDigests } from "./digests";
 import { guard } from "./files";
 import { sessionPorts } from "./ports";
+import { markActive } from "./push/watch";
 import { claudeDir, listSessions, parseZmxList, zmxListAsync } from "./sessions";
 
 export type EventsData = {
@@ -69,7 +71,7 @@ export async function openEvents(ws: ServerWebSocket<EventsData>, server: Server
 const MAX_WATCHES = 2000;
 const DEBOUNCE_MS = 150;
 
-// Replaces this socket's watch set. Each path is watched on its own, not recursively.
+// Replaces this socket's watch set (watch), or notes that the Mac is in use (active). Each path is watched on its own, not recursively.
 export function eventsMessage(ws: ServerWebSocket<EventsData>, msg: string | Buffer) {
   if (typeof msg !== "string") return;
   let m: any;
@@ -78,6 +80,7 @@ export function eventsMessage(ws: ServerWebSocket<EventsData>, msg: string | Buf
   } catch {
     return;
   }
+  if (m?.type === "active") return markActive();
   if (m?.type !== "watch" || !Array.isArray(m.paths)) return;
   const d = ws.data;
   const want = new Set<string>(m.paths.filter((p: unknown) => typeof p === "string").slice(0, MAX_WATCHES));
