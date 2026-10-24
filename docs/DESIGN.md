@@ -127,7 +127,9 @@ A secret is a value (an API key, a password) given to a session's Claude without
 
 `DELETE /sessions/<name>` → 204: `zmx kill <name>`, then waits (up to 3 s) until zmx no longer lists it. 404 if there's no such session. Attached clients see close code 4000. Claude's conversation stays on disk, so it can be resumed.
 
-`GET /folders/recent` → `[{ "dir": string, "lastUsed": number /* ms */ }]`, newest first, max 30, only folders that still exist. Source: each `<claude dir>/projects/*/` folder, its newest `*.jsonl`, the first `"cwd"` found in its first 50 lines.
+`GET /folders/recent` → `[{ "dir": string, "lastUsed": number /* ms */ }]`, newest first, max 30, only folders that still exist. Source: each `<claude dir>/projects/*/` folder, its newest `*.jsonl`, the first `"cwd"` found in its first 50 lines. Not a folder in or under a temporary folder (`/tmp`, the system's temp folder): those are scratch, a test's or a helper agent's. Not a hidden one (below).
+
+`GET /folders/hidden` → `string[]`: the projects you hid from the phone's strip, by folder (`src/hidden.ts`, `<socket dir>/hidden.json`, `{ "dirs": [...] }`, mode 600). `POST /folders/hidden` `{ "dir": string, "hidden": boolean }` → the list after hiding or showing it; 400 without a `dir` or a boolean `hidden`. `POST /sessions` in a hidden folder shows it again. The phone leaves a hidden project out of its strip even with sessions running there; the Mac's recent folders leave it out because this route does.
 
 `GET /conversations?dir=<dir>` → `[{ "sessionId": string, "title": string, "updatedAt": number /* ms, file mtime */, "unread": boolean }]`, newest first, max 50. The same list `/resume` shows in that folder: transcripts in `<claude dir>/projects/<dir with every non-alphanumeric char replaced by "-">/*.jsonl`.
 
