@@ -21,6 +21,7 @@ import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
+import { addDevice, isDeviceToken, isPushEnv, removeDevice } from "./push/store";
 import { startPush } from "./push/watch";
 import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
@@ -247,6 +248,16 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const id: string = b.id ?? randomUUID();
     await answerOnce(name, id, b.stop === true ? { type: "interrupt", at: b.at } : b.deny === true ? { type: "deny", at: b.at, text: b.text } : { ...b, type: "answer" });
     return Response.json({ id });
+  }
+
+  // Phone notifications (push/): a phone asks for them with its device token, and says when it stops.
+  if (path === "/push/device" && (req.method === "POST" || req.method === "DELETE")) {
+    const { token: device, env } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (!isDeviceToken(device)) throw new HttpError(400, "token must be the phone's device token, in hex");
+    if (req.method === "DELETE") removeDevice(device);
+    else if (isPushEnv(env)) addDevice(device, env);
+    else throw new HttpError(400, 'env must be "development" or "production"');
+    return new Response(null, { status: 204 });
   }
 
   if (path === "/events" && get) {
