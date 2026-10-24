@@ -84,6 +84,11 @@ describe("guardFile", () => {
     for (const s of secretPaths(home, blimp)) expect(status(() => guardFile(s, home, blimp))).toBe(403);
   });
 
+  test("the push key is one of them, there or not", () => {
+    expect(secretPaths(home, blimp)).toContain(join(blimp, "apns.p8"));
+    expect(status(() => guardFile(join(blimp, "apns.p8"), home, blimp))).toBe(403);
+  });
+
   test("a symlink to one is refused", () => {
     expect(status(() => guardFile(join(home, "token-link"), home, blimp))).toBe(403);
   });
