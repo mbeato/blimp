@@ -482,6 +482,10 @@ jobs:
           cp Blimp/Blimp.entitlements "$ent"
           plutil -replace aps-environment -string production "$ent"
           codesign --force --sign - --entitlements "$ent" --timestamp=none --generate-entitlement-der "$app"
+          # The export keeps what this signature lists; without aps-environment the TestFlight build can't get notifications.
+          if ! codesign -d --entitlements - --xml "$app" 2>/dev/null | grep aps-environment >/dev/null; then
+            echo "::warning title=TestFlight::The archived app's signature doesn't list aps-environment: this build may get no notifications."
+          fi
       - name: Upload to TestFlight
         run: |
           set -o pipefail
@@ -492,10 +496,6 @@ jobs:
             -exportOptionsPlist "$opts" -exportPath "$RUNNER_TEMP/export" \
             -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" \
             -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" | tail -80
-          # The export writes what it signed with; without aps-environment the TestFlight build can't get notifications.
-          if ! grep -q aps-environment "$RUNNER_TEMP/export/DistributionSummary.plist" 2>/dev/null; then
-            echo "::warning title=TestFlight::The export's DistributionSummary.plist doesn't list aps-environment: this build may get no notifications."
-          fi
           echo "::notice title=TestFlight::Uploaded build $GITHUB_RUN_NUMBER of ${GITHUB_REF_NAME}. App Store Connect shows it once it has processed it."
       - name: Delete the API key
         if: always()
