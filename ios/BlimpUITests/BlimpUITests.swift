@@ -545,7 +545,7 @@ final class BlimpUITests: XCTestCase {
     // MARK: - Notifications
 
     /// Notifications on: iOS asks once (Allow), and the phone signs up with blimpd, whose push.json then lists a
-    /// development phone (no push key here, so blimpd sends nothing itself). With the app in the background, a
+    /// development phone (no push key here, so blimpd sends nothing itself). With the app in the background (after Home, the test waits until it has left the front), a
     /// notification for demo-chat (signals.sh pushes it to the simulator, as Apple would) opens its chat when tapped: the banner, or the notification in Notification Center if the banner is gone.
     /// (In shard b, after the tests that read demo-chat; it changes nothing later tests see: they launch with notifications off.)
     func testPushOpensTheChat() throws {
@@ -557,6 +557,11 @@ final class BlimpUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.5)
         }
         XCUIDevice.shared.press(.home)
+        // A push while blimp is still in front (on its way out) shows nothing, by design (Push.swift willPresent):
+        // wait until it's in the background.
+        let gone = Date().addingTimeInterval(10)
+        while app.state == .runningForeground && Date() < gone { Thread.sleep(forTimeInterval: 0.2) }
+        Thread.sleep(forTimeInterval: 1)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         try signal("push-demo-chat")
         Thread.sleep(forTimeInterval: 2)
