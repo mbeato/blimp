@@ -34,6 +34,7 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 | A host or user name starting with `-` | Inject ssh options | The app rejects them and passes `--` before the destination. |
 | A tampered app update | Get the app to install a different build | Updates must be signed with the updater key, which only the release workflow has (a repository secret); the app checks the signature against the public key built into it before installing. The update comes from this repository's GitHub releases over HTTPS. **Update server** runs the latest release's `install.sh` over your SSH connection, the same as installing by hand. |
 | A tampered download | Install a different blimpd or zmx | zmx is pinned to a version and SHA-256 in `install.sh`. Releases publish SHA-256 sums. Dependencies are locked (`bun.lock`, `Cargo.lock`) and CI builds with `--frozen-lockfile` / `--locked`. Release builds run read-only, with every action pinned to a commit; only a separate publish step can write the release. |
+| Anyone but you | Send your phone fake notifications | Only the holder of the push key can. It stays on the server in `~/.blimp/apns.p8` (600), and no file route serves, replaces or downloads it. |
 
 ## Accepted
 
@@ -50,6 +51,7 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 - **Server browser cookies.** With `--password-store=basic`, Chrome encrypts cookies with a fixed key instead of a desktop keyring (a server has none). Anyone who can read `~/.blimp/browser/profile` as you can use them.
 - **The MCP comes from npm.** `npx` downloads `chrome-devtools-mcp`, pinned to 1.11.0, the first time a session uses it, and runs it as you.
 - **Token lifetime.** The token stays the same until you delete `~/.blimp/token` and restart blimpd. Anyone who has it can already reach you over SSH.
+- **Notifications go through Apple.** Once you add a push key, blimpd makes outbound HTTPS connections to Apple's push service, and a notification's text (a session's title, a command's summary, a question, the start of a reply, with secrets taken out) passes through Apple's servers to reach the phone.
 
 ## Latency budget
 
