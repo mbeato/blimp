@@ -67,14 +67,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         print("push: no device token: \(error.localizedDescription)")
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        []
+    /// In front, none shows (blimp's own banner tells you). The completion-handler forms of both methods are used: the
+    /// async forms' generated code called iOS back from a background thread, and UIKit aborted.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([])
     }
 
-    /// A tap (the notification itself, not one of its buttons): that session's chat, behind the lock as at any launch.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
-        guard let note = PushNote(response.notification.request.content.userInfo) else { return }
-        await MainActor.run { Push.shared.open = note.session }
+    /// A tap on the notification itself (not one of its buttons): that session's chat, behind the lock as at any launch.
+    /// Called back on the main actor (the e2e's tap, 2026-10-24).
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
+        let session = response.actionIdentifier == UNNotificationDefaultActionIdentifier
+            ? PushNote(response.notification.request.content.userInfo)?.session : nil
+        // iOS's callback isn't Sendable; it's only ever called on the main actor here.
+        nonisolated(unsafe) let done = completionHandler
+        Task { @MainActor in
+            if let session { Push.shared.open = session }
+            done()
+        }
     }
 }
