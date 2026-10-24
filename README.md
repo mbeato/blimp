@@ -21,6 +21,13 @@ The server can also answer a prompt without the terminal. The phone sends the an
 
 **Pair your iPhone.** On the server, run `blimpd pair`. It prints a QR code and a `blimp://` link. On the iPhone, open blimp and tap Scan QR code, or paste the link. The phone gets its own token, separate from the Mac's. To cut the phone off, run `blimpd pair --revoke` on the server. The Mac keeps working. The phone reaches the server through Tailscale, so `blimpd pair` takes the server's address from Tailscale. Without Tailscale, give the address yourself: `blimpd pair --url <address>`.
 
+**Notifications on the iPhone.** blimpd sends them straight to Apple with your own push key. To set it up once:
+1. In Apple's developer site (Certificates, Identifiers & Profiles), open Keys and add one with "Apple Push Notifications service (APNs)" ticked (Sandbox & Production). Download the `.p8` file (Apple lets you download it only once) and note its Key ID. Your Team ID is under Membership.
+2. Copy it to the server, then run `blimpd push-key AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --team-id YYYYYYYYYY`. You can delete the file afterwards.
+3. Open blimp on the iPhone and allow notifications, then run `blimpd push-test`. It prints Apple's answer for each phone.
+
+The notification's text (a session's title, a command, a question, the start of a reply) shows on the lock screen. To hide it until Face ID: iOS Settings > Notifications > Show Previews > When Unlocked.
+
 ## Requirements
 
 **Server**
