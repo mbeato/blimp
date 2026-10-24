@@ -71,7 +71,14 @@ export class PushWatcher {
   }
 
   private async notify(creds: Creds, devices: Device[], s: WatchedSession, e: PushEvent) {
-    const reply = e.kind === "finish" && s.transcript ? await this.deps.reply(s.transcript) : undefined;
+    // A transcript that can't be read still gets its finish told, with the folder's name instead of the reply.
+    let reply: string | undefined;
+    if (e.kind === "finish" && s.transcript)
+      try {
+        reply = await this.deps.reply(s.transcript);
+      } catch (err) {
+        this.deps.log(`push: couldn't read ${s.name}'s last reply (${(err as Error).message}), so the notification says the folder`);
+      }
     const payload = pushPayload(s, e, reply);
     for (const d of devices) {
       // A newer notification for a session replaces the older one (Apple allows 64 bytes; names are ASCII).

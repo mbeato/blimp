@@ -11,7 +11,7 @@ const key: Creds = { key: "k", keyId: "ABC123DEFG", teamId: "1A2B3C4D5E" };
 const phone: Device = { token: "a".repeat(64), env: "production", at: 0 };
 const other: Device = { token: "b".repeat(64), env: "development", at: 0 };
 
-function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent } = {}) {
+function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent; reply?: (file: string) => Promise<string | undefined> } = {}) {
   const t = {
     list: [] as WatchedSession[],
     clock: T,
@@ -36,10 +36,12 @@ function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent } = {}) {
       return o.answer ?? { status: 200 };
     },
     gone: (d) => void t.gone.push(d),
-    reply: async (file) => {
-      t.replies.push(file);
-      return "All done.";
-    },
+    reply:
+      o.reply ??
+      (async (file) => {
+        t.replies.push(file);
+        return "All done.";
+      }),
     now: () => t.clock,
     active: () => t.active,
     log: (l) => void t.logs.push(l),
@@ -122,6 +124,22 @@ test("a finish carries Claude's last reply, from its transcript", async () => {
   await w.tick();
   expect(t.replies).toEqual(["/t/a.jsonl"]);
   expect(t.sent[0].payload.aps.alert).toEqual({ title: "Fix it finished", body: "All done." });
+});
+
+test("a reply that can't be read still sends the finish, and the others ready with it", async () => {
+  const { t, w } = setup({
+    reply: async () => {
+      throw new Error("ENOENT");
+    },
+  });
+  t.list = [s("working", T - 60_000, { transcript: "/t/a.jsonl" }), s("working", T - 5000, { name: "b" })];
+  await w.tick();
+  t.list = [s("done", T, { transcript: "/t/a.jsonl" }), s("waiting", T, { name: "b", prompt: { kind: "other", answerable: false, at: T } })];
+  t.clock = T + 3500;
+  await w.tick();
+  expect(t.sent.map((x) => x.collapseId).sort()).toEqual(["a", "b"]);
+  expect(t.sent.find((x) => x.collapseId === "a")!.payload.aps.alert).toEqual({ title: "Fix it finished", body: "blimp" });
+  expect(t.logs.join("\n")).toContain("last reply");
 });
 
 test("a phone Apple says is gone is removed", async () => {
