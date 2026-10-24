@@ -474,6 +474,14 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             archive | tail -80
+          # The export signs only the entitlements the archived app's signature lists, and an unsigned archive lists
+          # none: an ad-hoc signature with Release's (aps-environment production) carries notifications over, or the
+          # TestFlight build could never get one. Checked 2026-10-24: with it, the exported app has aps-environment.
+          app="$RUNNER_TEMP/blimp.xcarchive/Products/Applications/blimp.app"
+          ent="$RUNNER_TEMP/release.entitlements"
+          cp Blimp/Blimp.entitlements "$ent"
+          plutil -replace aps-environment -string production "$ent"
+          codesign --force --sign - --entitlements "$ent" --timestamp=none --generate-entitlement-der "$app"
       - name: Upload to TestFlight
         run: |
           set -o pipefail
