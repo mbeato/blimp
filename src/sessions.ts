@@ -285,8 +285,8 @@ function promptFor(name: string, hook: any): Prompt | undefined {
   const key = `${name}\0${hook.at}`;
   let done = screenPrompts.get(key);
   if (!done) {
-    const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore" });
-    done = withScreenOptions(p, r.stdout.toString().split("\n").slice(-40).join("\n"));
+    const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore", ...ZMX_LIMIT });
+    done = withScreenOptions(p, r.exitedDueToTimeout ? "" : r.stdout.toString().split("\n").slice(-40).join("\n"));
     if (screenPrompts.size > 200) screenPrompts.clear();
     if (done !== p || Date.now() > hook.at + 2000) screenPrompts.set(key, done);
   }
@@ -299,9 +299,9 @@ const trustScreens = new Map<string, { read: number; prompt?: Prompt }>();
 function trustFor(name: string): Prompt | undefined {
   let t = trustScreens.get(name);
   if (!t || Date.now() - t.read >= 1000) {
-    const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore" });
+    const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore", ...ZMX_LIMIT });
     if (trustScreens.size > 200) trustScreens.clear();
-    trustScreens.set(name, (t = { read: Date.now(), prompt: trustPrompt(r.stdout.toString().split("\n").slice(-60).join("\n")) }));
+    trustScreens.set(name, (t = { read: Date.now(), prompt: trustPrompt(r.exitedDueToTimeout ? "" : r.stdout.toString().split("\n").slice(-60).join("\n")) }));
   }
   return t.prompt;
 }
@@ -371,15 +371,24 @@ function runFields({ dir, ...run }: Run) {
   return { run, title: cut(run.command.split("\n")[0].trim(), 70), ...(dir && { dir }) };
 }
 
+// A zmx that hangs (a session too stuck to answer it) would hold up whatever waits for it: the session
+// list, a phone's chat, closing that chat. So list and history get 5 s, then count as a failed call:
+// no output, not a part of it (a part of the list would look like sessions that ended).
+const ZMX_LIMIT = { timeout: 5000, killSignal: "SIGKILL" } as const;
+
 function runZmxList(): string {
-  const r = Bun.spawnSync([zmxPath(), "list"], { env: zmxEnv() });
-  return r.stdout.toString();
+  const r = Bun.spawnSync([zmxPath(), "list"], { env: zmxEnv(), ...ZMX_LIMIT });
+  return r.exitedDueToTimeout ? "" : r.stdout.toString();
 }
 
 // The server's version: doesn't block terminals streaming on the same thread while zmx answers.
-export async function zmxListAsync(): Promise<string> {
-  const p = Bun.spawn([zmxPath(), "list"], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-  return await new Response(p.stdout).text();
+export const zmxListAsync = () => zmxOutput("list");
+
+export async function zmxOutput(...args: string[]): Promise<string> {
+  const p = Bun.spawn([zmxPath(), ...args], { env: zmxEnv(), stdin: "ignore", stdout: "pipe", stderr: "ignore", ...ZMX_LIMIT });
+  const out = await new Response(p.stdout).text();
+  await p.exited;
+  return p.signalCode ? "" : out;
 }
 
 // zmx lists a session it can't reach as `err=… status=unreachable`, with no pid. That's either one that

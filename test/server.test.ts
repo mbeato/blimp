@@ -600,9 +600,9 @@ describe("chat", () => {
     viewer.ws.close();
   });
 
-  test("input whose paste starts a question gets no Enter", async () => {
-    // The stand-in starts waiting as soon as it reads the paste's first line: the check before the
-    // paste passes, the one before Enter doesn't.
+  test("input's paste and its Enter go in one write: a question that starts as the paste lands can't leave it in Claude's box", async () => {
+    // The stand-in starts waiting as soon as it reads the paste's first line. The Enter came with the
+    // paste, so the whole message is sent anyway, as Claude would have taken it before asking.
     const sid = "efefefef-efef-efef-efef-efefefefefef";
     mkdirSync(join(tmp, "status"), { recursive: true });
     const status = join(tmp, "status", `${tag}-chat16.json`);
@@ -619,10 +619,9 @@ describe("chat", () => {
     await until(() => c.messages.find((m) => m.type === "history"), "history");
     c.ws.send(JSON.stringify({ type: "input", id: "e1", text: "wait-now\nrest of it" }));
     await until(() => c.messages.find((m) => m.id === "e1"), "reply");
-    expect(c.messages.find((m) => m.id === "e1")).toEqual({ type: "error", id: "e1", error: "Claude is asking something. Answer it first." });
-    await until(() => viewer.text.includes("got:~[200~wait-now"), "the paste's first line");
-    await Bun.sleep(500);
-    expect(viewer.text).not.toContain("got:rest of it"); // the paste's last line, still waiting for Enter
+    expect(c.messages.find((m) => m.id === "e1")).toEqual({ type: "ack", id: "e1" });
+    // The paste's last line, with no Enter from the viewer.
+    await until(() => viewer.text.includes("got:~[200~wait-now") && viewer.text.includes("got:rest of it~[201~"), "the whole message");
     c.ws.close();
     viewer.ws.close();
   });
