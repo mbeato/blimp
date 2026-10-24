@@ -546,7 +546,7 @@ final class BlimpUITests: XCTestCase {
 
     /// Notifications on: iOS asks once (Allow), and the phone signs up with blimpd, whose push.json then lists a
     /// development phone (no push key here, so blimpd sends nothing itself). With the app in the background, a
-    /// notification for demo-chat (signals.sh pushes it to the simulator, as Apple would) opens its chat when tapped.
+    /// notification for demo-chat (signals.sh pushes it to the simulator, as Apple would) opens its chat when tapped: the banner, or the notification in Notification Center if the banner is gone.
     /// (In shard b, after the tests that read demo-chat; it changes nothing later tests see: they launch with notifications off.)
     func testPushOpensTheChat() throws {
         try launchPaired(push: true)
@@ -557,11 +557,24 @@ final class BlimpUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.5)
         }
         XCUIDevice.shared.press(.home)
-        try signal("push-demo-chat")
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "is waiting")).firstMatch
-        try wait(banner, "the notification over the home screen", timeout: 20)
-        banner.tap()
+        try signal("push-demo-chat")
+        Thread.sleep(forTimeInterval: 2)
+        screen("41-push-sent")
+        print("SPRINGBOARD after the push:\n" + springboard.debugDescription)
+        let byLabel = NSPredicate(format: "label CONTAINS %@", "is waiting")
+        var note = springboard.descendants(matching: .any).matching(byLabel).firstMatch
+        if !note.waitForExistence(timeout: 8) {
+            // The banner is gone or out of the test's reach, and Notification Center lists it too: pull it down
+            // from the very top of the screen.
+            let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.005))
+            top.press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.6)))
+            screen("41-notification-center")
+            print("SPRINGBOARD in Notification Center:\n" + springboard.debugDescription)
+            note = springboard.descendants(matching: .any).matching(byLabel).firstMatch
+            try wait(note, "the notification in Notification Center", timeout: 10)
+        }
+        note.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the notification", timeout: 30)
         shot("42-push-opened")
     }
@@ -695,7 +708,7 @@ final class BlimpUITests: XCTestCase {
     /// iOS asks once whether blimp may send notifications.
     private func allowNotifications() {
         let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Allow"]
-        if allow.waitForExistence(timeout: 15) {
+        if allow.waitForExistence(timeout: 8) {
             screen("push-permission")
             allow.tap()
         }
