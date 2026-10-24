@@ -153,6 +153,9 @@ struct HomeView: View {
             while online < 40 {
                 if store.sessions.contains(where: { $0.name == name }) {
                     Push.shared.open = nil
+                    // Close what could cover the chat.
+                    browserTab = nil
+                    showSettings = false
                     show(.session(name))
                     return
                 }
