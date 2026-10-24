@@ -1,6 +1,8 @@
 // What a notification says (docs/superpowers/specs/2026-10-20-phone-push-design.md, section 4), as Apple's JSON: the
 // alert, the session as its thread (iOS groups them), and for the app `session`, `kind` and, for a permission, the
-// wait's `at` and the pick and label that Yes and No answer with: the first option and the last, as on the phone.
+// wait's `at` and the pick and label that Yes and No answer with: the first option, and the last one that starts
+// with "No" (else the last), as on the phone. A plan or a risky command comes without buttons: the app never answers
+// those in one tap, so a tap opens the chat, where its review and confirm apply.
 // Text goes through Apple's servers, so secrets come out first (activity.ts redact).
 
 import { basename } from "node:path";
@@ -34,7 +36,7 @@ export function plainText(md: string): string {
 }
 
 export function pushPayload(s: Shown, e: PushEvent, reply?: string): Record<string, unknown> {
-  const title = cut(s.title, 80);
+  const title = cut(redact(s.title), 80);
   const folder = basename(s.dir) || s.dir;
   const p = s.prompt;
   const aps: Record<string, unknown> = { alert: {}, sound: "default", "thread-id": s.name };
@@ -43,12 +45,14 @@ export function pushPayload(s: Shown, e: PushEvent, reply?: string): Record<stri
     const text = reply ? cut(plainText(redact(reply)), 150) : "";
     aps.alert = { title: `${title} finished`, body: text || folder };
   } else if (p?.kind === "permission" && p.options.length >= 2) {
-    const last = p.options.length - 1;
     aps.alert = { title: `${title} is waiting`, body: cut(redact(p.summary), 200) };
-    aps.category = PERMISSION_CATEGORY;
-    const yes: Choice = { pick: 0, label: p.options[0] };
-    const no: Choice = { pick: last, label: p.options[last] };
-    Object.assign(data, { at: p.at, yes, no });
+    if (p.tool !== "ExitPlanMode" && !p.risky) {
+      const no = p.options.findLastIndex((o) => o.startsWith("No"));
+      const last = no >= 0 ? no : p.options.length - 1;
+      aps.category = PERMISSION_CATEGORY;
+      const yes: Choice = { pick: 0, label: p.options[0] };
+      Object.assign(data, { at: p.at, yes, no: { pick: last, label: p.options[last] } satisfies Choice });
+    }
   } else if (p?.kind === "question" && p.questions[0]) {
     aps.alert = { title: `${title} is waiting`, body: cut(redact(p.questions[0].question), 200) };
   } else {

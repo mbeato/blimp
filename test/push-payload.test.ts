@@ -1,14 +1,15 @@
 // What a notification says (src/push/payload.ts), for each row of the spec's table.
 
 import { expect, test } from "bun:test";
+import { answerKeys, choiceLabel, promptFromHook, withScreenOptions } from "../src/prompt";
 import { PERMISSION_CATEGORY, plainText, pushPayload, type Shown } from "../src/push/payload";
 import type { PushEvent } from "../src/push/rule";
 
 const base = { name: "blimp-1", kind: "claude", state: "waiting", stateSince: 5, title: "Fix the drawer", dir: "/home/m/blimp" } as const;
 const ask: PushEvent = { kind: "ask", session: "blimp-1", key: 5 };
 const finish: PushEvent = { kind: "finish", session: "blimp-1", key: 9 };
-const permission = (options: string[]) =>
-  ({ ...base, prompt: { kind: "permission", tool: "Bash", summary: "Run bun test", options, keys: options.map((_, i) => String(i + 1)), answerable: true, at: 5 } }) as Shown;
+const permission = (options: string[], extra: object = {}) =>
+  ({ ...base, prompt: { kind: "permission", tool: "Bash", summary: "Run bun test", options, keys: options.map((_, i) => String(i + 1)), answerable: true, at: 5, ...extra } }) as Shown;
 
 test("a permission: its summary, and Yes and No as the first option and the last, with the wait's at", () => {
   expect(pushPayload(permission(["Yes", "Yes, and don't ask again for bun test", "No"]), ask)).toEqual({
@@ -21,10 +22,48 @@ test("a permission: its summary, and Yes and No as the first option and the last
   });
 });
 
-test("a plan's No is its last option, as the screen names it", () => {
-  const p = pushPayload(permission(["Yes, and auto-accept edits", "Yes, and manually approve edits", "No, keep planning"]), ask);
-  expect(p.yes).toEqual({ pick: 0, label: "Yes, and auto-accept edits" });
-  expect(p.no).toEqual({ pick: 2, label: "No, keep planning" });
+test("a plan has no buttons: the app only offers Review plan, so a tap opens the chat", () => {
+  const p = pushPayload(permission(["Yes, and auto-accept edits", "Yes, and manually approve edits", "No, keep planning"], { tool: "ExitPlanMode" }), ask);
+  expect((p.aps as any).category).toBeUndefined();
+  expect(p.yes).toBeUndefined();
+  expect(p.no).toBeUndefined();
+  expect(p.at).toBeUndefined();
+  expect((p.aps as any).alert.title).toBe("Fix the drawer is waiting");
+});
+
+test("a risky command has no buttons: the app asks again before it allows one", () => {
+  const p = pushPayload(permission(["Yes", "No"], { risky: true }), ask);
+  expect((p.aps as any).category).toBeUndefined();
+  expect(p.yes).toBeUndefined();
+  expect(p.no).toBeUndefined();
+  expect(p.at).toBeUndefined();
+  expect((p.aps as any).alert.body).toBe("Run bun test");
+});
+
+test("No is the last option that starts with No, as the app's Deny picks it; else the last option", () => {
+  const a = pushPayload(permission(["Yes", "No, and tell Claude what to do differently", "Always allow this"]), ask);
+  expect(a.no).toEqual({ pick: 1, label: "No, and tell Claude what to do differently" });
+  const b = pushPayload(permission(["Yes", "Allow once", "Cancel"]), ask);
+  expect(b.no).toEqual({ pick: 2, label: "Cancel" });
+});
+
+test("a title holding a secret comes out without it", () => {
+  const s = { ...permission(["Yes", "No"]), title: "deploy with GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123" } as Shown;
+  expect(JSON.stringify(pushPayload(s, ask))).not.toContain("ghp_");
+  expect(JSON.stringify(pushPayload({ ...s, state: "done" } as Shown, finish, "ok"))).not.toContain("ghp_");
+});
+
+// What the notification sends is what blimpd accepts (src/prompt.ts): the picks, the labels and the keys agree.
+test("Yes and No answer the same way on the hook's prompt and on the screen's", () => {
+  const hook = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "bun test" }, cwd: "/w" })!;
+  const screen = "Do you want to proceed?\n\u276f 1. Yes\n  2. Yes, and don't ask again for bun test commands in /w\n  3. No, and tell Claude what to do differently (esc)";
+  for (const prompt of [hook, withScreenOptions(hook, screen)]) {
+    const p = pushPayload({ ...base, prompt: { ...prompt, at: 5 } } as Shown, ask) as any;
+    expect(choiceLabel(prompt, p.yes.pick)).toBe(p.yes.label);
+    expect(choiceLabel(prompt, p.no.pick)).toBe(p.no.label);
+    expect(answerKeys(prompt, p.yes.pick)).toBe("1");
+    expect(answerKeys(prompt, p.no.pick)).toMatch(/^[1-9]$|^\x1b$/);
+  }
 });
 
 test("a question: its first question, no buttons", () => {
