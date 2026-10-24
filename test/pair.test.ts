@@ -92,15 +92,17 @@ describe("blimpd pair", () => {
     expect(existsSync(join(dir, "phone-token"))).toBe(false);
   });
 
-  test("--revoke deletes the phone token and leaves the Mac's", () => {
+  test("--revoke deletes the phone token, and the phones that get notifications, and leaves the Mac's token", () => {
     const dir = join(tmp, "f");
     mkdirSync(dir);
     writeFileSync(join(dir, "token"), "mac");
     expect(pair(dir, ["--url", "https://x.ts.net"]).code).toBe(0);
+    writeFileSync(join(dir, "push.json"), JSON.stringify({ devices: [{ token: "a".repeat(64), env: "production", at: 1 }] }));
     const r = pair(dir, ["--revoke"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("Phone token deleted");
     expect(existsSync(join(dir, "phone-token"))).toBe(false);
+    expect(existsSync(join(dir, "push.json"))).toBe(false);
     expect(readFileSync(join(dir, "token"), "utf8")).toBe("mac");
     expect(pair(dir, ["--revoke"]).out).toContain("There was no phone token.");
   });

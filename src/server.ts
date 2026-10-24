@@ -21,6 +21,8 @@ import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
+import { addDevice, isDeviceToken, isPushEnv, removeDevice } from "./push/store";
+import { startPush } from "./push/watch";
 import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
@@ -248,6 +250,16 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     return Response.json({ id });
   }
 
+  // Phone notifications (push/): a phone asks for them with its device token, and says when it stops.
+  if (path === "/push/device" && (req.method === "POST" || req.method === "DELETE")) {
+    const { token: device, env } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (!isDeviceToken(device)) throw new HttpError(400, "token must be the phone's device token, in hex");
+    if (req.method === "DELETE") removeDevice(device);
+    else if (isPushEnv(env)) addDevice(device, env);
+    else throw new HttpError(400, 'env must be "development" or "production"');
+    return new Response(null, { status: 204 });
+  }
+
   if (path === "/events" && get) {
     if (upgrade(eventsData())) return;
     throw new HttpError(400, "expected a WebSocket");
@@ -447,6 +459,7 @@ export function serve(): Server {
   startNotes(); // the same switch
   startDigests(); // and again
   startHandoffs();
+  startPush(); // phone notifications: nothing runs until there's a push key and a phone that asked (push/watch.ts)
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

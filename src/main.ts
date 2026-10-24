@@ -7,6 +7,8 @@
 //   blimpd hook [codex]        what those hooks run (reads Claude's or Codex's hook JSON on stdin)
 //   blimpd pair [--url <url>]  make the phone's token and show the link for the iPhone app as a QR code
 //   blimpd pair --revoke       delete the phone's token (the Mac keeps working)
+//   blimpd push-key <file.p8> --key-id <id> --team-id <id>  the push key from Apple, for the phone's notifications
+//   blimpd push-test           a test notification to every phone that asked for them
 //   blimpd browser             which Chrome the server browser runs, if any
 //   blimpd browser-mcp         the browser MCP a session runs (browser/mcp.ts)
 //   blimpd send <session> <message>  type a message into another session's Claude (send.ts)
@@ -19,6 +21,7 @@ import { findChrome } from "./browser/chrome";
 import { runBrowserMcp } from "./browser/mcp";
 import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
 import { runPair } from "./pair";
+import { runPushKey, runPushTest } from "./push/cli";
 import { runSend } from "./send";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
@@ -73,6 +76,10 @@ if (cmd === "sessions") {
   await runHook(args[0] === "codex");
 } else if (cmd === "pair") {
   process.exit(runPair(args));
+} else if (cmd === "push-key") {
+  process.exit(runPushKey(args));
+} else if (cmd === "push-test") {
+  process.exit(await runPushTest());
 } else if (cmd === "browser") {
   console.log(findChrome() ?? "no Chrome or Chromium found; install one: npx playwright install chromium");
 } else if (cmd === "browser-mcp") {
@@ -82,6 +89,6 @@ if (cmd === "sessions") {
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | browser | browser-mcp | send <session> <message> | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | --version");
   process.exit(cmd ? 1 : 0);
 }

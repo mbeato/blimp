@@ -2162,3 +2162,19 @@ describe("hidden folders", () => {
     expect((await api("/folders/hidden", { method: "POST", body: JSON.stringify({ dir }) })).status).toBe(400);
   }, 15000);
 });
+
+describe("push", () => {
+  test("a phone asks for notifications with its device token, at most 5 are kept, and it can stop", async () => {
+    const device = (token: unknown, env: unknown = "production", method = "POST") => api("/push/device", { method, body: JSON.stringify({ token, env }) });
+    const stored = () => JSON.parse(readFileSync(join(tmp, "push.json"), "utf8")).devices.map((d: { token: string }) => d.token[0]);
+    expect((await device("a".repeat(64))).status).toBe(204);
+    expect(statSync(join(tmp, "push.json")).mode & 0o777).toBe(0o600);
+    for (const c of "bcdef") await device(c.repeat(64), "development");
+    expect(stored()).toEqual(["f", "e", "d", "c", "b"]);
+    expect((await device("f".repeat(64), undefined, "DELETE")).status).toBe(204);
+    expect(stored()).toEqual(["e", "d", "c", "b"]);
+    expect((await device("xyz")).status).toBe(400);
+    expect((await device("a".repeat(64), "staging")).status).toBe(400);
+    expect((await api("/push/device", { method: "POST", body: "null" })).status).toBe(400);
+  });
+});

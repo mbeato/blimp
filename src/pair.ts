@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { clearDevices, devicesFile } from "./push/store";
 import { readPhoneToken } from "./server";
 import { blimpDir } from "./sessions";
 import { qrcodegen } from "./vendor/qrcodegen";
@@ -68,7 +69,8 @@ export function runPair(args: string[], dir = blimpDir()): number {
   if (args.length === 1 && args[0] === "--revoke") {
     const had = !!readPhoneToken(dir);
     rmSync(join(dir, "phone-token"), { force: true });
-    console.log(had ? "Phone token deleted. The phone can't connect any more; the Mac still can." : "There was no phone token.");
+    clearDevices(devicesFile(dir));
+    console.log(had ? "Phone token deleted. The phone can't connect or get notifications any more; the Mac still can." : "There was no phone token.");
     return 0;
   }
   let url: string | undefined;

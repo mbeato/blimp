@@ -209,7 +209,7 @@ What a Claude session is doing besides talking, read from its transcript (`src/a
 - `{ "type": "browser", "tabs": BrowserTab[] }`: the server browser's tabs (see Server browser), sent on connect and when they change.
 - `{ "type": "fs", "paths": string[] }`: watched paths that changed (debounced 150 ms).
 
-Client → server: `{ "type": "watch", "paths": string[] }` replaces this socket's watch set. Each path is watched non-recursively (a folder: its direct entries; a file: its content). The app sends the expanded folders of the tree plus the open files. Paths outside home are ignored.
+Client → server: `{ "type": "watch", "paths": string[] }` replaces this socket's watch set. Each path is watched non-recursively (a folder: its direct entries; a file: its content). The app sends the expanded folders of the tree plus the open files. Paths outside home are ignored. `{ "type": "active" }`: a blimp window is in front on the Mac (sent at most every 30 s), so the phone's notifications wait (see Push).
 
 ### Chat
 
@@ -332,6 +332,16 @@ A paragraph on where each project's work stands (`src/digests.ts`), with the sam
 - **The answer:** one paragraph, 2 to 4 sentences, at most 600 characters, no lists or control characters. Each session it mentions is a link, `[a few words](n)`, n its number; a number it doesn't have, or a square bracket outside a link, is a failed try. A single line break is a space.
 - **Where:** `<socket dir>/digests.json`, `{ [folder]: { text, sessions, at, key } }` (`sessions`: the names its links point at, link n at `sessions[n - 1]`; `key`: what it was written from), through a temp file and a rename, 600, the 200 newest kept. The events socket's `sessions` message carries `digests: { [folder]: { text, sessions, at } }` for the folders with sessions running; blimpd still sends it with the list, and no app shows it.
 - **Off:** with names (`{ "names": false }`): nothing is called and no paragraphs are sent.
+
+### Push
+
+Notifications on Max's phone when a session waits on him or a Claude turn ends, with both apps closed (`src/push/`, design in `docs/superpowers/specs/2026-10-20-phone-push-design.md`). blimpd sends straight to Apple with Max's own push key: no relay.
+
+- **Setup:** `blimpd push-key <file.p8> --key-id <id> --team-id <id>` copies the key from Apple's developer site to `<socket dir>/apns.p8` and the ids to `apns.json` (both 600). No file route serves the key. `blimpd push-test` sends "blimp can reach this phone" to every phone and prints Apple's answer for each. Without a key, blimpd sends nothing, and says so once in its log when a phone has asked for a push.
+- **Phones:** `POST /push/device { "token": hex, "env": "development" | "production" }` → 204 adds one (`<socket dir>/push.json`, 600, at most 5, newest kept); `DELETE /push/device { "token" }` → 204 removes it; 400 for a token that isn't hex or another env. Apple's 410, `BadDeviceToken` or `Unregistered` removes a phone. `blimpd pair --revoke` removes them all.
+- **When:** a watcher checks the session list every 1 s, always, once there's a key and a phone. A wait is told once it has lasted 3 s (a permission's options are read from the screen up to 2 s after it starts, and Yes and No need the final ones), once per `prompt.at` (or `stateSince` without a prompt). A Claude turn of 30 s or more is told when it ends (`working` to `done`; the turn's waits count). The list found first counts as seen, so a restart tells nothing again. While the Mac sent `active` in the last 2 minutes, a notification waits until 2 minutes after it, then goes only if the session still shows the same wait or the same finish. Codex and shell sessions: waits only.
+- **What:** title "<session title> is waiting" or "… finished". A permission: its summary, category `permission` (the app's Yes and No), and `at`, `yes: { pick, label }` (the first option), `no: { pick, label }` (the last option whose label starts with "No", else the last). A plan and a risky command come without buttons (no category, no `at`, `yes`, `no`): a tap opens the chat, where the app's review and confirm apply. A question: its first question. Another wait: the folder's name. A finish: the last reply as plain text, 150 characters at most. Secrets come out of all text. `apns-collapse-id` and `thread-id` are the session's name, so a newer one replaces the older.
+- **Sending:** one HTTP/2 connection per Apple service, kept while it works; a JWT (ES256, `iss` Team ID, `kid` Key ID) made again every 40 minutes; `apns-topic: dev.blimp.phone`. A failed send is logged with Apple's reason and not retried, except once on a fresh connection after a dropped one.
 
 ### Hooks (status backup)
 
