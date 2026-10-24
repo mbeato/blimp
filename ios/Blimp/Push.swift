@@ -71,8 +71,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         []
     }
 
-    /// A tap: that session's chat, behind the lock as at any launch.
+    /// A tap (the notification itself, not one of its buttons): that session's chat, behind the lock as at any launch.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
         guard let note = PushNote(response.notification.request.content.userInfo) else { return }
         await MainActor.run { Push.shared.open = note.session }
     }
