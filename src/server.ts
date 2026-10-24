@@ -13,7 +13,7 @@ import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGa
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, deleteEntry, download, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, renameEntry, upload, writeFile } from "./files";
-import { conversations, projectFolderName, recentFolders, resumedKind } from "./folders";
+import { conversations, projectFolderName, recentFolders, resumedKind, tempRoots } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { askHandoff, startHandoffs } from "./handoff";
 import { readHidden, setHidden } from "./hidden";
@@ -134,8 +134,11 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     // Claude's first message, as an argument after "--", so one that starts with "-" isn't taken for an option.
     if (typeof prompt === "string") run.args.push("--", cleanText(prompt));
     const started = await startSession(real, { name: name || undefined, kind: k, run });
-    // A session started in a hidden project shows it again: you went back to it.
-    for (const d of new Set([dir, real])) setHidden(d, false);
+    // A session started in a hidden project shows it again: you went back to it. The session runs either way,
+    // so a failed write mustn't answer 500 and get the start retried.
+    try {
+      for (const d of new Set([dir, real])) setHidden(d, false);
+    } catch {}
     return Response.json({ name: started }, { status: 201 });
   }
 
@@ -279,15 +282,12 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   }
 
   if (path === "/ports" && get) return Response.json(await sessionPorts(parseZmxList(await zmxListAsync())));
-  if (path === "/folders/recent" && get) {
-    const hidden = new Set(readHidden());
-    return Response.json(recentFolders().filter((f) => !hidden.has(f.dir)));
-  }
+  if (path === "/folders/recent" && get) return Response.json(recentFolders(claudeDir(), tempRoots(), new Set(readHidden())));
   // The projects you hid from the phone's strip; POST { dir, hidden } hides one or shows it again.
   if (path === "/folders/hidden" && get) return Response.json(readHidden());
   if (path === "/folders/hidden" && req.method === "POST") {
     const { dir, hidden } = ((await req.json()) ?? {}) as Record<string, unknown>;
-    if (typeof dir !== "string" || !dir) throw new HttpError(400, "dir is required");
+    if (typeof dir !== "string" || !dir.startsWith("/")) throw new HttpError(400, "dir must be a folder's full path");
     if (typeof hidden !== "boolean") throw new HttpError(400, "hidden must be true or false");
     return Response.json(setHidden(dir, hidden));
   }

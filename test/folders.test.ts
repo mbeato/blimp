@@ -48,6 +48,10 @@ test("recentFolders: none in or under a temporary folder", () => {
   expect(tempRoots()).toContain("/tmp");
 });
 
+test("recentFolders: none you hid, left out before the list is cut to 30", () => {
+  expect(recentFolders(claude, [], new Set([web]))).toEqual([{ dir: api, lastUsed: 2_000_000 }]);
+});
+
 test("conversations: the folder's transcripts, newest first, with titles", () => {
   expect(conversations(web, claude)).toEqual([
     { sessionId: "22222222-2222-2222-2222-222222222222", title: "Web v2", updatedAt: 3_000_000, unread: false },

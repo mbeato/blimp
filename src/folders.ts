@@ -80,7 +80,8 @@ export function tempRoots(): string[] {
 
 const under = (d: string, root: string) => d === root || d.startsWith(root.endsWith("/") ? root : root + "/");
 
-export function recentFolders(dir = claudeDir(), temp = tempRoots()): { dir: string; lastUsed: number }[] {
+// hidden: the projects you hid from the phone's strip (hidden.ts), left out before the list is cut to 30.
+export function recentFolders(dir = claudeDir(), temp = tempRoots(), hidden = new Set<string>()): { dir: string; lastUsed: number }[] {
   const projects = join(dir, "projects");
   let folders: string[];
   try {
@@ -96,7 +97,7 @@ export function recentFolders(dir = claudeDir(), temp = tempRoots()): { dir: str
     try {
       cwd = firstCwd(newest.file);
     } catch {}
-    if (!cwd || !existsSync(cwd) || temp.some((t) => under(cwd!, t))) continue;
+    if (!cwd || hidden.has(cwd) || !existsSync(cwd) || temp.some((t) => under(cwd!, t))) continue;
     seen.set(cwd, Math.max(seen.get(cwd) ?? 0, newest.mtime));
   }
   return [...seen]
