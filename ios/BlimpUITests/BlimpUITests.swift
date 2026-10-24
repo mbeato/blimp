@@ -547,7 +547,7 @@ final class BlimpUITests: XCTestCase {
     /// Notifications on: iOS asks once (Allow), and the phone signs up with blimpd, whose push.json then lists a
     /// development phone (no push key here, so blimpd sends nothing itself). With the app in the background, a
     /// notification for demo-chat (signals.sh pushes it to the simulator, as Apple would) opens its chat when tapped.
-    /// (Last in shard b, after the tests that read demo-chat.)
+    /// (In shard b, after the tests that read demo-chat; it changes nothing later tests see: they launch with notifications off.)
     func testPushOpensTheChat() throws {
         try launchPaired(push: true)
         allowNotifications()
@@ -561,7 +561,6 @@ final class BlimpUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "is waiting")).firstMatch
         try wait(banner, "the notification over the home screen", timeout: 20)
-        screen("41-push-banner")
         banner.tap()
         try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the notification", timeout: 30)
         shot("42-push-opened")

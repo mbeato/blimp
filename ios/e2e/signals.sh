@@ -20,7 +20,7 @@ while :; do
         xcrun simctl spawn "$SIM" notifyutil -s com.apple.BiometricKit.enrollmentChanged 1
         xcrun simctl spawn "$SIM" notifyutil -p com.apple.BiometricKit.enrollmentChanged ;;
       faceid-match) xcrun simctl spawn "$SIM" notifyutil -p com.apple.BiometricKit_Sim.pearl.match ;;
-      push-*) xcrun simctl push "$SIM" dev.blimp.phone "$here/$name.json" ;;
+      push-*) xcrun simctl push "$SIM" dev.blimp.phone "$here/$name.json" || echo "push $name failed" ;;
       *) echo "unknown signal $name" ;;
     esac
     echo "$(date -u +%T) done: $name"
