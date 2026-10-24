@@ -33,6 +33,8 @@ struct HomeView: View {
     /// Where the chat's sideways scrollers are, so a swipe that starts in one scrolls it and pulls no drawer.
     @State private var sideScrollers = SideScrollers()
     @State private var folders: [RecentFolder] = []
+    /// The projects hidden from the strip (blimpd keeps the list), fetched again as the drawer opens.
+    @State private var hidden: Set<String> = []
     /// Each project's past conversations, kept while another one shows, and fetched again as below.
     @State private var earlierBy: [String: [Conversation]] = [:]
     @State private var showSettings = false
@@ -67,7 +69,7 @@ struct HomeView: View {
         // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. While
         // the drawer is open this does nothing: a swipe on it closes it (DrawerView). Nor does one that starts in
         // something that scrolls sideways (a code box, the reply chips): it scrolls that instead, as this runs
-        // while a scroll view in the chat scrolls too.
+        // while a scroll view in the chat scrolls too. The keyboard goes as the drawer starts to come out.
         .simultaneousGesture(
             DragGesture(minimumDistance: 10, coordinateSpace: .global)
                 .onChanged { v in
@@ -75,6 +77,7 @@ struct HomeView: View {
                     if pulling == nil {
                         let free = !sideScrollers.contain(v.startLocation)
                         pulling = free && v.translation.width > 0 && abs(v.translation.width) > abs(v.translation.height) * 1.5
+                        if pulling == true { hideKeyboard() }
                     }
                     if pulling == true { pull = max(0, v.translation.width) }
                 }
@@ -89,7 +92,8 @@ struct HomeView: View {
                 }
         )
         .overlay {
-            DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, rows: rows, selected: selected,
+            DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, onHide: hideProject,
+                       rows: rows, selected: selected,
                        onPick: pick, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },
                        actions: actions, onOpen: { show(.session($0)) },
@@ -112,7 +116,15 @@ struct HomeView: View {
         .task(id: store.connection == .online) {
             guard let api = store.api else { return }
             folders = (try? await api.folders()) ?? []
+            hidden = Set((try? await api.hiddenFolders()) ?? [])
             if store.dir == nil { store.dir = projects.first?.dir }
+        }
+        // The drawer opens: the keyboard goes (☰ on the inbox), and the hidden projects are fetched again, as a
+        // session started on the Mac shows one again.
+        .onChange(of: drawer) { _, open in if open { hideKeyboard() } }
+        .task(id: drawer) {
+            guard drawer, let api = store.api, let list = try? await api.hiddenFolders() else { return }
+            hidden = Set(list)
         }
         // The project's past conversations: again when the drawer or the inbox opens, as its sessions start and end,
         // and after a Mark read here. The ones kept meanwhile show, so the drawer's rows are there as it opens.
@@ -238,7 +250,7 @@ struct HomeView: View {
         }
     }
 
-    private var projects: [ProjectChoice] { Drawer.projects(sessions: store.sessions, recent: folders) }
+    private var projects: [ProjectChoice] { Drawer.projects(sessions: store.sessions, recent: folders, hidden: hidden) }
 
     private var earlier: [Conversation] { store.dir.flatMap { earlierBy[$0] } ?? [] }
 
@@ -306,6 +318,29 @@ struct HomeView: View {
     private func pickProject(_ dir: String) {
         store.dir = dir
         opened = .inbox
+    }
+
+    /// Hide on a strip icon: it leaves the strip at once, and blimpd keeps the list (so the Mac's recent folders
+    /// leave it out too). Hiding the project on screen shows the next one's inbox. If blimpd refuses, it comes back.
+    private func hideProject(_ dir: String) {
+        hidden.insert(dir)
+        if store.dir == dir {
+            store.dir = projects.first?.dir
+            opened = .inbox
+        }
+        Task {
+            guard let api = store.api else { return }
+            do {
+                hidden = Set(try await api.setHidden(dir: dir, hidden: true))
+            } catch {
+                hidden.remove(dir)
+                actions.failure = Store.words(for: error)
+            }
+        }
+    }
+
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     /// A session from another project (a banner's) brings its project along. Opening one

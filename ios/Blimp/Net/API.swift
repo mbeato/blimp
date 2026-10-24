@@ -22,6 +22,17 @@ struct API {
         try await decode(call("GET", "/folders/recent"))
     }
 
+    /// The projects hidden from the strip, by folder.
+    func hiddenFolders() async throws -> [String] {
+        try await decode(call("GET", "/folders/hidden"))
+    }
+
+    /// Hides a project from the strip, or shows it again; the folders hidden now.
+    func setHidden(dir: String, hidden: Bool) async throws -> [String] {
+        struct Body: Encodable { let dir: String; let hidden: Bool }
+        return try await decode(call("POST", "/folders/hidden", body: JSONEncoder().encode(Body(dir: dir, hidden: hidden))))
+    }
+
     func conversations(dir: String) async throws -> [Conversation] {
         try await decode(call("GET", "/conversations", query: [URLQueryItem(name: "dir", value: dir)]))
     }

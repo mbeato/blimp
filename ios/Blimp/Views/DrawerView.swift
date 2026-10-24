@@ -1,13 +1,13 @@
-// The drawer from the left: a strip of the projects down its left side (two letters each, with the mark of the
-// session there that needs you most; a tap shows that project's inbox behind the drawer and its sessions in it,
-// and the drawer stays open; Settings at its foot), and beside it the project's name with + (New session: the
-// inbox's box, ready to type into), its running sessions, the project's browser tabs (a dot on ones a session
-// opened; a tap opens one full screen, New Tab opens one, a swipe right closes one), then its past conversations
-// folded under Earlier (each newest activity first, with its mark, and under its title its branch, jobs and
-// handoff). A tap opens one; a swipe right on a row or press and hold has its actions (Stop, Mark read, End;
-// Resume a past one). It follows the finger: a swipe right in the chat pulls it out (HomeView's `pull`), a swipe
-// left on it or beside it pushes it back, and letting go settles it open or closed by where it is and how fast
-// it went. A tap beside it closes it too.
+// The drawer from the left: the project's name with + (New session: the inbox's box, ready to type into), its
+// running sessions, the project's browser tabs (a dot on ones a session opened; a tap opens one full screen, New
+// Tab opens one, a swipe right closes one), then its past conversations folded under Earlier (each newest activity
+// first, with its mark, and under its title its branch, jobs and handoff). A tap opens one; a swipe right on a row
+// or press and hold has its actions (Stop, Mark read, End; Resume a past one). Along the bottom, the projects in a
+// row that scrolls sideways (two letters each, with the mark of the session there that needs you most; a tap shows
+// that project's inbox behind the drawer and its sessions in it, and the drawer stays open; press and hold one to
+// hide it), and Settings at its right end. It follows the finger: a swipe right in the chat pulls it out
+// (HomeView's `pull`), a swipe left on it or beside it pushes it back (not one in the project row, which scrolls
+// it), and letting go settles it open or closed by where it is and how fast it went. A tap beside it closes it too.
 import BlimpKit
 import SwiftUI
 
@@ -20,6 +20,8 @@ struct DrawerView: View {
     let projects: [ProjectChoice]
     /// Shows a project's inbox behind the drawer, which stays open with its sessions.
     let onProject: (String) -> Void
+    /// Hides a project from the strip (press and hold its icon).
+    let onHide: (String) -> Void
     let rows: [DrawerRow]
     /// The row of what the chat shows.
     let selected: String?
@@ -44,6 +46,9 @@ struct DrawerView: View {
     @State private var sideways: Bool?
     /// The strip's order, read as the drawer comes out (Strip.held), so an icon never moves under a finger.
     @State private var order: [String] = []
+    /// Where the project row is on screen, so a sideways swipe that starts in it scrolls it instead of closing
+    /// the drawer.
+    @State private var stripFrame: CGRect = .zero
 
     var body: some View {
         GeometryReader { geo in
@@ -75,9 +80,11 @@ struct DrawerView: View {
     }
 
     private func closing(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10)
+        DragGesture(minimumDistance: 10, coordinateSpace: .global)
             .onChanged { v in
-                if sideways == nil { sideways = abs(v.translation.width) > abs(v.translation.height) }
+                if sideways == nil {
+                    sideways = abs(v.translation.width) > abs(v.translation.height) && !stripFrame.contains(v.startLocation)
+                }
                 if sideways == true { push = min(0, v.translation.width) }
             }
             .onEnded { v in
@@ -93,9 +100,7 @@ struct DrawerView: View {
     }
 
     private var panel: some View {
-        HStack(spacing: 0) {
-            strip
-            Divider()
+        VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 header.padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
                 List {
@@ -135,30 +140,35 @@ struct DrawerView: View {
                 }
                 .listStyle(.plain)
             }
+            Divider()
+            strip
         }
         .onAppear { order = projects.map(\.dir) }
         .accessibilityAddTraits(.isModal)
     }
 
-    /// The projects, two letters each with their mark, the one shown lit; Settings at the foot.
+    /// The projects in a row along the bottom, two letters each with their mark, the one shown lit; the row
+    /// scrolls sideways when they don't all fit. Settings stays at its right end.
     private var strip: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(spacing: 10) {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 10) {
                     ForEach(Strip.held(projects, order: order)) { stripIcon($0) }
                 }
-                .padding(.vertical, 12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
             .scrollIndicators(.hidden)
+            Divider().frame(height: 32)
             Button(action: onSettings) {
                 Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44)
             }
             .foregroundStyle(.secondary)
             .accessibilityLabel("Settings")
             .accessibilityIdentifier("settingsButton")
-            .padding(.bottom, 8)
+            .padding(.horizontal, 4)
         }
-        .frame(width: 60)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { stripFrame = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("drawerStrip")
     }
@@ -176,6 +186,9 @@ struct DrawerView: View {
         .accessibilityLabel(Self.label(p))
         .accessibilityAddTraits(p.dir == dir ? .isSelected : [])
         .accessibilityIdentifier("strip-" + p.name)
+        .contextMenu {
+            Button("Hide \(p.name)", systemImage: "eye.slash") { onHide(p.dir) }
+        }
     }
 
     /// "blimp, asking you something", "mbeato, new reply", "api-server".

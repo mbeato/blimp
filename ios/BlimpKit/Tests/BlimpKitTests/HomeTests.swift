@@ -47,6 +47,13 @@ func conversation(_ id: String, updated: Double, unread: Bool? = nil) -> Convers
     #expect(Drawer.name(of: "/") == "/")
 }
 
+@Test func aHiddenProjectLeavesTheStripEvenWithSessionsRunningThere() {
+    let sessions = [session("a1", dir: "/h/alpha", created: 1, updated: 5_000), session("b1", dir: "/h/beta", created: 3, updated: 2_000)]
+    let recent = [RecentFolder(dir: "/h/gamma", lastUsed: 4_000)]
+    #expect(Drawer.projects(sessions: sessions, recent: recent, hidden: ["/h/alpha", "/h/gamma"]).map(\.name) == ["beta"])
+    #expect(Drawer.projects(sessions: sessions, recent: recent, hidden: []).map(\.name) == ["alpha", "gamma", "beta"])
+}
+
 @Test func drawerButtonShowsWhatNeedsYouOutsideTheChatOnScreen() {
     let sessions = [
         session("a1", dir: "/h/alpha", created: 1, state: .waiting),

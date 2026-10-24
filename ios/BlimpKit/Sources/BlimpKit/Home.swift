@@ -58,8 +58,8 @@ public enum Drawer {
     }
 
     /// The strip's projects: folders with sessions running and recent folders, newest activity first, each with
-    /// the top mark of its sessions.
-    public static func projects(sessions: [Session], recent: [RecentFolder]) -> [ProjectChoice] {
+    /// the top mark of its sessions. A hidden one is left out, even with sessions running there.
+    public static func projects(sessions: [Session], recent: [RecentFolder], hidden: Set<String> = []) -> [ProjectChoice] {
         let running = Dictionary(grouping: sessions, by: \.dir).map { dir, list in
             ProjectChoice(dir: dir, name: name(of: dir), mark: Mark.top(list.map(\.mark)), activity: list.map(\.activity).max() ?? 0)
         }
@@ -67,7 +67,8 @@ public enum Drawer {
         let idle = recent.filter { !dirs.contains($0.dir) }.map {
             ProjectChoice(dir: $0.dir, name: name(of: $0.dir), mark: .none, activity: $0.lastUsed)
         }
-        return (running + idle).sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.dir < $1.dir }
+        return (running + idle).filter { !hidden.contains($0.dir) }
+            .sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.dir < $1.dir }
     }
 
     /// The top-left button's mark: the top one of every session but the one on screen.
