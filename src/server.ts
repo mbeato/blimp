@@ -16,6 +16,7 @@ import { createFile, deleteEntry, download, guard, guardEntry, guardFile, guardL
 import { conversations, projectFolderName, recentFolders, resumedKind } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { askHandoff, startHandoffs } from "./handoff";
+import { readHidden, setHidden } from "./hidden";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
@@ -132,7 +133,10 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const run = await launchFor(k, resume);
     // Claude's first message, as an argument after "--", so one that starts with "-" isn't taken for an option.
     if (typeof prompt === "string") run.args.push("--", cleanText(prompt));
-    return Response.json({ name: await startSession(real, { name: name || undefined, kind: k, run }) }, { status: 201 });
+    const started = await startSession(real, { name: name || undefined, kind: k, run });
+    // A session started in a hidden project shows it again: you went back to it.
+    for (const d of new Set([dir, real])) setHidden(d, false);
+    return Response.json({ name: started }, { status: 201 });
   }
 
   // Run a command Claude handed over, in a session of its own beside Claude's; then its result back to Claude.
@@ -275,7 +279,18 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   }
 
   if (path === "/ports" && get) return Response.json(await sessionPorts(parseZmxList(await zmxListAsync())));
-  if (path === "/folders/recent" && get) return Response.json(recentFolders());
+  if (path === "/folders/recent" && get) {
+    const hidden = new Set(readHidden());
+    return Response.json(recentFolders().filter((f) => !hidden.has(f.dir)));
+  }
+  // The projects you hid from the phone's strip; POST { dir, hidden } hides one or shows it again.
+  if (path === "/folders/hidden" && get) return Response.json(readHidden());
+  if (path === "/folders/hidden" && req.method === "POST") {
+    const { dir, hidden } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (typeof dir !== "string" || !dir) throw new HttpError(400, "dir is required");
+    if (typeof hidden !== "boolean") throw new HttpError(400, "hidden must be true or false");
+    return Response.json(setHidden(dir, hidden));
+  }
   if (path === "/conversations" && get) {
     const dir = q.get("dir");
     if (!dir) throw new HttpError(400, "dir is required");

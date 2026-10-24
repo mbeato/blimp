@@ -1,7 +1,9 @@
-// For "New session in…": the folders Claude was used in, and the conversations /resume would offer there.
+// For "New session in…": the folders Claude was used in (not scratch ones in a temporary folder), and the
+// conversations /resume would offer there.
 // Both read Claude's transcript folders, <claude dir>/projects/<folder name>/<sessionId>.jsonl.
 
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { shownNames } from "./names";
@@ -65,7 +67,20 @@ export function firstCwd(file: string, maxLines = 50): string | undefined {
   });
 }
 
-export function recentFolders(dir = claudeDir()): { dir: string; lastUsed: number }[] {
+// The system's temporary folders: a folder in one is scratch (a test's, a helper agent's), not a project.
+export function tempRoots(): string[] {
+  const roots = new Set(["/tmp", tmpdir()]);
+  for (const r of [...roots]) {
+    try {
+      roots.add(realpathSync(r));
+    } catch {}
+  }
+  return [...roots];
+}
+
+const under = (d: string, root: string) => d === root || d.startsWith(root.endsWith("/") ? root : root + "/");
+
+export function recentFolders(dir = claudeDir(), temp = tempRoots()): { dir: string; lastUsed: number }[] {
   const projects = join(dir, "projects");
   let folders: string[];
   try {
@@ -81,7 +96,7 @@ export function recentFolders(dir = claudeDir()): { dir: string; lastUsed: numbe
     try {
       cwd = firstCwd(newest.file);
     } catch {}
-    if (!cwd || !existsSync(cwd)) continue;
+    if (!cwd || !existsSync(cwd) || temp.some((t) => under(cwd!, t))) continue;
     seen.set(cwd, Math.max(seen.get(cwd) ?? 0, newest.mtime));
   }
   return [...seen]

@@ -2134,3 +2134,32 @@ describe("secrets", () => {
     }
   }, 20000);
 });
+
+describe("hidden folders", () => {
+  test("a hidden folder leaves the recent folders, shown again it comes back, and starting a session in one shows it", async () => {
+    const dir = join(homeDir, `${tag}-hide`);
+    mkdirSync(dir, { recursive: true });
+    // Claude was used there: a transcript whose cwd is the folder makes it a recent folder.
+    const folder = join(tmp, "claude", "projects", dir.replace(/[^A-Za-z0-9]/g, "-"));
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "55555555-5555-5555-5555-555555555555.jsonl"), JSON.stringify({ type: "user", cwd: dir }) + "\n");
+    const recent = async () => ((await (await api("/folders/recent")).json()) as { dir: string }[]).map((f) => f.dir);
+    const hide = (hidden: boolean, d: unknown = dir) => api("/folders/hidden", { method: "POST", body: JSON.stringify({ dir: d, hidden }) });
+
+    expect(await recent()).toContain(dir);
+    expect(await (await hide(true)).json()).toEqual([dir]);
+    expect(await (await api("/folders/hidden")).json()).toEqual([dir]);
+    expect(await recent()).not.toContain(dir);
+    expect(await (await hide(false)).json()).toEqual([]);
+    expect(await recent()).toContain(dir);
+
+    await hide(true);
+    const r = await api("/sessions", { method: "POST", body: JSON.stringify({ dir, name: "unhide" }) });
+    expect(r.status).toBe(201);
+    made.push((await r.json()).name);
+    expect(await (await api("/folders/hidden")).json()).toEqual([]);
+
+    expect((await hide(true, 5)).status).toBe(400);
+    expect((await api("/folders/hidden", { method: "POST", body: JSON.stringify({ dir }) })).status).toBe(400);
+  }, 15000);
+});

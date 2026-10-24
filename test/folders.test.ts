@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { conversations, firstCwd, projectFolderName, recentFolders, resumedKind } from "../src/folders";
+import { conversations, firstCwd, projectFolderName, recentFolders, resumedKind, tempRoots } from "../src/folders";
 
 // A temp CLAUDE_CONFIG_DIR with three project folders, plus the work folders they point at.
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-folders-")));
@@ -32,10 +32,20 @@ test("projectFolderName turns every non-alphanumeric char into -", () => {
 });
 
 test("recentFolders: newest first, only folders that still exist", () => {
-  expect(recentFolders(claude)).toEqual([
+  // These folders are in the system's temporary folder, which recentFolders leaves out by default.
+  expect(recentFolders(claude, [])).toEqual([
     { dir: web, lastUsed: 3_000_000 },
     { dir: api, lastUsed: 2_000_000 },
   ]);
+});
+
+test("recentFolders: none in or under a temporary folder", () => {
+  expect(recentFolders(claude, [api])).toEqual([{ dir: web, lastUsed: 3_000_000 }]);
+  expect(recentFolders(claude, [join(root, "work")])).toEqual([]);
+  // A folder whose name only starts the same isn't under it.
+  expect(recentFolders(claude, [join(root, "work", "ap")]).map((f) => f.dir)).toEqual([web, api]);
+  expect(recentFolders(claude).map((f) => f.dir)).toEqual([]);
+  expect(tempRoots()).toContain("/tmp");
 });
 
 test("conversations: the folder's transcripts, newest first, with titles", () => {
