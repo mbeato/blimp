@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { generateKeyPairSync, verify } from "node:crypto";
 import http2 from "node:http2";
+import net from "node:net";
 import { Apns, goneDevice, makeJwt, TOPIC } from "../src/push/apns";
 import type { Device, PushEnv } from "../src/push/store";
 
@@ -135,3 +136,40 @@ test("when the second try fails too, the send says so with status 0, and doesn't
     a.close();
   }
 });
+
+// The 10 s limit holds whatever the connection does; here it is 200 ms.
+const SHORT = 200;
+
+test("Apple takes the request and never answers: status 0 with a reason, after 2 tries, well under a second", async () => {
+  reset((_, s) => void s.on("error", () => {}));
+  const a = new Apns(creds, hosts, Date.now, SHORT);
+  try {
+    const t0 = Date.now();
+    const r = await a.send(device, { aps: {} });
+    expect(r.status).toBe(0);
+    expect(r.reason).toBeTruthy();
+    expect(got.length).toBe(2);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  } finally {
+    a.close();
+  }
+});
+
+test("a TCP connection that never speaks HTTP/2: still status 0 within about 2 x the timeout", async () => {
+  const socks: net.Socket[] = [];
+  const dead = net.createServer((c) => void socks.push(c));
+  await new Promise<void>((r) => dead.listen(0, "127.0.0.1", () => r()));
+  const url = `http://127.0.0.1:${(dead.address() as net.AddressInfo).port}`;
+  const a = new Apns(creds, { production: url, development: url }, Date.now, SHORT);
+  try {
+    const t0 = Date.now();
+    const r = await a.send(device, { aps: {} });
+    expect(r.status).toBe(0);
+    expect(r.reason).toBeTruthy();
+    expect(Date.now() - t0).toBeLessThan(SHORT * 2 + 600);
+  } finally {
+    a.close();
+    for (const c of socks) c.destroy();
+    await new Promise((r) => dead.close(r));
+  }
+}, 5000);

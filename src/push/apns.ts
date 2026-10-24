@@ -10,7 +10,6 @@ import type { Creds, Device, PushEnv } from "./store";
 export const HOSTS: Record<PushEnv, string> = { production: "https://api.push.apple.com", development: "https://api.sandbox.push.apple.com" };
 export const TOPIC = "dev.blimp.phone";
 const JWT_LIFE = 40 * 60_000;
-const TIMEOUT = 10_000;
 
 const b64url = (b: Buffer | string) => Buffer.from(b).toString("base64url");
 
@@ -37,6 +36,7 @@ export class Apns {
     private creds: Creds,
     private hosts = HOSTS,
     private now = Date.now,
+    private timeout = 10_000,
   ) {}
 
   // Never throws. A failed send isn't tried again, except after a dropped connection: once, on a fresh one.
@@ -96,11 +96,20 @@ export class Apns {
       });
       let status = 0;
       let body = "";
-      req.setTimeout(TIMEOUT, () => req.close(http2.constants.NGHTTP2_CANCEL));
+      // A hard limit that rejects whatever the stream does: a connection that never comes up (or never finishes TLS)
+      // never settles the stream's own timeout. send() then destroys the session, so the worst case is 2 x the limit.
+      const timer = setTimeout(() => {
+        reject(new Error(`no answer from Apple in ${this.timeout / 1000} s`));
+        req.close(http2.constants.NGHTTP2_CANCEL);
+      }, this.timeout);
       req.on("response", (h) => (status = Number(h[":status"])));
       req.on("data", (c) => (body += c));
-      req.on("error", reject);
+      req.on("error", (e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
       req.on("close", () => {
+        clearTimeout(timer);
         if (!status) return reject(new Error("no answer from Apple"));
         let reason: unknown;
         try {
