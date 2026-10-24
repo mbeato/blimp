@@ -267,6 +267,31 @@ describe("writeHookStatus", () => {
     expect(read("a1").state).toBe("working");
   });
 
+  // Recorded with Claude Code 2.1.300: Claude launched a background agent and asked in one message. The
+  // question's PreToolUse names its tool_use_id (its PermissionRequest names none), and the Agent call's
+  // PostToolUse came after it, from the main thread.
+  test("another call from the question's message finishing after it doesn't end the question; the question's own does", () => {
+    const question = { tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Color?", options: [{ label: "Red" }] }] } };
+    const hook = (o: object) => writeHookStatus(JSON.stringify({ session_id: "s5", ...o }), "m1", dir);
+    hook({ hook_event_name: "PreToolUse", ...question, tool_use_id: "toolu_q" });
+    const asked = read("m1");
+    hook({ hook_event_name: "PermissionRequest", ...question });
+    hook({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_use_id: "toolu_agent" });
+    hook({ hook_event_name: "Notification", notification_type: "permission_prompt" });
+    hook({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_use_id: "toolu_agent" });
+    expect(read("m1")).toMatchObject({ state: "waiting", at: asked.at, prompt: asked.prompt });
+    hook({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_use_id: "toolu_q" });
+    expect(read("m1").state).toBe("working");
+
+    // A new turn ends it too, and a PostToolUse with no tool_use_id (as before) still does.
+    hook({ hook_event_name: "PreToolUse", ...question, tool_use_id: "toolu_q2" });
+    hook({ hook_event_name: "UserPromptSubmit" });
+    expect(read("m1").state).toBe("working");
+    hook({ hook_event_name: "PreToolUse", ...question, tool_use_id: "toolu_q3" });
+    hook({ hook_event_name: "PostToolUse", tool_name: "Read" });
+    expect(read("m1").state).toBe("working");
+  });
+
   test("a question's PreToolUse then PermissionRequest (default mode) is one wait, with one time", async () => {
     const ask = (event: string, session_id = "s2") =>
       JSON.stringify({ hook_event_name: event, session_id, tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Color?", options: [{ label: "Red" }] }] } });

@@ -147,15 +147,22 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   try {
     prev = JSON.parse(readFileSync(file, "utf8"));
   } catch {}
-  // A subagent's tool calls come in the same session, with its agent_id. One ends only the subagent's own
-  // wait: while a background agent works, Claude still shows the main thread's question (2.1.300).
+  // A tool call that isn't the one waited on doesn't end the wait, as Claude still shows it (2.1.300). A
+  // subagent's (in the same session, with its agent_id) ends only the subagent's own wait. The main thread's
+  // ends a question only if it's the question's own call: another from the same message, like a background
+  // Agent launched beside it, can finish after the question appeared. The question's PreToolUse names its
+  // tool_use_id; its PermissionRequest and Notification don't, so the wait keeps it.
   const agent = typeof ev.agent_id === "string" ? ev.agent_id : undefined;
-  if (state === "working" && agent && prev?.state === "waiting" && prev.sessionId === ev.session_id && prev.agent !== agent) return;
+  const call = typeof ev.tool_use_id === "string" ? ev.tool_use_id : undefined;
+  const waited = prev?.state === "waiting" && prev.sessionId === ev.session_id ? prev : undefined;
+  if (state === "working" && waited && (agent ? waited.agent !== agent : !!call && !!waited.call && waited.call !== call)) return;
   let waitAgent = state === "waiting" ? agent : undefined;
-  if (state === "waiting" && (!prompt || prompt.kind === "question")) {
-    if (prev?.state === "waiting" && prev.sessionId === ev.session_id && prev.prompt) {
-      if (!prompt) ({ prompt, at, agent: waitAgent } = prev);
-      else if (prev.prompt.kind === "question") at = prev.at;
+  let waitCall = state === "waiting" && prompt?.kind === "question" ? call : undefined;
+  if (state === "waiting" && (!prompt || prompt.kind === "question") && waited?.prompt) {
+    if (!prompt) ({ prompt, at, agent: waitAgent, call: waitCall } = waited);
+    else if (waited.prompt.kind === "question") {
+      at = waited.at;
+      waitCall ??= waited.call;
     }
   }
   // at is when this file was last written (what deriveState compares with Claude's file), or for a wait
@@ -167,7 +174,7 @@ export function writeHookStatus(input: string, session: string | undefined, stat
     if (typeof t === "number") since = t;
   }
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }), ...(waitAgent && { agent: waitAgent }) }));
+  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }), ...(waitAgent && { agent: waitAgent }), ...(waitCall && { call: waitCall }) }));
   renameSync(tmp, file); // the server never reads half a file
 }
 
