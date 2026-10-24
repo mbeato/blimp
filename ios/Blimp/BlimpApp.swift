@@ -47,7 +47,11 @@ private struct Root: View {
             }
         }
         .overlay { if covered { LockedView() } }
-        .onReturnFromBackground { store.reconnectNow() }
+        .onReturnFromBackground {
+            store.reconnectNow()
+            // Back from iOS Settings, notifications may be on now (or off).
+            if store.connection == .online && !lock.locked { store.startPush() }
+        }
         // Again once a Keychain that couldn't be read at launch has been read: a saved server then asks for Face ID.
         .task(id: store.waitingForKeychain) {
             guard !store.waitingForKeychain else { return }
