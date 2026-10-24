@@ -24,6 +24,8 @@ final class Store {
     private(set) var everOnline = false
     /// blimpd can't be reached, the server is on the tailnet, and the phone has no tailnet address.
     private(set) var tailnetOff = false
+    /// blimpd's version, from /health each time the events socket opens (an update restarts it); nil until then.
+    private(set) var serverVersion: String?
     /// The project the chat is in, kept for the next launch.
     var dir: String? = UserDefaults.standard.string(forKey: "project") {
         didSet { UserDefaults.standard.set(dir, forKey: "project") }
@@ -107,6 +109,7 @@ final class Store {
         connection = .connecting
         everOnline = false
         tailnetOff = false
+        serverVersion = nil
     }
 
     /// Starts (or resumes) Claude Code in `dir`, with `prompt` as its first message if given; returns the new session's name.
@@ -152,6 +155,10 @@ final class Store {
             connection = .online
             everOnline = true
             tailnetOff = false
+            Task { [weak self] in
+                guard let api = self?.api, let health = try? await api.health() else { return }
+                self?.serverVersion = health.version
+            }
         case .closed(code: 401):
             connection = .unauthorized
         case .closed:

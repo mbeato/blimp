@@ -1,5 +1,6 @@
 // The slim bar at the top while the events link isn't up: "Connecting…" the first time, "Reconnecting…"
 // after, why it can't reach blimpd, and when that's most likely Tailscale being off, a button to open it.
+// Up, it shows only when blimpd is older than this app.
 import BlimpKit
 import SwiftUI
 
@@ -10,6 +11,7 @@ struct ConnectionBar: View {
     /// Tailscale's own link; unchecked on a device, so a refusal falls back to its App Store page.
     private static let tailscale = URL(string: "tailscale://")!
     private static let appStore = URL(string: "https://apps.apple.com/app/id1470499037")!
+    private static let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 
     var body: some View {
         if let text {
@@ -34,7 +36,8 @@ struct ConnectionBar: View {
 
     private var text: String? {
         switch store.connection {
-        case .online, .unauthorized: nil
+        case .online: LinkText.behind(server: store.serverVersion, app: Self.appVersion)
+        case .unauthorized: nil
         case .connecting: LinkText.connecting(everOnline: store.everOnline)
         case .offline(let reason): reason
         }

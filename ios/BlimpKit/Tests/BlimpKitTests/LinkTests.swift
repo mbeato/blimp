@@ -43,3 +43,19 @@ import Testing
     #expect(LinkText.offline(tailnetOff: true) == "Tailscale looks off")
     #expect(LinkText.offline(tailnetOff: false) == "Can't reach the server")
 }
+
+@Test func theBarSaysWhenTheServerIsOlderThanThisApp() {
+    #expect(LinkText.behind(server: "0.3.4", app: "0.3.6") == "The server runs an older blimp (0.3.4). Update it from the Mac.")
+    #expect(LinkText.behind(server: "0.2.16", app: "0.3.0") != nil)
+    #expect(LinkText.behind(server: "0.3.6-rc.1", app: "0.3.6") != nil)
+    #expect(LinkText.behind(server: "dev", app: "0.3.6") != nil)
+    // The same or newer says nothing, and numbers compare as numbers.
+    #expect(LinkText.behind(server: "0.3.6", app: "0.3.6") == nil)
+    #expect(LinkText.behind(server: "v0.3.6", app: "0.3.6") == nil)
+    #expect(LinkText.behind(server: "0.3.7", app: "0.3.6") == nil)
+    #expect(LinkText.behind(server: "0.3.10", app: "0.3.9") == nil)
+    #expect(LinkText.behind(server: "0.3.6", app: "0.3.6-rc.2") == nil)
+    // Not known yet: nothing.
+    #expect(LinkText.behind(server: nil, app: "0.3.6") == nil)
+    #expect(LinkText.behind(server: "0.3.4", app: nil) == nil)
+}

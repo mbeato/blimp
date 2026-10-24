@@ -66,4 +66,25 @@ public enum Interfaces {
 public enum LinkText {
     public static func connecting(everOnline: Bool) -> String { everOnline ? "Reconnecting…" : "Connecting…" }
     public static func offline(tailnetOff: Bool) -> String { tailnetOff ? "Tailscale looks off" : "Can't reach the server" }
+
+    /// Online, with a blimpd older than this app (the two are released together): what this app asks of it may
+    /// be missing (Hide on 0.3.4 was a 404), so say so instead of each thing failing on its own.
+    public static func behind(server: String?, app: String?) -> String? {
+        guard let server, let app, versionParts(server).lexicographicallyPrecedes(versionParts(app)) else { return nil }
+        return "The server runs an older blimp (\(server)). Update it from the Mac."
+    }
+
+    /// As the Mac app reads versions: 0.3.6 → [0, 3, 6, max], 0.3.6-rc.2 → [0, 3, 6, 2] (a release candidate comes
+    /// before its release). Anything unreadable counts as 0.0.0.
+    static func versionParts(_ v: String) -> [Int] {
+        let unreadable = [0, 0, 0, Int.max]
+        var s = v.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("v") { s.removeFirst() }
+        let halves = s.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let nums = halves[0].split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        guard nums.count == 3, let a = nums[0], let b = nums[1], let c = nums[2] else { return unreadable }
+        guard halves.count == 2 else { return [a, b, c, Int.max] }
+        guard halves[1].hasPrefix("rc."), let rc = Int(halves[1].dropFirst(3)) else { return unreadable }
+        return [a, b, c, rc]
+    }
 }

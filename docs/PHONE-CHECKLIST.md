@@ -110,6 +110,7 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] A new network. With a chat open, turn Wi-Fi off (cellular takes over), then on again; or join a hotspot. The chat comes back within a few seconds each time, not after 20 to 40.
 - [ ] A send on a dead link. Turn on Airplane Mode, then at once send a message. Within about 3 to 6 seconds "Not sent. Check the connection." shows, and your text stays in the box. (A link that was only slow gets the message once more on a new link, and Claude gets it once.) (phone)
 - [ ] Tailscale off. With the phone paired over Tailscale, turn the Tailscale VPN off in its app. The top bar says "Tailscale looks off" with "Open Tailscale". Tap it: the Tailscale app opens (if its link doesn't work, the App Store's Tailscale page opens; note which). Turn the VPN on: the bar goes within a few seconds. Paired over another address (the simulator's 127.0.0.1), it says "Can't reach the server" instead. (phone)
+- [ ] An older server says so. With a phone build newer than the server's blimpd (as after a release, before the server is updated), the top bar says "The server runs an older blimp (0.3.6). Update it from the Mac." with the server's version. Update the server from the Mac: the bar goes once the phone reconnects. With the same version, there's no bar. (phone)
 
 ## Voice
 
