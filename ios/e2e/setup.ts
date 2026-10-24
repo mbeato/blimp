@@ -15,6 +15,8 @@
 //              answers its naming call): "Configure Integration Test Pipeline Runs" (40 characters, the most blimpd keeps)
 //   demo-trust in api-server: Claude Code just started there and asks whether to trust the folder, with no
 //              status file yet (ios/e2e/fake-trust.ts); every key is appended to $E2E_DIR/trust.in
+//   demo-stuck in api-server: Claude Code that never says which conversation it is and shows nothing blimpd
+//              reads, as when it's stuck on a screen only the Mac can answer (no status file)
 //   a conversation in blimp-demo with no session running, for the project screen's Earlier list
 //   a server browser tab in blimp-demo on $E2E_DIR/site/index.html (the job serves it on 127.0.0.1:$E2E_SITE_PORT): a
 //              button and a field that put what reached them in the page's title, which the drawer's row shows
@@ -159,16 +161,21 @@ writeFileSync(quizStatus, JSON.stringify({ state: "waiting", at: Date.now(), ses
   prompt: promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions } }) }));
 
 // Claude Code asking whether to trust its folder: no status file and no hook until it's answered. blimpd
-// reads the question off the screen for a session started as Claude Code (its record of kinds says so).
+// reads the question off the screen for a session started as Claude Code (its record of kinds says so, and
+// of demo-stuck below).
 const trustDir = join(work, "api-server");
 const trustCfg = join(root, "trust-cfg.json");
 writeFileSync(join(root, "trust.in"), "");
 writeFileSync(trustCfg, JSON.stringify({ folder: trustDir, keys: join(root, "trust.in"), claudeDir: claude, sessionId: "e2e00000-0000-0000-0000-000000000006" }));
-writeFileSync(join(dirname(sock), "session-kinds.json"), JSON.stringify({ "demo-trust": "claude" }));
+writeFileSync(join(dirname(sock), "session-kinds.json"), JSON.stringify({ "demo-trust": "claude", "demo-stuck": "claude" }));
 Bun.spawnSync([zmxPath(), "attach", "demo-trust", "sh", "-c", `exec '${process.execPath}' '${join(import.meta.dir, "fake-trust.ts")}' '${trustCfg}'`],
   { env, cwd: trustDir, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
 await until(() => parseZmxList(Bun.spawnSync([zmxPath(), "list"], { env }).stdout.toString()).some((s) => s.name === "demo-trust" && s.pid > 0), "zmx session demo-trust");
 console.log("demo-trust: asking to trust " + trustDir);
+
+// Claude Code by the kind blimpd remembers it was started as, with no status file and a blank screen: starting, for good.
+Bun.spawnSync([zmxPath(), "attach", "demo-stuck", "sh", "-c", "exec cat > /dev/null"], { env, cwd: join(work, "api-server"), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+await until(() => parseZmxList(Bun.spawnSync([zmxPath(), "list"], { env }).stdout.toString()).some((s) => s.name === "demo-stuck" && s.pid > 0), "zmx session demo-stuck");
 
 const token = readFileSync(join(dirname(sock), "token"), "utf8").trim();
 

@@ -5,8 +5,8 @@
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
 // through it; two questions at once; unread and asking marks; a project's inbox and the chat's top bar; Allow from
 // Needs you, in its own project's inbox only; the drawer's New session; a project from the drawer's strip; a server
-// browser tab from the drawer, tapped and typed into. What reached the sessions is checked by the job afterwards.
-// Screenshots stay in the .xcresult.
+// browser tab from the drawer, tapped and typed into; a start that's stuck. What reached the sessions is checked by
+// the job afterwards. Screenshots stay in the .xcresult.
 //
 // The job runs them on three Macs at once (ios.yml lists which on each), in name order, sharing each Mac's
 // simulator and stand-ins: the first pairs (test1, or launchPaired), the rest launch paired (the Keychain
@@ -507,6 +507,18 @@ final class BlimpUITests: XCTestCase {
         try until(page, "exists == false", "the chat after ×")
         try openDrawer()
         try until(row, "label CONTAINS 'tapped typed:hi'", "the tap and the typing to reach the page")
+    }
+
+    // MARK: - A start that's stuck
+
+    /// demo-stuck is Claude Code that never says which conversation it is and shows no question blimpd reads (as
+    /// when it waits on signing in): a spinner, then after 20 s a line that says to open it on the Mac, and no box.
+    func testStuckStart() throws {
+        try launchPaired()
+        try openSession("demo-stuck", in: "api-server")
+        try wait(labeled("Claude hasn't started"), "the note that Claude hasn't started", timeout: 40)
+        if element("messageField").exists { throw failed("no message box while Claude hasn't started") }
+        shot("40-stuck-start")
     }
 
     // MARK: - The project strip
