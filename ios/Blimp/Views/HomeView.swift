@@ -119,12 +119,13 @@ struct HomeView: View {
             hidden = Set((try? await api.hiddenFolders()) ?? [])
             if store.dir == nil { store.dir = projects.first?.dir }
         }
-        // The drawer opens: the keyboard goes (☰ on the inbox), and the hidden projects are fetched again, as a
-        // session started on the Mac shows one again.
+        // The drawer opens: the keyboard goes (☰ on the inbox), and the hidden projects and recent folders are
+        // fetched again, as a session started on the Mac shows one again.
         .onChange(of: drawer) { _, open in if open { hideKeyboard() } }
         .task(id: drawer) {
-            guard drawer, let api = store.api, let list = try? await api.hiddenFolders() else { return }
-            hidden = Set(list)
+            guard drawer, let api = store.api else { return }
+            if let list = try? await api.hiddenFolders() { hidden = Set(list) }
+            if let list = try? await api.folders() { folders = list }
         }
         // The project's past conversations: again when the drawer or the inbox opens, as its sessions start and end,
         // and after a Mark read here. The ones kept meanwhile show, so the drawer's rows are there as it opens.
@@ -218,8 +219,11 @@ struct HomeView: View {
 
     private var projectName: String { store.dir.map(Drawer.name(of:)) ?? "blimp" }
 
-    /// Needs you's rule (Drawer.badge), so the badge and the band agree.
-    private var mark: Mark { Drawer.badge(store.sessions, needs: needs, onScreen: onScreen) }
+    /// Needs you's rule (Drawer.badge), so the badge and the band agree. Not a hidden project's sessions (but the
+    /// one on screen's): nothing in the drawer would say where the mark comes from.
+    private var mark: Mark {
+        Drawer.badge(store.sessions.filter { !hidden.contains($0.dir) || $0.dir == store.dir }, needs: needs, onScreen: onScreen)
+    }
 
     @ViewBuilder private var badge: some View {
         switch mark {
@@ -329,9 +333,13 @@ struct HomeView: View {
             opened = .inbox
         }
         Task {
-            guard let api = store.api else { return }
+            guard let api = store.api else {
+                hidden.remove(dir)
+                return
+            }
             do {
-                hidden = Set(try await api.setHidden(dir: dir, hidden: true))
+                // Added to, not replaced: another hide may still be on its way.
+                hidden.formUnion(try await api.setHidden(dir: dir, hidden: true))
             } catch {
                 hidden.remove(dir)
                 actions.failure = Store.words(for: error)

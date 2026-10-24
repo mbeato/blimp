@@ -47,8 +47,8 @@ struct DrawerView: View {
     /// The strip's order, read as the drawer comes out (Strip.held), so an icon never moves under a finger.
     @State private var order: [String] = []
     /// Where the project row is on screen, so a sideways swipe that starts in it scrolls it instead of closing
-    /// the drawer.
-    @State private var stripFrame: CGRect = .zero
+    /// the drawer. Not observed: it changes on every step of a swipe, and only a swipe's start reads it.
+    @State private var stripFrame = StripFrame()
 
     var body: some View {
         GeometryReader { geo in
@@ -83,7 +83,7 @@ struct DrawerView: View {
         DragGesture(minimumDistance: 10, coordinateSpace: .global)
             .onChanged { v in
                 if sideways == nil {
-                    sideways = abs(v.translation.width) > abs(v.translation.height) && !stripFrame.contains(v.startLocation)
+                    sideways = abs(v.translation.width) > abs(v.translation.height) && !stripFrame.rect.contains(v.startLocation)
                 }
                 if sideways == true { push = min(0, v.translation.width) }
             }
@@ -110,7 +110,6 @@ struct DrawerView: View {
                     if !active.isEmpty {
                         Section("Active") { ForEach(active) { rowButton($0) } }
                     }
-                    // After the running sessions, so they stay in sight when the keyboard leaves the drawer short.
                     Section("Browser") {
                         ForEach(tabs) { tabRow($0) }
                         Button(action: onNewTab) {
@@ -159,6 +158,7 @@ struct DrawerView: View {
                 .padding(.vertical, 10)
             }
             .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
             Divider().frame(height: 32)
             Button(action: onSettings) {
                 Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44)
@@ -168,7 +168,7 @@ struct DrawerView: View {
             .accessibilityIdentifier("settingsButton")
             .padding(.horizontal, 4)
         }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { stripFrame = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { stripFrame.rect = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("drawerStrip")
     }
@@ -252,6 +252,12 @@ struct DrawerView: View {
             Button(role: .destructive) { onCloseTab(tab) } label: { Label("Close Tab", systemImage: "xmark") }
         }
     }
+}
+
+/// Where the drawer's project row is on screen (DrawerView's closing swipe).
+@MainActor
+final class StripFrame {
+    var rect: CGRect = .zero
 }
 
 /// A row: its mark, its title (a session a handoff started has an arrow before it), and under it how long ago,

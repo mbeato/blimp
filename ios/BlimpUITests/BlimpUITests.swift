@@ -96,8 +96,7 @@ final class BlimpUITests: XCTestCase {
         shot("3-sent")
 
         // Read now: its row has no blue dot any more. The keyboard goes as the drawer comes out.
-        input.tap()
-        try wait(app.keyboards.firstMatch, "the keyboard for the box")
+        try focus(input)
         try openDrawer()
         try until(app.keyboards.firstMatch, "exists == false", "the keyboard to go as the drawer opens")
         try until(chatRow, "NOT (label CONTAINS 'New reply')", "demo-chat to be read once open")
