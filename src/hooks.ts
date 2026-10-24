@@ -147,9 +147,14 @@ export function writeHookStatus(input: string, session: string | undefined, stat
   try {
     prev = JSON.parse(readFileSync(file, "utf8"));
   } catch {}
+  // A subagent's tool calls come in the same session, with its agent_id. One ends only the subagent's own
+  // wait: while a background agent works, Claude still shows the main thread's question (2.1.300).
+  const agent = typeof ev.agent_id === "string" ? ev.agent_id : undefined;
+  if (state === "working" && agent && prev?.state === "waiting" && prev.sessionId === ev.session_id && prev.agent !== agent) return;
+  let waitAgent = state === "waiting" ? agent : undefined;
   if (state === "waiting" && (!prompt || prompt.kind === "question")) {
     if (prev?.state === "waiting" && prev.sessionId === ev.session_id && prev.prompt) {
-      if (!prompt) ({ prompt, at } = prev);
+      if (!prompt) ({ prompt, at, agent: waitAgent } = prev);
       else if (prev.prompt.kind === "question") at = prev.at;
     }
   }
@@ -162,7 +167,7 @@ export function writeHookStatus(input: string, session: string | undefined, stat
     if (typeof t === "number") since = t;
   }
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }) }));
+  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }), ...(waitAgent && { agent: waitAgent }) }));
   renameSync(tmp, file); // the server never reads half a file
 }
 
