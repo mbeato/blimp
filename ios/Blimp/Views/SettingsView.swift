@@ -45,7 +45,7 @@ struct SettingsView: View {
                         dismiss()
                     }
                 } footer: {
-                    Text("Forgets this server on this phone. The token stays valid on the server.")
+                    Text("Forgets this server on this phone and stops its notifications. The token stays valid on the server.")
                 }
             }
             .navigationTitle("Settings")
