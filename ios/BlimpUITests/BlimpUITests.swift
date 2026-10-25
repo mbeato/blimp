@@ -623,6 +623,15 @@ final class BlimpUITests: XCTestCase {
         shot("42-push-opened")
     }
 
+    /// A widget's row links to blimp://open?session=<name> (WidgetLink): opened with the app in front, it lands in that
+    /// session's chat, as a tapped notification does. (The widgets themselves can't be driven from a UI test.)
+    func testWidgetLinkOpensTheChat() throws {
+        try launchPaired()
+        app.open(URL(string: "blimp://open?session=demo-chat")!)
+        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the widget's link", timeout: 30)
+        shot("45-widget-link")
+    }
+
     // MARK: - Helpers
 
     /// Picks a project from the drawer's strip; its inbox shows behind the drawer, which stays open with its

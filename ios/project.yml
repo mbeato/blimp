@@ -28,16 +28,21 @@ targets:
           APS_ENVIRONMENT: development
         Release:
           APS_ENVIRONMENT: production
-    # Notifications: Apple's sandbox service for a build from Xcode or the simulator, production for TestFlight.
-    # XcodeGen writes the file (it's ignored, as Info.plist is).
+    # Notifications: Apple's sandbox service for a build from Xcode or the simulator, production for TestFlight; the
+    # App Group the widgets share. XcodeGen writes the file (it's ignored, as Info.plist is).
     entitlements:
       path: Blimp/Blimp.entitlements
       properties:
         aps-environment: $(APS_ENVIRONMENT)
+        com.apple.security.application-groups: [group.dev.blimp.phone]
     info:
       path: Blimp/Info.plist
       properties:
         CFBundleDisplayName: blimp
+        # A widget's tap opens blimp://open?session=<name> (WidgetLink).
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.blimp.phone
+            CFBundleURLSchemes: [blimp]
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSFaceIDUsageDescription: blimp locks with Face ID because it can run anything on your server.

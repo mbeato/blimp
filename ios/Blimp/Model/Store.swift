@@ -125,6 +125,7 @@ final class Store {
 
     func signOut() {
         stopPush()
+        WidgetShare.forget(api: api)
         events?.stop()
         events = nil
         Keychain.clear()
@@ -185,6 +186,7 @@ final class Store {
                 guard let api = self?.api, let health = try? await api.health() else { return }
                 self?.serverVersion = health.version
                 self?.serverHome = health.home
+                await WidgetShare.update(api: api)
             }
         case .closed(code: 401):
             connection = .unauthorized

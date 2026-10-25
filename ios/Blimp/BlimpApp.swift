@@ -60,6 +60,8 @@ private struct Root: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { store.loadServer() }
             lock.scenePhaseChanged(phase, paired: store.server != nil)
+            // What the widgets show may have changed while the app was open.
+            if phase == .background { WidgetShare.reload() }
         }
         // Nothing is read aloud in the background, behind the lock cover, or while locked.
         .onChange(of: scenePhase == .active && !lock.locked, initial: true) { _, open in Speaker.shared.allowed = open }
@@ -70,6 +72,10 @@ private struct Root: View {
         }
         .onChange(of: Push.shared.token) { _, token in
             if let token { store.sendPushToken(token) }
+        }
+        // A widget's tap (WidgetLink): its session's chat, the way a tapped notification opens one.
+        .onOpenURL { url in
+            if let name = WidgetLink.session(url) { Push.shared.open = name }
         }
     }
 
