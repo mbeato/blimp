@@ -105,6 +105,8 @@ struct InputBar: View {
             .padding(.bottom, 4)
         }
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 20))
+        // Hold on the words and drag to move the caret: that drag is the box's, and doesn't pull the drawer.
+        .scrollsSideways()
         .overlay(alignment: .topTrailing) {
             if let hint {
                 Text(hint)

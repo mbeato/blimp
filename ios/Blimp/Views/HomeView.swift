@@ -71,7 +71,8 @@ struct HomeView: View {
         // scrolling the chat never does. Let go past 120 points, or flung right: it opens; else back closed. While
         // the drawer is open this does nothing: a swipe on it closes it (DrawerView). Nor does one that starts in
         // something that scrolls sideways (a code box, the reply chips): it scrolls that instead, as this runs
-        // while a scroll view in the chat scrolls too. The keyboard goes as the drawer starts to come out.
+        // while a scroll view in the chat scrolls too. Nor one in the message box: a hold and drag there moves the
+        // caret. The keyboard goes as the drawer starts to come out.
         .simultaneousGesture(
             DragGesture(minimumDistance: 10, coordinateSpace: .global)
                 .onChanged { v in
@@ -483,9 +484,9 @@ private struct HomeBannerView: View {
     }
 }
 
-/// Where the chat's sideways scrollers (a code box, the reply chips) are on screen, so a sideways swipe that starts
-/// in one scrolls it instead of pulling a drawer out (HomeView's swipe). Not observed: the frames change on every
-/// step of a scroll, and only the start of a swipe reads them.
+/// Where the chat's sideways scrollers (a code box, the reply chips) and the message box are on screen, so a sideways
+/// swipe that starts in one scrolls it, or moves the box's caret, instead of pulling a drawer out (HomeView's swipe).
+/// Not observed: the frames change on every step of a scroll, and only the start of a swipe reads them.
 @MainActor
 final class SideScrollers {
     private var frames: [UUID: CGRect] = [:]
@@ -501,7 +502,8 @@ extension EnvironmentValues {
 }
 
 extension View {
-    /// Marks a view that scrolls sideways: a swipe that starts in it pulls no drawer (SideScrollers).
+    /// Marks a view that scrolls sideways (or the message box, where a drag moves the caret): a swipe that starts in
+    /// it pulls no drawer (SideScrollers).
     func scrollsSideways() -> some View { modifier(SideScroller()) }
 }
 
