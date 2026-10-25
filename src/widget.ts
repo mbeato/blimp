@@ -3,7 +3,7 @@
 // app/src/lib/inbox.ts): needs you (waiting, or done with a question in its note), the oldest wait first; new (done
 // and unread, its note not "in progress"), the newest first; working, the longest-running first. At most 9 rows, for
 // the large widget. Past conversations stay in their project's inbox, as the drawer's project marks leave them out.
-// The widget key, which reads only GET /widget (server.ts), comes from the phone's token.
+// The widget key, which reads GET /widget and may send the live panel's tokens (POST/DELETE /push/live) (server.ts), comes from the phone's token.
 
 import { createHmac } from "node:crypto";
 import type { Session } from "./sessions";

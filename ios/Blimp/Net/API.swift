@@ -64,7 +64,7 @@ struct API {
         _ = try await call("DELETE", "/push/device", body: JSONEncoder().encode(Body(token: token)))
     }
 
-    /// The widget key: it reads only GET /widget, so the widgets can read it while the phone is locked. An older
+    /// The widget key: it reads GET /widget and may send the live panel's tokens (POST/DELETE /push/live), so the widgets can read it while the phone is locked. An older
     /// blimpd has no such route: "not found".
     func widgetKey() async throws -> String {
         struct Key: Decodable { let key: String }

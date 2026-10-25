@@ -463,6 +463,7 @@ describe("chat", () => {
   test("input from the phone makes its session the live panel's followed turn; the Mac's doesn't", async () => {
     const phone = "feed".repeat(16);
     writeFileSync(join(tmp, "phone-token"), phone, { mode: 0o600 });
+    let liveName = "";
     try {
       const mac = await fakeClaude("live1", "5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e", []);
       const c = await socket(`/sessions/${mac.name}/chat`);
@@ -471,6 +472,7 @@ describe("chat", () => {
       await until(() => c.messages.find((m) => m.type === "ack" && m.id === "l1"), "the Mac's ack");
       expect((await (await api("/live")).json()).turn).toBeUndefined();
       const { name } = await fakeClaude("live2", "5f5f5f5f-5f5f-4f5f-8f5f-5f5f5f5f5f5f", []);
+      liveName = name;
       const ws = new WebSocket(`ws+unix://${sock}:/sessions/${name}/chat?token=${phone}`);
       const got: any[] = [];
       ws.onmessage = (e) => got.push(JSON.parse(String(e.data)));
@@ -480,10 +482,17 @@ describe("chat", () => {
       const live = await (await api("/live")).json();
       expect(live.turn).toMatchObject({ session: name, state: "working" });
       expect(typeof live.turn.since).toBe("number");
+      // The phone resends an id it got no ack for: that is no new prompt, so the turn's start doesn't move.
+      await new Promise((r) => setTimeout(r, 20));
+      ws.send(JSON.stringify({ type: "input", id: "l2", text: "from the phone" }));
+      await until(() => got.filter((m) => m.type === "ack" && m.id === "l2").length > 1, "the second ack");
+      expect((await (await api("/live")).json()).turn.since).toBe(live.turn.since);
       expect(live.rows.some((r: { session: string }) => r.session === name)).toBe(false);
       ws.close();
       c.ws.close();
     } finally {
+      // The mark names live2: end that session so the mark doesn't reach later tests.
+      await Bun.spawn([zmxPath(), "kill", liveName, "--force"], { env, stdin: "ignore", stdout: "ignore", stderr: "ignore" }).exited;
       rmSync(join(tmp, "phone-token"), { force: true });
     }
   });
@@ -2326,6 +2335,27 @@ describe("live panel", () => {
     expect(Object.keys(l.counts).sort()).toEqual(["needs", "new", "working"]);
     expect(Array.isArray(l.rows)).toBe(true);
     expect(l.rows.length).toBeLessThanOrEqual(4);
+  });
+
+  test("POST /sessions with a prompt follows the new session when the phone sends it, and not when the Mac does", async () => {
+    writeFileSync(phoneFile, phone);
+    try {
+      const dir = join(homeDir, tag);
+      mkdirSync(dir, { recursive: true });
+      const start = async (t: string, name: string) => {
+        const r = await withToken(t, "/sessions", { method: "POST", body: JSON.stringify({ dir, name, prompt: "go" }) });
+        expect(r.status).toBe(201);
+        const n = (await r.json()).name;
+        made.push(n);
+        return n as string;
+      };
+      await start(token, "followmac");
+      expect((await (await api("/live")).json()).turn).toBeUndefined();
+      const n = await start(phone, "followphone");
+      await until(async () => (await (await api("/live")).json()).turn?.session === n, "the phone's session followed");
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
   });
 
   test("POST and DELETE /push/live keep its push-to-start and panel tokens in push.json, beside the devices", async () => {

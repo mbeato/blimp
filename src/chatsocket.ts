@@ -163,12 +163,14 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
       // Not while Claude asks something: the Enter after the paste would confirm its highlighted choice.
       // Checked right before the paste, which goes in one write with its Enter (Claude 2.1.300 sends it,
       // queues it while working): a question can't start between them and leave the text in Claude's box.
+      // A resent id was typed already: it is not a new prompt, so it doesn't follow anything again.
+      const fresh = !wasTyped(d.name, id);
       await typed(d.typist, id, async () => {
         if ((await find(d.name))?.state === "waiting") throw new Asking();
         return ["\x1b[200~" + text + "\x1b[201~\r"];
       });
       // A prompt from the phone: the live panel follows this turn (followed.ts).
-      if (d.phone) markFollowed(d.name);
+      if (d.phone && fresh) markFollowed(d.name);
       return send(ws, { type: "ack", id });
     }
     // answer, interrupt and deny (answer.ts); anything else is "unknown message".
