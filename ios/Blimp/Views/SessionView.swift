@@ -275,6 +275,7 @@ private struct ChatContent: View {
                 if model.canResume {
                     Button("Resume") { Task { await resume() } }
                         .buttonStyle(.borderedProminent)
+                        .foregroundStyle(Color(.systemBackground))
                         .disabled(resuming)
                 }
                 errorLine

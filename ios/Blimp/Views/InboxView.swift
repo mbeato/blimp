@@ -238,6 +238,7 @@ private struct NeedsRow: View {
                         Text("Allow").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .foregroundStyle(Color(.systemBackground))
                     .accessibilityIdentifier("inbox-allow-" + s.name)
                     Button { send(s, p, Self.deny(p, deny)) } label: {
                         Text("Deny").frame(maxWidth: .infinity)

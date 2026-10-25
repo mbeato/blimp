@@ -293,6 +293,7 @@ private struct DenyField: View {
                         .accessibilityIdentifier("denyField")
                     Button("Send", action: go)
                         .buttonStyle(.borderedProminent)
+                        .foregroundStyle(Color(.systemBackground))
                         .disabled(sending || sent || text.allSatisfy(\.isWhitespace))
                         .accessibilityIdentifier("denySend")
                 }
@@ -383,6 +384,7 @@ private struct QuestionFlow: View {
                 if q.multiSelect {
                     Button(nextLabel) { move { draft.next() } }
                         .buttonStyle(.borderedProminent)
+                        .foregroundStyle(Color(.systemBackground))
                         .disabled(!draft.isAnswered(draft.step))
                         .accessibilityIdentifier("nextButton")
                 }
@@ -440,6 +442,7 @@ private struct QuestionFlow: View {
                 Spacer()
                 Button("Submit") { onAnswers(draft, prompt) }
                     .buttonStyle(.borderedProminent)
+                    .foregroundStyle(Color(.systemBackground))
                     .accessibilityIdentifier("submitAnswers")
             }
         }
@@ -528,7 +531,7 @@ private struct ChoiceButton: View {
 
     @ViewBuilder private var button: some View {
         switch style {
-        case .prominent: Button(action: action) { text }.buttonStyle(.borderedProminent)
+        case .prominent: Button(action: action) { text }.buttonStyle(.borderedProminent).foregroundStyle(Color(.systemBackground))
         case .normal: Button(action: action) { text }.buttonStyle(.bordered)
         case .plain: Button(action: action) { text }.buttonStyle(.borderless)
         }

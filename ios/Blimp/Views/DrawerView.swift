@@ -244,6 +244,7 @@ struct DrawerView: View {
             Text("Open a folder on the computer to start.").foregroundStyle(.secondary)
             Button("Open a Folder", systemImage: "folder.badge.plus", action: onOpenFolder)
                 .buttonStyle(.borderedProminent)
+                .foregroundStyle(Color(.systemBackground))
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
