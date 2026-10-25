@@ -9,6 +9,7 @@ import pkg from "../package.json";
 import { promptFromHook } from "../src/prompt";
 import { findChrome } from "../src/browser/chrome";
 import { parseZmxList, zmxPath } from "../src/sessions";
+import { widgetKey } from "../src/widget";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-server-"));
 const sock = join(tmp, "blimpd.sock");
@@ -2205,5 +2206,69 @@ describe("push", () => {
     expect((await device("xyz")).status).toBe(400);
     expect((await device("a".repeat(64), "staging")).status).toBe(400);
     expect((await api("/push/device", { method: "POST", body: "null" })).status).toBe(400);
+  });
+});
+
+describe("widgets", () => {
+  const phoneFile = join(tmp, "phone-token");
+  const phone = "beef".repeat(16);
+  const key = widgetKey(phone);
+  const withToken = (t: string, path: string, init: RequestInit = {}) => api(path, { ...init, headers: { Authorization: `Bearer ${t}` } }, false);
+
+  test("GET /widget: the counts and rows, with the widget key or the phone's or the Mac's token", async () => {
+    writeFileSync(phoneFile, phone);
+    try {
+      for (const t of [key, phone, token]) {
+        const r = await withToken(t, "/widget");
+        expect(r.status).toBe(200);
+        const w = await r.json();
+        expect(Object.keys(w.counts).sort()).toEqual(["needs", "new", "working"]);
+        expect(Array.isArray(w.rows)).toBe(true);
+        expect(typeof w.at).toBe("number");
+      }
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
+  });
+
+  test("the widget key reads GET /widget and nothing else", async () => {
+    writeFileSync(phoneFile, phone);
+    try {
+      expect((await withToken(key, "/sessions")).status).toBe(401);
+      expect((await withToken(key, "/widget/key")).status).toBe(401);
+      expect((await withToken(key, "/health")).status).toBe(401);
+      const push = JSON.stringify({ token: "ab".repeat(50), env: "production" });
+      expect((await withToken(key, "/push/widget", { method: "POST", body: push })).status).toBe(401);
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
+  });
+
+  test("GET /widget/key gives the phone its widget key; pairing again changes it; with no phone paired, 404", async () => {
+    writeFileSync(phoneFile, phone);
+    try {
+      expect(await (await withToken(phone, "/widget/key")).json()).toEqual({ key });
+      const again = "f00d".repeat(16);
+      writeFileSync(phoneFile, again);
+      expect(await (await withToken(again, "/widget/key")).json()).toEqual({ key: widgetKey(again) });
+      // the old key no longer reads anything
+      expect((await withToken(key, "/widget")).status).toBe(401);
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
+    expect((await api("/widget/key")).status).toBe(404);
+  });
+
+  test("POST and DELETE /push/widget keep the widgets' push tokens in push.json, beside the devices", async () => {
+    const widget = (t: unknown, env: unknown = "production", method = "POST") => api("/push/widget", { method, body: JSON.stringify({ token: t, env }) });
+    const file = () => JSON.parse(readFileSync(join(tmp, "push.json"), "utf8"));
+    expect((await widget("ab".repeat(50))).status).toBe(204);
+    expect(file().widgets.map((w: { token: string }) => w.token)).toEqual(["ab".repeat(50)]);
+    expect(statSync(join(tmp, "push.json")).mode & 0o777).toBe(0o600);
+    expect((await widget("ab".repeat(50), undefined, "DELETE")).status).toBe(204);
+    expect(file().widgets).toBeUndefined();
+    expect((await widget("xyz")).status).toBe(400);
+    expect((await widget("ab".repeat(50), "staging")).status).toBe(400);
+    expect((await api("/push/widget", { method: "POST", body: "null" })).status).toBe(400);
   });
 });

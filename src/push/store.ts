@@ -1,6 +1,7 @@
 // Phone notifications' files, beside the socket (docs/superpowers/specs/2026-10-20-phone-push-design.md):
 // apns.p8, the push key from Apple's developer site, and apns.json { keyId, teamId }, both from `blimpd
-// push-key`; push.json { devices: [{ token, env, at }] }, the phones that asked for notifications. All 600,
+// push-key`; push.json { devices: [{ token, env, at }], widgets: [...] }, the phones that asked for notifications
+// and the widgets' push tokens (iOS 26 widget push, src/push/widgets.ts). All 600,
 // written through a temp file and a rename, so never half written.
 
 import { createPrivateKey } from "node:crypto";
@@ -22,6 +23,8 @@ const MAX_DEVICES = 5;
 const APPLE_ID = /^[A-Z0-9]{10}$/;
 
 export const isDeviceToken = (t: unknown): t is string => typeof t === "string" && /^[0-9a-f]{64,200}$/i.test(t);
+// WidgetKit's push tokens: hex, longer than a device's can be.
+export const isWidgetToken = (t: unknown): t is string => typeof t === "string" && /^[0-9a-f]{64,400}$/i.test(t);
 export const isPushEnv = (e: unknown): e is PushEnv => e === "development" || e === "production";
 
 function write(file: string, text: string) {
@@ -56,32 +59,50 @@ export function saveCreds(p8: string, keyId: string, teamId: string, dir = blimp
   write(credsFile(dir), JSON.stringify({ keyId, teamId }));
 }
 
-// Missing or unreadable: no phones. Entries that aren't phones are left out.
-export function readDevices(file = devicesFile()): Device[] {
+type Lists = { devices: Device[]; widgets: Device[] };
+
+const valid = (list: unknown, isToken: (t: unknown) => boolean): Device[] =>
+  Array.isArray(list) ? list.filter((x) => isToken(x?.token) && isPushEnv(x?.env) && typeof x?.at === "number") : [];
+
+// Missing or unreadable: none. Entries that aren't phones (or widgets) are left out.
+function readLists(file: string): Lists {
   try {
-    const d = JSON.parse(readFileSync(file, "utf8"))?.devices;
-    if (Array.isArray(d)) return d.filter((x) => isDeviceToken(x?.token) && isPushEnv(x?.env) && typeof x?.at === "number");
+    const j = JSON.parse(readFileSync(file, "utf8"));
+    return { devices: valid(j?.devices, isDeviceToken), widgets: valid(j?.widgets, isWidgetToken) };
   } catch {}
-  return [];
+  return { devices: [], widgets: [] };
 }
 
-// Adds a phone, or moves it to the front with its env and time; only the 5 newest are kept.
-export function addDevice(token: string, env: PushEnv, now = Date.now(), file = devicesFile()): Device[] {
+// No widgets: the file is as it was before them.
+const writeLists = (file: string, l: Lists) => write(file, JSON.stringify({ devices: l.devices, ...(l.widgets.length ? { widgets: l.widgets } : {}) }));
+
+// Adds one, or moves it to the front with its env and time; only the 5 newest are kept.
+function add(key: keyof Lists, token: string, env: PushEnv, now: number, file: string): Device[] {
   const t = token.toLowerCase();
-  const devices = [{ token: t, env, at: now }, ...readDevices(file).filter((d) => d.token !== t)].slice(0, MAX_DEVICES);
-  write(file, JSON.stringify({ devices }));
-  return devices;
+  const l = readLists(file);
+  l[key] = [{ token: t, env, at: now }, ...l[key].filter((d) => d.token !== t)].slice(0, MAX_DEVICES);
+  writeLists(file, l);
+  return l[key];
 }
 
-export function removeDevice(token: string, file = devicesFile()): Device[] {
+function remove(key: keyof Lists, token: string, file: string): Device[] {
   const t = token.toLowerCase();
-  const had = readDevices(file);
-  const devices = had.filter((d) => d.token !== t);
-  if (devices.length !== had.length) write(file, JSON.stringify({ devices }));
-  return devices;
+  const l = readLists(file);
+  const had = l[key].length;
+  l[key] = l[key].filter((d) => d.token !== t);
+  if (l[key].length !== had) writeLists(file, l);
+  return l[key];
 }
 
-// `blimpd pair --revoke`: a phone that can't connect gets no notifications either.
+export const readDevices = (file = devicesFile()): Device[] => readLists(file).devices;
+export const addDevice = (token: string, env: PushEnv, now = Date.now(), file = devicesFile()) => add("devices", token, env, now, file);
+export const removeDevice = (token: string, file = devicesFile()) => remove("devices", token, file);
+
+export const readWidgets = (file = devicesFile()): Device[] => readLists(file).widgets;
+export const addWidget = (token: string, env: PushEnv, now = Date.now(), file = devicesFile()) => add("widgets", token, env, now, file);
+export const removeWidget = (token: string, file = devicesFile()) => remove("widgets", token, file);
+
+// `blimpd pair --revoke`: a phone that can't connect gets no notifications, and its widgets no pings.
 export function clearDevices(file = devicesFile()) {
   rmSync(file, { force: true });
 }

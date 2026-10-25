@@ -345,6 +345,14 @@ Notifications on Max's phone when a session waits on him or a Claude turn ends, 
 - **What:** title "<session title> is waiting" or "… finished". A permission: its summary, category `permission` (the app's Yes and No), and `at`, `yes: { pick, label }` (the first option), `no: { pick, label }` (the last option whose label starts with "No", else the last). A plan and a risky command come without buttons (no category, no `at`, `yes`, `no`): a tap opens the chat, where the app's review and confirm apply. A question: its first question. Another wait: the folder's name. A finish: the last reply as plain text, 150 characters at most. Secrets come out of all text. `apns-collapse-id` and `thread-id` are the session's name, so a newer one replaces the older.
 - **Sending:** one HTTP/2 connection per Apple service, kept while it works; a JWT (ES256, `iss` Team ID, `kid` Key ID) made again every 40 minutes; `apns-topic: dev.blimp.phone`. A failed send is logged with Apple's reason and not retried, except once on a fresh connection after a dropped one.
 
+### Widgets
+
+The iPhone's widgets (home screen and lock screen; design in `docs/superpowers/specs/2026-10-25-phone-widgets-design.md`) show every project's running sessions, the hidden projects' left out, by the rules the inbox gives each session: needs you (waiting, or done with a question in its note; the oldest wait first), new (done and unread, the note not "in progress"; the newest first) and working (the longest-running first).
+
+- **`GET /widget`** → `{ at, counts: { needs, new, working }, rows: [{ session, dir, title, state, since }], lastFinished? }`, at most 9 rows (`src/widget.ts`). `since` is when it started waiting or working (ms).
+- **The widget key** reads `GET /widget` and nothing else (anything else answers it 401), so the widgets can read while the phone is locked without the phone's token, which stays in the keychain until Face ID. It is HMAC-SHA256 of the phone's token with the text `blimp widget`, hex. The app gets it with `GET /widget/key` (phone token) → `{ key }`, 404 with no phone paired. `blimpd pair` makes a new phone token, and so a new key.
+- **Widget push tokens:** `POST /push/widget { "token": hex, "env" }` → 204 and `DELETE /push/widget { "token" }` → 204, kept in push.json's `widgets` beside its `devices` (at most 5); 400 for a token that isn't hex or another env. `blimpd pair --revoke` removes them with the devices.
+
 ### Hooks (status backup)
 
 Claude's status files are internal and may change. So blimpd also installs Claude Code hooks that record status itself.
