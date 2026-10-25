@@ -44,6 +44,7 @@ import { startReorder } from "./lib/reorder";
 import { getSettings, startSettings, useSettings } from "./lib/settings";
 import { notify, setBadge, toMarkSeen, WaitWatcher } from "./lib/waiting";
 import { jobsOpen, JobWatcher, viewingList } from "./lib/jobs";
+import blimpMark from "./assets/blimp-silver.svg";
 
 type DialogKind = "palette" | "open" | "add" | "settings" | null;
 
@@ -614,6 +615,7 @@ export function App() {
         </div>
         {link.status !== "connected" && (
           <span className={"conn conn-" + link.status} title={link.error}>
+            {link.status !== "offline" && <img className="conn-mark" src={blimpMark} alt="" />}
             {link.status === "offline" ? "offline" : "connecting…"}
           </span>
         )}
