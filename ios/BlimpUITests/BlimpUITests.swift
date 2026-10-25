@@ -350,7 +350,8 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - The drawer from a swipe
 
-    /// A swipe right, from the middle of the screen too, opens the drawer; a swipe left closes it.
+    /// A swipe right, from the middle of the screen too, opens the drawer; a swipe left closes it. Holding on the
+    /// words in the box and dragging right moves the caret: no drawer, and the keyboard stays.
     func test9DrawerFromASwipe() throws {
         try launchPaired()
         let new = element("drawerStrip")
@@ -362,6 +363,19 @@ final class BlimpUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)))
         try until(new, "exists == false", "the drawer to close on a swipe left")
+
+        let input = element("messageField")
+        try wait(input, "the message field")
+        try type("move the caret here", into: input)
+        input.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
+            .press(forDuration: 1, thenDragTo: input.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        if new.waitForExistence(timeout: 2) { throw failed("no drawer from moving the caret") }
+        if !app.keyboards.firstMatch.exists { throw failed("the keyboard still up after moving the caret") }
+        shot("30a-caret")
+        // Empty again, so no later test finds words in it
+        try focus(input)
+        input.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 30))
+        try until(app.buttons["sendButton"], "exists == false", "the box to be empty again")
     }
 
     // MARK: - The lock keeps your place
