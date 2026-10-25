@@ -73,7 +73,7 @@ Thin or pre-2025 evidence: ChatGPT, Claude chat, Slack's compose button.
 
 ```
 ┌──────────────────────────────┐
-│ Cancel        code           │
+│             code      Cancel │
 │              ~/code          │
 ├──────────────────────────────┤
 │ ▢ api-server               › │
@@ -89,7 +89,7 @@ Thin or pre-2025 evidence: ChatGPT, Claude chat, Slack's compose button.
   beside `serverVersion`).
 - A navigation stack, one level per folder: a tap on a folder goes in, the back button or a swipe back goes up.
   The top level is home (blimpd's `/fs/*` only reach inside home). Title: the folder's name; under it the path
-  with `~` for home.
+  with `~` for home. Cancel is at the top right on every level, since the back button takes the left.
 - Each level lists its folders, A to Z as blimpd sends them, then its files greyed and not tappable, so you can
   tell where you are. Names starting with "." are left out, folders and files: on a phone they would fill the
   first screen of home.
@@ -97,7 +97,7 @@ Thin or pre-2025 evidence: ChatGPT, Claude chat, Slack's compose button.
 - The bottom bar: New Folder and Open \<this folder's name\> (prominent).
 - New Folder asks for a name in an alert with a text field. Empty: nothing happens. Containing "/" or being "."
   or "..": "A name can't contain / or be . or .." (the Mac's words). Taken (409): "\<name\> already exists."
-  Made: the browser goes into it.
+  Both show in a "Couldn't do that" alert. Made: the browser goes into it.
 - Open: `POST /folders/opened`, then the sheet closes and that project shows as if its icon was tapped: its
   inbox behind the still-open drawer, its icon first in the column (the held order puts a newly opened project
   first, not last), and it leaves the hidden list on the phone at once. If blimpd refuses (an older blimpd's
