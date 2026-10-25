@@ -157,3 +157,12 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] The lock. Open a tab, leave the app for over five minutes, come back. The lock covers everything, the page included; after unlocking, the chat shows.
 - [ ] Close Tab. ••• > Close Tab, or swipe a tab's row right in the drawer: it goes, on the Mac too.
 - [ ] Notifications. After pairing (or on the first launch with this build), blimp asks once whether it may send notifications: Allow. With the server's push key set, `blimpd push-test` prints `sent` for the phone, and the phone shows "blimp can reach this phone". Close blimp and let a session wait on you: a notification comes within a few seconds, titled with the session and "is waiting". Tap it: blimp opens (after Face ID) on that session's chat, and the notification is gone. A Claude turn of 30 s or more that ends sends "… finished" with the start of the reply. With blimp open, none shows (its own banner does). Settings > Notifications off: none come, on again: they do.
+
+## The blimp
+
+- [ ] The home screen icon: the refined blimp on graphite, in light and dark mode.
+- [ ] The pair screen: the graphite card with the blimp and "blimp" above Scan and the link field.
+- [ ] The lock cover: graphite, the blimp, "blimp", "Locked", and a white Unlock button; no session names.
+- [ ] A project with nothing: the blimp drifting over a dashed path above "What should Claude do here?", dark in light mode, silver in dark.
+- [ ] Turn Tailscale off: the blimp beside "Reconnecting…" bobs, then stays still once it says why it's offline. With Reduce Motion on (Settings, Accessibility, Motion), nothing moves.
+- [ ] Buttons are black (white in dark mode); links in Claude's replies are still blue; swipe actions keep their colours.

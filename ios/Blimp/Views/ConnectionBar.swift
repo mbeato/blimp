@@ -1,6 +1,7 @@
 // The slim bar at the top while the events link isn't up: "Connecting…" the first time, "Reconnecting…"
 // after, why it can't reach blimpd, and when that's most likely Tailscale being off, a button to open it.
 // Up, it shows only when blimpd is older than this app.
+// The blimp bobs beside "Connecting…" (still when offline).
 import BlimpKit
 import SwiftUI
 
@@ -16,6 +17,11 @@ struct ConnectionBar: View {
     var body: some View {
         if let text {
             HStack(spacing: 10) {
+                if case .connecting = store.connection {
+                    BlimpMark(width: 24).drift(3, every: 2)
+                } else if offline {
+                    BlimpMark(width: 24)
+                }
                 Text(text).font(.footnote)
                 if offline && store.tailnetOff {
                     Button("Open Tailscale", action: openTailscale)

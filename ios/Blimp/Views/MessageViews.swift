@@ -119,6 +119,8 @@ struct AssistantText: View {
         .font(.callout)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Links in a reply stay blue under the app's monochrome tint.
+        .tint(.blue)
     }
 }
 

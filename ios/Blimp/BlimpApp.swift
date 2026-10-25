@@ -21,7 +21,8 @@ struct BlimpApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Root().environment(store).environment(lock)
+            // Buttons and controls in black, white in dark mode (the icon's monochrome); tints set on purpose stay.
+            Root().environment(store).environment(lock).tint(Color.primary)
                 .transaction { if Self.noAnimations { $0.animation = nil; $0.disablesAnimations = true } }
         }
     }

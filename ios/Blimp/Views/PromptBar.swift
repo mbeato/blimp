@@ -215,7 +215,7 @@ struct PromptBar: View {
         if let text = prompt.plan, !text.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(MarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
-                    BlockView(block: block)
+                    BlockView(block: block).tint(.blue)
                 }
             }
             .font(.callout)

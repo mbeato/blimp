@@ -70,7 +70,8 @@ struct InboxView: View {
         .animation(.snappy, value: showOther)
         .overlay {
             if inbox.isEmpty && needs.isEmpty {
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
+                    FlightPath()
                     Text(Drawer.name(of: dir)).font(.title2.bold())
                     Text("What should Claude do here?").foregroundStyle(.secondary)
                 }
