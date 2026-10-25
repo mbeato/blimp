@@ -624,11 +624,15 @@ final class BlimpUITests: XCTestCase {
     }
 
     /// A widget's row links to blimp://open?session=<name> (WidgetLink): opened with the app in front, it lands in that
-    /// session's chat, as a tapped notification does. (The widgets themselves can't be driven from a UI test.)
+    /// session's chat, in its own project, as a tapped notification does. demo-ask, in api-server: a launch reopens the
+    /// chat used last (KeepsPlace), demo-chat's after testPushOpensTheChat, and no test before this one in shard b opens
+    /// demo-ask, so its chat shows only if the link opened it. (The widgets themselves can't be driven from a UI test.)
     func testWidgetLinkOpensTheChat() throws {
         try launchPaired()
-        app.open(URL(string: "blimp://open?session=demo-chat")!)
-        try wait(message("message.user", "Add a dark mode toggle to settings"), "demo-chat's chat from the widget's link", timeout: 30)
+        let chat = message("message.user", "Run the test suite")
+        if chat.exists { throw failed("demo-ask's chat not open before the link") }
+        app.open(URL(string: "blimp://open?session=demo-ask")!)
+        try wait(chat, "demo-ask's chat from the widget's link", timeout: 30)
         shot("45-widget-link")
     }
 
