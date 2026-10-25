@@ -135,7 +135,7 @@ struct InputBar: View {
     private var mic: some View {
         Image(systemName: listening ? "mic.fill" : "mic")
             .font(.body.weight(.medium))
-            .foregroundStyle(listening ? Color(.systemBackground) : Color.accentColor)
+            .foregroundStyle(listening ? Color(.systemBackground) : Color.primary)
             .frame(width: 32, height: 32)
             .background(listening ? Color.primary : Color.clear, in: Circle())
             .contentShape(Circle())

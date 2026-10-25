@@ -143,6 +143,7 @@ struct BlockView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     CodeBox { Text(s) }
                     RunControls(command: command, chat: runs.chat, onAsk: runs.onAsk)
+                        .tint(Color.primary)
                 }
             } else {
                 CodeBox { Text(s) }

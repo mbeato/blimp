@@ -1,9 +1,8 @@
 // The blimp in the app (docs/superpowers/specs/2026-10-25-brand-refresh-design.md): the mark (the BlimpGlyph asset,
 // ink in light mode and silver in dark; BlimpGlyphOnDark, always silver), the wordmark in the system's rounded font,
 // the graphite the icon sits on, an empty inbox's flight path, and a gentle drift that stays still with Reduce Motion
-// or with UIKit's animations off (the UI tests turn them off, and an endless animation would keep them waiting).
+// or when the app was launched with -noAnimations YES (the UI tests do, and an endless animation would keep them waiting).
 import SwiftUI
-import UIKit
 
 enum Brand {
     /// The icon's graphite, top to bottom (#2b2c33 → #0c0c0f).
@@ -53,14 +52,17 @@ struct FlightPath: View {
 }
 
 /// Moves its content up and down by `distance` points, once every `period` seconds. Still with Reduce Motion, with
-/// UIKit's animations off, or for a distance of 0.
+/// the -noAnimations launch flag, or for a distance of 0.
 private struct Drift: ViewModifier {
     var distance: CGFloat
     var period: Double
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var up = false
 
-    private var still: Bool { reduceMotion || distance == 0 || !UIView.areAnimationsEnabled }
+    /// Read once at launch, as BlimpApp does.
+    private static let testsStill = UserDefaults.standard.bool(forKey: "noAnimations")
+
+    private var still: Bool { reduceMotion || distance == 0 || Self.testsStill }
 
     func body(content: Content) -> some View {
         content
