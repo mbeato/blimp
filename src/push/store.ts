@@ -1,7 +1,8 @@
 // Phone notifications' files, beside the socket (docs/superpowers/specs/2026-10-20-phone-push-design.md):
 // apns.p8, the push key from Apple's developer site, and apns.json { keyId, teamId }, both from `blimpd
-// push-key`; push.json { devices: [{ token, env, at }], widgets: [...] }, the phones that asked for notifications
-// and the widgets' push tokens (iOS 26 widget push, src/push/widgets.ts). All 600,
+// push-key`; push.json { devices: [{ token, env, at }], widgets: [...], starts: [...], activities: [...] }, the phones
+// that asked for notifications, the widgets' push tokens (iOS 26 widget push, src/push/widgets.ts), and the live
+// panel's: the push-to-start token, and the token of the panel that's up (src/push/live.ts). All 600,
 // written through a temp file and a rename, so never half written.
 
 import { createPrivateKey } from "node:crypto";
@@ -25,6 +26,8 @@ const APPLE_ID = /^[A-Z0-9]{10}$/;
 export const isDeviceToken = (t: unknown): t is string => typeof t === "string" && /^[0-9a-f]{64,200}$/i.test(t);
 // WidgetKit's push tokens: hex, longer than a device's can be.
 export const isWidgetToken = (t: unknown): t is string => typeof t === "string" && /^[0-9a-f]{64,400}$/i.test(t);
+// ActivityKit's push-to-start and Live Activity tokens: hex, as long as a widget's can be.
+export const isLiveToken = isWidgetToken;
 export const isPushEnv = (e: unknown): e is PushEnv => e === "development" || e === "production";
 
 function write(file: string, text: string) {
@@ -59,7 +62,9 @@ export function saveCreds(p8: string, keyId: string, teamId: string, dir = blimp
   write(credsFile(dir), JSON.stringify({ keyId, teamId }));
 }
 
-type Lists = { devices: Device[]; widgets: Device[] };
+type Lists = { devices: Device[]; widgets: Device[]; starts: Device[]; activities: Device[] };
+// The live panel's lists: push-to-start tokens, and the tokens of the panel that's up.
+export type LiveList = "starts" | "activities";
 
 const valid = (list: unknown, isToken: (t: unknown) => boolean): Device[] =>
   Array.isArray(list) ? list.filter((x) => isToken(x?.token) && isPushEnv(x?.env) && typeof x?.at === "number") : [];
@@ -68,13 +73,27 @@ const valid = (list: unknown, isToken: (t: unknown) => boolean): Device[] =>
 function readLists(file: string): Lists {
   try {
     const j = JSON.parse(readFileSync(file, "utf8"));
-    return { devices: valid(j?.devices, isDeviceToken), widgets: valid(j?.widgets, isWidgetToken) };
+    return {
+      devices: valid(j?.devices, isDeviceToken),
+      widgets: valid(j?.widgets, isWidgetToken),
+      starts: valid(j?.starts, isLiveToken),
+      activities: valid(j?.activities, isLiveToken),
+    };
   } catch {}
-  return { devices: [], widgets: [] };
+  return { devices: [], widgets: [], starts: [], activities: [] };
 }
 
-// No widgets: the file is as it was before them.
-const writeLists = (file: string, l: Lists) => write(file, JSON.stringify({ devices: l.devices, ...(l.widgets.length ? { widgets: l.widgets } : {}) }));
+// An empty list but the devices' is left out: without widgets or a live panel, the file is as it was before them.
+const writeLists = (file: string, l: Lists) =>
+  write(
+    file,
+    JSON.stringify({
+      devices: l.devices,
+      ...(l.widgets.length ? { widgets: l.widgets } : {}),
+      ...(l.starts.length ? { starts: l.starts } : {}),
+      ...(l.activities.length ? { activities: l.activities } : {}),
+    }),
+  );
 
 // Adds one, or moves it to the front with its env and time; only the 5 newest are kept.
 function add(key: keyof Lists, token: string, env: PushEnv, now: number, file: string): Device[] {
@@ -102,7 +121,18 @@ export const readWidgets = (file = devicesFile()): Device[] => readLists(file).w
 export const addWidget = (token: string, env: PushEnv, now = Date.now(), file = devicesFile()) => add("widgets", token, env, now, file);
 export const removeWidget = (token: string, file = devicesFile()) => remove("widgets", token, file);
 
-// `blimpd pair --revoke`: a phone that can't connect gets no notifications, and its widgets no pings.
+export const readLive = (list: LiveList, file = devicesFile()): Device[] => readLists(file)[list];
+export const addLive = (list: LiveList, token: string, env: PushEnv, now = Date.now(), file = devicesFile()) => add(list, token, env, now, file);
+export const removeLive = (list: LiveList, token: string, file = devicesFile()) => remove(list, token, file);
+// A panel ended or a new one is starting: the tokens kept are an ended panel's.
+export function clearLive(list: LiveList, file = devicesFile()) {
+  const l = readLists(file);
+  if (!l[list].length) return;
+  l[list] = [];
+  writeLists(file, l);
+}
+
+// `blimpd pair --revoke`: a phone that can't connect gets no notifications, its widgets no pings, and no live panel.
 export function clearDevices(file = devicesFile()) {
   rmSync(file, { force: true });
 }

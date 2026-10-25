@@ -460,6 +460,34 @@ describe("chat", () => {
     expect((await api(`/conversations/${sid}/messages`)).status).toBe(400);
   });
 
+  test("input from the phone makes its session the live panel's followed turn; the Mac's doesn't", async () => {
+    const phone = "feed".repeat(16);
+    writeFileSync(join(tmp, "phone-token"), phone, { mode: 0o600 });
+    try {
+      const mac = await fakeClaude("live1", "5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e", []);
+      const c = await socket(`/sessions/${mac.name}/chat`);
+      await until(() => c.messages.find((m) => m.type === "history"), "history");
+      c.ws.send(JSON.stringify({ type: "input", id: "l1", text: "from the Mac" }));
+      await until(() => c.messages.find((m) => m.type === "ack" && m.id === "l1"), "the Mac's ack");
+      expect((await (await api("/live")).json()).turn).toBeUndefined();
+      const { name } = await fakeClaude("live2", "5f5f5f5f-5f5f-4f5f-8f5f-5f5f5f5f5f5f", []);
+      const ws = new WebSocket(`ws+unix://${sock}:/sessions/${name}/chat?token=${phone}`);
+      const got: any[] = [];
+      ws.onmessage = (e) => got.push(JSON.parse(String(e.data)));
+      await until(() => got.find((m) => m.type === "history"), "the phone's history");
+      ws.send(JSON.stringify({ type: "input", id: "l2", text: "from the phone" }));
+      await until(() => got.find((m) => m.type === "ack" && m.id === "l2"), "the phone's ack");
+      const live = await (await api("/live")).json();
+      expect(live.turn).toMatchObject({ session: name, state: "working" });
+      expect(typeof live.turn.since).toBe("number");
+      expect(live.rows.some((r: { session: string }) => r.session === name)).toBe(false);
+      ws.close();
+      c.ws.close();
+    } finally {
+      rmSync(join(tmp, "phone-token"), { force: true });
+    }
+  });
+
   test("history of a long transcript is its last 200 messages", async () => {
     const lines = Array.from({ length: 3000 }, (_, i) => (i % 2 ? said(`a${i}`, `answer ${i}`) : user(`u${i}`, `prompt ${i}`)));
     const { name } = await fakeClaude("chat10", "99999999-9999-9999-9999-999999999999", lines);
@@ -2281,5 +2309,56 @@ describe("widgets", () => {
     expect((await widget("xyz")).status).toBe(400);
     expect((await widget("ab".repeat(50), "staging")).status).toBe(400);
     expect((await api("/push/widget", { method: "POST", body: "null" })).status).toBe(400);
+  });
+});
+
+describe("live panel", () => {
+  const phoneFile = join(tmp, "phone-token");
+  const phone = "cafe".repeat(16);
+  const key = widgetKey(phone);
+  const withToken = (t: string, path: string, init: RequestInit = {}) => api(path, { ...init, headers: { Authorization: `Bearer ${t}` } }, false);
+  const file = () => JSON.parse(readFileSync(join(tmp, "push.json"), "utf8"));
+
+  test("GET /live: the rows and counts it would show", async () => {
+    const r = await api("/live");
+    expect(r.status).toBe(200);
+    const l = await r.json();
+    expect(Object.keys(l.counts).sort()).toEqual(["needs", "new", "working"]);
+    expect(Array.isArray(l.rows)).toBe(true);
+    expect(l.rows.length).toBeLessThanOrEqual(4);
+  });
+
+  test("POST and DELETE /push/live keep its push-to-start and panel tokens in push.json, beside the devices", async () => {
+    const live = (kind: unknown, t: unknown, env: unknown = "development", method = "POST") => api("/push/live", { method, body: JSON.stringify({ kind, token: t, env }) });
+    expect((await live("start", "ab".repeat(60))).status).toBe(204);
+    expect((await live("activity", "cd".repeat(70))).status).toBe(204);
+    expect(file().starts.map((d: { token: string }) => d.token)).toEqual(["ab".repeat(60)]);
+    expect(file().activities.map((d: { token: string }) => d.token)).toEqual(["cd".repeat(70)]);
+    expect(statSync(join(tmp, "push.json")).mode & 0o777).toBe(0o600);
+    expect((await live("start", "ab".repeat(60), undefined, "DELETE")).status).toBe(204);
+    expect((await live("activity", "cd".repeat(70), undefined, "DELETE")).status).toBe(204);
+    expect(file().starts).toBeUndefined();
+    expect(file().activities).toBeUndefined();
+    expect((await live("broadcast", "ab".repeat(60))).status).toBe(400);
+    expect((await live("start", "xyz")).status).toBe(400);
+    expect((await live("start", "ab".repeat(60), "staging")).status).toBe(400);
+    expect((await api("/push/live", { method: "POST", body: "null" })).status).toBe(400);
+  });
+
+  test("the widget key sends the panel's tokens (the phone may be locked), and still reads nothing else", async () => {
+    writeFileSync(phoneFile, phone);
+    try {
+      const body = JSON.stringify({ kind: "activity", token: "ef".repeat(70), env: "production" });
+      expect((await withToken(key, "/push/live", { method: "POST", body })).status).toBe(204);
+      expect(file().activities.map((d: { token: string }) => d.token)).toEqual(["ef".repeat(70)]);
+      expect((await withToken(key, "/push/live", { method: "DELETE", body })).status).toBe(204);
+      expect(file().activities).toBeUndefined();
+      expect((await withToken(key, "/live")).status).toBe(401);
+      expect((await withToken(key, "/push/device", { method: "POST", body: JSON.stringify({ token: "a".repeat(64), env: "production" }) })).status).toBe(401);
+      expect((await withToken(phone, "/push/live", { method: "POST", body })).status).toBe(204);
+      expect((await withToken(phone, "/push/live", { method: "DELETE", body })).status).toBe(204);
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
   });
 });

@@ -5,7 +5,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addDevice, addWidget, clearDevices, credsFile, devicesFile, isDeviceToken, isWidgetToken, keyFile, readCreds, readDevices, readWidgets, removeDevice, removeWidget, saveCreds } from "../src/push/store";
+import { addDevice, addLive, addWidget, clearDevices, clearLive, credsFile, devicesFile, isDeviceToken, isLiveToken, isWidgetToken, keyFile, readCreds, readDevices, readLive, readWidgets, removeDevice, removeLive, removeWidget, saveCreds } from "../src/push/store";
 
 const root = mkdtempSync(join(tmpdir(), "blimp-push-store-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -107,4 +107,34 @@ test("a widget push token is hex, 64 to 400 characters", () => {
   expect(isWidgetToken("ab".repeat(201))).toBe(false);
   expect(isWidgetToken("xyz")).toBe(false);
   expect(isWidgetToken(5)).toBe(false);
+});
+
+test("the live panel's tokens are kept beside the devices and widgets: push-to-start ones and the panel's own", () => {
+  const file = devicesFile(fresh());
+  addDevice("a".repeat(64), "production", 1, file);
+  addWidget("ab".repeat(50), "production", 2, file);
+  addLive("starts", "CD".repeat(60), "development", 3, file);
+  addLive("activities", "ef".repeat(70), "development", 4, file);
+  addLive("activities", "12".repeat(70), "development", 5, file);
+  expect(readLive("starts", file)).toEqual([{ token: "cd".repeat(60), env: "development", at: 3 }]);
+  expect(readLive("activities", file).map((d) => d.token[0])).toEqual(["1", "e"]);
+  expect(readDevices(file).length).toBe(1);
+  expect(readWidgets(file).length).toBe(1);
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  removeLive("starts", "cd".repeat(60), file);
+  expect(readLive("starts", file)).toEqual([]);
+  clearLive("activities", file);
+  expect(readLive("activities", file)).toEqual([]);
+  expect(readWidgets(file).length).toBe(1);
+  // none left: push.json is as it was before the live panel
+  expect(Object.keys(JSON.parse(readFileSync(file, "utf8")))).toEqual(["devices", "widgets"]);
+  clearDevices(file);
+  expect(readLive("starts", file)).toEqual([]);
+});
+
+test("a live panel token is hex, 64 to 400 characters", () => {
+  expect(isLiveToken("ab".repeat(80))).toBe(true);
+  expect(isLiveToken("ab".repeat(201))).toBe(false);
+  expect(isLiveToken("xyz")).toBe(false);
+  expect(isLiveToken(undefined)).toBe(false);
 });

@@ -9,6 +9,7 @@ import { type ChatMessage, type ChatScan, newScan, readAppended, readLast } from
 import { answer } from "./answer";
 import { cleanText } from "./prompt";
 import { existsSync } from "node:fs";
+import { markFollowed } from "./followed";
 import { claudeDir, type Session, transcriptPath } from "./sessions";
 import { Asking, findSession, forget, release, typed, type Typist, typist, wasTyped } from "./typing";
 
@@ -26,6 +27,7 @@ export type ChatData = {
   busy?: boolean;
   opened?: Promise<void>;
   handling?: Set<Promise<void>>; // messages being handled: closeChat waits for them
+  phone?: string; // the phone's token, when the phone opened it (server.ts's upgrade sets it)
 };
 
 export const chatData = (name: string): ChatData => ({ kind: "chat", name, ticks: 0, typist: typist(name) });
@@ -165,6 +167,8 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
         if ((await find(d.name))?.state === "waiting") throw new Asking();
         return ["\x1b[200~" + text + "\x1b[201~\r"];
       });
+      // A prompt from the phone: the live panel follows this turn (followed.ts).
+      if (d.phone) markFollowed(d.name);
       return send(ws, { type: "ack", id });
     }
     // answer, interrupt and deny (answer.ts); anything else is "unknown message".

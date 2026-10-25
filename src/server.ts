@@ -22,7 +22,9 @@ import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
-import { addDevice, addWidget, isDeviceToken, isPushEnv, isWidgetToken, removeDevice, removeWidget } from "./push/store";
+import { markFollowed } from "./followed";
+import { liveNow } from "./live";
+import { addDevice, addLive, addWidget, isDeviceToken, isLiveToken, isPushEnv, isWidgetToken, removeDevice, removeLive, removeWidget } from "./push/store";
 import { startPush } from "./push/watch";
 import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
@@ -82,7 +84,7 @@ const same = (given: Buffer, token: string) => {
 };
 
 // Which token the request carries: the Mac's, the phone's (its value), the widget key (it reads only GET /widget,
-// widget.ts), or none (undefined).
+// widget.ts, and sends the live panel's tokens), or none (undefined).
 function authorized(req: Request, url: URL, token: string, dir: string): "mac" | "widget" | { phone: string } | undefined {
   // HTTP sends a Bearer header; WebSockets can't, so they send ?token=.
   const h = req.headers.get("authorization");
@@ -141,6 +143,8 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     // Claude's first message, as an argument after "--", so one that starts with "-" isn't taken for an option.
     if (typeof prompt === "string") run.args.push("--", cleanText(prompt));
     const started = await startSession(real, { name: name || undefined, kind: k, run });
+    // A first message from the phone: the live panel follows this turn (followed.ts).
+    if (phone && typeof prompt === "string") markFollowed(started);
     // A session started in a hidden project shows it again: you went back to it. The session runs either way,
     // so a failed write mustn't answer 500 and get the start retried.
     try {
@@ -281,6 +285,21 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const key = widgetKey(phone ?? readPhoneToken(blimpDir()));
     if (!key) throw new HttpError(404, "no phone is paired (blimpd pair)");
     return Response.json({ key });
+  }
+
+  // The live panel (live.ts, push/live.ts): what it shows now, and its push tokens: the push-to-start token (kind
+  // "start") and the token of the panel that's up (kind "activity"). The widget key may send them too: iOS wakes the
+  // app to hand over a panel blimpd started while the phone is locked, when only the App Group's files can be read.
+  if (path === "/live" && get) return Response.json(liveNow(listSessionsLite(claudeDir(), await zmxListAsync())));
+  if (path === "/push/live" && (req.method === "POST" || req.method === "DELETE")) {
+    const { kind, token: live, env } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    const list = kind === "start" ? "starts" : kind === "activity" ? "activities" : undefined;
+    if (!list) throw new HttpError(400, 'kind must be "start" or "activity"');
+    if (!isLiveToken(live)) throw new HttpError(400, "token must be a Live Activity push token, in hex");
+    if (req.method === "DELETE") removeLive(list, live);
+    else if (isPushEnv(env)) addLive(list, live, env);
+    else throw new HttpError(400, 'env must be "development" or "production"');
+    return new Response(null, { status: 204 });
   }
 
   if (path === "/events" && get) {
@@ -452,8 +471,9 @@ export function serve(): Server {
       const url = new URL(req.url);
       // No CORS header on a 401: any web page could read it and learn that this port is blimp.
       const who = authorized(req, url, token, dir);
-      // The widget key reads the widgets' summary and nothing else.
-      if (!who || (who === "widget" && !(url.pathname === "/widget" && req.method === "GET"))) return error(401, "wrong or missing token");
+      // The widget key reads the widgets' summary and sends the live panel's tokens, nothing else.
+      const widgetMay = (url.pathname === "/widget" && req.method === "GET") || (url.pathname === "/push/live" && (req.method === "POST" || req.method === "DELETE"));
+      if (!who || (who === "widget" && !widgetMay)) return error(401, "wrong or missing token");
       let res: Response | undefined;
       try {
         res = await route(req, url, server, who === "mac" || who === "widget" ? undefined : who.phone);
