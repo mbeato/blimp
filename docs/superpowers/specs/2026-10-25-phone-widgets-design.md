@@ -104,7 +104,8 @@ the widget's timeline ──> reload after 15 minutes ────────�
 - The widget key: HMAC-SHA256 of the phone's token with the text `blimp widget`, hex, worked out by blimpd from the
   phone token it has (`readPhoneToken`). The app gets it with `GET /widget/key` (phone token) → `{ key }`, so the
   crypto and its tests stay on the server. It is accepted only for `GET /widget`; anywhere else it is refused like a
-  wrong token. Pairing again changes the phone token and so this key.
+  wrong token. To change it: `blimpd pair --revoke`, then `blimpd pair` (a new phone token, and so a new key) and
+  pair the phone again.
 - Widget push tokens: `POST /push/widget { token, env }` and `DELETE /push/widget { token }` (phone token), kept in
   push.json beside the devices (mode 600).
 - The pinger (`src/push/widgets.ts`): its own one-second tick beside the push watcher's, sharing its connection to
@@ -117,9 +118,9 @@ the widget's timeline ──> reload after 15 minutes ────────�
 - An App Group, `group.dev.blimp.phone`, shared by the app and the extension, with two files so neither overwrites
   the other's: `server.json`, which only the app writes (the server's URL and the widget key, or none when blimpd is
   too old to have one), and `kept.json`, which only the widgets write (their last summary and their push token).
-- Each time it's online, the app writes `server.json` (asking blimpd for the widget key), sends a widget push token
-  it hasn't sent yet (`POST /push/widget`), and reloads the widgets; it reloads them too when it goes to the
-  background. Signing out deletes `server.json`.
+- Each time it's online, the app writes `server.json` (asking blimpd for the widget key), sends the widgets' push
+  token (`POST /push/widget`, each time, as it sends the phone's own), and reloads the widgets; it reloads them too
+  when it goes to the background. Signing out deletes `server.json`.
 - The push handler (iOS 26's `WidgetPushHandler`, set with `.pushHandler(...)`; the names checked against the iOS
   26.5 SDK when planning) writes the token to `kept.json`. So after adding a widget, it reaches blimpd the next
   time the app is open.
@@ -156,7 +157,7 @@ the widget's timeline ──> reload after 15 minutes ────────�
 ## Docs
 
 - DESIGN.md: `GET /widget`, the widget key, widget push tokens and the pinger.
-- SECURITY.md: the widget key (reads titles and counts only) and titles on the lock screen.
+- SECURITY.md: the widget key (reads the widgets' summary only) and titles on the lock screen.
 - ios/README.md: the widgets, and the Apple step if it's needed.
 
 ## Not in this change
