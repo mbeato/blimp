@@ -67,7 +67,7 @@ Thin or pre-2025 evidence: ChatGPT, Claude chat, Slack's compose button.
   above the list, then Active, Browser, Earlier as today.
 - A sideways swipe anywhere in the drawer closes it, the column too (the row's exception and `StripFrame` go).
 - No projects at all (a fresh blimpd): the right side says "Open a folder on the computer to start." with an
-  Open a Folder button; New session is disabled, as today with no project.
+  Open a Folder button; New session isn't shown there; the empty state's one action is Open a Folder.
 
 ### The folder browser
 

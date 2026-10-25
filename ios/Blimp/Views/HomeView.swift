@@ -1,7 +1,7 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
-// anywhere, or ☰ on the inbox) with the projects' column (+ at its foot opens a folder on the computer), New session and the project's sessions, running and past. A
-// chat's top left goes back to its project's inbox. A project opens to its inbox, where the box at the bottom starts
-// a session; the drawer's New session opens it with the keyboard up.
+// anywhere, or ☰ on the inbox) with the projects' column (+ at its foot opens a folder on the computer), New session
+// and the project's sessions, running and past. A chat's top left goes back to its project's inbox. A project opens
+// to its inbox, where the box at the bottom starts a session; the drawer's New session opens it with the keyboard up.
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
 // live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
@@ -132,6 +132,14 @@ struct HomeView: View {
         // The drawer opens: the keyboard goes (☰ on the inbox), and the hidden projects and recent folders are
         // fetched again, as a session started on the Mac shows one again.
         .onChange(of: drawer) { _, open in if open { hideKeyboard() } }
+        // The lock's cover is an overlay, and a sheet sits above it: close the folder browser as the cover goes on,
+        // with animations off so it's gone before the app switcher's snapshot, or it shows the computer's folders.
+        .onChange(of: covered) { _, c in
+            guard c else { return }
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) { showFolders = false }
+        }
         .task(id: drawer) {
             guard drawer, let api = store.api else { return }
             if let list = try? await api.hiddenFolders() { hidden = Set(list) }
@@ -166,6 +174,7 @@ struct HomeView: View {
                     // Close what could cover the chat.
                     browserTab = nil
                     showSettings = false
+                    showFolders = false
                     show(.session(name))
                     return
                 }

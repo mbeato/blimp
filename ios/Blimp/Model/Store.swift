@@ -135,6 +135,7 @@ final class Store {
         everOnline = false
         tailnetOff = false
         serverVersion = nil
+        serverHome = nil
     }
 
     /// Starts (or resumes) Claude Code in `dir`, with `prompt` as its first message if given; returns the new session's name.

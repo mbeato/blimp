@@ -458,7 +458,7 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - New session
 
-    /// The drawer's +, from a chat: the drawer closes and the project's inbox shows with its box ready to
+    /// The drawer's New session button, from a chat: the drawer closes and the project's inbox shows with its box ready to
     /// type into (the keyboard up). Nothing starts until Send, so the job's count of sessions started holds. (By name
     /// after Needs you.)
     func testNewSessionFromTheDrawer() throws {
@@ -561,12 +561,13 @@ final class BlimpUITests: XCTestCase {
         try type(name, into: field)
         app.alerts.buttons["Make"].tap()
         try wait(element("folderBrowserEmpty"), "the browser in the new folder")
-        shot("40-folder-browser")
+        shot("43-folder-browser")
+        try until(element("folderBrowserOpen"), "label == 'Open \(name)'", "the browser in \(name)")
         element("folderBrowserOpen").tap()
         try until(element("folderBrowserOpen"), "exists == false", "the browser to close on Open")
         try until(element("drawerProject"), "label == '\(name)'", "the drawer to show \(name)")
         try wait(element("strip-" + name), "\(name) in the column")
-        shot("41-opened-folder")
+        shot("44-opened-folder")
 
         // Hide it, then open it again from the browser: it's back.
         element("strip-" + name).press(forDuration: 1.2)
@@ -575,6 +576,7 @@ final class BlimpUITests: XCTestCase {
         hide.tap()
         try until(element("strip-" + name), "exists == false", "\(name) to leave the column")
         try browse(to: steps + [name])
+        try until(element("folderBrowserOpen"), "label == 'Open \(name)'", "the browser in \(name)")
         element("folderBrowserOpen").tap()
         try wait(element("strip-" + name), "\(name) back in the column")
     }
