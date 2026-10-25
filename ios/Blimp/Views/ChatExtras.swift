@@ -85,6 +85,7 @@ struct RunConfirmSheet: View {
                     Text("Run").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .foregroundStyle(Color(.systemBackground))
                 .controlSize(.large)
                 .accessibilityIdentifier("runConfirm")
             }

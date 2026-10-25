@@ -19,6 +19,7 @@ struct SettingsView: View {
                 }
                 Section {
                     Toggle("Notifications", isOn: $notify)
+                        .tint(.green)
                         .accessibilityIdentifier("pushSwitch")
                         .onChange(of: notify) { _, on in
                             Push.off = !on

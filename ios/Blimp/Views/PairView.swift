@@ -22,6 +22,18 @@ struct PairView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // The blimp, as on the icon.
+                Section {
+                    VStack(spacing: 8) {
+                        BlimpMark(width: 190, onDark: true)
+                        Wordmark().foregroundStyle(.white)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 36)
+                    .background(Brand.graphite, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
                 if canScan {
                     Section {
                         Button {
@@ -58,6 +70,7 @@ struct PairView: View {
                 }
             }
             .navigationTitle("Connect")
+            .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $scanning) {
                 NavigationStack {
                     QRScanner { scanned in

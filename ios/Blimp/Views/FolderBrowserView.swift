@@ -87,6 +87,7 @@ private struct FolderLevel: View {
                 Spacer()
                 Button { open() } label: { Text("Open \(name)").lineLimit(1) }
                     .buttonStyle(.borderedProminent)
+                    .foregroundStyle(Color(.systemBackground))
                     .disabled(opening)
                     .accessibilityIdentifier("folderBrowserOpen")
             }

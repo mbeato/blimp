@@ -522,3 +522,9 @@ A custom menu, so the web page gets ⌘W, ⌘N, ⌘⇧N, ⌘O, ⌘P and ⌘K: ap
   - M4: edit and save a file in blimp → `git diff` shows it. Change an open, edited file on the server → the reload bar appears.
 - Rust: `cargo clippy` and a Linux `tauri build` here; a macOS build on GitHub Actions (`macos-latest`), uploaded as an artifact.
 - Things only a Mac can check (notification banner, Dock badge, keyboard feel) go in a checklist for Max.
+
+## Brand
+
+The mark is a refined blimp facing right: a shaded white envelope with two panel seams and a highlight, four fins at the tail, and a gondola with three windows (design in `docs/superpowers/specs/2026-10-25-brand-refresh-design.md`). Its sources are `brand/blimp-silver.svg` (for dark backgrounds) and `brand/blimp-ink.svg` (graphite, for light ones); the iPhone's asset catalog (`BlimpGlyph`, ink in light mode and silver in dark; `BlimpGlyphOnDark`) and the Mac (`app/src/assets/`) ship copies, which `test/brand.test.ts` keeps the same. The icons are the mark on graphite (`#2b2c33` → `#0c0c0f`): `ios/app-icon.svg` and `app/src-tauri/app-icon.svg`, rendered by `bun scripts/icons.ts`.
+
+The name is written in the system's rounded font, heavy. Buttons are monochrome: black, white in dark mode, on the iPhone (its root tint), `var(--fg)` on `var(--bg)` on the Mac, following its theme. The Mac shows the silver blimp in its dark theme and the ink one in its light theme. Colour means something: amber for needs you, blue for unread and for links, and the swipe actions' red, green, blue and grey. The blimp appears on the pair screen, the lock cover, an empty inbox and beside "Connecting…" on the iPhone, and on the Mac's welcome page and connecting pill; it drifts or bobs, and keeps still with reduced motion.

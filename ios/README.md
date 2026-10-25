@@ -160,7 +160,7 @@ gh secret set APPLE_TEAM_ID -R mbeato/blimp --body "<team id>"
 
 8. Keep the `.p8` file somewhere safe, or delete it. The secret has it now.
 
-The icon is `Blimp/Assets.xcassets/AppIcon.appiconset/AppIcon.png`, drawn from `ios/app-icon.svg` (the Mac icon's blimp on a full black square; RGB, no transparency, which the App Store requires).
+The icon is `Blimp/Assets.xcassets/AppIcon.appiconset/AppIcon.png`, rendered from `ios/app-icon.svg` (the refined blimp on a full graphite square; RGB, no transparency, which the App Store requires) by `bun scripts/icons.ts` at the repo root, which also renders the Mac's `app/src-tauri/app-icon.png` (then `bun run tauri icon src-tauri/app-icon.png` in `app/`). The blimp alone is `brand/blimp-silver.svg` (on dark) and `brand/blimp-ink.svg` (on light); the apps ship copies, which `test/brand.test.ts` keeps the same.
 
 After that, each release tag uploads a build. The build number is the workflow's run number. The build shows in App Store Connect under TestFlight once Apple has processed it (often 10 to 30 minutes). Add yourself as an internal tester there, and install it on the iPhone with the TestFlight app.
 

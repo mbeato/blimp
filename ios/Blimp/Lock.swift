@@ -78,15 +78,28 @@ struct LockedView: View {
     @Environment(Lock.self) private var lock
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "lock").font(.largeTitle).foregroundStyle(.secondary)
-            Button("Unlock") { Task { await lock.unlock() } }
-                .buttonStyle(.borderedProminent)
-                .opacity(lock.locked ? 1 : 0)
-            if let note = lock.note, lock.locked { Text(note).font(.footnote).foregroundStyle(.secondary) }
+        VStack(spacing: 14) {
+            Spacer()
+            BlimpMark(width: 200, onDark: true)
+            Wordmark(size: 40).foregroundStyle(.white)
+            Text("Locked").font(.subheadline).foregroundStyle(Color(white: 0.63))
+            Spacer()
+            Button { Task { await lock.unlock() } } label: {
+                Label("Unlock", systemImage: "faceid")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .foregroundStyle(Color(red: 0x0c / 255, green: 0x0c / 255, blue: 0x0f / 255))
+                    .background(.white, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .opacity(lock.locked ? 1 : 0)
+            if let note = lock.note, lock.locked { Text(note).font(.footnote).foregroundStyle(Color(white: 0.63)) }
         }
+        .padding(.horizontal, 32)
+        .padding(.bottom, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(Brand.graphite)
         // Over a live Home, .accessibilityHidden doesn't reach Home's UIKit-hosted parts (the navigation bar,
         // the chat), so the cover itself shuts VoiceOver and the UI tests out of everything beside it.
         .accessibilityElement(children: .contain)

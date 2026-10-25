@@ -1,9 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- iPhone app icon: the Mac icon's white blimp on a full black square (iOS rounds the corners itself). -->
-  <rect width="1024" height="1024" fill="#000"/>
-  <g transform="translate(512 512) scale(1.24) translate(-512 -512) translate(-12 -4)" fill="#fff" stroke="#fff" stroke-width="18" stroke-linejoin="round">
-    <path d="M300 512 C340 452 448 424 566 424 C676 424 748 460 748 512 C748 564 676 600 566 600 C448 600 340 572 300 512 Z"/>
-    <path d="M300 400 L338 400 L424 456 L424 568 L338 624 L300 624 Z"/>
-    <path d="M520 590 L612 590 L602 630 L530 630 Z"/>
+  <!-- iPhone app icon: the refined blimp (brand/blimp-silver.svg's drawing) on a full graphite square; iOS rounds the corners. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2c33"/>
+      <stop offset="1" stop-color="#0c0c0f"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#eceef2"/>
+      <stop offset="1" stop-color="#c3c7d1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#tile)"/>
+  <g transform="translate(21 24)">
+    <path d="M300 446 L244 366 Q238 354 252 354 L306 354 Q318 354 326 364 L384 428 Z" fill="#a9aebb"/>
+    <path d="M300 514 L244 594 Q238 606 252 606 L306 606 Q318 606 326 596 L384 532 Z" fill="#a9aebb"/>
+    <rect x="520" y="570" width="120" height="52" rx="20" fill="#d6d9e0"/>
+    <rect x="537" y="598" width="18" height="12" rx="4" fill="#15161b"/>
+    <rect x="565" y="598" width="18" height="12" rx="4" fill="#15161b"/>
+    <rect x="593" y="598" width="18" height="12" rx="4" fill="#15161b"/>
+    <path d="M236 480 C290 420 420 368 572 368 C712 368 796 420 796 480 C796 540 712 592 572 592 C420 592 290 540 236 480 Z" fill="url(#body)"/>
+    <path d="M470 374 C452 430 452 530 470 586" fill="none" stroke="#9aa0ae" stroke-opacity="0.45" stroke-width="6" stroke-linecap="round"/>
+    <path d="M650 374 C634 430 634 530 650 588" fill="none" stroke="#9aa0ae" stroke-opacity="0.45" stroke-width="6" stroke-linecap="round"/>
+    <path d="M430 392 C500 378 610 376 700 398" fill="none" stroke="#ffffff" stroke-opacity="0.9" stroke-width="14" stroke-linecap="round"/>
+    <path d="M352 472 L212 466 Q192 466 192 480 Q192 494 212 494 L352 488 Z" fill="#878d9c"/>
   </g>
 </svg>

@@ -129,7 +129,7 @@ Each item says what to do, and what should happen. If the result is different, w
 
 - [ ] **Light and dark mode.**
   Do: switch macOS between Light and Dark in System Settings > Appearance.
-  Expect: blimp follows the change, the terminal and editor too.
+  Expect: blimp follows the change, the terminal and editor too. The welcome page's blimp shows in both the light and the dark theme (silver on dark, ink on light).
 
 ## Files
 

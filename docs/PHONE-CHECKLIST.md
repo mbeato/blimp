@@ -166,3 +166,14 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] A row's tap opens its chat. The small widget's tap opens the oldest that needs you.
 - [ ] Stop blimpd (or turn Tailscale off). After the next refresh the widgets are greyed with "as of".
 - [ ] A working row's time counts up by itself; past an hour it says "1h", past a day "1d".
+
+## The blimp
+
+- [ ] The home screen icon: the refined blimp on graphite, in light and dark mode.
+- [ ] The pair screen: the graphite card with the blimp and "blimp" above Scan and the link field.
+- [ ] The lock cover: graphite, the blimp, "blimp", "Locked", and a white Unlock button; no session names.
+- [ ] A project with nothing: the blimp drifting over a dashed path above "What should Claude do here?", dark in light mode, silver in dark.
+- [ ] Turn Tailscale off: the blimp beside "Reconnecting…" bobs, then stays still once it says why it's offline. With Reduce Motion on (Settings, Accessibility, Motion), nothing moves.
+- [ ] Buttons are black (white in dark mode); links in Claude's replies are still blue; swipe actions keep their colours.
+- [ ] In dark mode, your messages, the send button and the mic while listening are white with black content, and readable.
+- [ ] In dark mode, the prominent buttons (Allow, Submit, Resume, Open, Run) are white with black text, and readable.

@@ -53,7 +53,7 @@ jobs:
       # bun build --compile for bun-linux-x64 and bun-linux-arm64 (the root "build" script).
       - name: Build blimpd
         run: |
-          bun install
+          bun install --production
           bun run build
           cd dist
           shasum -a 256 blimpd-linux-x64 blimpd-linux-arm64 > SHA256SUMS

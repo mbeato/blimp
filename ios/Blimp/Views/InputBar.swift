@@ -135,9 +135,9 @@ struct InputBar: View {
     private var mic: some View {
         Image(systemName: listening ? "mic.fill" : "mic")
             .font(.body.weight(.medium))
-            .foregroundStyle(listening ? Color.white : Color.accentColor)
+            .foregroundStyle(listening ? Color(.systemBackground) : Color.primary)
             .frame(width: 32, height: 32)
-            .background(listening ? Color.accentColor : Color.clear, in: Circle())
+            .background(listening ? Color.primary : Color.clear, in: Circle())
             .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
@@ -178,9 +178,9 @@ struct InputBar: View {
         Button(action: onSend) {
             Image(systemName: "arrow.up")
                 .font(.body.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color(.systemBackground))
                 .frame(width: 32, height: 32)
-                .background(Color.accentColor, in: Circle())
+                .background(Color.primary, in: Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Send")

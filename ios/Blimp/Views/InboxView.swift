@@ -70,7 +70,8 @@ struct InboxView: View {
         .animation(.snappy, value: showOther)
         .overlay {
             if inbox.isEmpty && needs.isEmpty {
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
+                    FlightPath()
                     Text(Drawer.name(of: dir)).font(.title2.bold())
                     Text("What should Claude do here?").foregroundStyle(.secondary)
                 }
@@ -237,6 +238,7 @@ private struct NeedsRow: View {
                         Text("Allow").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .foregroundStyle(Color(.systemBackground))
                     .accessibilityIdentifier("inbox-allow-" + s.name)
                     Button { send(s, p, Self.deny(p, deny)) } label: {
                         Text("Deny").frame(maxWidth: .infinity)
