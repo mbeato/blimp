@@ -33,6 +33,24 @@ struct API {
         return try await decode(call("POST", "/folders/hidden", body: JSONEncoder().encode(Body(dir: dir, hidden: hidden))))
     }
 
+    /// A folder on the computer, inside home: its folders and files.
+    func list(path: String) async throws -> DirListing {
+        try await decode(call("GET", "/fs/list", query: [URLQueryItem(name: "path", value: path)]))
+    }
+
+    /// Makes a folder. One there already: blimpd's "that name is taken".
+    func makeFolder(path: String) async throws {
+        struct Body: Encodable { let path: String }
+        _ = try await call("POST", "/fs/mkdir", body: JSONEncoder().encode(Body(path: path)))
+    }
+
+    /// Opens a folder as a project: blimpd shows it again if it was hidden and keeps it in the recent folders, which
+    /// it answers with.
+    func openFolder(dir: String) async throws -> [RecentFolder] {
+        struct Body: Encodable { let dir: String }
+        return try await decode(call("POST", "/folders/opened", body: JSONEncoder().encode(Body(dir: dir))))
+    }
+
     /// Notifications to this phone: its device token, and which of Apple's services it's on (development for a build
     /// from Xcode, production for TestFlight). Sending it again is harmless. An older blimpd answers 404.
     func registerDevice(token: String, env: String) async throws {

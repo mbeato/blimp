@@ -38,6 +38,8 @@ struct HomeView: View {
     /// Each project's past conversations, kept while another one shows, and fetched again as below.
     @State private var earlierBy: [String: [Conversation]] = [:]
     @State private var showSettings = false
+    /// The drawer's +: the folder browser (FolderBrowserView), over the drawer.
+    @State private var showFolders = false
     @State private var actions = RowActions()
     /// Each session's last title, for one that has ended.
     @State private var titles: [String: String] = [:]
@@ -108,6 +110,13 @@ struct HomeView: View {
         }
         .environment(\.sideScrollers, sideScrollers)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $showFolders) {
+            if let home = store.serverHome {
+                FolderBrowserView(home: home, onOpen: openFolder)
+            } else {
+                ContentUnavailableView("Can't reach the server", systemImage: "wifi.slash")
+            }
+        }
         .modifier(KeepsPlace(opened: $opened, drawer: drawer))
         .endConfirmation(Binding(get: { actions.pendingEnd }, set: { actions.pendingEnd = $0 }), store: store)
         .plainAlert("Couldn't do that", message: Binding(get: { actions.failure }, set: { actions.failure = $0 }))
@@ -373,6 +382,18 @@ struct HomeView: View {
                 actions.failure = Store.words(for: error)
             }
         }
+    }
+
+    /// Open in the folder browser. blimpd shows the folder again if it was hidden and keeps it in the recent folders,
+    /// so it stays in the column before Claude has run there. It then shows as if its icon was tapped: its inbox
+    /// behind the drawer, which stays open, and first in the column (Strip.held). If blimpd refuses, this throws and
+    /// the browser stays and says why.
+    private func openFolder(_ dir: String) async throws {
+        guard let api = store.api else { throw APIError.offline }
+        folders = try await api.openFolder(dir: dir)
+        hidden.remove(dir)
+        showFolders = false
+        pickProject(dir)
     }
 
     private func hideKeyboard() {

@@ -26,6 +26,8 @@ final class Store {
     private(set) var tailnetOff = false
     /// blimpd's version, from /health each time the events socket opens (an update restarts it); nil until then.
     private(set) var serverVersion: String?
+    /// The server's home folder, from /health as serverVersion is: where the folder browser starts. nil until then.
+    private(set) var serverHome: String?
     /// The project the chat is in, kept for the next launch.
     var dir: String? = UserDefaults.standard.string(forKey: "project") {
         didSet { UserDefaults.standard.set(dir, forKey: "project") }
@@ -181,6 +183,7 @@ final class Store {
             Task { [weak self] in
                 guard let api = self?.api, let health = try? await api.health() else { return }
                 self?.serverVersion = health.version
+                self?.serverHome = health.home
             }
         case .closed(code: 401):
             connection = .unauthorized
