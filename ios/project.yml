@@ -13,6 +13,7 @@ targets:
     sources: [Blimp]
     dependencies:
       - package: BlimpKit
+      - target: BlimpWidgets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.blimp.phone
@@ -51,6 +52,45 @@ targets:
         NSCameraUsageDescription: blimp uses the camera to scan the pairing code from your server.
         # Only HTTPS and the system's own encryption, so TestFlight needn't ask about export rules for each build.
         ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            localhost: { NSExceptionAllowsInsecureHTTPLoads: true }
+            127.0.0.1: { NSExceptionAllowsInsecureHTTPLoads: true }
+  # The widgets (BlimpWidgets/): every project's sessions on the home screen and the lock screen. Swift 5 language
+  # mode: WidgetKit's TimelineProvider hands over completion handlers that aren't Sendable, and Swift 6 won't let the
+  # Task that fetches GET /widget carry them.
+  BlimpWidgets:
+    type: app-extension
+    platform: iOS
+    sources: [BlimpWidgets]
+    dependencies:
+      - package: BlimpKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.blimp.phone.widgets
+        PRODUCT_NAME: BlimpWidgets
+        MARKETING_VERSION: "0.3.11"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
+    # Widget push (blimpd's pings) and the App Group the app shares. XcodeGen writes both files (they're ignored).
+    entitlements:
+      path: BlimpWidgets/BlimpWidgets.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        com.apple.security.application-groups: [group.dev.blimp.phone]
+    info:
+      path: BlimpWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: blimp
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
         NSAppTransportSecurity:
           NSExceptionDomains:
             localhost: { NSExceptionAllowsInsecureHTTPLoads: true }

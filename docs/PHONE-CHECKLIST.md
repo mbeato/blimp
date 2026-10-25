@@ -157,3 +157,12 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] The lock. Open a tab, leave the app for over five minutes, come back. The lock covers everything, the page included; after unlocking, the chat shows.
 - [ ] Close Tab. ••• > Close Tab, or swipe a tab's row right in the drawer: it goes, on the Mac too.
 - [ ] Notifications. After pairing (or on the first launch with this build), blimp asks once whether it may send notifications: Allow. With the server's push key set, `blimpd push-test` prints `sent` for the phone, and the phone shows "blimp can reach this phone". Close blimp and let a session wait on you: a notification comes within a few seconds, titled with the session and "is waiting". Tap it: blimp opens (after Face ID) on that session's chat, and the notification is gone. A Claude turn of 30 s or more that ends sends "… finished" with the start of the reply. With blimp open, none shows (its own banner does). Settings > Notifications off: none come, on again: they do.
+
+## Widgets
+
+- [ ] Add each widget: small, medium and large on the home screen; the line above the clock, the circle and the rectangle on the lock screen. Open blimp once after adding the first.
+- [ ] The counts match the app: needs you as the drawer's ? marks, new as the inbox's "Finished, not read yet", working as its Working, across every project; a hidden project's sessions aren't counted.
+- [ ] With the app closed, start a turn that asks a question. The widgets show it as needing you within a few minutes.
+- [ ] A row's tap opens its chat. The small widget's tap opens the oldest that needs you.
+- [ ] Stop blimpd (or turn Tailscale off). After the next refresh the widgets are greyed with "as of".
+- [ ] A working row's time counts up by itself; past an hour it says "1h", past a day "1d".
