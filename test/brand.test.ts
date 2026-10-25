@@ -15,6 +15,7 @@ const copies: [string, string][] = [
   ["brand/blimp-ink.svg", "ios/Blimp/Assets.xcassets/BlimpGlyph.imageset/blimp-ink.svg"],
   ["brand/blimp-silver.svg", "ios/Blimp/Assets.xcassets/BlimpGlyphOnDark.imageset/blimp-silver.svg"],
   ["brand/blimp-silver.svg", "app/src/assets/blimp-silver.svg"],
+  ["brand/blimp-ink.svg", "app/src/assets/blimp-ink.svg"],
 ];
 
 test.each(copies)("%s is shipped unchanged as %s", (source, copy) => {

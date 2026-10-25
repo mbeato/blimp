@@ -3,7 +3,8 @@ import type { ServerLink } from "../lib/connection";
 import { recentProjects, type Recent } from "../lib/recent";
 import { tildify } from "../lib/sessions";
 import { relTime } from "../lib/time";
-import blimpMark from "../assets/blimp-silver.svg";
+import blimpSilver from "../assets/blimp-silver.svg";
+import blimpInk from "../assets/blimp-ink.svg";
 
 // Home's editor area while no file is open: recent projects, Open Folder, and the servers.
 // shown: Home is the tab in front. The list is read again each time it comes forward, since
@@ -32,7 +33,8 @@ export function Welcome(props: {
     <div className="welcome-page">
       <div className="welcome-col">
         <div className="welcome-brand">
-          <img src={blimpMark} alt="" width={132} height={61} />
+          <img className="brand-mark brand-mark-dark" src={blimpSilver} alt="" width={132} height={61} />
+          <img className="brand-mark brand-mark-light" src={blimpInk} alt="" width={132} height={61} />
           <h1>blimp</h1>
         </div>
         <div className="welcome-server">

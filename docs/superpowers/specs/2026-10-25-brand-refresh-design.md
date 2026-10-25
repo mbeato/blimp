@@ -66,7 +66,7 @@ The wordmark: "blimp" in the system's rounded font, heavy (iOS `.fontDesign(.rou
 - **App icon:** A.
 - **Welcome page** (`Welcome.tsx`): the silver blimp above the wordmark, in place of the plain "blimp" heading.
 - **Connecting:** the same small bobbing blimp beside the Mac's connecting words (respecting reduced motion).
-- **Buttons:** the primary button white with near-black text (the Mac app is dark), instead of any blue.
+- **Buttons:** the primary button white with near-black text (the silver blimp in the Mac's dark theme, the ink one in its light theme; the buttons follow the theme's colours, `var(--fg)` on `var(--bg)`), instead of any blue.
 
 ## Not in this change
 
