@@ -166,3 +166,4 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] A project with nothing: the blimp drifting over a dashed path above "What should Claude do here?", dark in light mode, silver in dark.
 - [ ] Turn Tailscale off: the blimp beside "Reconnecting…" bobs, then stays still once it says why it's offline. With Reduce Motion on (Settings, Accessibility, Motion), nothing moves.
 - [ ] Buttons are black (white in dark mode); links in Claude's replies are still blue; swipe actions keep their colours.
+- [ ] In dark mode, your messages, the send button and the mic while listening are white with black content, and readable.

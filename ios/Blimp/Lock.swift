@@ -89,10 +89,10 @@ struct LockedView: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
+                    .foregroundStyle(Color(red: 0x0c / 255, green: 0x0c / 255, blue: 0x0f / 255))
+                    .background(.white, in: Capsule())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color(red: 0x0c / 255, green: 0x0c / 255, blue: 0x0f / 255))
-            .background(.white, in: Capsule())
             .opacity(lock.locked ? 1 : 0)
             if let note = lock.note, lock.locked { Text(note).font(.footnote).foregroundStyle(Color(white: 0.63)) }
         }

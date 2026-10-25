@@ -69,10 +69,10 @@ struct UserBubble: View {
             Text(text)
                 .accessibilityIdentifier("message.user")
                 .textSelection(.enabled)
-                .foregroundStyle(.white)
+                .foregroundStyle(Color(.systemBackground))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18))
+                .background(Color.primary, in: RoundedRectangle(cornerRadius: 18))
         }
     }
 }
