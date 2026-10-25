@@ -52,6 +52,42 @@ test("recentFolders: none you hid, left out before the list is cut to 30", () =>
   expect(recentFolders(claude, [], new Set([web]))).toEqual([{ dir: api, lastUsed: 2_000_000 }]);
 });
 
+test("recentFolders: a folder you opened counts from when you opened it, unless hidden or gone, even in a temporary folder", () => {
+  const fresh = join(root, "work", "fresh");
+  mkdirSync(fresh, { recursive: true });
+  // fresh has no transcript; api's (2000 s) is older than its open, web's (3000 s) newer.
+  const opened = [
+    { dir: fresh, at: 2_500_000 },
+    { dir: api, at: 2_600_000 },
+    { dir: web, at: 1_000 },
+    { dir: join(root, "gone"), at: 5_000_000 },
+  ];
+  expect(recentFolders(claude, [], new Set(), opened)).toEqual([
+    { dir: web, lastUsed: 3_000_000 },
+    { dir: api, lastUsed: 2_600_000 },
+    { dir: fresh, lastUsed: 2_500_000 },
+  ]);
+  expect(recentFolders(claude, [], new Set([fresh]), opened).map((f) => f.dir)).toEqual([web, api]);
+  // You picked them: a temporary folder leaves out only their transcripts.
+  expect(recentFolders(claude, [root], new Set(), opened)).toEqual([
+    { dir: api, lastUsed: 2_600_000 },
+    { dir: fresh, lastUsed: 2_500_000 },
+    { dir: web, lastUsed: 1_000 },
+  ]);
+});
+
+test("recentFolders: the list is cut to 30 after the opened folders join it", () => {
+  const many = Array.from({ length: 35 }, (_, i) => {
+    const d = join(root, "many", `f${i}`);
+    mkdirSync(d, { recursive: true });
+    return { dir: d, at: 10_000_000 + i };
+  });
+  const list = recentFolders(claude, [], new Set(), many);
+  expect(list).toHaveLength(30);
+  expect(list[0]).toEqual({ dir: join(root, "many", "f34"), lastUsed: 10_000_034 });
+  expect(list.map((f) => f.dir)).not.toContain(web);
+});
+
 test("conversations: the folder's transcripts, newest first, with titles", () => {
   expect(conversations(web, claude)).toEqual([
     { sessionId: "22222222-2222-2222-2222-222222222222", title: "Web v2", updatedAt: 3_000_000, unread: false },
