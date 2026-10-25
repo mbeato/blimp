@@ -309,13 +309,15 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   if (path === "/folders/opened" && req.method === "POST") {
     const { dir } = ((await req.json()) ?? {}) as Record<string, unknown>;
     if (typeof dir !== "string" || !dir.startsWith("/")) throw new HttpError(400, "dir must be a folder's full path");
+    // The same form /fs/list answers with, so /a/./b and /a/b/ are the folder /a/b, not another entry.
+    const full = resolve(dir);
     let folder = false;
     try {
-      folder = isDir(guardList(dir));
+      folder = isDir(guardList(full));
     } catch {}
     if (!folder) throw new HttpError(400, "dir must be a folder inside your home folder");
-    setHidden(dir, false);
-    addOpened(dir);
+    setHidden(full, false);
+    addOpened(full);
     return Response.json(recentFolders(claudeDir(), tempRoots(), new Set(readHidden()), readOpened()));
   }
   if (path === "/conversations" && get) {

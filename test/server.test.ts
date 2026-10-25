@@ -2179,6 +2179,13 @@ describe("opened folders", () => {
     expect(dirs(await (await api("/folders/recent")).json())).toContain(dir);
     expect(statSync(join(tmp, "opened.json")).mode & 0o777).toBe(0o600);
 
+    // A trailing slash is the same folder, not another entry.
+    const slash = await open(dir + "/");
+    expect(slash.status).toBe(200);
+    const listed = dirs(await slash.json());
+    expect(listed).toContain(dir);
+    expect(listed).not.toContain(dir + "/");
+
     for (const bad of [undefined, 5, "relative/dir", join(dir, "missing"), join(dir, "file.txt"), tmpdir()]) {
       expect((await open(bad)).status).toBe(400);
     }
