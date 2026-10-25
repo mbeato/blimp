@@ -175,6 +175,14 @@ The iOS workflow's end-to-end test (app-e2e) can run on Max's MacBook Pro, on th
 - Once per Xcode update, in Terminal on the Mac: `sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch && sudo DevToolsSecurity -enable && sudo automationmodetool enable-automationmode-without-authentication` (UI tests then run without asking for a password).
 - To stop them for a while: `for s in a b c; do launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/actions.runner.mbeato-blimp.mbp-$s.plist; done` (runs go to GitHub's Macs once the runners show offline). To remove them for good: `cd ~/actions-runner/<shard> && ./svc.sh uninstall && ./config.sh remove --token <a removal token from gh api -X POST repos/mbeato/blimp/actions/runners/remove-token -q .token>`.
 
+## Widgets
+
+Long-press the home screen or the lock screen, tap Edit and Add Widget, and pick blimp. Home screen: small (the counts), medium (4 sessions) and large (about 9). Lock screen: the line above the clock, a circle (the needs-you count, else the working count) and a rectangle (the counts and the top two titles). They show every project's sessions, the hidden projects' left out: ? needs you, ✓ new (finished, not read yet), ● working. A tap on a session opens its chat.
+
+They need blimpd newer than 0.3.11 ("Update blimpd for widgets" otherwise) and the app opened once after pairing ("Open blimp to set up its widgets"). blimpd tells them to reload when what they show changes, and the phone decides when they do: expect minutes, not seconds. When the phone can't reach the server, a widget shows what it last had, greyed, with "as of". Open the app once after adding the first widget, so blimpd gets the widgets' push token.
+
+The widgets are an app extension, `dev.blimp.phone.widgets`, sharing the App Group `group.dev.blimp.phone` with the app. CI's App Store Connect key (Admin) registers both when it signs. If a TestFlight upload fails on them, register them once on https://developer.apple.com/account/resources/identifiers: press +, pick App Groups, Description: blimp, Identifier: `group.dev.blimp.phone`, Continue, Register. Then press +, pick App IDs, then App, Description: blimp widgets, Bundle ID: Explicit, `dev.blimp.phone.widgets`, tick App Groups and Push Notifications, Continue, Register. Then open the `dev.blimp.phone` App ID, tick App Groups, and save. Then run the TestFlight upload again.
+
 ## Check list
 
 `docs/PHONE-CHECKLIST.md` lists what to try by hand.

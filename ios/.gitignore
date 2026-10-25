@@ -4,3 +4,5 @@ Blimp.xcodeproj/
 DerivedData/
 Blimp/Info.plist
 Blimp/Blimp.entitlements
+BlimpWidgets/Info.plist
+BlimpWidgets/BlimpWidgets.entitlements

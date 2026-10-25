@@ -36,6 +36,8 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 | A tampered download | Install a different blimpd or zmx | zmx is pinned to a version and SHA-256 in `install.sh`. Releases publish SHA-256 sums. Dependencies are locked (`bun.lock`, `Cargo.lock`) and CI builds with `--frozen-lockfile` / `--locked`. Release builds run read-only, with every action pinned to a commit; only a separate publish step can write the release. |
 | Anyone but you | Send your phone fake notifications | Only the holder of the push key can. It stays on the server in `~/.blimp/apns.p8` (600), and no file route serves, replaces or downloads it. |
 | Someone who sees your locked phone | Read commands, questions or replies | A notification's text shows on the lock screen. iOS Settings > Notifications > Show Previews > When Unlocked hides it until Face ID. The README says so. |
+| Someone who gets the widget key (it's in blimp's App Group on the phone) | Read session names, titles, states, times and full folder paths, and counts | It reads `GET /widget` and nothing else. The App Group's files (the server's address and the widget key) can be in the phone's backups, and so reach a phone restored from one; the Keychain's address and token never do. To change the key: `blimpd pair --revoke`, then `blimpd pair` and pair the phone again. |
+| Someone who sees your locked phone, with blimp's rectangular widget on the lock screen | Read session titles | It shows the top two titles, as notifications show their text. The round and inline widgets show counts only. |
 
 ## Accepted
 

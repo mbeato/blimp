@@ -22,7 +22,7 @@ import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
-import { addDevice, isDeviceToken, isPushEnv, removeDevice } from "./push/store";
+import { addDevice, addWidget, isDeviceToken, isPushEnv, isWidgetToken, removeDevice, removeWidget } from "./push/store";
 import { startPush } from "./push/watch";
 import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
@@ -31,10 +31,12 @@ import { checkCommand, sendResult, startRun } from "./runs";
 import { markSeen, startSeen } from "./seen";
 import {
   checkZmxDir,
+  blimpDir,
   claudeDir,
   isSafeName,
   killSession,
   listSessions,
+  listSessionsLite,
   parseZmxList,
   realDir,
   sessionExists,
@@ -44,6 +46,7 @@ import {
   transcriptTitles,
   zmxListAsync,
 } from "./sessions";
+import { widgetKey, widgetSummary } from "./widget";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
 // A live view of a server browser tab (browser/view.ts): input waits in queue until it's open.
@@ -78,15 +81,16 @@ const same = (given: Buffer, token: string) => {
   return token !== "" && given.length === want.length && timingSafeEqual(given, want);
 };
 
-// Which token the request carries: the Mac's, the phone's (its value), or neither (undefined).
-function authorized(req: Request, url: URL, token: string, dir: string): "mac" | { phone: string } | undefined {
+// Which token the request carries: the Mac's, the phone's (its value), the widget key (it reads only GET /widget,
+// widget.ts), or none (undefined).
+function authorized(req: Request, url: URL, token: string, dir: string): "mac" | "widget" | { phone: string } | undefined {
   // HTTP sends a Bearer header; WebSockets can't, so they send ?token=.
   const h = req.headers.get("authorization");
   const given = Buffer.from(h?.startsWith("Bearer ") ? h.slice(7) : (url.searchParams.get("token") ?? ""));
   const phone = readPhoneToken(dir);
-  // Both compared every time, so the answer takes as long whichever matched.
-  const [mac, ph] = [same(given, token), same(given, phone)];
-  return mac ? "mac" : ph ? { phone } : undefined;
+  // All compared every time, so the answer takes as long whichever matched.
+  const [mac, ph, widget] = [same(given, token), same(given, phone), same(given, widgetKey(phone))];
+  return mac ? "mac" : ph ? { phone } : widget ? "widget" : undefined;
 }
 
 const error = (status: number, message: string, extra = {}) => Response.json({ error: message, ...extra }, { status });
@@ -261,6 +265,24 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     return new Response(null, { status: 204 });
   }
 
+  // The widgets' push tokens (iOS 26 widget push): the pinger (push/widgets.ts) tells them to reload.
+  if (path === "/push/widget" && (req.method === "POST" || req.method === "DELETE")) {
+    const { token: widget, env } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (!isWidgetToken(widget)) throw new HttpError(400, "token must be the widgets' push token, in hex");
+    if (req.method === "DELETE") removeWidget(widget);
+    else if (isPushEnv(env)) addWidget(widget, env);
+    else throw new HttpError(400, 'env must be "development" or "production"');
+    return new Response(null, { status: 204 });
+  }
+
+  // The phone's widgets (widget.ts): what they show, and the key they read it with while the phone is locked.
+  if (path === "/widget" && get) return Response.json(widgetSummary(listSessionsLite(claudeDir(), await zmxListAsync()), new Set(readHidden())));
+  if (path === "/widget/key" && get) {
+    const key = widgetKey(phone ?? readPhoneToken(blimpDir()));
+    if (!key) throw new HttpError(404, "no phone is paired (blimpd pair)");
+    return Response.json({ key });
+  }
+
   if (path === "/events" && get) {
     if (upgrade(eventsData())) return;
     throw new HttpError(400, "expected a WebSocket");
@@ -430,10 +452,11 @@ export function serve(): Server {
       const url = new URL(req.url);
       // No CORS header on a 401: any web page could read it and learn that this port is blimp.
       const who = authorized(req, url, token, dir);
-      if (!who) return error(401, "wrong or missing token");
+      // The widget key reads the widgets' summary and nothing else.
+      if (!who || (who === "widget" && !(url.pathname === "/widget" && req.method === "GET"))) return error(401, "wrong or missing token");
       let res: Response | undefined;
       try {
-        res = await route(req, url, server, who === "mac" ? undefined : who.phone);
+        res = await route(req, url, server, who === "mac" || who === "widget" ? undefined : who.phone);
       } catch (e) {
         res = errorResponse(e);
       }
@@ -476,7 +499,9 @@ export function serve(): Server {
   startNotes(); // the same switch
   startDigests(); // and again
   startHandoffs();
-  startPush(); // phone notifications: nothing runs until there's a push key and a phone that asked (push/watch.ts)
+  // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
+  // widget push token (push/watch.ts).
+  startPush();
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

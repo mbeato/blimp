@@ -64,6 +64,25 @@ struct API {
         _ = try await call("DELETE", "/push/device", body: JSONEncoder().encode(Body(token: token)))
     }
 
+    /// The widget key: it reads only GET /widget, so the widgets can read it while the phone is locked. An older
+    /// blimpd has no such route: "not found".
+    func widgetKey() async throws -> String {
+        struct Key: Decodable { let key: String }
+        let k: Key = try await decode(call("GET", "/widget/key"))
+        return k.key
+    }
+
+    /// blimpd's widget pings to this phone's widgets: their push token from WidgetKit, and which of Apple's services.
+    func registerWidget(token: String, env: String) async throws {
+        struct Body: Encodable { let token: String; let env: String }
+        _ = try await call("POST", "/push/widget", body: JSONEncoder().encode(Body(token: token, env: env)))
+    }
+
+    func unregisterWidget(token: String) async throws {
+        struct Body: Encodable { let token: String }
+        _ = try await call("DELETE", "/push/widget", body: JSONEncoder().encode(Body(token: token)))
+    }
+
     func conversations(dir: String) async throws -> [Conversation] {
         try await decode(call("GET", "/conversations", query: [URLQueryItem(name: "dir", value: dir)]))
     }

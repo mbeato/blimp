@@ -2,10 +2,10 @@
 
 import { afterAll, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addDevice, clearDevices, credsFile, devicesFile, isDeviceToken, keyFile, readCreds, readDevices, removeDevice, saveCreds } from "../src/push/store";
+import { addDevice, addWidget, clearDevices, credsFile, devicesFile, isDeviceToken, isWidgetToken, keyFile, readCreds, readDevices, readWidgets, removeDevice, removeWidget, saveCreds } from "../src/push/store";
 
 const root = mkdtempSync(join(tmpdir(), "blimp-push-store-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -83,4 +83,28 @@ test("device tokens are hex, 64 to 200 characters", () => {
   expect(isDeviceToken("ab")).toBe(false);
   expect(isDeviceToken(tok("g"))).toBe(false);
   expect(isDeviceToken(5)).toBe(false);
+});
+
+test("widget push tokens are kept beside the devices, and each list leaves the other as it was", () => {
+  const file = devicesFile(fresh());
+  addDevice("a".repeat(64), "production", 1, file);
+  addWidget("AB".repeat(50), "development", 2, file);
+  expect(readDevices(file).map((d) => d.token)).toEqual(["a".repeat(64)]);
+  expect(readWidgets(file)).toEqual([{ token: "ab".repeat(50), env: "development", at: 2 }]);
+  addDevice("b".repeat(64), "production", 3, file);
+  expect(readWidgets(file).length).toBe(1);
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  removeWidget("ab".repeat(50), file);
+  expect(readWidgets(file)).toEqual([]);
+  expect(readDevices(file).map((d) => d.token[0])).toEqual(["b", "a"]);
+  // no widgets: push.json is as it was before widgets
+  expect(Object.keys(JSON.parse(readFileSync(file, "utf8")))).toEqual(["devices"]);
+});
+
+test("a widget push token is hex, 64 to 400 characters", () => {
+  expect(isWidgetToken("ab".repeat(32))).toBe(true);
+  expect(isWidgetToken("ab".repeat(200))).toBe(true);
+  expect(isWidgetToken("ab".repeat(201))).toBe(false);
+  expect(isWidgetToken("xyz")).toBe(false);
+  expect(isWidgetToken(5)).toBe(false);
 });
