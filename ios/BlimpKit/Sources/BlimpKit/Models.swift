@@ -416,6 +416,17 @@ public enum ChatCommand: Encodable, Sendable, Equatable {
 }
 
 public struct RecentFolder: Codable, Sendable, Equatable { public let dir: String; public let lastUsed: Double }
+/// One name in a folder on the computer (GET /fs/list): "dir" or "file", its size and when it last changed (ms).
+public struct DirEntry: Codable, Sendable, Equatable, Identifiable {
+    public let name: String
+    public let kind: String
+    public let size: Double
+    public let mtime: Double
+    public var id: String { name }
+    public var isFolder: Bool { kind == "dir" }
+}
+/// A folder on the computer and what's in it, folders first, A to Z (GET /fs/list).
+public struct DirListing: Codable, Sendable, Equatable { public let path: String; public let entries: [DirEntry] }
 public struct Conversation: Codable, Sendable, Equatable, Identifiable {
     public let sessionId: String; public let title: String; public let updatedAt: Double
     public var unread: Bool? = nil
