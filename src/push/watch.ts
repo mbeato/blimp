@@ -1,14 +1,17 @@
 // The push watcher (docs/superpowers/specs/2026-10-20-phone-push-design.md, section 3): every second, whether or not
 // an app is connected, the session list goes through the rule (rule.ts), and what it finds goes to every phone that
-// asked, at once or, while the Mac is in use, up to 2 minutes later. Without a key and a phone nothing runs, not even
-// the list; once both are there, what it finds first counts as seen.
+// asked, at once or, while the Mac is in use, up to 2 minutes later. The widgets' pinger (widgets.ts) runs on the same
+// tick. Without a key and a phone nothing runs, not even the list; once both are there, what it finds first counts as
+// seen.
 
+import { readHidden } from "../hidden";
 import { follow, newSummary, type Summary } from "../names";
 import { claudeDir, listSessionsLite, type Session, zmxListAsync } from "../sessions";
 import { Apns, goneDevice, type Sent } from "./apns";
 import { pushPayload } from "./payload";
 import { dueAt, type PushEvent, pushChanges, type PushSession, type Seen, stillDue } from "./rule";
-import { type Creds, type Device, readCreds, readDevices, removeDevice } from "./store";
+import { type Creds, type Device, readCreds, readDevices, readWidgets, removeDevice, removeWidget } from "./store";
+import { PING, type WidgetDeps, WidgetPinger } from "./widgets";
 
 export type WatchedSession = PushSession & Pick<Session, "title" | "dir" | "transcript">;
 export type PushDeps = {
@@ -100,19 +103,22 @@ export const lastActiveAt = () => lastActive;
 const summaries = new Map<string, Summary>(); // by transcript: each finish reads on from where the last one stopped
 let client: { id: string; apns: Apns } | undefined;
 
+// One client while the key stays the same; push-key with a new one gets a new client. Notifications and the widgets'
+// pings share it, so one connection to Apple.
+export function apnsFor(c: Creds): Apns {
+  const id = `${c.keyId}\0${c.teamId}\0${c.key}`;
+  if (client?.id !== id) {
+    client?.apns.close();
+    client = { id, apns: new Apns(c) };
+  }
+  return client.apns;
+}
+
 const live: PushDeps = {
   sessions: async () => listSessionsLite(claudeDir(), await zmxListAsync()),
   creds: () => readCreds(),
   devices: () => readDevices(),
-  // One client while the key stays the same; push-key with a new one gets a new client.
-  send: (c, d, payload, collapseId) => {
-    const id = `${c.keyId}\0${c.teamId}\0${c.key}`;
-    if (client?.id !== id) {
-      client?.apns.close();
-      client = { id, apns: new Apns(c) };
-    }
-    return client.apns.send(d, payload, { collapseId });
-  },
+  send: (c, d, payload, collapseId) => apnsFor(c).send(d, payload, { collapseId }),
   gone: (d) => void removeDevice(d.token),
   reply: async (file) => {
     if (summaries.size > 200) summaries.clear();
@@ -126,7 +132,22 @@ const live: PushDeps = {
   log: (line) => console.log(line),
 };
 
+const widgetsLive: WidgetDeps = {
+  sessions: async () => listSessionsLite(claudeDir(), await zmxListAsync()),
+  hidden: () => new Set(readHidden()),
+  creds: () => readCreds(),
+  widgets: () => readWidgets(),
+  send: (c, d) => apnsFor(c).send(d, PING, { type: "widgets" }),
+  gone: (d) => void removeWidget(d.token),
+  now: Date.now,
+  log: (line) => console.log(line),
+};
+
 export function startPush(every = 1000) {
   const w = new PushWatcher(live);
-  setInterval(() => void w.tick(), every);
+  const p = new WidgetPinger(widgetsLive);
+  setInterval(() => {
+    void w.tick();
+    void p.tick();
+  }, every);
 }

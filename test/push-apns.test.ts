@@ -69,6 +69,21 @@ test("a send: the device's path, Apple's headers, the payload as JSON, and Apple
   }
 });
 
+test("a widget ping: the widgets push type, its own topic, and priority 5", async () => {
+  reset();
+  const a = new Apns(creds, hosts);
+  try {
+    expect(await a.send(device, { aps: { "content-changed": true } }, { type: "widgets" })).toEqual({ status: 200 });
+    const [g] = got;
+    expect(g.headers["apns-topic"]).toBe(`${TOPIC}.push-type.widgets`);
+    expect(g.headers["apns-push-type"]).toBe("widgets");
+    expect(g.headers["apns-priority"]).toBe("5");
+    expect(g.headers["apns-collapse-id"]).toBeUndefined();
+  } finally {
+    a.close();
+  }
+});
+
 test("Apple's reason comes back; 410, BadDeviceToken and Unregistered mean the phone is gone", async () => {
   reset((_, s) => {
     s.respond({ ":status": 410 });
