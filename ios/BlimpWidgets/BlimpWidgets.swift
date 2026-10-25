@@ -63,7 +63,7 @@ struct Provider: TimelineProvider {
             return Entry(date: .now, summary: nil, status: .notSetUp)
         }
         guard let key = server.key else { return Entry(date: .now, summary: nil, status: .needsUpdate) }
-        var kept = WidgetShared.read(WidgetShared.Kept.self, from: files.kept) ?? WidgetShared.Kept()
+        let kept = WidgetShared.read(WidgetShared.Kept.self, from: files.kept) ?? WidgetShared.Kept()
         guard var c = URLComponents(url: server.url, resolvingAgainstBaseURL: false) else {
             return Entry(date: .now, summary: kept.summary, status: .stale)
         }
@@ -75,8 +75,10 @@ struct Provider: TimelineProvider {
             let (data, response) = try await URLSession.shared.data(for: req)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
             let summary = try JSONDecoder().decode(WidgetSummary.self, from: data)
-            kept.summary = summary
-            try? WidgetShared.write(kept, to: files.kept)
+            // Read again: PushHandler may have kept a new push token during the fetch, and the old copy would erase it.
+            var fresh = WidgetShared.read(WidgetShared.Kept.self, from: files.kept) ?? WidgetShared.Kept()
+            fresh.summary = summary
+            try? WidgetShared.write(fresh, to: files.kept)
             return Entry(date: .now, summary: summary, status: .fresh)
         } catch {
             return Entry(date: .now, summary: kept.summary, status: .stale)

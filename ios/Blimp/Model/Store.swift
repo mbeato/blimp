@@ -186,7 +186,7 @@ final class Store {
                 guard let api = self?.api, let health = try? await api.health() else { return }
                 self?.serverVersion = health.version
                 self?.serverHome = health.home
-                await WidgetShare.update(api: api)
+                await WidgetShare.update(api: api) { self?.server == api.server }
             }
         case .closed(code: 401):
             connection = .unauthorized
