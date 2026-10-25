@@ -86,7 +86,7 @@ test("device tokens are hex, 64 to 200 characters", () => {
 });
 
 test("widget push tokens are kept beside the devices, and each list leaves the other as it was", () => {
-  const file = join(mkdtempSync(join(tmpdir(), "blimp-push-")), "push.json");
+  const file = devicesFile(fresh());
   addDevice("a".repeat(64), "production", 1, file);
   addWidget("AB".repeat(50), "development", 2, file);
   expect(readDevices(file).map((d) => d.token)).toEqual(["a".repeat(64)]);

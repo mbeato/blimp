@@ -499,7 +499,9 @@ export function serve(): Server {
   startNotes(); // the same switch
   startDigests(); // and again
   startHandoffs();
-  startPush(); // phone notifications: nothing runs until there's a push key and a phone that asked (push/watch.ts)
+  // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
+  // widget push token (push/watch.ts).
+  startPush();
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

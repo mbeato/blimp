@@ -2239,6 +2239,17 @@ describe("widgets", () => {
       expect((await withToken(key, "/health")).status).toBe(401);
       const push = JSON.stringify({ token: "ab".repeat(50), env: "production" });
       expect((await withToken(key, "/push/widget", { method: "POST", body: push })).status).toBe(401);
+      expect((await withToken(key, "/widget", { method: "POST" })).status).toBe(401);
+      // No WebSocket either: its upgrade gets the 401, and the socket closes without opening.
+      expect((await api(`/events?token=${key}`, {}, false)).status).toBe(401);
+      const s = { opened: false, closed: false, messages: [] as unknown[] };
+      const w = new WebSocket(`ws+unix://${sock}:/events?token=${key}`);
+      w.onopen = () => (s.opened = true);
+      w.onmessage = (e) => s.messages.push(e.data);
+      w.onclose = () => (s.closed = true);
+      await until(() => s.closed, "the widget key's socket to close");
+      expect(s.opened).toBe(false);
+      expect(s.messages).toEqual([]);
     } finally {
       rmSync(phoneFile, { force: true });
     }

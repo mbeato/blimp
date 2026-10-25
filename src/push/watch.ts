@@ -1,8 +1,8 @@
 // The push watcher (docs/superpowers/specs/2026-10-20-phone-push-design.md, section 3): every second, whether or not
 // an app is connected, the session list goes through the rule (rule.ts), and what it finds goes to every phone that
-// asked, at once or, while the Mac is in use, up to 2 minutes later. The widgets' pinger (widgets.ts) runs on the same
-// tick. Without a key and a phone nothing runs, not even the list; once both are there, what it finds first counts as
-// seen.
+// asked, at once or, while the Mac is in use, up to 2 minutes later. Without a key and a phone it runs nothing, not
+// even the list; once both are there, what it finds first counts as seen. The widgets' pinger (widgets.ts) runs on the
+// same tick, and likewise only with a key and a widget push token.
 
 import { readHidden } from "../hidden";
 import { follow, newSummary, type Summary } from "../names";
