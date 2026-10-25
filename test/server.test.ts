@@ -2163,6 +2163,35 @@ describe("hidden folders", () => {
   }, 15000);
 });
 
+describe("opened folders", () => {
+  test("a folder opened from the phone joins the recent folders and shows a hidden one again; only a folder inside home", async () => {
+    const dir = join(homeDir, `${tag}-opened`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "file.txt"), "x");
+    const open = (d: unknown) => api("/folders/opened", { method: "POST", body: JSON.stringify({ dir: d }) });
+    const dirs = (list: unknown) => (list as { dir: string }[]).map((f) => f.dir);
+
+    await api("/folders/hidden", { method: "POST", body: JSON.stringify({ dir, hidden: true }) });
+    const r = await open(dir);
+    expect(r.status).toBe(200);
+    expect(dirs(await r.json())).toContain(dir);
+    expect(await (await api("/folders/hidden")).json()).not.toContain(dir);
+    expect(dirs(await (await api("/folders/recent")).json())).toContain(dir);
+    expect(statSync(join(tmp, "opened.json")).mode & 0o777).toBe(0o600);
+
+    // A trailing slash is the same folder, not another entry.
+    const slash = await open(dir + "/");
+    expect(slash.status).toBe(200);
+    const listed = dirs(await slash.json());
+    expect(listed).toContain(dir);
+    expect(listed).not.toContain(dir + "/");
+
+    for (const bad of [undefined, 5, "relative/dir", join(dir, "missing"), join(dir, "file.txt"), tmpdir()]) {
+      expect((await open(bad)).status).toBe(400);
+    }
+  }, 15000);
+});
+
 describe("push", () => {
   test("a phone asks for notifications with its device token, at most 5 are kept, and it can stop", async () => {
     const device = (token: unknown, env: unknown = "production", method = "POST") => api("/push/device", { method, body: JSON.stringify({ token, env }) });

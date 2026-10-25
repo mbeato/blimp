@@ -458,7 +458,7 @@ final class BlimpUITests: XCTestCase {
 
     // MARK: - New session
 
-    /// The drawer's +, from a chat: the drawer closes and the project's inbox shows with its box ready to
+    /// The drawer's New session button, from a chat: the drawer closes and the project's inbox shows with its box ready to
     /// type into (the keyboard up). Nothing starts until Send, so the job's count of sessions started holds. (By name
     /// after Needs you.)
     func testNewSessionFromTheDrawer() throws {
@@ -542,6 +542,45 @@ final class BlimpUITests: XCTestCase {
         try until(element("screenTitle"), "label CONTAINS 'api-server'", "api-server's inbox")
     }
 
+    /// + at the foot of the drawer's column: the folder browser opens at home, and goes through to the job's work
+    /// folder. New Folder makes a folder and goes into it, and Open shows it as a project, first in the column.
+    /// Hidden, it comes back when opened again.
+    func testOpenFolder() throws {
+        try launchPaired()
+        let steps = hostFile("work-under-home").split(separator: "/").map(String.init)
+        if steps.isEmpty || steps.first == ".." { throw failed("setup.ts to write the work folder's path under home") }
+        let name = "opened-\(Int(Date().timeIntervalSince1970))"
+
+        try openDrawer()
+        try browse(to: steps)
+        let newFolder = element("folderBrowserNewFolder")
+        try wait(newFolder, "New Folder")
+        newFolder.tap()
+        let field = app.alerts.textFields.firstMatch
+        try wait(field, "the new folder's name")
+        try type(name, into: field)
+        app.alerts.buttons["Make"].tap()
+        try wait(element("folderBrowserEmpty"), "the browser in the new folder")
+        shot("43-folder-browser")
+        try until(element("folderBrowserOpen"), "label == 'Open \(name)'", "the browser in \(name)")
+        element("folderBrowserOpen").tap()
+        try until(element("folderBrowserOpen"), "exists == false", "the browser to close on Open")
+        try until(element("drawerProject"), "label == '\(name)'", "the drawer to show \(name)")
+        try wait(element("strip-" + name), "\(name) in the column")
+        shot("44-opened-folder")
+
+        // Hide it, then open it again from the browser: it's back.
+        element("strip-" + name).press(forDuration: 1.2)
+        let hide = app.buttons["Hide \(name)"]
+        try wait(hide, "Hide in the icon's menu")
+        hide.tap()
+        try until(element("strip-" + name), "exists == false", "\(name) to leave the column")
+        try browse(to: steps + [name])
+        try until(element("folderBrowserOpen"), "label == 'Open \(name)'", "the browser in \(name)")
+        element("folderBrowserOpen").tap()
+        try wait(element("strip-" + name), "\(name) back in the column")
+    }
+
     // MARK: - Notifications
 
     /// Notifications on: iOS asks once (Allow), and the phone signs up with blimpd, whose push.json then lists a
@@ -617,6 +656,27 @@ final class BlimpUITests: XCTestCase {
     private func closeDrawer() throws {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         try until(element("drawerStrip"), "exists == false", "the drawer to close")
+    }
+
+    /// Opens the folder browser from the open drawer's + and goes into each folder of `steps`, from home.
+    private func browse(to steps: [String]) throws {
+        let plus = element("drawerOpenFolder")
+        try wait(plus, "+ at the foot of the drawer's column")
+        plus.tap()
+        for step in steps {
+            let row = element("folder-" + step)
+            // The list is lazy: a row below the screen isn't there until it's scrolled to. A slow drag that holds
+            // before lifting doesn't fling, so no row goes past unseen between the checks.
+            if !row.waitForExistence(timeout: 5) {
+                let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+                for _ in 0..<30 where !row.exists {
+                    from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
+                }
+            }
+            try wait(row, "\(step) in the folder browser", timeout: 10)
+            row.tap()
+        }
     }
 
     /// Unfolds Earlier in the open drawer (folded at first, and kept as it was left).

@@ -33,3 +33,13 @@ private func project(_ dir: String, activity: Double) -> ProjectChoice {
     // nothing held yet: as they come
     #expect(Strip.held(now, order: []).map(\.dir) == ["/c", "/a", "/b"])
 }
+
+@Test func aProjectJustOpenedFromTheBrowserGoesFirstNotLast() {
+    let order = ["/a", "/b"]
+    let now = [project("/new", activity: 1), project("/a", activity: 3), project("/b", activity: 2), project("/other", activity: 0)]
+    #expect(Strip.held(now, order: order, shown: "/new").map(\.dir) == ["/new", "/a", "/b", "/other"])
+    // one already held stays where it was
+    #expect(Strip.held(now, order: order, shown: "/b").map(\.dir) == ["/a", "/b", "/new", "/other"])
+    // nothing held yet: as they come, so the order the drawer opens with doesn't jump
+    #expect(Strip.held(now, order: [], shown: "/b").map(\.dir) == ["/new", "/a", "/b", "/other"])
+}

@@ -84,8 +84,8 @@ jobs:
           echo "the e2e runs on $on"
           # The shards: core tests always (what reaches Claude's sessions, starting, ending, resuming and
           # reconnecting, the lock), about 3.8 min each on GitHub's Macs by run 39997381577; the layout and gesture
-          # tests (the drawer's swipe, the inbox's top bar, New session, the browser tab, the project strip) only when asked, before a
-          # release. test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
+          # tests (the drawer's swipe, the inbox's top bar, New session, the browser tab, the project strip, opening a folder) only when asked,
+          # before a release. test1 pairs, test2 needs a paired app to find it locked, and testInbox runs after test1 read
           # demo-chat: they stay together. Each shard's first test pairs (launchPaired does when it isn't). Each
           # has its own ports, so shards can share a Mac. Three on GitHub's Macs; two on the Mac, a laptop that
           # also runs its owner's apps (three slowed its tests to half speed).
@@ -96,10 +96,10 @@ jobs:
           }
           if [ "$on" = "$mac" ]; then
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test3Stop test7AnswerQuestions test8TrustFolder testStuckStart" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testServerBrowserTab"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testOpenFolder testServerBrowserTab"
           else
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test8TrustFolder testStuckStart" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testOpenFolder"
             shard c 7427 7433 "test3Stop test7AnswerQuestions testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testServerBrowserTab"
           fi | jq -sc '{include: .}' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"

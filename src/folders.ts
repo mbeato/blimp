@@ -8,6 +8,7 @@ import { basename, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { shownNames } from "./names";
 import { shownNote, shownNotes } from "./notes";
+import type { Opened } from "./opened";
 import { isUnread, readSeen } from "./seen";
 import { claudeDir, pickTitle, realDir, transcriptTitles } from "./sessions";
 
@@ -81,13 +82,20 @@ export function tempRoots(): string[] {
 const under = (d: string, root: string) => d === root || d.startsWith(root.endsWith("/") ? root : root + "/");
 
 // hidden: the projects you hid from the phone's strip (hidden.ts), left out before the list is cut to 30.
-export function recentFolders(dir = claudeDir(), temp = tempRoots(), hidden = new Set<string>()): { dir: string; lastUsed: number }[] {
+// opened: the folders you opened from the phone's folder browser (opened.ts), from when you opened them, even in a
+// temporary folder (you picked them), so one is listed before Claude has run there.
+export function recentFolders(
+  dir = claudeDir(),
+  temp = tempRoots(),
+  hidden = new Set<string>(),
+  opened: Opened[] = [],
+): { dir: string; lastUsed: number }[] {
   const projects = join(dir, "projects");
   let folders: string[];
   try {
     folders = readdirSync(projects);
   } catch {
-    return [];
+    folders = []; // no transcripts yet: the opened folders still count
   }
   const seen = new Map<string, number>();
   for (const f of folders) {
@@ -99,6 +107,10 @@ export function recentFolders(dir = claudeDir(), temp = tempRoots(), hidden = ne
     } catch {}
     if (!cwd || hidden.has(cwd) || !existsSync(cwd) || temp.some((t) => under(cwd!, t))) continue;
     seen.set(cwd, Math.max(seen.get(cwd) ?? 0, newest.mtime));
+  }
+  for (const o of opened) {
+    if (hidden.has(o.dir) || !existsSync(o.dir)) continue;
+    seen.set(o.dir, Math.max(seen.get(o.dir) ?? 0, o.at));
   }
   return [...seen]
     .map(([dir, lastUsed]) => ({ dir, lastUsed }))

@@ -17,6 +17,7 @@ import { conversations, projectFolderName, recentFolders, resumedKind, tempRoots
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { askHandoff, startHandoffs } from "./handoff";
 import { readHidden, setHidden } from "./hidden";
+import { addOpened, readOpened } from "./opened";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
@@ -294,7 +295,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   }
 
   if (path === "/ports" && get) return Response.json(await sessionPorts(parseZmxList(await zmxListAsync())));
-  if (path === "/folders/recent" && get) return Response.json(recentFolders(claudeDir(), tempRoots(), new Set(readHidden())));
+  if (path === "/folders/recent" && get) return Response.json(recentFolders(claudeDir(), tempRoots(), new Set(readHidden()), readOpened()));
   // The projects you hid from the phone's strip; POST { dir, hidden } hides one or shows it again.
   if (path === "/folders/hidden" && get) return Response.json(readHidden());
   if (path === "/folders/hidden" && req.method === "POST") {
@@ -302,6 +303,22 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (typeof dir !== "string" || !dir.startsWith("/")) throw new HttpError(400, "dir must be a folder's full path");
     if (typeof hidden !== "boolean") throw new HttpError(400, "hidden must be true or false");
     return Response.json(setHidden(dir, hidden));
+  }
+  // A folder the phone's browser opened as a project: shown again if it was hidden, and kept in the recent folders
+  // so it stays a project before Claude has run there. Answers with the recent folders.
+  if (path === "/folders/opened" && req.method === "POST") {
+    const { dir } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (typeof dir !== "string" || !dir.startsWith("/")) throw new HttpError(400, "dir must be a folder's full path");
+    // The same form /fs/list answers with, so /a/./b and /a/b/ are the folder /a/b, not another entry.
+    const full = resolve(dir);
+    let folder = false;
+    try {
+      folder = isDir(guardList(full));
+    } catch {}
+    if (!folder) throw new HttpError(400, "dir must be a folder inside your home folder");
+    setHidden(full, false);
+    addOpened(full);
+    return Response.json(recentFolders(claudeDir(), tempRoots(), new Set(readHidden()), readOpened()));
   }
   if (path === "/conversations" && get) {
     const dir = q.get("dir");

@@ -1,7 +1,7 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
-// anywhere, or ☰ on the inbox) with the project strip, New session and the project's sessions, running and past. A
-// chat's top left goes back to its project's inbox. A project opens to its inbox, where the box at the bottom starts
-// a session; the drawer's New session opens it with the keyboard up.
+// anywhere, or ☰ on the inbox) with the projects' column (+ at its foot opens a folder on the computer), New session
+// and the project's sessions, running and past. A chat's top left goes back to its project's inbox. A project opens
+// to its inbox, where the box at the bottom starts a session; the drawer's New session opens it with the keyboard up.
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
 // live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
@@ -38,6 +38,8 @@ struct HomeView: View {
     /// Each project's past conversations, kept while another one shows, and fetched again as below.
     @State private var earlierBy: [String: [Conversation]] = [:]
     @State private var showSettings = false
+    /// The drawer's +: the folder browser (FolderBrowserView), over the drawer.
+    @State private var showFolders = false
     @State private var actions = RowActions()
     /// Each session's last title, for one that has ended.
     @State private var titles: [String: String] = [:]
@@ -93,6 +95,7 @@ struct HomeView: View {
         )
         .overlay {
             DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, onHide: hideProject,
+                       onOpenFolder: { showFolders = true },
                        rows: rows, selected: selected,
                        onPick: pick, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },
@@ -108,6 +111,13 @@ struct HomeView: View {
         }
         .environment(\.sideScrollers, sideScrollers)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $showFolders) {
+            if let home = store.serverHome {
+                FolderBrowserView(home: home, onOpen: openFolder)
+            } else {
+                ContentUnavailableView("Can't reach the server", systemImage: "wifi.slash")
+            }
+        }
         .modifier(KeepsPlace(opened: $opened, drawer: drawer))
         .endConfirmation(Binding(get: { actions.pendingEnd }, set: { actions.pendingEnd = $0 }), store: store)
         .plainAlert("Couldn't do that", message: Binding(get: { actions.failure }, set: { actions.failure = $0 }))
@@ -122,6 +132,14 @@ struct HomeView: View {
         // The drawer opens: the keyboard goes (☰ on the inbox), and the hidden projects and recent folders are
         // fetched again, as a session started on the Mac shows one again.
         .onChange(of: drawer) { _, open in if open { hideKeyboard() } }
+        // The lock's cover is an overlay, and a sheet sits above it: close the folder browser as the cover goes on,
+        // with animations off so it's gone before the app switcher's snapshot, or it shows the computer's folders.
+        .onChange(of: covered) { _, c in
+            guard c else { return }
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) { showFolders = false }
+        }
         .task(id: drawer) {
             guard drawer, let api = store.api else { return }
             if let list = try? await api.hiddenFolders() { hidden = Set(list) }
@@ -156,6 +174,7 @@ struct HomeView: View {
                     // Close what could cover the chat.
                     browserTab = nil
                     showSettings = false
+                    showFolders = false
                     show(.session(name))
                     return
                 }
@@ -373,6 +392,18 @@ struct HomeView: View {
                 actions.failure = Store.words(for: error)
             }
         }
+    }
+
+    /// Open in the folder browser. blimpd shows the folder again if it was hidden and keeps it in the recent folders,
+    /// so it stays in the column before Claude has run there. It then shows as if its icon was tapped: its inbox
+    /// behind the drawer, which stays open, and first in the column (Strip.held). If blimpd refuses, this throws and
+    /// the browser stays and says why.
+    private func openFolder(_ dir: String) async throws {
+        guard let api = store.api else { throw APIError.offline }
+        folders = try await api.openFolder(dir: dir)
+        hidden.remove(dir)
+        showFolders = false
+        pickProject(dir)
     }
 
     private func hideKeyboard() {
