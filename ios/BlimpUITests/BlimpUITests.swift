@@ -663,9 +663,14 @@ final class BlimpUITests: XCTestCase {
         plus.tap()
         for step in steps {
             let row = element("folder-" + step)
-            // The list is lazy: a row below the screen isn't there until it's scrolled to.
+            // The list is lazy: a row below the screen isn't there until it's scrolled to. A slow drag that holds
+            // before lifting doesn't fling, so no row goes past unseen between the checks.
             if !row.waitForExistence(timeout: 5) {
-                for _ in 0..<15 where !row.exists { app.swipeUp() }
+                let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+                for _ in 0..<30 where !row.exists {
+                    from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
+                }
             }
             try wait(row, "\(step) in the folder browser", timeout: 10)
             row.tap()
