@@ -33,14 +33,14 @@ waiting), and some stay working for days, so the widgets summarise every session
 
 ## The widgets
 
-What they count and list, across all projects, by the rules of `Inbox` (BlimpKit `Inbox.swift`; the Mac's
-`app/src/lib/inbox.ts`):
+What they count and list: every project's running sessions, by the rules `Inbox` (BlimpKit `Inbox.swift`; the
+Mac's `app/src/lib/inbox.ts`) gives each session. Past conversations with no session running stay in their
+project's inbox, as the drawer's project marks leave them out too (and reading every project's history each second
+would cost more than it's worth):
 
-1. Needs you: running sessions waiting on you, or done with a question in their note, and unread past conversations
-   with a question. The oldest wait first.
-2. New (the inbox's "Finished, not read yet"): done and unread, the note not "in progress", and unread past
-   conversations without a question. The newest first.
-3. Working: Claude working on it now, the longest-running first.
+1. Needs you: running sessions waiting on you, or done with a question in their note. The oldest wait first.
+2. New (the inbox's "Finished, not read yet"): done and unread, the note not "in progress". The newest first.
+3. Working: working on it now, the longest-running first.
 
 Each state has its own symbol (? needs you, ✓ new, ● working), so a widget reads right when iOS tints it one colour
 (the iOS 26 accented and glass looks). A working row's time counts up by itself (`Text(timerInterval:)`), with no
@@ -61,8 +61,8 @@ small                  medium (4 rows; large about 9)
 
 - Small: the three counts. A tap opens the oldest that needs you, or the app if nothing does.
 - Medium and large: the counts, then rows in the order above, as many as fit. A row: the state's symbol, the title,
-  a working row's time, the project's two letters (as the drawer's column has them). A tap on a running session's
-  row opens its chat, as a tapped notification does; on a past conversation's, its project's inbox.
+  a working row's time, the project's two letters (as the drawer's column has them). A tap on a row opens its chat,
+  as a tapped notification does.
 - Nothing needs you, is new or works: "All quiet" and when the last session finished.
 
 ### Lock screen
@@ -98,32 +98,34 @@ the widget's timeline ──> reload after 15 minutes ────────�
 ## The server
 
 - `GET /widget` (widget key, or the Mac's or phone's token):
-  `{ at, counts: { needs, new, working }, rows: [{ id, kind: "session" | "past", session?, sessionId?, dir, title,
-  state: "needs" | "new" | "working", since }], lastFinished? }`. At most 9 rows (the large widget). `since`: ms,
-  when it started waiting or working. Built from the session list, the past conversations and hidden.json, by the
-  inbox's rules above; a new `src/widget.ts`, with the rules beside the inbox's.
-- The widget key: HMAC-SHA256 of the phone's token with the text `blimp widget`, hex. blimpd works it out from the
-  phone token it has (`readPhoneToken`); the phone from the one it was paired with. It is accepted only for
-  `GET /widget`; anywhere else it is refused like a wrong token. Pairing again changes the phone token and so this
-  key.
+  `{ at, counts: { needs, new, working }, rows: [{ session, dir, title, state: "needs" | "new" | "working",
+  since }], lastFinished? }`. At most 9 rows (the large widget). `since`: ms, when it started waiting or working.
+  Built from the session list and hidden.json by the rules above; a new `src/widget.ts`.
+- The widget key: HMAC-SHA256 of the phone's token with the text `blimp widget`, hex, worked out by blimpd from the
+  phone token it has (`readPhoneToken`). The app gets it with `GET /widget/key` (phone token) → `{ key }`, so the
+  crypto and its tests stay on the server. It is accepted only for `GET /widget`; anywhere else it is refused like a
+  wrong token. Pairing again changes the phone token and so this key.
 - Widget push tokens: `POST /push/widget { token, env }` and `DELETE /push/widget { token }` (phone token), kept in
   push.json beside the devices (mode 600).
-- The pinger: in the push watcher (`src/push/watch.ts`), which already lists the sessions every second while a key
-  and a phone are set. It works out the summary only when there is a widget token.
+- The pinger (`src/push/widgets.ts`): its own one-second tick beside the push watcher's, sharing its connection to
+  Apple, and only while there's a push key and a widget token.
 
 ## The phone
 
 - A widget extension, `BlimpWidgets` (bundle id `dev.blimp.phone.widgets`), in `ios/project.yml`, embedded in the
   app, iOS 26. It has the six widget views, one timeline provider and the push handler.
-- An App Group, `group.dev.blimp.phone`, shared by the app and the extension: a file `widget.json` with the server's
-  URL, the widget key, the last summary and its time, and the widget push token for the app to send.
-- The app writes the URL and widget key there when it pairs or starts, reloads the widgets when it opens or goes to
-  the background, and sends a new widget push token (`POST /push/widget`) when it finds one there.
+- An App Group, `group.dev.blimp.phone`, shared by the app and the extension, with two files so neither overwrites
+  the other's: `server.json`, which only the app writes (the server's URL and the widget key, or none when blimpd is
+  too old to have one), and `kept.json`, which only the widgets write (their last summary and their push token).
+- Each time it's online, the app writes `server.json` (asking blimpd for the widget key), sends a widget push token
+  it hasn't sent yet (`POST /push/widget`), and reloads the widgets; it reloads them too when it goes to the
+  background. Signing out deletes `server.json`.
 - The push handler (iOS 26's `WidgetPushHandler`, set with `.pushHandler(...)`; the names checked against the iOS
-  26.5 SDK when planning) writes the token to `widget.json`. So after adding a widget, it reaches blimpd the next
+  26.5 SDK when planning) writes the token to `kept.json`. So after adding a widget, it reaches blimpd the next
   time the app is open.
-- Taps: the widgets link to `blimp://open?session=<name>` or `blimp://open?dir=<dir>`. The app registers the
-  `blimp` scheme and opens them as it opens a tapped notification's session. Pair links (`blimp://pair?...`) stay
+- Taps: a row, and the small widget when something needs you, link to `blimp://open?session=<name>`; otherwise
+  `blimp://open`, which just opens the app. The app registers the `blimp` scheme and opens the session as it opens
+  a tapped notification's. Pair links (`blimp://pair?...`) stay
   as they are: pasted into the pair screen.
 - BlimpKit, with tests: the summary's model, the counts line, the row text, "All quiet", and the link's URL both ways.
 
@@ -137,12 +139,11 @@ the widget's timeline ──> reload after 15 minutes ────────�
 
 - Server (`bun test`):
   - widget.test.ts: needs you, new and working by the inbox's rules (a waiting session; a done one with a question
-    note; one with an "in progress" note left out; unread past conversations with and without a question; a past
-    one a running session has open left out); hidden projects left out; the order across projects; at most 9 rows;
-    lastFinished.
+    note; one with an "in progress" note left out; a read one left out); hidden projects left out; the order across
+    projects; at most 9 rows; lastFinished; the widget key against a fixed value.
   - server.test.ts: `GET /widget` with the widget key, and the phone's and Mac's tokens; the widget key refused on
-    another route; a different phone token gives a different key; `POST`/`DELETE /push/widget`, 400 on a bad token,
-    push.json mode 600.
+    another route; `GET /widget/key`, and a new phone token giving a new key; `POST`/`DELETE /push/widget`, 400 on
+    a bad token, push.json mode 600.
   - The pinger: a new needs-you pinged at once; other changes no sooner than 2 minutes after the last ping; a
     working row's time alone pings nothing; no token, nothing sent; the headers, topic and body; a gone token
     removed.
