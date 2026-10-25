@@ -474,18 +474,32 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             archive | tail -80
-          # The export signs only the entitlements the archived app's signature lists, and an unsigned archive lists
-          # none: an ad-hoc signature with Release's (aps-environment production) carries notifications over, or the
-          # TestFlight build could never get one. Checked 2026-10-24: with it, the exported app has aps-environment.
+          # The export signs only the entitlements each archived bundle's signature lists, and an unsigned archive lists
+          # none: ad-hoc signatures with Release's (aps-environment production, the App Group) carry them over, or the
+          # TestFlight build could never get notifications and its widgets could neither read the App Group's
+          # server.json nor get a push token. Both are signed: the widget extension first, as nested code must be
+          # signed before the app that holds it. Checked 2026-10-24: with it, the exported app has aps-environment.
           app="$RUNNER_TEMP/blimp.xcarchive/Products/Applications/blimp.app"
+          appex="$app/PlugIns/BlimpWidgets.appex"
+          went="$RUNNER_TEMP/release-widgets.entitlements"
+          cp BlimpWidgets/BlimpWidgets.entitlements "$went"
+          plutil -replace aps-environment -string production "$went"
+          codesign --force --sign - --entitlements "$went" --timestamp=none --generate-entitlement-der "$appex"
           ent="$RUNNER_TEMP/release.entitlements"
           cp Blimp/Blimp.entitlements "$ent"
           plutil -replace aps-environment -string production "$ent"
           codesign --force --sign - --entitlements "$ent" --timestamp=none --generate-entitlement-der "$app"
-          # The export keeps what this signature lists; without aps-environment the TestFlight build can't get notifications.
-          if ! codesign -d --entitlements - --xml "$app" 2>/dev/null | grep aps-environment >/dev/null; then
-            echo "::warning title=TestFlight::The archived app's signature doesn't list aps-environment: this build may get no notifications."
-          fi
+          # The export keeps what these signatures list: without aps-environment no notifications or widget pushes,
+          # without the App Group the widgets can't read the server's address.
+          for b in "$app" "$appex"; do
+            name=$(basename "$b")
+            if ! codesign -d --entitlements - --xml "$b" 2>/dev/null | grep aps-environment >/dev/null; then
+              echo "::warning title=TestFlight::The archived $name's signature doesn't list aps-environment: this build may get no notifications or widget pushes."
+            fi
+            if ! codesign -d --entitlements - --xml "$b" 2>/dev/null | grep com.apple.security.application-groups >/dev/null; then
+              echo "::warning title=TestFlight::The archived $name's signature doesn't list the App Group: this build's widgets may not read the server's address."
+            fi
+          done
       - name: Upload to TestFlight
         run: |
           set -o pipefail
