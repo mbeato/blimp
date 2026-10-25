@@ -1,5 +1,5 @@
 // The app's one screen, as chat apps have it: a project's inbox or a chat, and a drawer from the left (a swipe right
-// anywhere, or ☰ on the inbox) with the project strip, New session and the project's sessions, running and past. A
+// anywhere, or ☰ on the inbox) with the projects' column (+ at its foot opens a folder on the computer), New session and the project's sessions, running and past. A
 // chat's top left goes back to its project's inbox. A project opens to its inbox, where the box at the bottom starts
 // a session; the drawer's New session opens it with the keyboard up.
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
@@ -95,6 +95,7 @@ struct HomeView: View {
         )
         .overlay {
             DrawerView(open: $drawer, pull: pull, dir: store.dir, projects: projects, onProject: pickProject, onHide: hideProject,
+                       onOpenFolder: { showFolders = true },
                        rows: rows, selected: selected,
                        onPick: pick, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },

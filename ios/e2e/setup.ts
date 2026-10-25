@@ -25,7 +25,7 @@
 // ($E2E_PORT for the app's link, $E2E_SITE_PORT for the page) are each shard's own when shards share a Mac.
 
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { projectFolderName } from "../../src/folders";
 import { promptFromHook } from "../../src/prompt";
 import { parseZmxList, zmxPath } from "../../src/sessions";
@@ -154,6 +154,8 @@ const questions = [
 ];
 const quizCfg = join(root, "quiz-cfg.json");
 writeFileSync(join(root, "quiz.in"), "");
+// testOpenFolder's browser goes from home to the work folder one folder at a time, by these steps.
+writeFileSync(join(root, "work-under-home"), relative(realpathSync(process.env.HOME!), realpathSync(work)));
 writeFileSync(quizCfg, JSON.stringify({ questions, keys: join(root, "quiz.in"), answers: join(root, "quiz.json"), status: quizStatus, sessionId: quizSid }));
 await standIn("demo-quiz", join(work, "api-server"), `exec '${process.execPath}' '${join(import.meta.dir, "fake-ask.ts")}' '${quizCfg}'`,
   quizSid, [user("u1", "Set up the test pipeline"), said("a1", "A couple of questions first.")]);

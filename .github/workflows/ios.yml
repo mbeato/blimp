@@ -96,10 +96,10 @@ jobs:
           }
           if [ "$on" = "$mac" ]; then
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test3Stop test7AnswerQuestions test8TrustFolder testStuckStart" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testServerBrowserTab"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testOpenFolder testServerBrowserTab"
           else
             shard a 7425 7431 "test1PairChatAndAnswer test2FaceIDLock test8TrustFolder testStuckStart" "test9DrawerFromASwipe testInbox"
-            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip"
+            shard b 7426 7432 "test4StartAndEnd test5Resume test6Reconnect testPushOpensTheChat" "testNewSessionFromTheDrawer testSwitchProjectFromTheStrip testOpenFolder"
             shard c 7427 7433 "test3Stop test7AnswerQuestions testDraftKeptThroughRelock testNeedsYouAllowFromTheInbox" "testServerBrowserTab"
           fi | jq -sc '{include: .}' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
