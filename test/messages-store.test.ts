@@ -44,6 +44,22 @@ test("the switch keeps the rest of config.json; on from off starts again from th
   expect(messagesOn(config())).toBe(false);
 });
 
+test("on from off drops the texts left from before: those to go out, those held, and the open question", () => {
+  const left = () => {
+    addOut("old", 5, state());
+    change((s) => {
+      s.held = ["hi"];
+      s.open = true;
+    }, state());
+  };
+  left();
+  setMessagesOn(true, config(), state());
+  expect(readState(state())).toMatchObject({ outbox: [], held: [], open: false, primed: false });
+  left();
+  setMessagesOn(true, config(), state()); // already on: kept
+  expect(readState(state())).toMatchObject({ outbox: [{ text: "old" }], held: ["hi"], open: true });
+});
+
 test("the relay key: made once, 64 hex characters, 600; revoke deletes it", () => {
   expect(readRelayKey(dir)).toBe("");
   const k = makeRelayKey(dir);

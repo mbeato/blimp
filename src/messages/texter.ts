@@ -13,12 +13,12 @@ import { HttpError } from "../files";
 import { follow, newSummary, type Summary } from "../names";
 import { cleanText } from "../prompt";
 import { Apns, HOSTS } from "../push/apns";
-import { ASK_SETTLE } from "../push/rule";
+import { ASK_SETTLE, waitKey } from "../push/rule";
 import { readCreds, readDevices } from "../push/store";
 import type { Session } from "../sessions";
 import { Asking, findSession, typeInto } from "../typing";
 import { addOut, change, messagesFile, messagesOn, pushOut, readState, SEEN } from "./store";
-import { ALREADY, isShortAnswer, OFF, OFFLINE, PICTURE_NOTE, PICTURE_ONLY, plainLines, replyFor, STUCK, waitText } from "./words";
+import { ALREADY, isShortAnswer, OFF, OFFLINE, OPEN_BLIMP, PICTURE_NOTE, PICTURE_ONLY, plainLines, replyFor, STUCK, waitText } from "./words";
 
 export const QUIET = 5 * 60_000;
 const MAX_TEXT = 20_000;
@@ -101,7 +101,8 @@ export class Texter {
     if (t.picture) text += PICTURE_NOTE;
     const s = await this.deps.session();
     const st = readState(file);
-    const p = s?.state === "waiting" && s.prompt?.at === st.lastWait ? s.prompt : undefined;
+    const current = s?.state === "waiting" && waitKey(s) === st.lastWait; // waiting on the question last texted
+    const p = current ? s?.prompt : undefined;
     if (p && st.open) {
       const m = replyFor(p, text);
       if (m) {
@@ -114,7 +115,7 @@ export class Texter {
         }
         return { ok: true };
       }
-    } else if (!p && st.open && isShortAnswer(text)) {
+    } else if (!current && st.open && isShortAnswer(text)) {
       change((x) => void (x.open = false), file);
       say(ALREADY);
       return { ok: true };
@@ -170,13 +171,14 @@ export class Texter {
             }
           }, file);
       }
-      // Its question, once it has asked for 3 s: texted once.
-      const p = s.state === "waiting" ? s.prompt : undefined;
-      if (p && now - p.at >= ASK_SETTLE && p.at !== readState(file).lastWait)
+      // Its question, once it has asked for 3 s: texted once, keyed as push keys a wait. One with no prompt can only
+      // be answered in blimp.
+      const wait = s.state === "waiting" ? waitKey(s) : undefined;
+      if (wait !== undefined && now - wait >= ASK_SETTLE && wait !== readState(file).lastWait)
         change((x) => {
-          x.lastWait = p.at;
+          x.lastWait = wait;
           x.open = true;
-          pushOut(x, waitText(p), now);
+          pushOut(x, s.prompt ? waitText(s.prompt) : OPEN_BLIMP, now);
         }, file);
       // Held texts, once it isn't asking anything.
       const held = readState(file).held;

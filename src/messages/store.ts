@@ -22,7 +22,7 @@ export type MessagesState = {
   held: string[]; // texts to type into the assistant once it isn't asking anything
   primed?: boolean; // sentReply was set when texting began, so a reply from before isn't texted
   sentReply?: string; // the id of the assistant's latest reply that was texted (or primed)
-  lastWait?: number; // prompt.at of the latest question texted
+  lastWait?: number; // the latest question texted, by push/rule.ts's waitKey (prompt.at, or stateSince without one)
   open?: boolean; // that question is still to be answered from Messages
   relaySeen?: number; // when the relay last called (ms), for `blimpd messages status`
 };
@@ -56,12 +56,19 @@ export const pushOut = (s: MessagesState, text: string, now: number) => void s.o
 export const addOut = (text: string, now = Date.now(), file = messagesFile()) => change((s) => pushOut(s, text, now), file);
 export const markSent = (id: string, file = messagesFile()) => change((s) => void (s.outbox = s.outbox.filter((o) => o.id !== id)), file);
 
-// On from off starts from the assistant's reply at that moment: nothing older is texted.
+// On from off starts from the assistant's reply at that moment: nothing older is texted, and texts left from
+// before (to go out, or held for it) are dropped.
 export function setMessagesOn(on: boolean, file = configFile(), state = messagesFile()) {
   const was = messagesOn(file);
   const m = (readConfig(file) as { messages?: unknown }).messages;
   saveConfig({ messages: { ...(m && typeof m === "object" && !Array.isArray(m) ? m : {}), on } }, file);
-  if (on && !was) change((s) => void (s.primed = false), state);
+  if (on && !was)
+    change((s) => {
+      s.primed = false;
+      s.outbox = [];
+      s.held = [];
+      s.open = false;
+    }, state);
 }
 
 export function readRelayKey(dir = blimpDir()): string {

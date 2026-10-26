@@ -181,6 +181,22 @@ test("a question a text can't answer says to open blimp; texts wait until it's o
   expect(t.typed).toEqual(["yes"]);
 });
 
+test("a wait with no prompt is texted once it has waited 3 s, keyed as push keys it, and says to open blimp; texts wait", async () => {
+  const { t, x, set, out, state } = setup();
+  await x.tick();
+  set({ state: "waiting", prompt: undefined, stateSince: T });
+  t.clock = T + 2999;
+  await x.tick();
+  expect(out()).toEqual([]);
+  t.clock = T + 3000;
+  await x.tick();
+  await x.tick();
+  expect(out()).toEqual([OPEN_BLIMP]);
+  expect(state()).toMatchObject({ lastWait: T, open: true });
+  await x.receive(text("g1", "yes"));
+  expect([out(), state().held]).toEqual([[OPEN_BLIMP], ["yes"]]);
+});
+
 test("a turn's reply is texted once the turn is over, once, as plain text; the reply from before texting began isn't", async () => {
   const { t, x, set, out, state } = setup();
   t.reply = { id: "r0", text: "old" };
