@@ -3,7 +3,8 @@
 // - Every second:
 //   - the assistant's finished turns and its questions become texts out (the outbox, which the relay takes);
 //   - held texts are typed into it once it isn't asking anything;
-//   - a relay that's been quiet for 5 minutes is told to the phone, once.
+//   - a relay that's been quiet for 5 minutes is told to the phone, once, and so is one that calls but whose texts
+//     have waited 5 minutes to go out.
 
 import { statSync } from "node:fs";
 import { answerOnce } from "../answer";
@@ -17,7 +18,7 @@ import { readCreds, readDevices } from "../push/store";
 import type { Session } from "../sessions";
 import { Asking, findSession, typeInto } from "../typing";
 import { addOut, change, messagesFile, messagesOn, pushOut, readState, SEEN } from "./store";
-import { ALREADY, isShortAnswer, OFF, OFFLINE, PICTURE_NOTE, PICTURE_ONLY, plainLines, replyFor, waitText } from "./words";
+import { ALREADY, isShortAnswer, OFF, OFFLINE, PICTURE_NOTE, PICTURE_ONLY, plainLines, replyFor, STUCK, waitText } from "./words";
 
 export const QUIET = 5 * 60_000;
 const MAX_TEXT = 20_000;
@@ -40,7 +41,9 @@ export class Texter {
   private busy = false;
   private started: number;
   private relaySeen?: number;
+  private calling?: number; // when the relay began calling again, after a quiet spell or blimpd's start
   private alerted = false;
+  private stuckTold = false;
   private onSince?: number; // when texting was last seen turned on; the relay can't call while it's off
 
   constructor(private deps: TexterDeps) {
@@ -50,14 +53,25 @@ export class Texter {
   // The relay called.
   touch() {
     const now = this.deps.now();
+    if (this.relaySeen === undefined || now - this.relaySeen >= QUIET) this.calling = now;
     this.relaySeen = now;
     this.alerted = false;
     change((s) => void (s.relaySeen = now), this.deps.file);
   }
 
-  // Texting is on and the relay called within 5 minutes: the texts are the assistant's alerts (push/rule.ts).
+  // Texting is on, the relay called within 5 minutes and it isn't stuck: the texts are the assistant's alerts
+  // (push/rule.ts).
   live(): boolean {
-    return this.deps.on() && this.relaySeen !== undefined && this.deps.now() - this.relaySeen < QUIET;
+    const now = this.deps.now();
+    return this.deps.on() && this.relaySeen !== undefined && now - this.relaySeen < QUIET && !this.stuck(now);
+  }
+
+  // The relay calls but can't send (Messages refused it, or is signed out): a text has waited to go out for 5
+  // minutes of its calling.
+  private stuck(now: number): boolean {
+    const oldest = readState(this.deps.file).outbox[0]?.at;
+    if (oldest === undefined || this.relaySeen === undefined || this.calling === undefined) return false;
+    return now - this.relaySeen < QUIET && now - Math.max(oldest, this.calling) >= QUIET;
   }
 
   // A text from the relay.
@@ -123,6 +137,12 @@ export class Texter {
       if (!this.alerted && now - Math.max(this.relaySeen ?? 0, this.started, this.onSince) >= QUIET) {
         this.alerted = true;
         await this.deps.alert(OFFLINE).catch((e) => this.deps.log(`messages: couldn't tell the phone the relay is quiet (${(e as Error).message})`));
+      }
+      // Once until no text has waited that long.
+      if (!this.stuck(now)) this.stuckTold = false;
+      else if (!this.stuckTold) {
+        this.stuckTold = true;
+        await this.deps.alert(STUCK).catch((e) => this.deps.log(`messages: couldn't tell the phone the relay can't send (${(e as Error).message})`));
       }
       const s = await this.deps.session();
       if (!s) return;
@@ -218,7 +238,7 @@ const live = (): TexterDeps => ({
     try {
       for (const d of devices) {
         const r = await apns.send(d, { aps: { alert: { title: "blimp", body }, sound: "default" } });
-        if (r.status !== 200) console.log(`messages: Apple didn't take the offline alert (${r.status || "nothing"}${r.reason ? `, ${r.reason}` : ""})`);
+        if (r.status !== 200) console.log(`messages: Apple didn't take the relay alert (${r.status || "nothing"}${r.reason ? `, ${r.reason}` : ""})`);
       }
     } finally {
       apns.close();

@@ -10,6 +10,7 @@ export const PICTURE_NOTE = " (a picture came with this text; you can't see pict
 export const ALREADY = "That was already answered.";
 export const OPEN_BLIMP = "It's asking something only blimp can show. Open blimp to answer.";
 export const OFFLINE = "The Messages relay is offline: blimp hasn't heard from it in 5 minutes. Check the Mac it runs on.";
+export const STUCK = "The Messages relay can't send texts: some have waited 5 minutes. Check Messages on the Mac it runs on.";
 
 // Markdown as a text: as push/payload.ts's plainText, but with line breaks (at most one blank line in a row), list
 // marks and link addresses kept.

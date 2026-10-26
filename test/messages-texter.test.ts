@@ -6,9 +6,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpError } from "../src/files";
-import { readState } from "../src/messages/store";
+import { addOut, markSent, readState } from "../src/messages/store";
 import { QUIET, Texter, type TexterDeps } from "../src/messages/texter";
-import { ALREADY, OFF, OFFLINE, OPEN_BLIMP, PICTURE_NOTE, PICTURE_ONLY } from "../src/messages/words";
+import { ALREADY, OFF, OFFLINE, OPEN_BLIMP, PICTURE_NOTE, PICTURE_ONLY, STUCK } from "../src/messages/words";
 import type { Session } from "../src/sessions";
 import { Asking } from "../src/typing";
 
@@ -267,6 +267,48 @@ test("a relay quiet for 5 minutes is told once; a call starts the count again; l
   expect(x.live()).toBe(false);
   await x.tick();
   expect(t.alerts).toEqual([OFFLINE, OFFLINE]);
+});
+
+test("a relay that calls but can't send: once a text has waited 5 minutes, texting isn't live and the phone is told, once", async () => {
+  const { t, x, state } = setup();
+  const file = join(dir, "messages.json");
+  x.touch();
+  await x.tick();
+  addOut("hi", T, file);
+  t.clock = T + QUIET - 1;
+  x.touch();
+  await x.tick();
+  expect([x.live(), t.alerts]).toEqual([true, []]);
+  t.clock = T + QUIET;
+  x.touch();
+  expect(x.live()).toBe(false);
+  await x.tick();
+  await x.tick();
+  expect(t.alerts).toEqual([STUCK]);
+  markSent(state().outbox[0].id, file);
+  expect(x.live()).toBe(true);
+  await x.tick();
+  addOut("again", T + QUIET, file);
+  t.clock = T + 1.5 * QUIET;
+  x.touch();
+  t.clock = T + 2 * QUIET;
+  x.touch();
+  await x.tick();
+  expect([x.live(), t.alerts]).toEqual([false, [STUCK, STUCK]]);
+});
+
+test("texts that waited while the relay was quiet aren't stuck: the relay is told offline, and is live once it calls", async () => {
+  const { t, x } = setup();
+  x.touch();
+  await x.tick();
+  addOut("hi", T, join(dir, "messages.json"));
+  t.clock = T + QUIET;
+  await x.tick();
+  expect(t.alerts).toEqual([OFFLINE]);
+  t.clock = T + 2 * QUIET;
+  x.touch();
+  await x.tick();
+  expect([x.live(), t.alerts]).toEqual([true, [OFFLINE]]);
 });
 
 test("off: nothing is typed, texted or told", async () => {
