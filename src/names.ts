@@ -64,7 +64,7 @@ export function saveName(id: string, n: Name, file = namesFile()) {
 }
 
 // What a transcript has said so far, kept up to date as it grows (chat.ts reads it).
-export type Summary = { scan: ChatScan; prompts: number; replies: number; first?: string; last: string[]; reply?: string };
+export type Summary = { scan: ChatScan; prompts: number; replies: number; first?: string; last: string[]; reply?: string; replyId?: string };
 export const newSummary = (): Summary => ({ scan: newScan(""), prompts: 0, replies: 0, last: [] });
 
 export function addMessage(s: Summary, m: ChatMessage) {
@@ -75,6 +75,7 @@ export function addMessage(s: Summary, m: ChatMessage) {
   } else if (m.role === "assistant") {
     s.replies++;
     s.reply = m.text;
+    s.replyId = m.id;
   }
 }
 

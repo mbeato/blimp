@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conversations, projectFolderName } from "../src/folders";
-import { addMessage, checkName, NAMING_ARGS, namesOn, namingPrompt, readNames, saveName, type Summary, wantsName } from "../src/names";
+import { addMessage, checkName, follow, newSummary, NAMING_ARGS, namesOn, namingPrompt, readNames, saveName, type Summary, wantsName } from "../src/names";
 import { listSessions, titleFromTranscript } from "../src/sessions";
 
 const MIN = 60_000;
@@ -66,6 +66,17 @@ describe("namingPrompt", () => {
     expect(p).toContain(`reply: ${"c".repeat(300)}…\n`);
     expect(p).not.toContain("b".repeat(301));
   });
+});
+
+test("follow keeps the latest reply's id with its text", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "blimp-follow-"));
+  const file = join(dir, "t.jsonl");
+  const line = (o: object) => JSON.stringify({ timestamp: new Date().toISOString(), ...o }) + "\n";
+  writeFileSync(file, line({ type: "user", uuid: "u1", message: { role: "user", content: "hi" } }) + line({ type: "assistant", uuid: "a1", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } }));
+  const s = newSummary();
+  await follow(file, s);
+  expect([s.reply, s.replyId]).toEqual(["hello", "a1#0"]); // chat.ts keys an assistant block by uuid#index
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe("checkName", () => {
