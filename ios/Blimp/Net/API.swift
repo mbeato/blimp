@@ -83,6 +83,14 @@ struct API {
         _ = try await call("DELETE", "/push/widget", body: JSONEncoder().encode(Body(token: token)))
     }
 
+    /// The visual key: it reads visuals' pages and blimp's kit, and nothing else (VisualView). An older blimpd has no
+    /// such route: "not found".
+    func visualKey() async throws -> String {
+        struct Key: Decodable { let key: String }
+        let k: Key = try await decode(call("GET", "/visuals/key"))
+        return k.key
+    }
+
     func conversations(dir: String) async throws -> [Conversation] {
         try await decode(call("GET", "/conversations", query: [URLQueryItem(name: "dir", value: dir)]))
     }
