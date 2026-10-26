@@ -1,6 +1,6 @@
 # Texting the assistant: Messages as its front door
 
-Date: 2026-10-26. Branch `messages` (worktree /Users/mbeato/blimp-messages). Status: design approved, not built.
+Date: 2026-10-26. Branch `messages` (worktree /Users/mbeato/blimp-messages). Status: built (plan docs/superpowers/plans/2026-10-26-messages.md); the Mac setup and the live check are next.
 
 ## What Max asked for
 

@@ -260,6 +260,36 @@ blimpd assistant on
 - Add your own instructions in `~/.blimp/assistant/CLAUDE.md`. blimp writes that file once and never changes it again.
 - `blimpd assistant off`, or the switch in Settings (which asks first), ends it. Its folder and chats stay, and turning it on again carries on the latest.
 
+### Texting the assistant
+
+You can text the assistant from Messages instead of opening blimp. A small program, blimp-relay, runs on a Mac that stays on, in a Mac user whose Messages is signed in to an Apple ID made just for the assistant. It passes your texts to blimpd and texts the assistant's answers back.
+
+- Only texts from the phone numbers and email addresses in the relay's list reach the assistant. Group chats and tapbacks are ignored, and pictures aren't read yet.
+- Everything the assistant finishes saying is texted to you, including its reports on jobs. Its chat in blimp shows the same conversation.
+- When it asks before acting, you get a text like "OK to run this? … Reply yes or no." Other words count as no and go to the assistant as what to do instead. A numbered question takes a number or your own words.
+- While the relay works, the assistant's own questions and answers come as texts, not blimp notifications. Jobs that need you still notify from blimp.
+- If blimpd hasn't heard from the relay for 5 minutes, your phone gets one notification. After the Mac restarts, sign that Mac user back in.
+
+To set it up:
+
+1. Make an Apple ID from an email address, for the assistant.
+2. On the Mac, add a standard user. Sign in to it, open Messages and sign in with that Apple ID.
+3. On the server, run `blimpd messages on`. It makes the relay's key, `~/.blimp/relay-key`.
+4. Build the relay with `bun run relay` (it makes `dist/blimp-relay`). Copy it to `/Users/Shared/blimp-relay` on the Mac, with `relay/install.sh` and a `relay.json`. `server` is the address the phone uses:
+
+   ```json
+   {"server": "https://your-server.your-tailnet.ts.net", "key": "<the relay key>", "allow": ["+15551234567", "you@example.com"]}
+   ```
+
+   Without `server`, the relay texts back `got: <your text>`. That tests the Mac on its own.
+5. Still signed in as that Mac user, run `bash /Users/Shared/blimp-relay/install.sh` and give blimp-relay Full Disk Access when it asks. Then text the account from your phone, and click OK when macOS asks whether blimp-relay may control Messages.
+6. Switch back to your own Mac user, and leave the other one signed in.
+
+Other commands:
+- `blimpd messages status` says when the relay last called.
+- `blimpd messages off` turns texting off.
+- `blimpd messages revoke` deletes the relay's key.
+
 ### Models and keys
 
 Sessions run on the server, so keys and sign-ins live there too. **Settings > Models** has one part per connected server:
