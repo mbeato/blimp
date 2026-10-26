@@ -1,7 +1,7 @@
 // When blimpd tells the phone (src/push/rule.ts): lists of sessions one after another, and what each step tells.
 
 import { expect, test } from "bun:test";
-import { ASK_SETTLE, dueAt, FINISH_MIN, HOLD, type PushEvent, type PushSession, pushChanges, stillDue } from "../src/push/rule";
+import { ASK_SETTLE, dueAt, FINISH_MIN, HOLD, type PushEvent, type PushSession, pushChanges, stillDue, UPDATE_SLACK } from "../src/push/rule";
 
 const T = 1_800_000_000_000;
 const claude = (name: string, state: PushSession["state"], stateSince: number, prompt?: { at: number }) =>
@@ -114,4 +114,26 @@ test("while the Mac was in use in the last 2 minutes, a notification waits until
   expect(dueAt(T, 0)).toBe(T);
   expect(dueAt(T, T - 30_000)).toBe(T - 30_000 + HOLD);
   expect(dueAt(T, T - HOLD)).toBe(T);
+});
+
+test("while the assistant runs, a job's finish isn't told: the assistant tells it; with no assistant, it is", () => {
+  const job = (state: PushSession["state"], since: number) => ({ ...claude("j", state, since), job: { reason: "fix CI", at: T - 60_000 } }) as PushSession;
+  const assistant = { ...claude("assistant", "done", T - 60_000), assistant: true } as PushSession;
+  const turn = (others: PushSession[]) => run([job("working", T - 60_000), ...others], [[T + 1000, [job("done", T + 1000), ...others]]]);
+  expect(turn([assistant])).toEqual([[]]);
+  expect(turn([])).toEqual([[{ kind: "finish", session: "j", key: T + 1000 }]]);
+});
+
+test("the assistant's turn that a job update began is told however short; its other short turns aren't", () => {
+  const a = (state: PushSession["state"], since: number) => ({ ...claude("assistant", state, since), assistant: true }) as PushSession;
+  const short = (updated?: number) => {
+    let seen = pushChanges(undefined, [a("done", T - 60_000)], T).seen;
+    seen = pushChanges(seen, [a("working", T + 1000)], T + 1000, updated).seen;
+    return pushChanges(seen, [a("done", T + 5000)], T + 5000, updated).events;
+  };
+  expect(short(T + 500)).toEqual([{ kind: "finish", session: "assistant", key: T + 5000 }]);
+  expect(short(T + 1000 - UPDATE_SLACK)).toEqual([{ kind: "finish", session: "assistant", key: T + 5000 }]);
+  expect(short(T + 1000 - UPDATE_SLACK - 1)).toEqual([]);
+  expect(short(T + 6000)).toEqual([]);
+  expect(short(undefined)).toEqual([]);
 });
