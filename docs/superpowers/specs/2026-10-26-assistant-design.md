@@ -64,7 +64,8 @@ Sources: [Meta's announcement](https://about.fb.com/news/2026/09/introducing-mus
     (`mcp__claude_ai_Gmail__send_message`, `mcp__claude_ai_Gmail__reply`, `mcp__claude_ai_Gmail__forward`,
     `mcp__claude_ai_Slack__slack_send_message`).
   - `permissions.allow`: the look commands, and `Read` for the whole home folder.
-  - No `defaultMode`. The session runs in default permission mode, never with skipped permissions.
+  - `permissions.defaultMode: "default"`, and blimpd also starts the session with `--permission-mode default`.
+    Max's own settings run auto mode, which asks nothing, so the flag is what makes the `ask` rules show.
 - **Kept alive.** While the assistant is on, blimpd checks every 5 s that a session named `assistant` is
   running, and starts one if not. If the folder already has a Claude conversation (a transcript in Claude's
   projects folder for that path), the new session gets `--continue` and picks it up. Otherwise it starts
@@ -72,13 +73,18 @@ Sources: [Meta's announcement](https://about.fb.com/news/2026/09/introducing-mus
   10 minutes and logs why.
 - **Long chats:** Claude Code's own compaction. `/clear` starts a fresh chat in the same place.
 - **The switch:** `{"assistant": true}` in `<socket dir>/config.json`, next to `names`.
+  - `blimpd assistant on | off | status` on the server (step 1). `off` also ends the session.
+  - For the apps' Settings (step 3):
   - `GET /assistant` → `{ on, session? }`.
   - `PUT /assistant { on }` → 204. Turning it off stops keeping it alive and ends the session (the apps
     confirm first). The folder and its conversations stay, and turning it on again continues the latest.
   - The events socket sends `{ "type": "assistant", "on": boolean }` on connect and when it changes.
-- **First start:** Claude Code may ask once whether to trust the new folder. Max answers it in the terminal
-  (the Mac), as for any new folder today. Check during step 1 whether blimpd can mark the folder trusted
-  instead.
+- **First start:** Claude Code asks once whether to trust the new folder. blimp already shows that question
+  as a waiting prompt with its two options, on the phone and the Mac, so Max answers it there. blimpd doesn't
+  mark the folder trusted itself: that lives in Claude Code's own state file (`~/.claude.json`), which every
+  running Claude writes too.
+- **The session's name is exactly `assistant`,** not `<folder>-<name>` as other custom names get
+  (`startSession`'s `exact` option).
 
 ### blimp.md (what it says, in short)
 
@@ -104,7 +110,7 @@ for Claude to read.
 | Command | Kind | What it does |
 |---|---|---|
 | `blimpd overview` | look | Every project but the hidden ones: its running sessions (name, title, state, note, how long ago) and what each waiting session asks, by the widgets' rules (`widgetSummary`) without their 9-row limit; then its unread Earlier conversations with their notes, as `GET /conversations` gives them. |
-| `blimpd read <session> [--last N]` | look | The session's last N chat messages (default 20), as the phone shows them: `you:`, `claude:`, and tools as their one-line summary. |
+| `blimpd read <session or conversation id> [--last N]` | look | The last N chat messages (default 20) of a running session, or of a past conversation by the id overview prints, as the phone shows them: `you:`, `claude:`, and tools as their one-line summary. |
 | `blimpd start <folder> <message…> [--job <reason>]` | act | A new Claude session in that folder with that first message (`POST /sessions` with `prompt`). Prints its name. |
 | `blimpd send <session> <message…> [--job <reason>]` | act | As today, plus `--job`. |
 | `blimpd answer <session> <option>` | act | Picks option N of the session's current question. It reads the prompt first and sends that choice's label, so the phone's rules apply: refused if the question changed, refused if nothing is being asked. |
@@ -171,13 +177,13 @@ for Claude to read.
 
 ## Build steps (each usable on its own)
 
-1. **The assistant (M).** The session, folder, `blimp.md`, `CLAUDE.md` and settings; keep-alive; the switch
-   (config, routes, events, both apps' Settings); `overview`, `read`, `start`, `answer` and `--job`. Usable
-   at once: it shows as one more session under its folder.
-2. **Jobs and reports (M).** `assistant-jobs.json`, `job` and `assistant` on `GET /sessions`, the report
-   queue, and the push rules.
-3. **The apps (M).** The phone's pinned icon and jobs bar, the Mac's pinned group, and the folder left out
-   of the projects.
+1. **The assistant (M), server only.** The session, folder, `blimp.md`, `CLAUDE.md` and settings;
+   keep-alive; `blimpd assistant on | off | status`; `overview`, `read`, `start` and `answer`. Usable at once:
+   it shows as one more session under its folder.
+2. **Jobs and reports (M).** `--job` on the act commands, `assistant-jobs.json`, `job` and `assistant` on
+   `GET /sessions`, the report queue, blimp.md's job-update rules, and the push rules.
+3. **The apps (M).** The phone's pinned icon and jobs bar, the Mac's pinned group, the folder left out of the
+   projects, and the switch in both apps' Settings (`GET`/`PUT /assistant` and the events message).
 
 ## Tests
 
@@ -196,8 +202,9 @@ for Claude to read.
     waits, and the loop guard.
   - Push: a job's finish is skipped, an assistant turn begun by an update is pushed, a job's ask is pushed.
   - The switch: config, routes, events, and off ending the session.
-- **Native Claude check (claude1, real Claude):** an act command shows Claude's permission prompt in the
-  assistant, including the `cd … &&` form.
+- **Real Claude check (opt-in, `BLIMP_REAL_CLAUDE=1`):** in a folder with the assistant's settings, run in
+  default mode, Claude runs a look command and is refused an act command (in `-p` mode an `ask` is a
+  refusal), including the `cd … &&` form.
 - **iPhone e2e:** the pinned icon opens the assistant's chat, and a job row opens its session and comes back.
 - **Mac e2e:** the pinned group shows the assistant and its jobs, and a job row opens the session.
 
