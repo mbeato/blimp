@@ -129,3 +129,10 @@ test("sendText: osascript with the script on stdin, the text and handle as argum
   expect(sendText("x", "y", () => ({ code: 1, err: "execution error" }))).toBe("execution error");
   expect(sendText("x", "y", () => ({ code: 2, err: "" }))).toBe("osascript exited 2");
 });
+
+test("a first run on a quiet chat.db saves the watermark", async () => {
+  const { t, d } = setup();
+  await inStep(d);
+  expect(t.saves).toBeGreaterThanOrEqual(1);
+  expect(d.state.last).toBe(40);
+});

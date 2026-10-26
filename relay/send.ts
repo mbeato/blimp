@@ -11,8 +11,11 @@ end run`;
 
 export type Run = (cmd: string[], stdin: string) => { code: number; err: string };
 
+// The first send raises macOS's Automation prompt and osascript waits for a click; a minute leaves time for that.
+const SEND_TIMEOUT_MS = 60_000;
+
 const osascript: Run = (cmd, stdin) => {
-  const r = Bun.spawnSync(cmd, { stdin: new TextEncoder().encode(stdin), stdout: "ignore", stderr: "pipe" });
+  const r = Bun.spawnSync(cmd, { stdin: new TextEncoder().encode(stdin), stdout: "ignore", stderr: "pipe", timeout: SEND_TIMEOUT_MS });
   return { code: r.exitCode ?? 1, err: r.stderr.toString().trim() };
 };
 

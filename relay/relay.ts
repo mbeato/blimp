@@ -49,9 +49,10 @@ export function parseState(text?: string): State {
 // One look at chat.db, then delivery of what's waiting.
 export async function inStep(d: RelayDeps): Promise<void> {
   const s = d.state;
+  const fresh = s.last === undefined;
   s.last ??= d.watermark();
   const { last, texts } = d.read(s.last);
-  if (last !== s.last || texts.length) {
+  if (fresh || last !== s.last || texts.length) {
     s.last = last;
     for (const t of texts) {
       s.to = t.from;
@@ -93,7 +94,7 @@ export async function outStep(d: RelayDeps): Promise<void> {
   for (const t of texts) {
     const err = d.send(t.text, d.state.to ?? d.config.allow[0]);
     if (err) throw new Error(`couldn't send a text: ${err}`);
-    const done = await d.fetch(`/messages/out/${encodeURIComponent(t.id)}/sent`, { method: "POST" });
+    const done = await d.fetch(`/messages/out/${encodeURIComponent(t.id)}/sent`, { method: "POST", signal: AbortSignal.timeout(15_000) });
     if (!done.ok) throw new Error(`blimpd said ${done.status} to a sent text`);
   }
 }
