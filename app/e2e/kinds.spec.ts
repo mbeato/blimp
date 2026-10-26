@@ -38,7 +38,10 @@ test("the chevron lists the server's kinds; Codex starts a session labelled Code
   const row = frontTab(page).locator(`.srow[data-session="${name}"]`);
   await expect(row.locator(".kind-label")).toHaveText("Codex");
   await expect(row.locator(".srow-title")).toHaveText(name);
-  await expect.poll(() => screenText(splitTerm(page, name))).toContain("fake codex []");
+  // blimpd always starts Codex with blimp's tool settings: the blimp MCP (the show tool) as -c overrides.
+  await expect.poll(() => screenText(splitTerm(page, name))).toContain("fake codex [");
+  await expect.poll(() => screenText(splitTerm(page, name))).toContain("mcp_servers.blimp.command=");
+  await expect.poll(() => screenText(splitTerm(page, name))).toContain("visuals-mcp");
 });
 
 test("Settings > Models: a pasted key makes GLM available, Remove takes it away; Codex sign-in starts its session", async ({ page }) => {
