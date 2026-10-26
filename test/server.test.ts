@@ -1045,6 +1045,30 @@ describe("chat", () => {
     }
     expect((await answerOver(name, { id: 5, stop: true })).status).toBe(400);
   });
+  test("blimpd overview lists a project's sessions with their state, and what a waiting one asks, numbered", async () => {
+    const sid = "0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e";
+    const { name } = await fakeClaude("ov1", sid, [user("u1", "fix the login"), said("a1", "fixed")]);
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${name}.json`);
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
+    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
+    await until(async () => (await listed(name))?.prompt?.options?.length === 2, "the prompt's options");
+    const r = await cli(["overview"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`  ${name}  "fix the login"  needs you, `);
+    expect(r.out).toContain("    asks: Bash: ");
+    expect(r.out).toContain("| options: 1. Yes  2. No");
+    rmSync(status);
+  }, 20000);
+
+  test("blimpd read prints a session's latest messages, and a past conversation's by its id", async () => {
+    const sid = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f";
+    const { name } = await fakeClaude("read1", sid, [user("u1", "one"), said("a1", "two"), user("u2", "three")]);
+    expect(await cli(["read", name, "--last", "2"])).toEqual({ code: 0, out: "claude: two\n\nyou: three", err: "" });
+    expect((await cli(["read", sid])).out).toBe("you: one\n\nclaude: two\n\nyou: three");
+    expect(await cli(["read", `${tag}-nope`])).toMatchObject({ code: 1, err: `blimpd read: no session named ${tag}-nope` });
+    expect((await cli(["read", name, "--last", "0"])).code).toBe(1);
+  }, 20000);
 });
 
 describe("starting sessions", () => {

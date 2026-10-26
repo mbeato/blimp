@@ -13,6 +13,8 @@
 //   blimpd browser-mcp         the browser MCP a session runs (browser/mcp.ts)
 //   blimpd send <session> <message>  type a message into another session's Claude (send.ts)
 //   blimpd assistant on|off|status  the assistant: one Claude session blimpd keeps running (assistant.ts)
+//   blimpd overview            every project's sessions and unread past conversations, for the assistant (overview.ts)
+//   blimpd read <session or conversation id> [--last N]  its latest messages (overview.ts)
 //   blimpd --version
 
 import pkg from "../package.json";
@@ -22,6 +24,7 @@ import { runAssistant } from "./assistant";
 import { findChrome } from "./browser/chrome";
 import { runBrowserMcp } from "./browser/mcp";
 import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
+import { runOverview, runRead } from "./overview";
 import { runPair } from "./pair";
 import { runPushKey, runPushTest } from "./push/cli";
 import { runSend } from "./send";
@@ -90,9 +93,13 @@ if (cmd === "sessions") {
   process.exit(await runSend(args));
 } else if (cmd === "assistant") {
   process.exit(await runAssistant(args));
+} else if (cmd === "overview") {
+  process.exit(await runOverview());
+} else if (cmd === "read") {
+  process.exit(await runRead(args));
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | assistant on|off|status | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | assistant on|off|status | overview | read <session or conversation id> [--last N] | --version");
   process.exit(cmd ? 1 : 0);
 }
