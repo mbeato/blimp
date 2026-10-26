@@ -109,6 +109,11 @@ code {
   border-radius: 5px;
 }
 
+pre {
+  overflow-x: auto;
+  font: 14px/1.4 var(--mono);
+}
+
 /* One column on a phone; as many 280 px columns as fit on a wider screen. */
 .grid {
   display: grid;
