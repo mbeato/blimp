@@ -16,6 +16,7 @@ function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent; reply?: (f
     list: [] as WatchedSession[],
     clock: T,
     active: 0,
+    updated: undefined as number | undefined,
     creds: "creds" in o ? o.creds : key,
     devices: o.devices ?? [phone],
     sent: [] as { device: Device; payload: any; collapseId: string }[],
@@ -35,6 +36,7 @@ function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent; reply?: (f
       t.sent.push({ device, payload, collapseId });
       return o.answer ?? { status: 200 };
     },
+    assistantOn: () => true,
     gone: (d) => void t.gone.push(d),
     reply:
       o.reply ??
@@ -44,6 +46,7 @@ function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent; reply?: (f
       }),
     now: () => t.clock,
     active: () => t.active,
+    updated: () => t.updated,
     log: (l) => void t.logs.push(l),
   };
   return { t, w: new PushWatcher(deps) };
@@ -192,4 +195,16 @@ test("`active` from a socket opened with the phone's token doesn't count: only t
   expect(lastActiveAt()).toBe(1234);
   eventsMessage({ data: eventsData(), send() {} } as any, JSON.stringify({ type: "active" }));
   expect(lastActiveAt()).toBeGreaterThan(1234);
+});
+
+test("the assistant's short turn after a job update is told: the watcher passes when one was last typed", async () => {
+  const a = (state: WatchedSession["state"], since: number) => ({ ...s(state, since), name: "assistant", assistant: true }) as WatchedSession;
+  const { t, w } = setup();
+  t.list = [a("working", T - 2000)];
+  await w.tick();
+  t.updated = T - 2500;
+  t.clock = T + 1000;
+  t.list = [a("done", T + 1000)];
+  await w.tick();
+  expect(t.sent.map((x) => x.collapseId)).toEqual(["assistant"]);
 });

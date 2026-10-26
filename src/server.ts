@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
 import { answerOnce } from "./answer";
-import { startAssistant } from "./assistant";
+import { ASSISTANT, startAssistant } from "./assistant";
 import { newScan, readLast } from "./chat";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
@@ -18,6 +18,7 @@ import { conversations, projectFolderName, recentFolders, resumedKind, tempRoots
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
 import { askHandoff, startHandoffs } from "./handoff";
 import { readHidden, setHidden } from "./hidden";
+import { saveJob } from "./jobs";
 import { addOpened, readOpened } from "./opened";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
@@ -28,6 +29,7 @@ import { startNotes } from "./notes";
 import { addDevice, addWidget, isDeviceToken, isPushEnv, isWidgetToken, removeDevice, removeWidget } from "./push/store";
 import { startPush } from "./push/watch";
 import { recap } from "./recaps";
+import { startReports } from "./reports";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
 import { checkCommand, sendResult, startRun } from "./runs";
@@ -171,6 +173,16 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     return new Response(null, { status: 204 });
   }
 
+  // The assistant's jobs (jobs.ts): `blimpd start`, `send` and `answer` record one when the assistant runs them.
+  if (path === "/assistant/jobs" && req.method === "POST") {
+    const { session, reason } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (typeof session !== "string" || !isSafeName(session) || session === ASSISTANT) throw new HttpError(400, "session must be another session's name");
+    const words = typeof reason === "string" && reason.length <= 200 ? cleanText(reason).replace(/\s+/g, " ").trim() : "";
+    if (!words) throw new HttpError(400, "reason must be text of at most 200 characters");
+    if (!(await sessionExists(session))) throw new HttpError(404, `no session named ${session}`);
+    saveJob(session, words, Date.now());
+    return new Response(null, { status: 204 });
+  }
   if (path === "/kinds" && get) return Response.json(listKinds(await installed()));
   // Keys go in, never out: GET /keys only says whether there is one.
   if (path === "/keys" && get) return Response.json({ zai: !!zaiKey() });
@@ -525,6 +537,7 @@ export function serve(): Server {
   startFeed(); // off unless {"feed": {"on": true}} in <socket dir>/config.json
   startHandoffs();
   startAssistant(); // off unless {"assistant": true} in <socket dir>/config.json
+  startReports(); // the assistant's job updates (reports.ts): nothing while it's off or has no jobs
   // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
   // widget push token (push/watch.ts).
   startPush();
