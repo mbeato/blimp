@@ -47,6 +47,14 @@ const listing = json({
   },
 });
 
+test("parseListing: a link that isn't a web address becomes the thread; a permalink not under /r/ is left out", () => {
+  const one = (data: object) => parseListing({ data: { children: [{ kind: "t3", data: { title: "t", ...data } }] } }, "rust");
+  expect(one({ permalink: "/r/programming/comments/c/cross/", url: "/r/rust/comments/x/y/" })[0]?.url).toBe(
+    "https://www.reddit.com/r/programming/comments/c/cross/",
+  );
+  expect(one({ permalink: "@evil.example/x", url: "https://example.com" })).toEqual([]);
+});
+
 test("parseListing: stickied and over-18 posts left out; a self post links to its thread", () => {
   expect(parseListing(JSON.parse(listing), "programming")).toEqual([
     {

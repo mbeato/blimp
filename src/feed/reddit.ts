@@ -91,7 +91,7 @@ export function parseListing(json: any, sub: string): Found[] {
   const kids: any[] = Array.isArray(json?.data?.children) ? json.data.children : [];
   return kids
     .map((k) => k?.data)
-    .filter((d) => d && typeof d.title === "string" && d.title.trim() && typeof d.permalink === "string" && !d.stickied && !d.over_18)
+    .filter((d) => d && typeof d.title === "string" && d.title.trim() && typeof d.permalink === "string" && d.permalink.startsWith("/r/") && !d.stickied && !d.over_18)
     .slice(0, 5)
     .map((d, i): Found => {
       const thread = `https://www.reddit.com${d.permalink}`;
@@ -101,7 +101,7 @@ export function parseListing(json: any, sub: string): Found[] {
         kind: "reddit",
         source: `r/${sub}`,
         rank: i + 1,
-        url,
+        url: /^https?:\/\//i.test(url) ? url : thread,
         title: d.title.trim(),
         thread,
         ...(typeof d.score === "number" && { score: d.score }),
