@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Visual fixture</title>
+    <link rel="stylesheet" href="kit/blimp.css" />
+    <script src="kit/chart.js"></script>
+    <script src="kit/mermaid.js"></script>
+    <script src="kit/blimp.js"></script>
+  </head>
+  <body>
+    <h1>Visual fixture</h1>
+    <p class="sub">A chart, a diagram, and two requests that must fail.</p>
+    <div class="stats">
+      <div class="stat"><b>42</b><span>tests</span></div>
+      <div class="stat"><b>3</b><span>failed</span></div>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="chart"><canvas id="bars"></canvas></div></div>
+      <div class="card">
+<pre class="mermaid">flowchart LR
+  A[Claude] --> B[blimpd] --> C[phone]</pre>
+      </div>
+    </div>
+    <p><a id="away" href="https://example.com/">Leave the page</a></p>
+    <!-- Not stopped by the kit: on the phone the web view cancels it; the Mac's test doesn't press it. -->
+    <p><button id="leave" onclick="location.href = 'https://example.com/'">Leave by script</button></p>
+    <pre id="out"></pre>
+    <script>
+      const out = {};
+      new Chart(document.getElementById("bars"), {
+        type: "bar",
+        data: { labels: ["mon", "tue", "wed"], datasets: [{ label: "runs", data: [3, 5, 2] }] },
+        options: { maintainAspectRatio: false, animation: false },
+      });
+      out.chart = "drawn";
+      Promise.allSettled([fetch("/health"), fetch("https://example.com/")]).then((r) => {
+        out.requests = r.map((x) => x.status).join(",");
+        document.getElementById("out").textContent = JSON.stringify(out);
+      });
+    </script>
+  </body>
+</html>
