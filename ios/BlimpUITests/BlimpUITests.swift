@@ -696,6 +696,8 @@ final class BlimpUITests: XCTestCase {
     func testVisualCardOpensThePage() throws {
         try launchPaired()
         app.open(URL(string: "blimp://open?session=demo-chat")!)
+        // A link brings the app back through the lock, as a tapped notification can
+        if app.buttons["Unlock"].firstMatch.waitForExistence(timeout: 5) { try unlockWithFace() }
         let card = message("message.visual", "Test results")
         try wait(card, "the visual's card in demo-chat", timeout: 30)
         shot("46-visual-card")
