@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import { eventsData, eventsMessage } from "../src/events";
 import type { Sent } from "../src/push/apns";
+import { ASK_SETTLE } from "../src/push/rule";
 import type { Creds, Device } from "../src/push/store";
 import { lastActiveAt, markActive, type PushDeps, PushWatcher, type WatchedSession } from "../src/push/watch";
 
@@ -17,6 +18,7 @@ function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent; reply?: (f
     clock: T,
     active: 0,
     updated: undefined as number | undefined,
+    texting: false as boolean,
     creds: "creds" in o ? o.creds : key,
     devices: o.devices ?? [phone],
     sent: [] as { device: Device; payload: any; collapseId: string }[],
@@ -37,6 +39,7 @@ function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent; reply?: (f
       return o.answer ?? { status: 200 };
     },
     assistantOn: () => true,
+    texting: () => t.texting,
     gone: (d) => void t.gone.push(d),
     reply:
       o.reply ??
@@ -207,4 +210,15 @@ test("the assistant's short turn after a job update is told: the watcher passes 
   t.list = [a("done", T + 1000)];
   await w.tick();
   expect(t.sent.map((x) => x.collapseId)).toEqual(["assistant"]);
+});
+
+test("while texting is live, the assistant's question isn't pushed", async () => {
+  const { t, w } = setup();
+  t.list = [{ ...s("working", T - 60_000), name: "assistant", assistant: true } as WatchedSession];
+  await w.tick();
+  t.texting = true;
+  t.clock = T + 1000 + ASK_SETTLE;
+  t.list = [{ ...waiting(T + 1000), name: "assistant", assistant: true } as WatchedSession];
+  await w.tick();
+  expect(t.sent).toEqual([]);
 });

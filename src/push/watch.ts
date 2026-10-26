@@ -6,6 +6,7 @@
 
 import { readHidden } from "../hidden";
 import { assistantOn as isAssistantOn } from "../assistant";
+import { theTexter } from "../messages/texter";
 import { follow, newSummary, type Summary } from "../names";
 import { lastReportTyped } from "../reports";
 import { claudeDir, listSessionsLite, type Session, zmxListAsync } from "../sessions";
@@ -31,6 +32,7 @@ export type PushDeps = {
   updated: () => number | undefined;
   // Whether the assistant is switched on (config.json).
   assistantOn: () => boolean;
+  texting: () => boolean;
   log: (line: string) => void;
 };
 
@@ -63,7 +65,7 @@ export class PushWatcher {
       // An empty list after sessions is more likely a zmx list that failed than every session gone, and forgetting
       // them would tell their waits again.
       if (!list.length && this.seen?.size) return;
-      const { seen, events } = pushChanges(this.seen, list, now, this.deps.updated(), this.deps.assistantOn());
+      const { seen, events } = pushChanges(this.seen, list, now, this.deps.updated(), this.deps.assistantOn(), this.deps.texting());
       this.seen = seen;
       const due = dueAt(now, this.deps.active());
       this.held.push(...events.map((e) => ({ e, due })));
@@ -137,6 +139,7 @@ const live: PushDeps = {
   active: lastActiveAt,
   updated: lastReportTyped,
   assistantOn: () => isAssistantOn(),
+  texting: () => theTexter().live(),
   log: (line) => console.log(line),
 };
 

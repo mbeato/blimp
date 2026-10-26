@@ -146,3 +146,17 @@ test("the assistant's turn that a job update began is told however short; its ot
   expect(short(T + 6000)).toEqual([]);
   expect(short(undefined)).toEqual([]);
 });
+
+test("while texting is live, the assistant's own questions and finishes aren't pushed (the texts tell them); a job's question still is", () => {
+  const a = (state: PushSession["state"], since: number, prompt?: { at: number }) => ({ ...claude("assistant", state, since, prompt), assistant: true }) as PushSession;
+  const step = (before: PushSession[], after: PushSession[], at: number, texting: boolean) => pushChanges(pushChanges(undefined, before, T).seen, after, at, undefined, true, texting).events;
+  const working = a("working", T - 60_000);
+  const asking = a("waiting", T + 1000, { at: T + 1000 });
+  expect(step([working], [asking], T + 1000 + ASK_SETTLE, false)).toEqual([{ kind: "ask", session: "assistant", key: T + 1000 }]);
+  expect(step([working], [asking], T + 1000 + ASK_SETTLE, true)).toEqual([]);
+  const done = a("done", T + FINISH_MIN);
+  expect(step([working], [done], T + FINISH_MIN, false)).toEqual([{ kind: "finish", session: "assistant", key: T + FINISH_MIN }]);
+  expect(step([working], [done], T + FINISH_MIN, true)).toEqual([]);
+  const job = (s: PushSession) => ({ ...s, job: { reason: "fix CI", at: T - 120_000 } }) as PushSession;
+  expect(step([working, job(claude("j", "working", T - 60_000))], [working, job(claude("j", "waiting", T + 1000, { at: T + 1000 }))], T + 1000 + ASK_SETTLE, true)).toEqual([{ kind: "ask", session: "j", key: T + 1000 }]);
+});

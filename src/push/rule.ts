@@ -24,8 +24,9 @@ export const UPDATE_SLACK = 15_000;
 // The wait: when the hook says it began, or for one without a prompt (Codex), when the state did.
 export const waitKey = (s: PushSession) => s.prompt?.at ?? s.stateSince ?? 0;
 
-// updated: when a job update was last typed into the assistant, if ever.
-export function pushChanges(before: Map<string, Seen> | undefined, list: PushSession[], now: number, updated?: number, assistantOn = true): { seen: Map<string, Seen>; events: PushEvent[] } {
+// updated: when a job update was last typed into the assistant, if ever. texting: the assistant's questions and
+// finished turns reach the user as texts (messages/texter.ts), so they aren't pushed as well.
+export function pushChanges(before: Map<string, Seen> | undefined, list: PushSession[], now: number, updated?: number, assistantOn = true, texting = false): { seen: Map<string, Seen>; events: PushEvent[] } {
   // While the assistant is on and running, it tells its jobs' finishes itself.
   const reporting = assistantOn && list.some((s) => s.assistant);
   const seen = new Map<string, Seen>();
@@ -36,7 +37,7 @@ export function pushChanges(before: Map<string, Seen> | undefined, list: PushSes
       const wait = waitKey(s);
       const known = !before || was?.wait === wait;
       const settled = now - wait >= ASK_SETTLE;
-      if (!known && settled) events.push({ kind: "ask", session: s.name, key: wait });
+      if (!known && settled && !(texting && s.assistant)) events.push({ kind: "ask", session: s.name, key: wait });
       // Not settled yet: the wait stays untold, so a later list tells it.
       seen.set(s.name, { state: s.state, wait: known || settled ? wait : was?.wait, turn: was?.turn });
     } else if (s.state === "working") {
@@ -48,7 +49,7 @@ export function pushChanges(before: Map<string, Seen> | undefined, list: PushSes
         const end = s.stateSince ?? now;
         // The assistant's turn that an update began is told however short; a job's finish is the assistant's to tell.
         const fromUpdate = !!s.assistant && updated !== undefined && updated >= was.turn - UPDATE_SLACK && updated <= end;
-        if ((end - was.turn >= FINISH_MIN || fromUpdate) && !(s.job && reporting)) events.push({ kind: "finish", session: s.name, key: end });
+        if ((end - was.turn >= FINISH_MIN || fromUpdate) && !(s.job && reporting) && !(texting && s.assistant)) events.push({ kind: "finish", session: s.name, key: end });
       }
       seen.set(s.name, { state: s.state });
     }

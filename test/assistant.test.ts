@@ -28,6 +28,7 @@ describe("assistantSettings", () => {
       "Read(~/.aws/**)",
       "Read(~/.blimp/token)",
       "Read(~/.blimp/phone-token)",
+      "Read(~/.blimp/relay-key)",
       "Read(~/.blimp/secrets/**)",
       "Read(~/.blimp/browser/key)",
       "Read(~/.blimp/apns.p8)",
@@ -46,6 +47,12 @@ describe("assistantSettings", () => {
 });
 
 describe("blimpMd", () => {
+  test("blimp.md tells the assistant its answers may be texted, so to keep them short and plain", () => {
+    const md = blimpMd("blimpd");
+    expect(md).toContain("## Messages");
+    expect(md).toContain("everything you finish saying is texted to them");
+  });
+
   test("names every command with blimpd's own path, says which ones ask, and the browser rule; for any user", () => {
     const md = blimpMd("/opt/blimpd");
     for (const c of ["overview", "read <session or conversation id>", "start <folder> <message>", "send <session> <message>", "answer <session> <option number>"])
