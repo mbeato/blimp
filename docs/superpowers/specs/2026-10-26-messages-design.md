@@ -62,10 +62,12 @@ person. He asked whether a spare AT&T number or an email address would be easier
   - A message with attachments is passed with `picture: true`.
 - **Where it remembers its place:** the last ROWID read is kept in a state file next to the binary. The first
   run starts at `MAX(ROWID)`, so old history is never sent.
-- **Sending:** `osascript` with `tell application "Messages" to send (item 1 of argv) to chat id (item 2 of
-  argv)`. The text is passed as an argument, never pasted into the script.
-  - The chat is the one the latest allowed text came from.
-  - Before any text has come in, it uses the chat for the first allowlisted handle.
+- **Sending:** `osascript`, sending `item 1 of argv` to `participant (item 2 of argv)` of the iMessage account.
+  The text and handle are passed as arguments, never pasted into the script.
+  - The handle is the sender of the latest allowed text, or the first allowlisted handle before any text has
+    come in. A participant needs no existing conversation, unlike a chat id.
+  - If macOS 26 refuses `participant`, the fallback is `send … to chat id`, with that handle's chat guid from
+    chat.db.
 - **Echo mode:** with no server in its config, the relay texts back `got: <text>`. Build step 1 tests the
   relay in this mode.
 - **Mac permissions, granted once by hand:**
@@ -94,13 +96,15 @@ person. He asked whether a spare AT&T number or an email address would be easier
     (`typeInto`). Claude queues it if a turn is running.
   - If the assistant is waiting on a question blimp hasn't texted yet, or one texted as "Open blimp to
     answer", the text is held. It's typed once the wait ends. It's never typed into a dialog.
-  - A text with `picture: true` gets " (Max also sent a picture, which you can't see yet)" appended. If it
-    has no words at all, blimpd texts back "I can only read text for now."
+  - A text with `picture: true` gets " (a picture came with this text; you can't see pictures yet)" appended.
+    If it has no words at all, blimpd texts back "I can only read text for now." (No names in blimp's own
+    words: it's open source.)
 - **Answers out:**
   - Every second blimpd looks at the assistant session.
-  - When a turn finishes (state goes to `done`, keyed by `stateSince` so a turn is never sent twice), it
-    reads the turn's final reply with the reader push alerts already use (`follow`/`newSummary` from
-    names.ts).
+  - When the assistant is `done`, blimpd reads its latest reply with the reader push alerts already use
+    (`follow`/`newSummary` from names.ts, which now also keeps the reply's message id).
+  - It texts that reply if its id isn't the last one texted, so a reply is never sent twice. When texting
+    starts, blimpd only notes the latest reply's id, so nothing from before is sent.
   - It turns the reply into plain text: the same marks `plainText` (push/payload.ts) removes, but line
     breaks kept. Then it adds it to the outbox.
   - An empty reply (a turn of only tool calls) sends nothing. In-between text in a turn is never sent.
@@ -145,8 +149,8 @@ person. He asked whether a spare AT&T number or an email address would be easier
 - **If the server can't be reached,** the relay keeps unsent incoming texts in its state file and posts them
   when it's back.
 - **Offline alert:** blimpd notes when the relay last called.
-  - If Messages is on and the relay hasn't called for 5 minutes, it sends one push: "Messages relay is
-    offline. Sign the Assistant user back in on the work Mac."
+  - If Messages is on and the relay hasn't called for 5 minutes, it sends one push: "The Messages relay is
+    offline: blimp hasn't heard from it in 5 minutes. Check the Mac it runs on."
   - The alert goes out once per outage. The first check is 5 minutes after blimpd starts.
   - It's sent through the same APNs client the test push (`blimpd push test`) uses.
 
@@ -170,7 +174,8 @@ person. He asked whether a spare AT&T number or an email address would be easier
   - moves `relay.json` there with mode 600 and deletes the shared copy;
   - writes and loads the LaunchAgent;
   - reveals the binary in Finder and opens the Full Disk Access pane;
-  - runs `blimp-relay --check` (one read and one send to Max), which raises the Automation prompt.
+  - loads the LaunchAgent and asks Max to text the account. The relay's first reply raises the Automation
+    prompt for him to accept.
 - The key never appears in chat.
 - Then `blimpd messages on` on claude1, and watch the first texts go through.
 
