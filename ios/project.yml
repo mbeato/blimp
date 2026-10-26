@@ -60,13 +60,14 @@ targets:
           NSExceptionDomains:
             localhost: { NSExceptionAllowsInsecureHTTPLoads: true }
             127.0.0.1: { NSExceptionAllowsInsecureHTTPLoads: true }
-  # The widgets (BlimpWidgets/): every project's sessions on the home screen and the lock screen. Swift 5 language
+  # The widgets and the live panel (BlimpWidgets/; the Live Activity type is in Live/, shared with the app): every
+  # project's sessions on the home screen and the lock screen. Swift 5 language
   # mode: WidgetKit's TimelineProvider hands over completion handlers that aren't Sendable, and Swift 6 won't let the
   # Task that fetches GET /widget carry them.
   BlimpWidgets:
     type: app-extension
     platform: iOS
-    sources: [BlimpWidgets]
+    sources: [BlimpWidgets, Live]
     dependencies:
       - package: BlimpKit
     settings:

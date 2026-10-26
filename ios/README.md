@@ -183,6 +183,14 @@ They need blimpd newer than 0.3.11 ("Update blimpd for widgets" otherwise) and t
 
 The widgets are an app extension, `dev.blimp.phone.widgets`, sharing the App Group `group.dev.blimp.phone` with the app. CI's App Store Connect key (Admin) registers both when it signs. If a TestFlight upload fails on them, register them once on https://developer.apple.com/account/resources/identifiers: press +, pick App Groups, Description: blimp, Identifier: `group.dev.blimp.phone`, Continue, Register. Then press +, pick App IDs, then App, Description: blimp widgets, Bundle ID: Explicit, `dev.blimp.phone.widgets`, tick App Groups and Push Notifications, Continue, Register. Then open the `dev.blimp.phone` App ID, tick App Groups, and save. Then run the TestFlight upload again.
 
+## Live panel
+
+The live panel is a Live Activity: the large panel on the lock screen, and the Dynamic Island. On top, a turn you started from the phone: its title, its project's two letters, a timer and, when Claude keeps a task list, "Step 4 of 7", a bar and the step it's on. Below, what needs you (?), what's new (✓) and what's working (●), as the widgets show them, then the counts. A tap opens the turn's chat, else the oldest that needs you, else the app.
+
+blimpd starts it when something needs you or is working, and ends it 10 minutes after nothing does. With blimp open it starts without a banner; with blimp closed, iOS shows a quiet one ("2 need you, 3 working", no sound). Updates come only when something changes, and make no sound: the notifications ring. It needs blimpd newer than 0.3.12 with its push key (`blimpd push-key`, as for notifications) and the app opened once after pairing. To turn it off: Settings > "Live panel on the lock screen", or iOS Settings > blimp > Live Activities.
+
+Nothing to set up on Apple's developer site: a Live Activity uses the app's own push key and Push Notifications, and its views are in the widget extension.
+
 ## Check list
 
 `docs/PHONE-CHECKLIST.md` lists what to try by hand.

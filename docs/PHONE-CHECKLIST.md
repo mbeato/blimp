@@ -167,6 +167,19 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] Stop blimpd (or turn Tailscale off). After the next refresh the widgets are greyed with "as of".
 - [ ] A working row's time counts up by itself; past an hour it says "1h", past a day "1d".
 
+## Live panel
+
+- [ ] With blimp open, send a prompt from the phone to a session. The panel appears without a banner: the turn on top with its title, its project's letters and a timer from the prompt, and the other sessions below.
+- [ ] With blimp closed and the phone locked, start a turn on the Mac. Within seconds a quiet banner ("2 need you, 3 working" or similar, no sound, no vibration), and the panel on the lock screen.
+- [ ] Then, still locked, let a session start waiting on you: the panel shows it as ? within seconds (blimpd got the panel's own token from the phone; if it never updates, check blimpd's log for `live panel`). A panel started while the phone was locked keeps updating, silently.
+- [ ] In a turn sent from the phone where Claude keeps a task list: "Step n of m", a bar that fills, and the step in progress, changing as Claude goes.
+- [ ] Dynamic Island: ?n and ●n; while a turn from the phone runs, its timer instead of ●n. Long-press: the turn and the first rows.
+- [ ] A tap opens the turn's chat; with no turn, the oldest that needs you.
+- [ ] Swipe the panel away on the lock screen (or end it from the Dynamic Island): it goes away, and blimpd doesn't start another until something new needs you or starts working.
+- [ ] 10 minutes after nothing needs you or works, the panel goes away by itself.
+- [ ] Settings > "Live panel on the lock screen" off: the panel goes away and doesn't come back. On again: it's back with the next busy turn.
+- [ ] After 8 busy hours, a panel is still there (blimpd started a new one at 7 h 45 min, with another quiet banner).
+
 ## The blimp
 
 - [ ] The home screen icon: the refined blimp on graphite, in light and dark mode.

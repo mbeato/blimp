@@ -3,6 +3,7 @@
 // They read GET /widget with the widget key the app leaves in the App Group (WidgetShare.swift in the app) whenever iOS
 // reloads them: after blimpd's widget push, after 15 minutes, or when the app is online or leaves. Failing that, the
 // last summary they had, greyed.
+// The live panel (LiveView.swift) is in this extension too: a Live Activity's views live in a widget extension.
 import BlimpKit
 import SwiftUI
 import WidgetKit
@@ -10,7 +11,10 @@ import WidgetKit
 // Not named BlimpWidgets: that's the module's name.
 @main
 struct BlimpWidgetBundle: WidgetBundle {
-    var body: some Widget { SessionsWidget() }
+    var body: some Widget {
+        SessionsWidget()
+        LiveWidget()
+    }
 }
 
 struct SessionsWidget: Widget {
