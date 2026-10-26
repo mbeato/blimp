@@ -53,9 +53,11 @@ Mac:   the "visual" event ──> a tab in that project ──> GET /visuals/<ke
 - It knows its session from `ZMX_SESSION`, as `browser-mcp` does, and reaches blimpd over the unix socket with the
   Mac token from `~/.blimp/token`, as `blimpd send` does (`src/send.ts`).
 - **Every session blimp starts gets it**, with or without Chrome. Today `mcp.json` is written only by the browser
-  gate and `launchFor` adds `--mcp-config` only when Chrome and npx are there (`kinds.ts`). New: blimpd writes
-  `~/.blimp/mcp.json` when it starts, with `blimp` always and `blimp-browser` when the browser is ready, and
-  Claude Code always gets `--mcp-config`. Codex gets `mcp_servers.blimp.*` overrides the same way.
+  gate and `launchFor` adds `--mcp-config` only when Chrome and npx are there (`kinds.ts`). New: two config
+  files. blimpd writes `~/.blimp/mcp.json` when it starts, with `blimp` only, and the browser gate writes
+  `~/.blimp/browser/mcp.json` once it listens, with `blimp` and `blimp-browser`. Claude Code always gets
+  `--mcp-config`: the browser's file when the browser is ready, else the first. Codex always gets
+  `mcp_servers.blimp.*` overrides, and `mcp_servers.blimp-browser.*` after them when the browser is ready.
 - **Input:** `path` (absolute, or relative to the session's folder) and `title` (short; shown on the card and the
   tab, at most 80 characters).
 - **Refused, with the reason in the tool's result** (`isError`), so Claude can fix it: no such file; not under
@@ -100,7 +102,7 @@ The exact text is written and tested in the plan.
     object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts`
   - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: private, max-age=2592000,
     immutable` (a copy never changes).
-  - Kit files are sent gzipped (`Content-Encoding: gzip`, made once when blimpd starts) with the same cache line.
+  - Kit files are sent gzipped (`Content-Encoding: gzip`, made once, the first time it's asked for) with `Cache-Control: private, max-age=3600` (an hour).
 - **The chat** (`chat.ts`): a `tool_use` named `mcp__blimp__show` is a hidden `tool` message as now; when its
   result comes back without an error, the same id becomes `{ role: "visual", title, visual: <id>, gone?,
   summary: "Showed <title>" }`. `gone: true` when the copy is no longer kept, worked out when the chat is sent.
@@ -117,7 +119,7 @@ The exact text is written and tested in the plan.
   - `mermaid.js`: Mermaid, a build that runs from a plain `<script>`.
   - `blimp.js`: Chart.js's defaults from blimp's colours and font (the terminal palette's six colours for series),
     `mermaid.initialize` with blimp's theme and `securityLevel: "strict"`; redraws both when light and dark
-    change.
+    change; stops a tap on a link (a visual has no internet; leaving would show an error in the Mac's frame).
 - Versions (the latest of each released at least two weeks before 10/26), with a test that the files match these
   SHA-256 sums. Both are MIT, like blimp.
   - Chart.js 4.5.1, `dist/chart.umd.min.js`: 208,522 bytes (70 KB gzipped),
@@ -131,25 +133,26 @@ The exact text is written and tested in the plan.
 - **The card** (`MessageRow`'s new `.visual` case): a chart symbol, the title and "Tap to open", in the reply's
   width. `gone`: greyed, "No longer kept", not tappable. No preview picture for now.
 - **Tap:** the page full screen over the chat, as a browser tab opens (an `.overlay` in `HomeView`): a top bar with
-  the title and Done, the page below. Done goes back to the same place in the chat. The Face ID lock closes it,
-  as it closes sheets.
+  × and the title, as the browser's and the feed's have, the page below. × goes back to the same place in the chat. Under
+  the lock it's hidden, as a browser tab is, and there again after Face ID; a tapped notification closes it.
 - **The web view** (`WKWebView` in a `UIViewRepresentable`; the app's first): one non-persistent data store for
   the app's run, shared by every visual, so the kit downloads once per run and nothing is kept on disk; no script
   message handlers, no link previews. Its navigation delegate lets the page load its own URL and cancels
   everything else, so links do nothing. Pinch zoom as the page's viewport allows.
 - **BlimpKit:** `ChatRole.visual` and the message's `title`, `visual` and `gone`; the page's URL from the server's
-  address, the visual key and the id. The app gets the key with `GET /visuals/key` when it's online, as it gets
-  the widget key.
+  address, the visual key and the id. The app gets the key with `GET /visuals/key` each time a page opens (not
+  when it connects: one small request, no key to keep).
 
 ## The Mac
 
 - **The tab:** a new kind, `visual:<source path>`, after the galleries, with a chart icon and the title. When a
   `visual` event's `dir` is an open project's folder, that project gets the tab (or the tab it has for that
-  source moves to the new copy) and it becomes that project's front tab. The window doesn't switch projects, and
+  source moves to the new copy) and it becomes that project's front tab unless you're typing in a file. The window doesn't switch projects, and
   focus stays where it is: the terminal keeps your typing. A
   project that isn't open gets nothing; the phone still has the card.
 - **`VisualView`:** `<iframe sandbox="allow-scripts" src="<base>/visuals/<key>/<id>">`, filling the tab. The app
-  gets its key with `GET /visuals/key` when it connects.
+  gets its key with `GET /visuals/key` each time a page opens (not when it connects: one small request, no key to
+  keep).
 - **The app's CSP** (`tauri.conf.json` and `index.html`, dev too) gets `frame-src http://127.0.0.1:*`. So a
   page can't take its frame to a website. It could take it to a port forwarded on 127.0.0.1, where it would still
   have no token; SECURITY.md says so.
@@ -196,8 +199,8 @@ that parent to `http://127.0.0.1`, so the frame is expected to load.
     a new phone token gives a new key.
   - chat.test.ts: a `show` call becomes a `visual` message with the id from the result, an errored one stays a
     hidden tool, `gone` when the copy is missing.
-  - kinds.test.ts: Claude Code gets `--mcp-config` without Chrome; `mcp.json` has `blimp` always and
-    `blimp-browser` only with the browser; Codex's overrides.
+  - kinds.test.ts: Claude Code gets `--mcp-config` without Chrome; `mcp.json` has `blimp` only and
+    `browser/mcp.json` both; Codex's overrides.
   - The kit's files match their pinned sums.
 - Mac (Playwright against a real blimpd, `app/e2e/visuals.spec.ts`): a show opens the tab in its project and not
   in another, the terminal keeps focus; showing the same file again reuses the tab; the page draws a chart and a
@@ -205,7 +208,7 @@ that parent to `http://127.0.0.1`, so the frame is expected to load.
   the app.
 - Phone: BlimpKit tests for the role, fields and URL. UI test `testVisualCardOpensThePage`: demo-chat's fixture
   gets a `show` call and a page under `$E2E_WORK`; the card shows, a tap opens the page and its text is there,
-  Done goes back; a `gone` card is greyed.
+  × goes back; a `gone` card is greyed.
 - Checklists: PHONE-CHECKLIST.md and MAC-CHECKLIST.md get "ask Claude for a chart of something; it shows; light
   and dark; a narrow and a wide Mac window".
 

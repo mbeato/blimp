@@ -355,6 +355,48 @@ The iPhone's widgets (home screen and lock screen; design in `docs/superpowers/s
 - **Widget push tokens:** `POST /push/widget { "token": hex, "env" }` → 204 and `DELETE /push/widget { "token" }` → 204, kept in push.json's `widgets` beside its `devices` (at most 5); 400 for a token that isn't hex or another env. `blimpd pair --revoke` removes them with the devices.
 - **The pinger** (`src/push/widgets.ts`): every second, while there's a push key and a widget push token, the summary from the session list. When the counts, or the rows and their states, change, a widget push (`apns-push-type: widgets`, topic `dev.blimp.phone.push-type.widgets`, priority 5, `{"aps":{"content-changed":true}}`) tells iOS to reload the widgets, which then read `GET /widget`: a needs-you that wasn't there at once, anything else 2 minutes after the last ping at the earliest. A working row's time isn't a change. What it finds first counts as known. It shares the notifications' connection to Apple, and Apple's 410, `BadDeviceToken` or `Unregistered` removes a token. iOS decides when the widgets reload: expect minutes, not seconds.
 
+### Visuals
+
+A session can show you a page it wrote, a chart, a diagram or a small report, on the phone and the Mac (design in
+`docs/superpowers/specs/2026-10-26-visuals-design.md`).
+
+- **The show tool** (`src/visuals/mcp.ts`): `blimpd visuals-mcp`, blimp's own MCP server over stdio, which every
+  session blimp starts gets (see Server browser, Sessions). One tool, `show { path, title }`; Claude Code calls it
+  `mcp__blimp__show`. Its description is Claude's instructions for a page. A call is `POST /visuals` on blimpd's
+  socket with the Mac's token, for its session (`ZMX_SESSION`); the result is `Shown on the phone and the Mac.
+  visual: <id>`, or `Not shown: <reason>` as the tool's error.
+- **`POST /visuals { session, path, title }`** → 201 `{ id }` (`src/visuals/store.ts`): a copy of the page as it is
+  now, `<socket dir>/visuals/<id>.html` with `<id>.json` (`{ id, title, session, dir, source, at }`), 600. `path` is
+  absolute or relative to the session's folder, under home and never one of blimp's own files (`guardFile`); at most
+  2 MB of UTF-8; a title of 1 to 80 characters. 404 for no such file or session, 413 over 2 MB, 400 otherwise.
+  Copies over 30 days old are deleted when blimpd starts and once a day. Then it publishes
+  `{ "type": "visual", id, title, session, dir, source, at }` on the events socket.
+- **The visual key** reads `GET /visuals/<key>/<id>` (the copy) and `GET /visuals/<key>/kit/<file>` (the kit) and
+  nothing else; it is in the path, not a header, so the page's relative `kit/` paths carry it, and a wrong one is a
+  401. It is HMAC-SHA256 of a token with the text `blimp visuals`, hex: the Mac's and the phone's each have one, from
+  `GET /visuals/key` → `{ key }`, which each app asks for every time a page opens. A new phone token (`blimpd pair
+  --revoke`, `blimpd pair`) changes the phone's.
+- **The page's headers** (`src/visuals/http.ts`): `Content-Security-Policy: default-src 'none'; script-src 'self'
+  'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none';
+  frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts`, nosniff,
+  `Referrer-Policy: no-referrer`, cached 30 days (a copy never changes). The kit's files: an hour, gzipped when asked.
+- **The kit** (`src/visuals/kit/`, built into the binary): `blimp.css` (blimp's colours for light and dark, the
+  system font, `.grid`, `.card`, `.stats`/`.stat`, `.chart`, `.scroll`, tables, `.tag`), `blimp.js` (Chart.js's and
+  Mermaid's look from it; it draws `<pre class="mermaid">` diagrams, draws both again when the scheme changes, and
+  stops a tap on a link),
+  Chart.js 4.5.1 and Mermaid 12.1.0, vendored (`kit/LICENSES.md`; `test/visuals-kit.test.ts` checks their sums).
+- **In the chat** (`src/chat.ts`): a `mcp__blimp__show` call is a tool step (`Showing <title>`) until its result
+  names the copy; then, under the same id, `{ role: "visual", title, visual: <id>, summary: "Showed <title>",
+  gone? }`, `gone` when the copy is no longer kept. Older phone apps read the role as a tool step and hide it.
+- **The Mac** (`app/src/lib/visuals.ts`, `app/src/components/VisualView.tsx`): a `visual` event for an open
+  project's folder opens a `visual:<source>` tab after the galleries (one per file: showing it again moves the tab
+  to the new copy), in front unless you're typing in a file, with the keyboard left where it was. The tab is an
+  `<iframe sandbox="allow-scripts">` of the copy's URL.
+- **The phone** (`ios/Blimp/Views/VisualView.swift`): a card in the chat (`VisualCard`), and full screen over
+  everything a `WKWebView` that loads the page's own URL and cancels every other navigation, with one non-persistent
+  data store for the app's run. It closes with × ("Close" to VoiceOver); under the Face ID lock it is hidden, and
+  there again after unlocking; a tapped notification closes it.
+
 ### Feed
 
 A full-screen feed on the iPhone of what's new in tech, one card a screen: Hacker News, Reddit, GitHub trending, and release notes and blogs, fetched every hour and summarized by the small model (`src/feed/`; design in `docs/superpowers/specs/2026-10-26-phone-feed-design.md`). Off unless `config.json` says `{ "feed": { "on": true } }`.
@@ -437,11 +479,11 @@ One Chrome on the server that sessions drive through Google's Chrome DevTools MC
 - Its folder is the session's (real path).
 - Tabs are saved to `~/.blimp/browser/tabs.json` (`[{ folder, url, openedBy? }]`, 600) half a second after a change, and reopened when Chrome starts.
 
-**Sessions** (`src/browser/mcp.ts`, `src/kinds.ts`): when the login shell finds `npx`, a Chrome is found, and `~/.blimp/browser/mcp.json` exists:
-- Claude Code and Claude Code on GLM start with `--mcp-config ~/.blimp/browser/mcp.json`.
-- Codex starts with `-c mcp_servers.blimp-browser.command=… -c mcp_servers.blimp-browser.args=[…]`.
+**Sessions** (`src/browser/mcp.ts`, `src/kinds.ts`): sessions get blimp's MCP servers from two config files. `~/.blimp/mcp.json` has `blimp` only (`blimpd visuals-mcp`, the show tool; see Visuals); blimpd writes it when it starts. `~/.blimp/browser/mcp.json` has `blimp` and `blimp-browser` (`blimpd browser-mcp`); blimpd writes it once the gate listens. When the login shell finds `npx`, a Chrome is found and the gate is listening:
+- Claude Code and Claude Code on GLM start with `--mcp-config ~/.blimp/browser/mcp.json`; otherwise with `--mcp-config ~/.blimp/mcp.json`.
+- Codex always starts with `-c mcp_servers.blimp.command=… -c mcp_servers.blimp.args=[…]`, and with the same for `mcp_servers.blimp-browser.*` after them when the browser is ready.
 
-`mcp.json` runs `blimpd browser-mcp` (server `blimp-browser`). That reads `ZMX_SESSION` and the port file, then runs `npx -y chrome-devtools-mcp@1.11.0 --wsEndpoint ws://127.0.0.1:<port>/s/<session> --no-usage-statistics --no-performance-crux`. Your own MCP servers still load. Sessions already running get it when they're next started.
+`blimp-browser` runs `blimpd browser-mcp`. That reads `ZMX_SESSION` and the port file, then runs `npx -y chrome-devtools-mcp@1.11.0 --wsEndpoint ws://127.0.0.1:<port>/s/<session> --no-usage-statistics --no-performance-crux`. Your own MCP servers still load. Sessions already running get them when they're next started.
 
 **API**:
 - `GET /browser/tabs?dir=` → `BrowserTab[]` = `[{ id, folder, url, title, openedBy? }]` (all of them without `dir`).
@@ -525,10 +567,10 @@ React + TypeScript + Vite. Libraries: `@xterm/xterm` + `@xterm/addon-fit` + `@xt
 The UI renders files from servers (Markdown, SVG, PDF, HTML), so script injection must be impossible and, if it ever happened, contained. The same policy is set in `app/src-tauri/tauri.conf.json` (`app.security.csp`) and as a `<meta http-equiv="Content-Security-Policy">` in `app/index.html`, so the e2e tests run under it too:
 
 ```
-default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; frame-src http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'
 ```
 
-(Vite's dev server needs `ws://localhost:*` for hot reload; add it only in dev.) pdf.js (pdfjs-dist 6, which never uses eval) runs with scripting off. Tauri capabilities (for the web views `main` and `w-*`, by web view label) grant only what the UI uses: the app's own commands (`build.rs` lists them: tunnels and port forwards, windows, transfers), event listen, set-badge-count, set-title, the web view's size (to place a Finder drop: `dropPoint` in `lib/transfers.ts`), notification, store, opener limited to `http:`/`https:` URLs and reveal-in-Finder. The dialog plugin is used from Rust only. No shell, fs or http plugin. No `frame-src`: web pages never load in the app; browser tabs are frames of the server's Chrome, drawn in a canvas. An HTML file's page is a `srcdoc` frame (no URL is loaded, so `frame-src` doesn't apply), sandboxed with no flags, and it keeps this policy.
+(Vite's dev server needs `ws://localhost:*` for hot reload; add it only in dev.) pdf.js (pdfjs-dist 6, which never uses eval) runs with scripting off. Tauri capabilities (for the web views `main` and `w-*`, by web view label) grant only what the UI uses: the app's own commands (`build.rs` lists them: tunnels and port forwards, windows, transfers), event listen, set-badge-count, set-title, the web view's size (to place a Finder drop: `dropPoint` in `lib/transfers.ts`), notification, store, opener limited to `http:`/`https:` URLs and reveal-in-Finder. The dialog plugin is used from Rust only. No shell, fs or http plugin. `frame-src` allows only `http://127.0.0.1:*`, for visuals: a visual's tab is a frame of blimpd's copy through the tunnel, sandboxed with `allow-scripts` only, so it runs as an origin of its own, and blimpd's own policy on the page allows no requests. A frame can't be sent to a website; it could be sent to another port forwarded on 127.0.0.1 (a dev server), where it still has no token. Browser tabs are frames of the server's Chrome, drawn in a canvas. An HTML file's page is a `srcdoc` frame (no URL is loaded, so `frame-src` doesn't apply), sandboxed with no flags, and it keeps this policy.
 
 ### macOS menu
 
