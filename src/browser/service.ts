@@ -5,7 +5,7 @@
 // gate's listener on 127.0.0.1: /s/<session>, for connections of blimpd's own uid only. The tabs
 // (folder, address, who opened them) are saved in <blimp dir>/browser/tabs.json.
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { HttpError } from "../files";
@@ -13,7 +13,7 @@ import { isSafeName, parseZmxList, realDir, zmxListAsync } from "../sessions";
 import { findChrome, launchChrome, type Chrome } from "./chrome";
 import { Gate, type Tab } from "./gate";
 import { timingSafeEqual } from "node:crypto";
-import { browserDir, gateKey, mcpConfig, mcpConfigPath, portFile, selfCommand } from "./mcp";
+import { browserDir, gateKey, portFile, writeMcpConfig } from "./mcp";
 import { keepPasskeyDialogsOff } from "./passkeys";
 import { peerUid } from "./peer";
 import { openView, type ViewSocket } from "./view";
@@ -229,14 +229,14 @@ export async function startBrowserGate(): Promise<number> {
     listener = Bun.serve({ ...options, port: 0 });
   }
   writeFileSync(portFile(), `${listener.port}\n`, { mode: 0o600 });
-  writeFileSync(mcpConfigPath(), mcpConfig(selfCommand()), { mode: 0o600 });
+  writeMcpConfig(true);
   // Tabs from before: Chrome starts now, so they're there for the app and the sessions.
   if (loadSaved().length && browserAvailable()) ensureChrome().catch((e) => console.log(`browser: ${(e as Error).message}`));
   return listener.port!;
 }
 
-// Whether a session started now can get the browser: a Chrome to run and the MCP config written.
-export const browserReady = () => browserAvailable() && existsSync(mcpConfigPath());
+// Whether a session started now can get the browser: a Chrome to run and the gate listening.
+export const browserReady = () => browserAvailable() && listener !== null;
 
 // For tests: Chrome and the listener stop; tabs.json stays.
 export async function stopBrowser() {

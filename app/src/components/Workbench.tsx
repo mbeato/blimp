@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type * as Monaco from "monaco-editor/editor/editor.api";
-import { ApiError, type BrowserTab, type DirEntry, type FileBody, type Port } from "../lib/api";
+import { ApiError, type BrowserTab, type DirEntry, type FileBody, type Port, type Visual } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import {
   ancestors,
@@ -31,6 +31,7 @@ import {
 } from "../lib/files";
 import { HOME, hostOf, serverTabTarget } from "../lib/browser";
 import { galleryDir, galleryKey } from "../lib/gallery";
+import { isVisualTab, visualTab } from "../lib/visuals";
 import { byOrder, moved, startReorder } from "../lib/reorder";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
@@ -38,6 +39,7 @@ import { download, freeName, pickFiles, upload, type Item } from "../lib/transfe
 import { Dialog } from "./Dialog";
 import { HtmlView, ImageView, MarkdownView, PdfView, ViewerBoundary } from "./FileViews";
 import { Gallery } from "./Gallery";
+import { VisualView } from "./VisualView";
 import { PageView } from "./PageView";
 import type { PaneActions } from "./TerminalPane";
 import { QuickOpen } from "./QuickOpen";
@@ -53,6 +55,12 @@ const pageIcon = (
   <svg className="page-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
     <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" />
     <path d="M2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11" fill="none" stroke="currentColor" />
+  </svg>
+);
+
+const visualIcon = (
+  <svg className="page-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+    <path d="M2.5 13.5h11M4.5 11V8M8 11V4.5M11.5 11V6.5" fill="none" stroke="currentColor" strokeLinecap="round" />
   </svg>
 );
 
@@ -186,6 +194,8 @@ export function Workbench(props: {
   // Galleries' folders that weren't there at their last listing. A folder's watch ends when it's
   // deleted, so its parent's says when it's back (rm -rf renders && mkdir renders).
   const goneDirs = useRef(new Set<string>()).current;
+  // Pages sessions in this folder showed ("visual:<source>", lib/visuals.ts), after the galleries: one tab per file.
+  const visuals = useRef(new Map<string, Visual>()).current;
   // Saves not finished yet (sent, or waiting for the one before). Models are disposed only after
   // these finish, so leaving a project mid-save still sends what was typed meanwhile.
   const pending = useRef(new Set<Promise<void>>()).current;
@@ -518,7 +528,7 @@ export function Workbench(props: {
       if (doc.sync.dirty) return setClosing(path);
     }
     clearTimeout(doc.timer);
-    const order = [...docs.keys(), ...galleries];
+    const order = [...docs.keys(), ...galleries, ...visuals.keys()];
     if (editor.current && editor.current.getModel() === doc.model) editor.current.setModel(null);
     if (editorDoc.current === doc) editorDoc.current = null;
     doc.unsub();
@@ -580,7 +590,7 @@ export function Workbench(props: {
       });
     gone.add(key);
     opening.delete(key);
-    const order = [...docs.keys(), ...galleries, ...pages.keys()];
+    const order = [...docs.keys(), ...galleries, ...visuals.keys(), ...pages.keys()];
     const rest = order.filter((k) => k !== key);
     const i = order.indexOf(key);
     setActiveState((a) => (a === key ? (rest[Math.min(i, rest.length - 1)] ?? null) : a));
@@ -595,7 +605,7 @@ export function Workbench(props: {
     rerender();
   };
   const closeGallery = (key: string) => {
-    const order = [...docs.keys(), ...galleries, ...pages.keys()];
+    const order = [...docs.keys(), ...galleries, ...visuals.keys(), ...pages.keys()];
     galleries.delete(key);
     goneDirs.delete(galleryDir(key)!);
     const rest = order.filter((k) => k !== key);
@@ -627,8 +637,32 @@ export function Workbench(props: {
     );
   };
 
-  // A file tab, a gallery or a browser tab.
-  const closeTab = (key: string) => (key.startsWith("tab:") ? closePage(key) : galleryDir(key) !== null ? closeGallery(key) : void closeDoc(key));
+  // ---- visuals ----
+
+  // A page a session showed, if the session is in this folder: its tab (the file's, moved to the new copy) comes to
+  // the front, but the keyboard stays where it is. While you're typing in a file, the tab is added without coming
+  // to the front, so the editor isn't hidden under your typing.
+  const showVisual = useRef((_: Visual) => {});
+  showVisual.current = (v) => {
+    if (v.dir !== root) return;
+    const key = visualTab(v.source);
+    visuals.set(key, v);
+    if (!editor.current?.hasTextFocus()) setActive(key);
+    rerender();
+  };
+  useEffect(() => link.onVisual((v) => showVisual.current(v)), [link]);
+  const closeVisual = (key: string) => {
+    const order = [...docs.keys(), ...galleries, ...visuals.keys(), ...pages.keys()];
+    visuals.delete(key);
+    const rest = order.filter((k) => k !== key);
+    const i = order.indexOf(key);
+    setActiveState((a) => (a === key ? (rest[Math.min(i, rest.length - 1)] ?? null) : a));
+    rerender();
+  };
+
+  // A file tab, a gallery, a visual or a browser tab.
+  const closeTab = (key: string) =>
+    key.startsWith("tab:") ? closePage(key) : galleryDir(key) !== null ? closeGallery(key) : isVisualTab(key) ? closeVisual(key) : void closeDoc(key);
   // Hidden: the browser tab in front gives way to the last file (none: the terminal fills the
   // window), and comes back in front when they're shown. Hidden, their views aren't mounted.
   const lastPage = useRef<string | null>(null);
@@ -636,7 +670,7 @@ export function Workbench(props: {
   useEffect(() => {
     if (!props.showBrowsers && active?.startsWith("tab:")) {
       lastPage.current = active;
-      setActiveState([...docs.keys(), ...galleries].at(-1) ?? null);
+      setActiveState([...docs.keys(), ...galleries, ...visuals.keys()].at(-1) ?? null);
     } else if (props.showBrowsers && lastPage.current) {
       if (pages.has(lastPage.current)) setActiveState(lastPage.current);
       lastPage.current = null;
@@ -648,7 +682,7 @@ export function Workbench(props: {
   useEffect(() => {
     for (const k of opening) if (pages.has(k)) opening.delete(k);
     for (const k of gone) if (!link.browserTabs.some((t) => `tab:${t.id}` === k)) gone.delete(k);
-    if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...galleries, ...pages.keys()].at(-1) ?? null);
+    if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...galleries, ...visuals.keys(), ...pages.keys()].at(-1) ?? null);
   }, [pageKeys, listed]);
 
   // ---- paths, rename, delete, move ----
@@ -1073,7 +1107,7 @@ export function Workbench(props: {
     const t = tab.getBoundingClientRect();
     if (t.left < s.left) strip.current.scrollLeft -= Math.ceil(s.left - t.left);
     else if (t.right > s.right) strip.current.scrollLeft += Math.ceil(t.right - s.right);
-  }, [active, docs.size, galleries.size, toggleShown]);
+  }, [active, docs.size, galleries.size, visuals.size, toggleShown]);
 
   const createRow = (depth: number) =>
     creating && (
@@ -1210,8 +1244,8 @@ export function Workbench(props: {
   const doc = activeDoc;
   const closingDoc = closing ? docs.get(closing) : undefined;
   const showTerm = props.showTerm;
-  // File tabs, galleries and browser tabs shown.
-  const tabCount = docs.size + galleries.size + shownPages.size;
+  // File tabs, galleries, visuals and browser tabs shown.
+  const tabCount = docs.size + galleries.size + visuals.size + shownPages.size;
   // With the terminal hidden and no file open, the editor area shows how to open one.
   const showEditor = tabCount > 0 || !!props.welcome || !showTerm;
   const treeOpen = props.showFiles;
@@ -1318,6 +1352,26 @@ export function Workbench(props: {
                     </div>
                   );
                 })}
+                {[...visuals].map(([key, v]) => {
+                  const title = v.title || "Visual";
+                  return (
+                    <div
+                      key={key}
+                      role="tab"
+                      aria-selected={key === active}
+                      className={"tab visual-tab" + (key === active ? " active" : "")}
+                      title={`${title}\nShown by a session from ${tildify(v.source, link.home)}`}
+                      onMouseDown={(e) => e.button === 0 && setActive(key)}
+                      onAuxClick={(e) => e.button === 1 && closeVisual(key)}
+                    >
+                      {visualIcon}
+                      <span className="tab-title">{title}</span>
+                      <button className="tab-close" aria-label={`Close visual ${title}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => closeVisual(key)}>
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
                 {[...shownPages].map(([key, t]) => {
                   const title = t.title || hostOf(t.url) || "New tab";
                   return (
@@ -1396,7 +1450,12 @@ export function Workbench(props: {
               />
             </div>
           ))}
-          <div className="viewer" hidden={docs.size === 0 || !!active?.startsWith("tab:") || galleryDir(active) !== null}>
+          {[...visuals].map(([key, v]) => (
+            <div key={key} className="viewer" hidden={key !== active}>
+              <VisualView visual={v} api={link.api} />
+            </div>
+          ))}
+          <div className="viewer" hidden={docs.size === 0 || !!active?.startsWith("tab:") || galleryDir(active) !== null || isVisualTab(active)}>
             {closingDoc && (
               <div className="fbar" role="alert">
                 <span>{closingDoc.name} isn't saved.</span>

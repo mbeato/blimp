@@ -10,6 +10,7 @@ import { promptFromHook } from "../src/prompt";
 import { findChrome } from "../src/browser/chrome";
 import { projectFolderName } from "../src/folders";
 import { parseZmxList, zmxPath } from "../src/sessions";
+import { visualKey } from "../src/visuals/store";
 import { widgetKey } from "../src/widget";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-server-"));
@@ -1632,12 +1633,14 @@ describe("kinds and keys", () => {
   const kinds = async () => (await (await kApi("/kinds")).json()) as { id: string; label: string; available: boolean; note?: string }[];
   const dir = join(kHome, tag);
   const blimpdLog = join(kTmp, "blimpd.log");
-  // Claude and Codex get the browser MCP when this blimpd finds a Chrome (in kHome or on PATH) and
-  // npx (browser/mcp.ts): what's added to their arguments then.
   const kPath = `${fakeBin}:${env.PATH}`;
   const browserOn = !!findChrome(kHome, (n) => Bun.which(n, { PATH: kPath })) && !!Bun.which("npx", { PATH: kPath });
-  const claudeMcp = browserOn ? `--mcp-config ${join(kTmp, "browser", "mcp.json")}` : "";
-  const codexMcp = browserOn ? /-c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]/ : /^$/;
+  // Claude and Codex always get blimp's MCP (the show tool), and the browser's too when this blimpd finds a Chrome
+  // (in kHome or on PATH) and npx (browser/mcp.ts): what's added to their arguments (Claude: the file with both then).
+  const claudeMcp = `--mcp-config ${browserOn ? join(kTmp, "browser", "mcp.json") : join(kTmp, "mcp.json")}`;
+  const blimpCodex = String.raw`-c mcp_servers\.blimp\.command="[^"]+" -c mcp_servers\.blimp\.args=\[[^\]]*"visuals-mcp"\]`;
+  const browserCodex = String.raw` -c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]`;
+  const codexMcp = new RegExp(`^${blimpCodex}${browserOn ? browserCodex : ""}$`);
   const withMcp = (rest: string) => [claudeMcp, rest].filter(Boolean).join(" ");
 
   // Starts a session of this kind and returns its name and what it printed first.
@@ -2447,6 +2450,99 @@ describe("widgets", () => {
     expect((await widget("xyz")).status).toBe(400);
     expect((await widget("ab".repeat(50), "staging")).status).toBe(400);
     expect((await api("/push/widget", { method: "POST", body: "null" })).status).toBe(400);
+  });
+});
+
+describe("visuals", () => {
+  const phoneFile = join(tmp, "phone-token");
+  const phone = "cafe".repeat(16);
+  const page = () => readFileSync(join(import.meta.dir, "fixtures", "visual.html"), "utf8");
+  const raw = (path: string, init: RequestInit = {}) => api(path, init, false);
+  const show = (body: object) => api("/visuals", { method: "POST", body: JSON.stringify(body) });
+
+  test("POST /visuals copies a session's page and tells the apps; GET /visuals/key gives each app its key", async () => {
+    const name = await shSession("visual");
+    writeFileSync(join(homeDir, "chart.html"), page());
+    // The session runs in tmp, which isn't under home: an absolute path under home.
+    const e = await socket("/events");
+    await until(() => e.messages.find((m) => m.type === "sessions"), "the session list");
+    const r = await show({ session: name, path: join(homeDir, "chart.html"), title: "Test results" });
+    expect(r.status).toBe(201);
+    const { id } = await r.json();
+    expect(id).toMatch(/^[0-9a-f]{12}$/);
+    const ev = await until(() => e.messages.find((m) => m.type === "visual"), "the visual event");
+    expect(ev).toEqual({ type: "visual", id, title: "Test results", session: name, dir: realpathSync(tmp), source: join(homeDir, "chart.html"), at: ev.at });
+    e.ws.close();
+    expect(readFileSync(join(tmp, "visuals", `${id}.html`), "utf8")).toBe(page());
+
+    expect(await (await api("/visuals/key")).json()).toEqual({ key: visualKey(token) });
+    writeFileSync(phoneFile, phone);
+    try {
+      const r2 = await api("/visuals/key", { headers: { Authorization: `Bearer ${phone}` } }, false);
+      expect(await r2.json()).toEqual({ key: visualKey(phone) });
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
+  });
+
+  test("POST /visuals refuses what it can't show, with the reason", async () => {
+    const name = await shSession("visual-bad");
+    const refused = async (body: object) => {
+      const r = await show(body);
+      return [r.status, (await r.json()).error];
+    };
+    expect(await refused({ session: name, path: join(homeDir, "nope.html"), title: "T" })).toEqual([404, `no such file: ${join(homeDir, "nope.html")}`]);
+    expect(await refused({ session: `${tag}-none`, path: "x.html", title: "T" })).toEqual([404, `no session named ${tag}-none`]);
+    expect((await refused({ session: name, path: 3, title: "T" }))[0]).toBe(400);
+    expect(await refused({ session: name, path: "/etc/hostname", title: "T" })).toEqual([403, "outside your home folder"]);
+    expect(await refused({ session: name, path: join(tmp, "token"), title: "T" })).toEqual([403, "outside your home folder"]);
+  });
+
+  test("the page and the kit, read with the visual key in the path, with the headers that lock the page down", async () => {
+    const name = await shSession("visual-read");
+    writeFileSync(join(homeDir, "read.html"), page());
+    const { id } = await (await show({ session: name, path: join(homeDir, "read.html"), title: "Read me" })).json();
+    const key = visualKey(token);
+
+    const r = await raw(`/visuals/${key}/${id}`);
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe(page());
+    expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(r.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts",
+    );
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(r.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(r.headers.get("cache-control")).toBe("private, max-age=2592000, immutable");
+    expect(r.headers.get("access-control-allow-origin")).toBeNull();
+
+    const kit = await raw(`/visuals/${key}/kit/chart.js`, { headers: { "Accept-Encoding": "gzip" } });
+    expect(kit.status).toBe(200);
+    expect(kit.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(kit.headers.get("content-encoding")).toBe("gzip");
+    expect((await kit.arrayBuffer()).byteLength).toBe(208_522); // fetch unzips it
+    expect(kit.headers.get("cache-control")).toBe("private, max-age=3600");
+    const plain = await raw(`/visuals/${key}/kit/blimp.css`, { headers: { "Accept-Encoding": "identity" } });
+    expect(plain.headers.get("content-encoding")).toBeNull();
+    expect(await plain.text()).toContain("prefers-color-scheme: dark");
+
+    // The phone's key reads the same; a wrong key, a missing copy or anything else don't.
+    writeFileSync(phoneFile, phone);
+    try {
+      expect((await raw(`/visuals/${visualKey(phone)}/${id}`)).status).toBe(200);
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
+    expect((await raw(`/visuals/${visualKey(phone)}/${id}`)).status).toBe(401); // the phone was unpaired
+    expect((await raw(`/visuals/${"0".repeat(64)}/${id}`)).status).toBe(401);
+    expect((await raw(`/visuals/${key}/000000000000`)).status).toBe(404);
+    expect((await raw(`/visuals/${key}/kit/store.ts`)).status).toBe(404);
+    // fetch would resolve a plain ../ before sending it; an encoded one reaches blimpd.
+    expect((await raw(`/visuals/${key}/kit/..%2F..%2Ftoken`)).status).toBe(404);
+    expect((await raw(`/visuals/${key}/${id}`, { method: "POST" })).status).toBe(401);
+    // The key is no token: it reads nothing else.
+    for (const p of ["/sessions", "/visuals/key", "/health", `/fs/file?path=${encodeURIComponent(join(homeDir, "read.html"))}`])
+      expect((await api(p, { headers: { Authorization: `Bearer ${key}` } }, false)).status).toBe(401);
   });
 });
 

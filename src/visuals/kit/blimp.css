@@ -1,0 +1,255 @@
+/* blimp's look for visuals (src/visuals/kit.ts): its colours in light and dark (app/src/styles/theme.css), the
+   system font, and a few blocks a page can use. A page loads it with <link rel="stylesheet" href="kit/blimp.css">.
+   Phone first: one column, 16 px text; wider screens get a grid and more room. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --bg-side: #f1f1f3;
+  --bg-card: #f6f6f8;
+  --fg: #1d1d1f;
+  --fg-dim: #5d5e66;
+  --fg-faint: #8e8f96;
+  --line: rgba(0, 0, 0, 0.09);
+  --accent: #0a6cff;
+  --good: #3b8a2a;
+  --warn: #9a6a00;
+  --bad: #c63636;
+  /* Chart series, in order: the terminal's palette. */
+  --c1: #2a63c4;
+  --c2: #3b8a2a;
+  --c3: #9a6a00;
+  --c4: #9a3fb8;
+  --c5: #1c8584;
+  --c6: #c4322f;
+  --radius: 12px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1f22;
+    --bg-side: #26272b;
+    --bg-card: #26272b;
+    --fg: #e4e4e7;
+    --fg-dim: #a0a1a8;
+    --fg-faint: #707179;
+    --line: rgba(255, 255, 255, 0.1);
+    --accent: #3b8cff;
+    --good: #8cc77a;
+    --warn: #e5c07b;
+    --bad: #f07878;
+    --c1: #6fa8e8;
+    --c2: #8cc77a;
+    --c3: #e5c07b;
+    --c4: #c792ea;
+    --c5: #5fc4c4;
+    --c6: #e06c6c;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.45 var(--font);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0 auto;
+  padding: 16px;
+  max-width: 1100px;
+}
+
+h1 {
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+
+h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 24px 0 8px;
+}
+
+h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 16px 0 6px;
+}
+
+p {
+  margin: 0 0 12px;
+}
+
+.sub,
+small {
+  color: var(--fg-dim);
+  font-size: 14px;
+}
+
+a {
+  color: var(--accent);
+}
+
+code {
+  font: 14px var(--mono);
+  background: var(--bg-side);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+pre {
+  overflow-x: auto;
+  font: 14px/1.4 var(--mono);
+}
+
+/* One column on a phone; as many 280 px columns as fit on a wider screen. */
+.grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  margin: 12px 0;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.card > :first-child {
+  margin-top: 0;
+}
+
+/* Big numbers with their labels: <div class="stats"><div class="stat"><b>42</b><span>tests</span></div>…</div> */
+.stats {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  margin: 12px 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+
+.stat b {
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat span {
+  color: var(--fg-dim);
+  font-size: 14px;
+}
+
+/* A chart's box: Chart.js fills it with { maintainAspectRatio: false }. */
+.chart {
+  position: relative;
+  height: 260px;
+}
+
+/* Something wide (a table) scrolls sideways instead of widening the page. */
+.scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+th {
+  color: var(--fg-dim);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+th.num,
+td.num {
+  text-align: right;
+}
+
+.tag {
+  display: inline-block;
+  font-size: 14px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-side);
+  color: var(--fg-dim);
+}
+
+.good {
+  color: var(--good);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+/* A diagram's text stays hidden until Mermaid has drawn it (blimp.js), so its source never flashes. */
+pre.mermaid {
+  margin: 8px 0;
+  text-align: center;
+  font: inherit;
+  background: none;
+}
+
+pre.mermaid:not([data-processed]) {
+  visibility: hidden;
+}
+
+pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (min-width: 700px) {
+  body {
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 26px;
+  }
+
+  .chart {
+    height: 320px;
+  }
+}

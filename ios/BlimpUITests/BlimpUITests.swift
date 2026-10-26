@@ -5,7 +5,7 @@
 // end it; read a past conversation and resume it by sending; blimpd restarting; the Face ID lock, and a draft kept
 // through it; two questions at once; unread and asking marks; a project's inbox and the chat's top bar; Allow from
 // Needs you, in its own project's inbox only; the drawer's New session; a project from the drawer's strip; a server
-// browser tab from the drawer, tapped and typed into; a start that's stuck. What reached the sessions is checked by
+// browser tab from the drawer, tapped and typed into; a page Claude showed, from its card; a start that's stuck. What reached the sessions is checked by
 // the job afterwards. Screenshots stay in the .xcresult.
 //
 // The job runs them on three Macs at once (ios.yml lists which on each), in name order, sharing each Mac's
@@ -688,6 +688,38 @@ final class BlimpUITests: XCTestCase {
         app.open(URL(string: "blimp://open?session=demo-ask")!)
         try wait(chat, "demo-ask's chat from the widget's link", timeout: 30)
         shot("45-widget-link")
+    }
+
+    /// demo-chat's two show calls (ios/e2e/setup.ts): the kept one's card opens the page (the fixture: a chart, a
+    /// diagram, two requests that fail), which neither its link nor a script can leave; × goes back. The other's copy is gone: greyed, and
+    /// it opens nothing.
+    func testVisualCardOpensThePage() throws {
+        try launchPaired()
+        app.open(URL(string: "blimp://open?session=demo-chat")!)
+        // A link brings the app back through the lock, as a tapped notification can
+        if app.buttons["Unlock"].firstMatch.waitForExistence(timeout: 5) { try unlockWithFace() }
+        let card = message("message.visual", "Test results")
+        try wait(card, "the visual's card in demo-chat", timeout: 30)
+        shot("46-visual-card")
+        card.tap()
+        let page = app.webViews.firstMatch
+        try wait(page, "the visual's page")
+        try wait(page.staticTexts["Visual fixture"], "the page's heading")
+        try wait(page.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "rejected,rejected")).firstMatch, "the page's report that its requests failed")
+        shot("47-visual-page")
+        // A link goes nowhere (the kit stops it), nor does a script sending the page away (the web view cancels it)
+        page.links["Leave the page"].tap()
+        Thread.sleep(forTimeInterval: 2)
+        if !page.staticTexts["Visual fixture"].exists { throw failed("the page to stay after its link was tapped") }
+        page.buttons["Leave by script"].tap()
+        Thread.sleep(forTimeInterval: 2)
+        if !page.staticTexts["Visual fixture"].exists { throw failed("the page to stay after a script tried to leave it") }
+        element("visualClose").tap()
+        try until(page, "exists == false", "the chat after ×")
+        try wait(card, "the card after closing the page")
+        let gone = message("message.visual", "No longer kept")
+        try wait(gone, "the card of a copy no longer kept")
+        if gone.isEnabled { throw failed("a card of a copy no longer kept that can be tapped") }
     }
 
     // MARK: - Helpers
