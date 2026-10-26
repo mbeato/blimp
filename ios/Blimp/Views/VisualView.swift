@@ -89,9 +89,21 @@ struct VisualPage: UIViewRepresentable {
         let url: URL
         init(url: URL) { self.url = url }
 
-        /// The page's own address loads; a link, a script or a redirect sending it anywhere else is cancelled.
+        /// The page's own address loads, and its own #links scroll; a link, a script or a redirect sending it anywhere
+        /// else is cancelled.
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-            navigationAction.request.url?.absoluteString == url.absoluteString ? .allow : .cancel
+            guard let to = navigationAction.request.url, Self.page(to) == Self.page(url) else { return .cancel }
+            return .allow
+        }
+
+        /// A URL without its fragment, its scheme and host in lowercase and a default port left out, to compare pages.
+        private static func page(_ url: URL) -> String? {
+            guard var c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+            c.scheme = c.scheme?.lowercased()
+            c.host = c.host?.lowercased()
+            if (c.scheme == "https" && c.port == 443) || (c.scheme == "http" && c.port == 80) { c.port = nil }
+            c.fragment = nil
+            return c.string
         }
     }
 }
