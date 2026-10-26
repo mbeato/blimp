@@ -45,7 +45,7 @@ enum LiveShare {
             for await activity in Panel.activityUpdates {
                 // Off in Settings: a panel that came anyway (a push-to-start sent before blimpd heard) ends at once.
                 if off {
-                    await activity.end(nil, dismissalPolicy: .immediate)
+                    await end(id: activity.id)
                     continue
                 }
                 // A panel not seen before is the newest: the others go (the app's own is watched from start() on, so
@@ -54,9 +54,7 @@ enum LiveShare {
                 let isNew = !watched.contains(activity.id)
                 watch(activity)
                 if isNew {
-                    for other in current where other.id != activity.id {
-                        await other.end(nil, dismissalPolicy: .immediate)
-                    }
+                    await end(except: activity.id, liveOnly: true)
                 }
             }
         }
@@ -115,10 +113,17 @@ enum LiveShare {
             if let data = activity.pushToken { send("DELETE", kind: "activity", token: hex(data)) }
             tokens[activity.id] = nil
         }
-        Task {
-            for activity in Panel.activities {
-                await activity.end(nil, dismissalPolicy: .immediate)
-            }
+        Task { await end() }
+    }
+
+    /// Ends panels by id, looking them up here: an `Activity` isn't Sendable, so none is passed into an async call from
+    /// the main actor. With `id`, that panel; otherwise every panel but `except` (only the showing ones with `liveOnly`).
+    private nonisolated static func end(id: String? = nil, except: String? = nil, liveOnly: Bool = false) async {
+        for panel in Panel.activities {
+            if let id, panel.id != id { continue }
+            if panel.id == except { continue }
+            if liveOnly, panel.activityState != .active, panel.activityState != .stale { continue }
+            await panel.end(nil, dismissalPolicy: .immediate)
         }
     }
 
