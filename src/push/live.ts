@@ -18,6 +18,8 @@ import type { Creds, Device, LiveList } from "./store";
 export const QUIET = 10 * 60_000;
 export const RESTART = (7 * 60 + 45) * 60_000;
 export const APP_GRACE = 10_000;
+// How long after a push Apple didn't take (no answer, 5xx) before this panel's next update or end.
+export const RETRY = 30_000;
 
 export type LiveDeps = {
   sessions: () => Promise<Session[]>;
@@ -42,6 +44,7 @@ type Panel = {
   needs: Set<string>; // which sessions needed you in that
   asked?: number; // when the open app was asked to start it
   quiet?: number; // since when nothing needs you or works
+  retryAt?: number; // after a push that failed: not before then
 };
 
 // The sessions that need you in what it shows, the followed turn's among them.
@@ -88,7 +91,11 @@ export class LiveRunner {
       }
       if (isBusy(state)) p.quiet = undefined;
       else p.quiet ??= now;
-      if (p.quiet !== undefined && now - p.quiet >= QUIET) return await this.end(creds, token, state, now);
+      if (p.retryAt !== undefined && now < p.retryAt) return;
+      if (p.quiet !== undefined && now - p.quiet >= QUIET) {
+        await this.end(creds, token, state, now);
+        return;
+      }
       if (now - p.since >= RESTART) {
         if ((await this.end(creds, token, state, now)) && isBusy(state) && !doubtful) await this.begin(creds, start, state, now);
         return;
@@ -107,9 +114,11 @@ export class LiveRunner {
       const needs = needsOf(state);
       const urgent = [...needs].some((n) => !p.needs.has(n));
       // Only once Apple has answered does it count as sent: a push that didn't get through is tried again next tick.
-      if (!(await this.send(creds, "activities", token, livePayload("update", state, now), urgent ? 10 : 5))) {
+      if (await this.send(creds, "activities", token, livePayload("update", state, now), urgent ? 10 : 5)) p.retryAt = now + RETRY;
+      else {
         p.sent = shape;
         p.needs = needs;
+        p.retryAt = undefined;
       }
     } catch (e) {
       this.deps.log(`push: live panel: ${(e as Error).message}`);
@@ -135,7 +144,10 @@ export class LiveRunner {
 
   // False when the end didn't get through (no answer, or Apple failed): the panel and its token stay, for the next tick.
   private async end(creds: Creds, token: Device | undefined, state: LiveState, now: number): Promise<boolean> {
-    if (token && (await this.send(creds, "activities", token, livePayload("end", state, now), 10))) return false;
+    if (token && (await this.send(creds, "activities", token, livePayload("end", state, now), 10))) {
+      if (this.panel) this.panel.retryAt = now + RETRY;
+      return false;
+    }
     this.panel = undefined;
     this.deps.clearActivities();
     return true;

@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import type { LiveState } from "../src/live";
 import type { Sent } from "../src/push/apns";
-import { APP_GRACE, type LiveDeps, LiveRunner, QUIET, RESTART } from "../src/push/live";
+import { APP_GRACE, type LiveDeps, LiveRunner, QUIET, RESTART, RETRY } from "../src/push/live";
 import type { Creds, Device, LiveList } from "../src/push/store";
 import type { Session } from "../src/sessions";
 
@@ -300,7 +300,7 @@ test("a good busy list after an empty tick resets the quiet clock", async () => 
   expect(events(t).filter((e) => e.includes(":end:"))).toEqual([]);
 });
 
-test("an update Apple didn't take (no answer, 5xx) is sent again next tick; a 200 is not", async () => {
+test("an update Apple didn't take (no answer, 5xx) is sent again after the wait; a 200 is not", async () => {
   let status = 0;
   const { t, r } = setup({ answer: (d) => (d.token === startToken.token ? { status: 200 } : { status }) });
   t.state = working();
@@ -308,8 +308,10 @@ test("an update Apple didn't take (no answer, 5xx) is sent again next tick; a 20
   t.activities = [panelToken(T)];
   t.state = working(2);
   await r.tick();
+  t.clock += RETRY;
   status = 503;
   await r.tick();
+  t.clock += RETRY;
   status = 200;
   await r.tick();
   await r.tick();
@@ -328,6 +330,7 @@ test("an end that fails (no answer) keeps the panel and its token, and is sent a
   await r.tick();
   expect(t.activities).toEqual([panelToken(T)]);
   status = 200;
+  t.clock += RETRY;
   await r.tick();
   expect(events(t)).toEqual(["starts:start:10", "activities:update:5", "activities:end:10", "activities:end:10"]);
   expect(t.activities).toEqual([]);
@@ -345,4 +348,36 @@ test("the same token sent again doesn't move the restart", async () => {
   t.clock += 60_000;
   await r.tick();
   expect(events(t)).toEqual(["activities:update:5", "activities:end:10", "starts:start:10"]);
+});
+
+test("after a failed update or end, nothing more for that panel for 30 s, then it tries again", async () => {
+  let status = 0;
+  const { t, r } = setup({ answer: (d) => (d.token === startToken.token ? { status: 200 } : { status }) });
+  t.state = working();
+  await r.tick();
+  t.activities = [panelToken(T)];
+  t.state = working(2);
+  await r.tick();
+  t.clock += RETRY - 1;
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10", "activities:update:5"]);
+  t.clock += 1;
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10", "activities:update:5", "activities:update:5"]);
+  status = 200;
+  t.clock += RETRY;
+  await r.tick();
+  t.state = quiet;
+  await r.tick();
+  status = 0;
+  t.clock += QUIET;
+  await r.tick();
+  const n = t.pushes.length;
+  t.clock += RETRY - 1;
+  await r.tick();
+  expect(t.pushes.length).toBe(n);
+  t.clock += 1;
+  await r.tick();
+  expect(t.pushes.length).toBe(n + 1);
+  expect(events(t).at(-1)).toBe("activities:end:10");
 });
