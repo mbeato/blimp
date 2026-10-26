@@ -29,6 +29,7 @@ import { startNotes } from "./notes";
 import { addDevice, addWidget, isDeviceToken, isPushEnv, isWidgetToken, removeDevice, removeWidget } from "./push/store";
 import { startPush } from "./push/watch";
 import { recap } from "./recaps";
+import { startReports } from "./reports";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
 import { checkCommand, sendResult, startRun } from "./runs";
@@ -536,6 +537,7 @@ export function serve(): Server {
   startFeed(); // off unless {"feed": {"on": true}} in <socket dir>/config.json
   startHandoffs();
   startAssistant(); // off unless {"assistant": true} in <socket dir>/config.json
+  startReports(); // the assistant's job updates (reports.ts): nothing while it's off or has no jobs
   // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
   // widget push token (push/watch.ts).
   startPush();

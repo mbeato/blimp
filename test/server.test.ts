@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import pkg from "../package.json";
 import { promptFromHook } from "../src/prompt";
 import { findChrome } from "../src/browser/chrome";
@@ -1123,6 +1123,29 @@ describe("chat", () => {
     expect(await cli(["send", name, "check", "the", "logs"], { ZMX_SESSION: "assistant" })).toMatchObject({ code: 0 });
     expect((await listed(name)).job).toMatchObject({ reason: "check the logs" });
   }, 20000);
+
+  test("a job that starts waiting is told to the assistant within about 10 s, as a [blimp job update] line", async () => {
+    // A stand-in assistant that echoes what's typed into it; blimpd keeps it, since one is already running.
+    made.push("assistant");
+    Bun.spawnSync([zmxPath(), "attach", "assistant", "sh", "-c", LOOP], { env, cwd: tmp, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    await until(() => zmxNames().includes("assistant"), "the stand-in assistant");
+    writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false, assistant: true }));
+    const viewer = await socket(`/sessions/assistant/attach?cols=250&rows=30`);
+    const sid = "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c";
+    const { name } = await fakeClaude("job3", sid, []);
+    expect((await api("/assistant/jobs", { method: "POST", body: JSON.stringify({ session: name, reason: "fix the tests" }) })).status).toBe(204);
+    await Bun.sleep(20); // the wait begins after the job was recorded
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${name}.json`);
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
+    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
+    await until(() => viewer.text.includes(`[blimp job update] ${basename(tmp)} · fix the tests (${name}): needs you — Bash: `), "the job update in the assistant", 25000);
+    viewer.ws.close();
+    rmSync(status);
+    writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false }));
+    zmx("kill", "assistant", "--force");
+    await until(() => !zmxNames().includes("assistant"), "the stand-in assistant to end");
+  }, 40000);
 });
 
 describe("starting sessions", () => {

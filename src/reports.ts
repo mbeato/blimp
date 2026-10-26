@@ -6,12 +6,12 @@
 // or changes a job, and the assistant is never told about itself.
 
 import { basename } from "node:path";
-import { ASSISTANT } from "./assistant";
-import type { Jobs } from "./jobs";
+import { ASSISTANT, assistantOn } from "./assistant";
+import { dropEnded, type Jobs, markReported, readJobs } from "./jobs";
 import type { ShownNote } from "./notes";
 import { asks } from "./overview";
-import type { Session } from "./sessions";
-import { Asking } from "./typing";
+import { claudeDir, listSessionsLite, type Session, zmxListAsync } from "./sessions";
+import { Asking, typeInto } from "./typing";
 
 export const NOTE_WAIT = 30_000;
 export const BATCH = 10_000;
@@ -111,4 +111,22 @@ export class Reporter {
       this.busy = false;
     }
   }
+}
+
+const reporter = new Reporter({
+  on: () => assistantOn(),
+  jobs: () => readJobs(),
+  sessions: async () => listSessionsLite(claudeDir(), await zmxListAsync()),
+  reported: (name, end) => markReported(name, end),
+  drop: (live) => dropEnded(live),
+  type: (text) => typeInto(ASSISTANT, text, { enter: true }),
+  now: Date.now,
+  log: (m) => console.log(m),
+});
+
+export const lastReportTyped = () => reporter.lastTyped;
+
+// Every 2 s; it reads nothing while the assistant is off or has no jobs.
+export function startReports(every = 2000) {
+  setInterval(() => void reporter.tick(), every);
 }
