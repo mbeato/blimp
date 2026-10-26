@@ -61,7 +61,7 @@ struct ShellRun: View {
     }
 }
 
-/// A page Claude showed (blimp's show tool): its title and Tap to open, which opens it full screen (VisualView). One
+/// A page Claude showed (blimp's show tool): its title and Tap to open (a tap only, not a swipe), which opens it full screen (VisualView). One
 /// whose copy is no longer kept (after 30 days) is greyed and opens nothing.
 struct VisualCard: View {
     let message: ChatMessage
@@ -89,11 +89,26 @@ struct VisualCard: View {
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TapOnlyButtonStyle())
         .disabled(gone)
         .opacity(gone ? 0.5 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("message.visual")
+    }
+}
+
+/// A button that fires only on a tap: a swipe that starts on it (the drawer's, from anywhere in the chat) doesn't press
+/// it, as it can a plain button. Disabled, a tap does nothing.
+private struct TapOnlyButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Tapped(configuration: configuration) }
+
+    private struct Tapped: View {
+        let configuration: PrimitiveButtonStyleConfiguration
+        @Environment(\.isEnabled) private var enabled
+
+        var body: some View {
+            configuration.label.onTapGesture { if enabled { configuration.trigger() } }
+        }
     }
 }
 
