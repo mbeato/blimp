@@ -80,6 +80,12 @@ let sessionJSON = """
     #expect(EventsMessage.decode(Data(#"{"type":"ports","ports":[]}"#.utf8)) == .other)
 }
 
+@Test func decodesTheAssistantsSwitch() {
+    #expect(EventsMessage.decode(Data(#"{"type":"assistant","on":true}"#.utf8)) == .assistant(on: true))
+    #expect(EventsMessage.decode(Data(#"{"type":"assistant","on":false}"#.utf8)) == .assistant(on: false))
+    #expect(EventsMessage.decode(Data(#"{"type":"assistant"}"#.utf8)) == .other)
+}
+
 @Test func encodesCommandsExactly() throws {
     let enc = JSONEncoder()
     enc.outputFormatting = .sortedKeys
