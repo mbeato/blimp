@@ -154,8 +154,9 @@ The exact text is written and tested in the plan.
   gets its key with `GET /visuals/key` each time a page opens (not when it connects: one small request, no key to
   keep).
 - **The app's CSP** (`tauri.conf.json` and `index.html`, dev too) gets `frame-src http://127.0.0.1:*`. So a
-  page can't take its frame to a website. It could take it to a port forwarded on 127.0.0.1, where it would still
-  have no token; SECURITY.md says so.
+  page can't take its frame to a website. It can take it to any address on the Mac's 127.0.0.1 (any local service, not only blimp's forwards): a GET with
+  no click, after which the frame shows that service's page under that page's own rules; it still has no blimp token.
+  The tunnel's port changes per server, so the fixed policy can't name it. SECURITY.md says so.
 - Closing works as for any tab. `HtmlView` for HTML files doesn't change: scripts are still removed there.
 
 ## What a page can and can't do
