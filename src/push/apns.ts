@@ -24,7 +24,8 @@ export function makeJwt(c: Creds, now = Date.now()): string {
 // status 0: no answer from Apple, and reason says why.
 export type Sent = { status: number; reason?: string };
 // type widgets: a widget push (iOS 26), which only tells WidgetKit to reload the widgets: its own topic, priority 5.
-export type PushOptions = { collapseId?: string; type?: "alert" | "widgets" };
+// type liveactivity: a Live Activity push (the live panel, live.ts): its own topic, priority 10 unless given.
+export type PushOptions = { collapseId?: string; type?: "alert" | "widgets" | "liveactivity"; priority?: 5 | 10 };
 
 // Apple's answers that mean the phone's token no longer works: the app was deleted, or the token is wrong.
 export const goneDevice = (r: Sent) => r.status === 410 || r.reason === "BadDeviceToken" || r.reason === "Unregistered";
@@ -90,9 +91,9 @@ export class Apns {
         ":method": "POST",
         ":path": `/3/device/${d.token}`,
         authorization: `bearer ${this.bearer()}`,
-        "apns-topic": o.type === "widgets" ? `${TOPIC}.push-type.widgets` : TOPIC,
+        "apns-topic": o.type && o.type !== "alert" ? `${TOPIC}.push-type.${o.type}` : TOPIC,
         "apns-push-type": o.type ?? "alert",
-        "apns-priority": o.type === "widgets" ? "5" : "10",
+        "apns-priority": String(o.priority ?? (o.type === "widgets" ? 5 : 10)),
         ...(o.collapseId && { "apns-collapse-id": o.collapseId }),
       });
       let status = 0;

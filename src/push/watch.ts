@@ -2,15 +2,18 @@
 // an app is connected, the session list goes through the rule (rule.ts), and what it finds goes to every phone that
 // asked, at once or, while the Mac is in use, up to 2 minutes later. Without a key and a phone it runs nothing, not
 // even the list; once both are there, what it finds first counts as seen. The widgets' pinger (widgets.ts) runs on the
-// same tick, and likewise only with a key and a widget push token.
+// same tick, and likewise only with a key and a widget push token; so does the live panel's runner (live.ts), with a
+// key and a push-to-start token.
 
 import { readHidden } from "../hidden";
+import { liveNow } from "../live";
 import { follow, newSummary, type Summary } from "../names";
 import { claudeDir, listSessionsLite, type Session, zmxListAsync } from "../sessions";
 import { Apns, goneDevice, type Sent } from "./apns";
 import { pushPayload } from "./payload";
 import { dueAt, type PushEvent, pushChanges, type PushSession, type Seen, stillDue } from "./rule";
-import { type Creds, type Device, readCreds, readDevices, readWidgets, removeDevice, removeWidget } from "./store";
+import { type LiveDeps, LiveRunner } from "./live";
+import { clearLive, type Creds, type Device, readCreds, readDevices, readLive, readWidgets, removeDevice, removeLive, removeWidget } from "./store";
 import { PING, type WidgetDeps, WidgetPinger } from "./widgets";
 
 export type WatchedSession = PushSession & Pick<Session, "title" | "dir" | "transcript">;
@@ -103,8 +106,8 @@ export const lastActiveAt = () => lastActive;
 const summaries = new Map<string, Summary>(); // by transcript: each finish reads on from where the last one stopped
 let client: { id: string; apns: Apns } | undefined;
 
-// One client while the key stays the same; push-key with a new one gets a new client. Notifications and the widgets'
-// pings share it, so one connection to Apple.
+// One client while the key stays the same; push-key with a new one gets a new client. Notifications, the widgets'
+// pings and the live panel share it, so one connection to Apple.
 export function apnsFor(c: Creds): Apns {
   const id = `${c.keyId}\0${c.teamId}\0${c.key}`;
   if (client?.id !== id) {
@@ -143,11 +146,32 @@ const widgetsLive: WidgetDeps = {
   log: (line) => console.log(line),
 };
 
+// The phone's open apps (server.ts sets it): a message to each events socket opened with the phone's token; false
+// when there's none.
+let tellPhone: (message: string) => boolean = () => false;
+export const onPhoneApps = (f: (message: string) => boolean) => void (tellPhone = f);
+
+const liveLive: LiveDeps = {
+  sessions: async () => listSessionsLite(claudeDir(), await zmxListAsync()),
+  content: (list, now) => liveNow(list, now),
+  creds: () => readCreds(),
+  starts: () => readLive("starts"),
+  activities: () => readLive("activities"),
+  clearActivities: () => clearLive("activities"),
+  send: (c, d, payload, priority) => apnsFor(c).send(d, payload, { type: "liveactivity", priority }),
+  gone: (list, d) => void removeLive(list, d.token),
+  tellApp: (state) => tellPhone(JSON.stringify({ type: "live", state })),
+  now: Date.now,
+  log: (line) => console.log(line),
+};
+
 export function startPush(every = 1000) {
   const w = new PushWatcher(live);
   const p = new WidgetPinger(widgetsLive);
+  const l = new LiveRunner(liveLive);
   setInterval(() => {
     void w.tick();
     void p.tick();
+    void l.tick();
   }, every);
 }

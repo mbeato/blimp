@@ -25,7 +25,7 @@ import { startNotes } from "./notes";
 import { markFollowed } from "./followed";
 import { liveNow } from "./live";
 import { addDevice, addLive, addWidget, isDeviceToken, isLiveToken, isPushEnv, isWidgetToken, removeDevice, removeLive, removeWidget } from "./push/store";
-import { startPush } from "./push/watch";
+import { onPhoneApps, startPush } from "./push/watch";
 import { recap } from "./recaps";
 import { sessionPorts } from "./ports";
 import { cleanText } from "./prompt";
@@ -519,8 +519,18 @@ export function serve(): Server {
   startNotes(); // the same switch
   startDigests(); // and again
   startHandoffs();
-  // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
-  // widget push token (push/watch.ts).
+  // The live panel asks the phone's open app to start it (push/live.ts): through its events sockets.
+  onPhoneApps((message) => {
+    let told = false;
+    for (const ws of phoneSockets)
+      if (ws.data.kind === "events") {
+        ws.send(message);
+        told = true;
+      }
+    return told;
+  });
+  // Phone notifications, the widgets' pings and the live panel: nothing runs until there's a push key and a phone that
+  // asked, a widget push token, or a push-to-start token (push/watch.ts).
   startPush();
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
