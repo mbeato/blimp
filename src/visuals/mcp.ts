@@ -88,9 +88,10 @@ async function postShow(session: string, path: string, title: string): Promise<s
       unix: socketPath(),
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ session, path, title }),
+      signal: AbortSignal.timeout(15_000),
     } as any);
-  } catch {
-    throw new Error("blimpd isn't running");
+  } catch (e) {
+    throw new Error((e as Error).name === "TimeoutError" ? "blimpd didn't answer in 15 s" : "blimpd isn't running");
   }
   const body = (await r.json().catch(() => ({}))) as { id?: string; error?: string };
   if (!r.ok || !body.id) throw new Error(body.error ?? `blimpd answered ${r.status}`);

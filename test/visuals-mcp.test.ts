@@ -124,3 +124,15 @@ test("blimpd visuals-mcp: blimpd's refusal, or no blimpd at all, is the tool's e
   const { out } = await run(dir, [call(1)], 1);
   expect(out[0].result).toEqual({ content: [{ type: "text", text: "Not shown: blimpd isn't running" }], isError: true });
 });
+
+test("blimpd visuals-mcp: a blimpd that never answers is given up on after 15 s", async () => {
+  const dir = mkdtempSync(join(tmp, "slow-"));
+  writeFileSync(join(dir, "token"), "t0ken\n");
+  const fake = Bun.serve({ unix: join(dir, "blimpd.sock"), fetch: () => new Promise<Response>(() => {}) });
+  try {
+    const { out } = await run(dir, [call(1)], 1);
+    expect(out[0].result).toEqual({ content: [{ type: "text", text: "Not shown: blimpd didn't answer in 15 s" }], isError: true });
+  } finally {
+    fake.stop(true);
+  }
+}, 30_000);
