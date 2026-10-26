@@ -453,7 +453,8 @@ export function newSessionName(dir: string, at: Date, taken: string[], custom?: 
 //
 // One start at a time: two in the same second would pick the same name, and the second would just attach.
 let starting: Promise<unknown> = Promise.resolve();
-export type StartOptions = { name?: string; kind?: string; run?: Launch };
+// exact: name as given (the assistant's), not <folder>-<name>; it must be a plain name no session has.
+export type StartOptions = { name?: string; exact?: boolean; kind?: string; run?: Launch };
 export function startSession(dir: string, opts: StartOptions = {}): Promise<string> {
   const p = starting.then(() => start(dir, opts));
   starting = p.catch(() => {});
@@ -462,10 +463,12 @@ export function startSession(dir: string, opts: StartOptions = {}): Promise<stri
 
 const CLAUDE: Launch = { script: 'exec claude "$@"', args: ["claude"] };
 
-async function start(dir: string, { name: custom, kind = "claude", run = CLAUDE }: StartOptions): Promise<string> {
+async function start(dir: string, { name: custom, exact, kind = "claude", run = CLAUDE }: StartOptions): Promise<string> {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`not a folder: ${dir}`);
   const taken = parseZmxList(await zmxListAsync()).map((s) => s.name);
-  const name = newSessionName(dir, new Date(), taken, custom);
+  if (exact && (!custom || !isSafeName(custom))) throw new Error(`not a session name: ${custom}`);
+  if (exact && taken.includes(custom!)) throw new Error(`a session named ${custom} is already running`);
+  const name = exact ? custom! : newSessionName(dir, new Date(), taken, custom);
   const shell = loginShell();
   const cmd = run.script ? [shell, "-l", "-i", "-c", run.script, ...run.args] : [shell, "-l", "-i"];
   // Before it's listed, so it never shows up as the wrong kind.

@@ -242,6 +242,20 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - macOS asks for permission the first time blimp sends a notification.
 - The Dock icon shows how many sessions wait for you, on all servers.
 
+### The assistant
+
+The assistant is one Claude chat that isn't tied to a project. Ask it general questions, send it on errands in the browser, or ask what's going on across your projects. It's off until you turn it on, on the server:
+
+```sh
+blimpd assistant on
+```
+
+- blimpd starts a Claude session named **assistant** in `~/.blimp/assistant` within a few seconds, and starts it again if it stops, carrying on the same chat. Open it like any session. The first time, Claude asks whether to trust its folder; answer Yes.
+- It knows what Claude knows in every session (your own instructions and settings), and its browser tabs use the same logins as your other blimp tabs.
+- It can look at every project freely: `blimpd overview` and `blimpd read`. Before it starts a session, types into one or answers one's question, Claude asks you, with the usual Allow prompt.
+- Add your own instructions in `~/.blimp/assistant/CLAUDE.md`. blimp writes that file once and never changes it again.
+- `blimpd assistant off` ends it. Its folder and chats stay, and turning it on again carries on the latest.
+
 ### Models and keys
 
 Sessions run on the server, so keys and sign-ins live there too. **Settings > Models** has one part per connected server:

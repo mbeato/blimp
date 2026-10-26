@@ -27,8 +27,16 @@ function readJson(file: string): any {
 }
 
 // <socket dir>/config.json: blimpd's settings. Missing or not a JSON object: all defaults.
-export const readConfig = (file = configFile()): { names?: unknown } => readJson(file);
+export const readConfig = (file = configFile()): { names?: unknown; assistant?: unknown } => readJson(file);
 export const namesOn = (file = configFile()) => readConfig(file).names !== false;
+
+// Changes some settings and keeps the rest: through a temp file and a rename, 600.
+export function saveConfig(patch: Record<string, unknown>, file = configFile()) {
+  const tmp = file + ".tmp";
+  writeFileSync(tmp, JSON.stringify({ ...readJson(file), ...patch }), { mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, file);
+}
 
 export function readNames(file = namesFile()): Names {
   const out: Names = {};
