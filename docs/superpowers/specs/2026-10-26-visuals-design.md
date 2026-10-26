@@ -96,11 +96,11 @@ The exact text is written and tested in the plan.
   `GET /visuals/<key>/<id>` and the kit is `GET /visuals/<key>/kit/<file>`. A missing or expired copy is 404.
 - **Every page is sent with these headers:**
   - `Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self'
-    'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; frame-src 'none';
+    'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none';
     object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts`
   - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: private, max-age=2592000,
     immutable` (a copy never changes).
-  - If the spike finds WebKit doesn't match `'self'` in a sandboxed page, blimpd names its own origin instead.
+  - Kit files are sent gzipped (`Content-Encoding: gzip`, made once when blimpd starts) with the same cache line.
 - **The chat** (`chat.ts`): a `tool_use` named `mcp__blimp__show` is a hidden `tool` message as now; when its
   result comes back without an error, the same id becomes `{ role: "visual", title, visual: <id>, gone?,
   summary: "Showed <title>" }`. `gone: true` when the copy is no longer kept, worked out when the chat is sent.
@@ -118,8 +118,13 @@ The exact text is written and tested in the plan.
   - `blimp.js`: Chart.js's defaults from blimp's colours and font (the terminal palette's six colours for series),
     `mermaid.initialize` with blimp's theme and `securityLevel: "strict"`; redraws both when light and dark
     change.
-- Versions: the latest of each released at least two weeks before planning, pinned in the plan with their SHA-256
-  sums and a test that the files match them. Both are MIT, like blimp.
+- Versions (the latest of each released at least two weeks before 10/26), with a test that the files match these
+  SHA-256 sums. Both are MIT, like blimp.
+  - Chart.js 4.5.1, `dist/chart.umd.min.js`: 208,522 bytes (70 KB gzipped),
+    `48444a82d4edcb5bec0f1965faacdde18d9c17db3063d042abada2f705c9f54a`.
+  - Mermaid 12.1.0, `dist/mermaid.min.js`: 5,493,176 bytes (1.6 MB gzipped),
+    `6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2`. The tool's description says to load it
+    only for a diagram.
 
 ## The phone
 
@@ -128,8 +133,9 @@ The exact text is written and tested in the plan.
 - **Tap:** the page full screen over the chat, as a browser tab opens (an `.overlay` in `HomeView`): a top bar with
   the title and Done, the page below. Done goes back to the same place in the chat. The Face ID lock closes it,
   as it closes sheets.
-- **The web view** (`WKWebView` in a `UIViewRepresentable`; the app's first): a non-persistent data store, no
-  script message handlers, no link previews. Its navigation delegate lets the page load its own URL and cancels
+- **The web view** (`WKWebView` in a `UIViewRepresentable`; the app's first): one non-persistent data store for
+  the app's run, shared by every visual, so the kit downloads once per run and nothing is kept on disk; no script
+  message handlers, no link previews. Its navigation delegate lets the page load its own URL and cancels
   everything else, so links do nothing. Pinch zoom as the page's viewport allows.
 - **BlimpKit:** `ChatRole.visual` and the message's `title`, `visual` and `gone`; the page's URL from the server's
   address, the visual key and the id. The app gets the key with `GET /visuals/key` when it's online, as it gets
@@ -151,23 +157,32 @@ The exact text is written and tested in the plan.
 
 ## What a page can and can't do
 
-- Can: run its own scripts and styles, load blimp's kit, draw on canvas and SVG, use `data:` and `blob:` images.
+- Can: run its own scripts and styles, load blimp's kit (its only requests), draw on canvas and SVG, use `data:`
+  and `blob:` images and fonts.
 - Can't: make any request (`connect-src 'none'`: no fetch, XHR or WebSocket), load anything from the internet,
   read the app's storage or cookies (an opaque origin, from `sandbox`), open windows, navigate the app, or leave
   its own URL (the phone's navigation delegate; the Mac's `frame-src`).
 - Its URL holds the visual key, which only reads other visuals, and it can't send a request with it anyway.
 
-## Spike first (throwaway, before the plan's tasks)
+## Spike (10/26, done; throwaway, in the session's scratchpad)
 
-In real WebKit: an iPhone (simulator) web view and the Mac's Tauri webview (and WebKitGTK, which the native e2e
-uses), with a page served by a test blimpd with these headers:
+A test server sent pages with the headers above; WebKitGTK 2.54 (MiniBrowser over WebKitWebDriver) and Playwright's
+Chromium loaded them top-level (the phone's case) and in an `<iframe sandbox="allow-scripts">` inside a page with
+the Mac app's CSP plus `frame-src http://127.0.0.1:*` (the Mac's case). Both engines, both cases:
 
-1. The kit's scripts load from `'self'` under `sandbox allow-scripts`; if not, an explicit origin does.
-2. Chart.js and Mermaid both render with this CSP (no `'unsafe-eval'` needed).
-3. A `fetch` to blimpd and to the internet, and `location = "https://example.com"`, all fail.
-4. On the Mac: an `http://127.0.0.1` frame inside the app's page loads (the parent is `tauri://localhost`).
+1. The kit's scripts load from `'self'` under `sandbox allow-scripts` (the page's origin is `null`).
+2. Chart.js 4.5.1 draws a bar chart and Mermaid 12.1.0 draws a flowchart; neither needs `'unsafe-eval'`.
+3. Blocked: fetch, XHR and WebSocket to blimpd, a 127.0.0.1 port and another site; `sendBeacon` (it returns true,
+   but nothing arrives); images from another site; cookies and `localStorage`; `window.open`; navigating the
+   parent. With `img-src 'self'` an `<img>` did reach blimpd (no token, a 404), hence `img-src data: blob:`.
+4. On the Mac, a frame sending itself to another site is blocked by `frame-src`; to a 127.0.0.1 port it loads,
+   as this spec says.
+5. Top-level, a page can still navigate itself away (CSP doesn't cover navigation), so the phone's navigation
+   delegate is needed.
 
-If any of these fails and has no fix in the server's headers, stop and report before building.
+Not covered here: iOS's WKWebView (the phone's UI test checks that the page draws) and the Mac's real webview with
+a `tauri://localhost` parent (the native e2e and MAC-CHECKLIST.md check it). The app's API calls already go from
+that parent to `http://127.0.0.1`, so the frame is expected to load.
 
 ## Tests
 
