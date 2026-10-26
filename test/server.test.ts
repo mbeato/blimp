@@ -2283,3 +2283,79 @@ describe("widgets", () => {
     expect((await api("/push/widget", { method: "POST", body: "null" })).status).toBe(400);
   });
 });
+
+describe("feed", () => {
+  const config = join(tmp, "config.json");
+  const feedFile = join(tmp, "feed.json");
+  const a = "a".repeat(16);
+  const b = "b".repeat(16);
+  const card = (id: string, at: number) => ({ id, url: `https://example.com/${id}`, title: `Card ${id}`, sources: [{ kind: "hn", name: "Hacker News", score: 10 }], at, rank: 1, summary: "What it is.", tries: 0 });
+  // Cards a and b, ready; lastRun now, so the job doesn't fetch while the tests run. Then the switch.
+  const setUp = (on: boolean) => {
+    const now = Date.now();
+    writeFileSync(feedFile, JSON.stringify({ cards: { [a]: card(a, now), [b]: card(b, now - 1000) }, seen: {}, saved: [], runs: { "Hacker News": { at: now, ok: true } }, lastRun: now, calls: [] }));
+    writeFileSync(config, JSON.stringify(on ? { names: false, feed: { on: true } } : { names: false }));
+  };
+  const post = (path: string, body: unknown) => api(path, { method: "POST", body: JSON.stringify(body) });
+  afterAll(() => {
+    writeFileSync(config, JSON.stringify({ names: false }));
+    rmSync(feedFile, { force: true });
+  });
+
+  test("GET /feed while it's off: nothing", async () => {
+    setUp(false);
+    expect(await (await api("/feed")).json()).toEqual({ on: false, cards: [], saved: [], runs: {}, next: 0 });
+  });
+
+  test("on: the unseen cards in order; a seen one doesn't come back; a saved one is listed until it's unsaved", async () => {
+    setUp(true);
+    let f = await (await api("/feed")).json();
+    expect(f.on).toBe(true);
+    expect(f.cards.map((c: any) => c.id)).toEqual([a, b]);
+    expect(f.cards[0].tries).toBeUndefined();
+    expect(f.runs["Hacker News"].ok).toBe(true);
+    expect((await post("/feed/seen", { ids: [a] })).status).toBe(204);
+    expect((await post("/feed/saved", { id: b, saved: true })).status).toBe(204);
+    f = await (await api("/feed")).json();
+    expect(f.cards.map((c: any) => c.id)).toEqual([b]);
+    expect(f.saved.map((c: any) => c.id)).toEqual([b]);
+    expect((await post("/feed/saved", { id: b, saved: false })).status).toBe(204);
+    expect((await (await api("/feed")).json()).saved).toEqual([]);
+  });
+
+  test("bad ids are 400; an unknown card is 404", async () => {
+    setUp(true);
+    expect((await post("/feed/seen", { ids: ["nope"] })).status).toBe(400);
+    expect((await post("/feed/seen", { ids: "x" })).status).toBe(400);
+    expect((await post("/feed/seen", { ids: Array(501).fill(a) })).status).toBe(400);
+    expect((await post("/feed/saved", { id: a, saved: "yes" })).status).toBe(400);
+    expect((await post("/feed/saved", { id: "c".repeat(16), saved: true })).status).toBe(404);
+  });
+
+  test("the events socket says whether it's on and how many are unseen, as it opens and when that changes", async () => {
+    setUp(true);
+    // blimpd publishes only a change from the last message it sent, and setUp rewrote the file behind its back: tell it (nothing marked) so the drop to 1 below is a change.
+    await post("/feed/seen", { ids: [] });
+    const s = await socket("/events");
+    try {
+      await until(() => s.messages.find((m) => m.type === "feed"), "the feed message");
+      expect(s.messages.find((m) => m.type === "feed")).toEqual({ type: "feed", on: true, unseen: 2 });
+      await post("/feed/seen", { ids: [a] });
+      await until(() => s.messages.some((m) => m.type === "feed" && m.unseen === 1), "the count to drop to 1");
+    } finally {
+      s.ws.close();
+    }
+  });
+
+  test("the widget key can't read the feed", async () => {
+    const phoneFile = join(tmp, "phone-token");
+    const phone = "beef".repeat(16);
+    writeFileSync(phoneFile, phone);
+    try {
+      const r = await api("/feed", { headers: { Authorization: `Bearer ${widgetKey(phone)}` } }, false);
+      expect(r.status).toBe(401);
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
+  });
+});

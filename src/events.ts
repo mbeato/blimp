@@ -1,5 +1,5 @@
 // The events socket: the session list whenever it changes, the ports programs in sessions listen
-// on (ports.ts), the server browser's tabs (browser/service.ts), and changes to the paths the app
+// on (ports.ts), the server browser's tabs (browser/service.ts), the phone feed's switch and unseen count (feed/store.ts), and changes to the paths the app
 // watches. The Mac app also says here when a blimp window is in front, so the phone's notifications wait
 // (push/watch.ts).
 
@@ -7,6 +7,7 @@ import { type FSWatcher, statSync, watch } from "node:fs";
 import type { Server, ServerWebSocket } from "bun";
 import { browserTabs } from "./browser/service";
 import { shownDigests } from "./digests";
+import { feedMessage } from "./feed/store";
 import { guard } from "./files";
 import { sessionPorts } from "./ports";
 import { markActive } from "./push/watch";
@@ -66,6 +67,7 @@ export async function openEvents(ws: ServerWebSocket<EventsData>, server: Server
     ws.send(await portsMessage(zmx));
   } catch {}
   ws.send(browserMessage());
+  ws.send(feedMessage());
 }
 
 const MAX_WATCHES = 2000;
