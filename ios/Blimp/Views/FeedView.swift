@@ -108,7 +108,7 @@ struct CaughtUpView: View {
         .accessibilityIdentifier("feedCaughtUp")
     }
 
-    private static func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
+    nonisolated private static func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
 }
 
 /// The saved cards, newest first: a tap shows the card, a swipe left unsaves it.

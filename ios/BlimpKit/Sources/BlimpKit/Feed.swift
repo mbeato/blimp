@@ -109,7 +109,8 @@ public enum FeedText {
     public static func sourceLine(_ c: FeedCard, now: Date) -> String {
         var parts: [String]
         if c.sources.count == 1, let s = c.sources.first {
-            parts = [s.name] + (score(s).map { [$0] } ?? [])
+            parts = [s.name]
+            if let sc = score(s) { parts.append(sc) }
         } else {
             parts = c.sources.map { s in s.score.map { "\(s.name) \(FeedText.grouped($0))" } ?? s.name }
         }
@@ -135,9 +136,14 @@ public enum FeedText {
 
     /// A line for each source whose last run failed, by name: "Reddit didn't load at 2:00 PM: no key".
     public static func failures(_ runs: [String: FeedRun], time: (Date) -> String) -> [String] {
-        runs.filter { !$0.value.ok }.sorted { $0.key < $1.key }.map {
-            "\($0.key) didn't load at \(time(Date(timeIntervalSince1970: $0.value.at / 1000)))" + ($0.value.reason.map { ": \($0)" } ?? "")
+        var lines: [String] = []
+        for name in runs.keys.sorted() {
+            guard let run = runs[name], !run.ok else { continue }
+            let when = time(Date(timeIntervalSince1970: run.at / 1000))
+            let why = run.reason.map { ": \($0)" } ?? ""
+            lines.append("\(name) didn't load at \(when)\(why)")
         }
+        return lines
     }
 }
 
