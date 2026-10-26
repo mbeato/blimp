@@ -5,7 +5,7 @@
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Api, type BrowserTab, type Conn, type Port, type Session } from "./api";
+import { Api, type BrowserTab, type Conn, type Port, type Session, type Visual } from "./api";
 import { EventsSocket } from "./events";
 
 export type Server = { host: string; user?: string; port?: number };
@@ -135,6 +135,7 @@ export class ServerLink {
   private checking = false;
   private watching = new Map<number, string[]>();
   private fsListeners = new Set<(paths: string[]) => void>();
+  private visualListeners = new Set<(v: Visual) => void>();
 
   constructor(
     public server: Server,
@@ -194,6 +195,7 @@ export class ServerLink {
           this.onChange(this);
         },
         onFs: (paths) => this.fsListeners.forEach((f) => f(paths)),
+        onVisual: (v) => this.visualListeners.forEach((f) => f(v)),
         onClose: () => this.retry("Lost the connection to blimpd."),
       });
       this.events.watch(this.watched());
@@ -292,6 +294,12 @@ export class ServerLink {
   onFs(fn: (paths: string[]) => void) {
     this.fsListeners.add(fn);
     return () => void this.fsListeners.delete(fn);
+  }
+
+  // A page a session showed: each workbench opens it if it's its folder's (Workbench, lib/visuals.ts).
+  onVisual(fn: (v: Visual) => void) {
+    this.visualListeners.add(fn);
+    return () => void this.visualListeners.delete(fn);
   }
 
   private set(status: LinkStatus) {

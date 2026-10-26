@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mergeById, messagesFromLine, newScan, readAppended, readLast, toolSummary } from "../src/chat";
@@ -58,6 +58,43 @@ describe("messagesFromLine", () => {
     ]);
     // Output whose command came before what was read: skipped, as a tool result is.
     expect(messagesFromLine(user("u5", "<bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>", { parentUuid: "gone" }), s)).toEqual([]);
+  });
+
+  test("a show call (blimp's tool) becomes a visual, under the call's id, once its result says which", () => {
+    const sock = mkdtempSync(join(tmp, "sock-"));
+    const before = process.env.BLIMPD_SOCKET;
+    process.env.BLIMPD_SOCKET = join(sock, "blimpd.sock");
+    try {
+      mkdirSync(join(sock, "visuals"));
+      writeFileSync(join(sock, "visuals", "0123456789ab.html"), "<h1>x</h1>");
+      const s = newScan("/home/u/p");
+      const call = (tid: string, title: string) =>
+        messagesFromLine(assistant(`a-${tid}`, [{ type: "tool_use", id: tid, name: "mcp__blimp__show", input: { path: "chart.html", title } }]), s);
+      const result = (tid: string, text: string, is_error = false) =>
+        messagesFromLine(user(`r-${tid}`, [{ type: "tool_result", tool_use_id: tid, content: [{ type: "text", text }], is_error }]), s);
+
+      // While it runs, a tool step like any other (hidden on the phone; the working row says its summary).
+      expect(call("t1", "Test results")[0]).toMatchObject({ id: "a-t1#0", role: "tool", name: "mcp__blimp__show", summary: "Showing Test results" });
+      expect(result("t1", "Shown on the phone and the Mac. visual: 0123456789ab")).toEqual([
+        { id: "a-t1#0", at, role: "visual", title: "Test results", visual: "0123456789ab", summary: "Showed Test results" },
+      ]);
+      // A copy no longer kept: gone.
+      call("t2", "Old one");
+      expect(result("t2", "Shown on the phone and the Mac. visual: 00000000ffff")).toEqual([
+        { id: "a-t2#0", at, role: "visual", title: "Old one", visual: "00000000ffff", summary: "Showed Old one", gone: true },
+      ]);
+      // Refused, or a result with no id: it stays a tool step.
+      call("t3", "Nope");
+      expect(result("t3", "Not shown: no such file: chart.html", true)[0]).toMatchObject({ role: "tool", error: true });
+      call("t4", "Odd");
+      expect(result("t4", "something else")[0]).toMatchObject({ role: "tool" });
+      // Another server's tool named show isn't blimp's.
+      messagesFromLine(assistant("a-t5", [{ type: "tool_use", id: "t5", name: "mcp__other__show", input: { title: "X" } }]), s);
+      expect(result("t5", "Shown on the phone and the Mac. visual: 0123456789ab")[0]).toMatchObject({ role: "tool" });
+    } finally {
+      if (before === undefined) delete process.env.BLIMPD_SOCKET;
+      else process.env.BLIMPD_SOCKET = before;
+    }
   });
 
   test("tool input and output are capped at 20 000 characters", () => {

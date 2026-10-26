@@ -168,6 +168,14 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] Stop blimpd (or turn Tailscale off). After the next refresh the widgets are greyed with "as of".
 - [ ] A working row's time counts up by itself; past an hour it says "1h", past a day "1d".
 
+## Visuals
+
+- [ ] In a chat, ask Claude for a chart of something (say, "show me a chart of the last 10 commits by day"). The first show in a session asks permission (the phone can answer it); allow it. A card with its title shows in the chat.
+- [ ] Tap it: the page opens full screen, its chart and any diagram drawn, in light and in dark mode (switch in Control Center while it's open: it redraws).
+- [ ] A tap on a bar shows its value. Pinch zooms if the page allows it. A link in the page does nothing.
+- [ ] × goes back to the same place in the chat. The lock hides it; after Face ID it's there again.
+- [ ] Ask Claude to change the chart: a second card; the first still shows the old one.
+
 ## The blimp
 
 - [ ] The home screen icon: the refined blimp on graphite, in light and dark mode.

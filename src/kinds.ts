@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { HttpError } from "./files";
 import { browserReady } from "./browser/service";
-import { mcpConfigPath, selfCommand } from "./browser/mcp";
+import { browserMcpConfigPath, mcpConfigPath, selfCommand } from "./browser/mcp";
 import { blimpDir, loginShell } from "./sessions";
 
 // What GET /kinds lists. note: why one can't start, or a status (Codex signed in or not).
@@ -166,16 +166,17 @@ export function listKinds(have: Set<string>, home = homedir(), file = kindsFile(
 }
 
 // How to start kind `id`, or 400 if it's unknown or can't start here. resume: Claude Code only.
-// Claude Code and Codex get the server browser's MCP when there's a Chrome to run and npx to run
-// the MCP with (browser: whether the first holds; a parameter for tests).
+// Claude Code and Codex always get blimp's MCP (the show tool, visuals/mcp.ts), and the server browser's too when
+// there's a Chrome to run and npx to run that MCP with (browser: whether the first holds; a parameter for tests):
+// Claude Code gets the config file with both then (browser/mcp.json), else the one with blimp's only.
 export async function launchFor(id: string, resume?: string, home = homedir(), file = kindsFile(), browser = browserReady): Promise<Launch> {
   const have = await installed(file);
   const resumeArgs = resume ? ["--resume", resume] : [];
-  const mcp = have.has("npx") && browser();
-  const claudeArgs = ["claude", ...(mcp ? ["--mcp-config", mcpConfigPath()] : []), ...resumeArgs];
+  const browserMcp = have.has("npx") && browser();
+  const claudeArgs = ["claude", "--mcp-config", browserMcp ? browserMcpConfigPath() : mcpConfigPath(), ...resumeArgs];
   // The login shell found nothing at all, so it couldn't tell: Claude Code is tried anyway, as
   // before kinds. A missing claude then shows in the session itself.
-  if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", ...resumeArgs] };
+  if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", "--mcp-config", mcpConfigPath(), ...resumeArgs] };
   // Settings' Codex sign-in: the user finishes it in the terminal (a code to type in a browser).
   if (id === "codex-login") {
     if (!have.has("codex")) throw new HttpError(400, "codex isn't installed");
@@ -189,8 +190,8 @@ export async function launchFor(id: string, resume?: string, home = homedir(), f
   if (id === "codex") {
     // Codex takes MCP servers as config overrides; values are TOML, which JSON strings and arrays are.
     const [cmd, ...rest] = selfCommand();
-    const server = mcp ? ["-c", `mcp_servers.blimp-browser.command=${JSON.stringify(cmd)}`, "-c", `mcp_servers.blimp-browser.args=${JSON.stringify([...rest, "browser-mcp"])}`] : [];
-    return { script: 'exec codex "$@"', args: ["codex", ...server] };
+    const server = (name: string, sub: string) => ["-c", `mcp_servers.${name}.command=${JSON.stringify(cmd)}`, "-c", `mcp_servers.${name}.args=${JSON.stringify([...rest, sub])}`];
+    return { script: 'exec codex "$@"', args: ["codex", ...server("blimp", "visuals-mcp"), ...(browserMcp ? server("blimp-browser", "browser-mcp") : [])] };
   }
   if (id === "claude-glm") {
     // What claude-glm sets. The login profile runs before the script, so these are set in the script,

@@ -1,7 +1,9 @@
 // The /events WebSocket: the session list as it changes, the ports sessions listen on, the
-// server browser's tabs, whether the assistant is on, and changes to watched paths.
+// server browser's tabs, whether the assistant is on, changes to watched paths, and pages sessions
+// showed (lib/visuals.ts).
 
-import type { Api, BrowserTab, Port, Session } from "./api";
+import type { Api, BrowserTab, Port, Session, Visual } from "./api";
+import { visualFrom } from "./visuals";
 
 export type EventHandlers = {
   onSessions: (sessions: Session[]) => void;
@@ -9,6 +11,7 @@ export type EventHandlers = {
   onBrowser: (tabs: BrowserTab[]) => void;
   onAssistant: (on: boolean) => void; // the assistant's switch (Settings)
   onFs: (paths: string[]) => void;
+  onVisual: (v: Visual) => void;
   onClose: () => void; // the socket dropped or never opened; the caller decides when to retry
 };
 
@@ -34,6 +37,10 @@ export class EventsSocket {
       else if (msg.type === "browser" && Array.isArray(msg.tabs)) this.h.onBrowser(msg.tabs);
       else if (msg.type === "assistant" && typeof msg.on === "boolean") this.h.onAssistant(msg.on);
       else if (msg.type === "fs" && Array.isArray(msg.paths)) this.h.onFs(msg.paths);
+      else if (msg.type === "visual") {
+        const v = visualFrom(msg);
+        if (v) this.h.onVisual(v);
+      }
     };
     this.ws.onclose = () => {
       if (!this.closed) h.onClose();

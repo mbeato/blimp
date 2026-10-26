@@ -93,6 +93,9 @@ export type DirEntry = { name: string; kind: "file" | "dir"; size: number; mtime
 export type DirListing = { path: string; entries: DirEntry[] };
 export type FileBody = { bytes: Uint8Array<ArrayBuffer>; mtime: number; contentType: string };
 
+// A page a session showed (lib/visuals.ts): its copy's id, its title, and the session, folder and file it came from.
+export type Visual = { id: string; title: string; session: string; dir: string; source: string; at: number };
+
 // What the app needs to reach one blimpd: the local end of the tunnel and the token.
 // version: blimpd's, from /health.
 export type Conn = { id: string; base: string; token: string; home: string; version?: string };
@@ -249,6 +252,16 @@ export class Api {
 
   closeBrowserTab(id: string) {
     return this.req(`/browser/tabs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  // The visual key: it reads visuals' pages and blimp's kit, and nothing else (blimpd's GET /visuals/key).
+  async visualKey() {
+    return (await this.json<{ key: string }>("/visuals/key")).key;
+  }
+
+  // A visual's page, with the key in its path, so the page's relative kit/ paths carry it: what VisualView's frame loads.
+  visualUrl(key: string, id: string) {
+    return new URL(`/visuals/${key}/${id}`, this.conn.base).toString();
   }
 
   fsList(path: string) {

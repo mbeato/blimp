@@ -6,8 +6,9 @@
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
 // live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
 // from the drawer opens full screen over all of it (BrowserView), and not under the lock's cover. The feed from the
-// drawer's Feed button opens the same way (FeedView). The assistant's icon at the top of the strip opens its chat (its
-// folder isn't a project, so the project stays), with its jobs bar (JobsBar) on top; a job opened there goes back to it.
+// drawer's Feed button opens the same way (FeedView), and a page Claude showed, from its card in a chat (VisualView).
+// The assistant's icon at the top of the strip opens its chat (its folder isn't a project, so the project stays), with
+// its jobs bar (JobsBar) on top; a job opened there goes back to it.
 import BlimpKit
 import SwiftUI
 
@@ -28,6 +29,8 @@ struct HomeView: View {
     @State private var browserTab: String?
     /// The feed, full screen over everything (FeedView), from the drawer's Feed button.
     @State private var showFeed = false
+    /// A page Claude showed, full screen over everything (VisualView), from its card in a chat.
+    @State private var openVisual = OpenVisual()
     /// The drawer's New session was tapped: the inbox's box takes the keyboard, and sets this back.
     @State private var newSession = false
     /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
@@ -123,7 +126,14 @@ struct HomeView: View {
                 FeedView(onClose: { showFeed = false })
             }
         }
+        .overlay {
+            if !covered, let visual = openVisual.message {
+                VisualView(message: visual, onClose: { openVisual.message = nil })
+                    .id(visual.id)
+            }
+        }
         .environment(\.sideScrollers, sideScrollers)
+        .environment(openVisual)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showFolders) {
             if let home = store.serverHome {
@@ -188,6 +198,7 @@ struct HomeView: View {
                     // Close what could cover the chat.
                     browserTab = nil
                     showFeed = false
+                    openVisual.message = nil
                     showSettings = false
                     showFolders = false
                     show(.session(name))

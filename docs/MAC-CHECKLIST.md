@@ -169,6 +169,13 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: in the file tree, click a folder, then the New folder button, type a name and press Enter. Then the New file button, a name, Enter.
   Expect: the folder shows inside the one you clicked. The file shows inside the new folder and opens in a tab. Both exist on the server (`ls`).
 
+## Visuals
+
+- [ ] Ask Claude for a chart in a session of the open project. The first show in a session asks permission (the terminal shows the prompt); allow it. A tab with its title opens and comes to the front; the terminal keeps the keyboard.
+- [ ] The chart and any diagram are drawn, in light and dark (System Settings > Appearance while it's open: it redraws). A narrow window and a wide one both lay it out.
+- [ ] Ask for a change: the same tab shows the new copy. A visual from a session in another project doesn't open here.
+- [ ] While you type in a file, a new visual's tab is added without taking the editor's place.
+
 ## Links
 
 - [ ] **Terminal links open in the default browser.**

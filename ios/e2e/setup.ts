@@ -82,6 +82,15 @@ for (const f of [chatIn, promptIn, stopIn, permIn]) writeFileSync(f, "");
 const chatSid = "e2e00000-0000-0000-0000-000000000001";
 const chatLog = join(claude, "projects", "e2e", `${chatSid}.jsonl`);
 const echo = String.raw`n=0; while IFS= read -r l; do printf '%s\n' "$l" >> '${chatIn}'; n=$((n+1)); t=$(printf %s "$l" | tr -d '\033' | sed 's/\[20[01]~//g'); ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); printf '{"type":"user","uuid":"in%s","timestamp":"%s","message":{"role":"user","content":"%s"}}\n{"type":"assistant","uuid":"out%s","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Shipped: %s"}]}}\n' "$n" "$ts" "$t" "$n" "$ts" "$t" >> '${chatLog}'; done`;
+// Two pages Claude showed in demo-chat (blimp's show tool): one blimpd still keeps (the fixture the Mac's e2e shows
+// too), and one whose copy is gone, a greyed card.
+const VISUAL = "a1b2c3d4e5f6";
+mkdirSync(join(dirname(sock), "visuals"), { recursive: true });
+writeFileSync(join(dirname(sock), "visuals", `${VISUAL}.html`), readFileSync(join(import.meta.dir, "..", "..", "test", "fixtures", "visual.html")));
+const shown = (n: number, title: string, id: string) => [
+  line({ type: "assistant", uuid: `v${n}`, message: { role: "assistant", content: [{ type: "tool_use", id: `s${n}`, name: "mcp__blimp__show", input: { path: "results.html", title } }] } }),
+  line({ type: "user", uuid: `w${n}`, message: { role: "user", content: [{ type: "tool_result", tool_use_id: `s${n}`, content: [{ type: "text", text: `Shown on the phone and the Mac. visual: ${id}` }] }] } }),
+];
 await standIn("demo-chat", join(work, "blimp-demo"), echo, chatSid, [
   user("u1", "Add a dark mode toggle to settings"),
   line({ type: "assistant", uuid: "a1", message: { role: "assistant", content: [
@@ -89,6 +98,8 @@ await standIn("demo-chat", join(work, "blimp-demo"), echo, chatSid, [
     { type: "tool_use", id: "t1", name: "Bash", input: { command: "swift test" } },
   ] } }),
   line({ type: "user", uuid: "u2", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "Test Suite 'All tests' passed" }] } }),
+  ...shown(1, "Test results", VISUAL),
+  ...shown(2, "Last week's results", "0000000000ff"),
   said("a2", "Done. The toggle is in **Settings**, under Appearance.\n\n- `SettingsView.swift`: the new toggle\n- `Theme.swift`: reads it at launch"),
 ]);
 

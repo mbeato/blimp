@@ -1,5 +1,5 @@
 // How each chat message looks: your prompts as bubbles, Claude's replies as native Markdown (a long
-// one folded, with Show more, except the newest). Tool steps aren't shown; the working row says the latest
+// one folded, with Show more, except the newest), and a page Claude showed as a card that opens it (VisualCard). Tool steps aren't shown; the working row says the latest
 // one. In Claude's latest reply, a code block blimpd offers to run has Run under it (ChatExtras.swift).
 import BlimpKit
 import SwiftUI
@@ -23,6 +23,7 @@ struct MessageRow: View {
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("message.compacted")
         case .shell: ShellRun(command: message.input ?? "", output: message.output)
+        case .visual: VisualCard(message: message)
         }
     }
 }
@@ -56,6 +57,57 @@ struct ShellRun: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
+        }
+    }
+}
+
+/// A page Claude showed (blimp's show tool): its title and Tap to open (a tap only, not a swipe), which opens it full screen (VisualView). One
+/// whose copy is no longer kept (after 30 days) is greyed and opens nothing.
+struct VisualCard: View {
+    let message: ChatMessage
+    @Environment(OpenVisual.self) private var open: OpenVisual?
+
+    var body: some View {
+        let gone = message.gone == true
+        Button { open?.message = message } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.title3)
+                    .frame(width: 40, height: 40)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(message.title ?? "Visual").font(.subheadline.weight(.semibold)).lineLimit(2)
+                    Text(gone ? "No longer kept" : "Tap to open").font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if !gone {
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(TapOnlyButtonStyle())
+        .disabled(gone)
+        .opacity(gone ? 0.5 : 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("message.visual")
+    }
+}
+
+/// A button that fires only on a tap: a swipe that starts on it (the drawer's, from anywhere in the chat) doesn't press
+/// it, as it can a plain button. Disabled, a tap does nothing.
+private struct TapOnlyButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Tapped(configuration: configuration) }
+
+    private struct Tapped: View {
+        let configuration: PrimitiveButtonStyleConfiguration
+        @Environment(\.isEnabled) private var enabled
+
+        var body: some View {
+            configuration.label.onTapGesture { if enabled { configuration.trigger() } }
         }
     }
 }
