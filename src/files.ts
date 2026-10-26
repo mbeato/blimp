@@ -83,8 +83,8 @@ function realPath(p: string): string {
   }
 }
 
-// blimp's own key files: the daemon's token, the phone's token, the browser gate's key, the push key (all
-// beside the socket), the model key, and the folder of secrets given to sessions (secrets.ts).
+// blimp's own key files: the daemon's token, the phone's token, the browser gate's key, the push key and
+// the Reddit key (all beside the socket), the model key, and the folder of secrets given to sessions (secrets.ts).
 // No fs route may serve, replace, or archive them: a client holding one token — the phone's —
 // must not read or plant another (the Mac's), so `blimpd pair --revoke` stays final.
 export function secretPaths(home = realHome(), dir = socketDir()): string[] {
@@ -94,6 +94,8 @@ export function secretPaths(home = realHome(), dir = socketDir()): string[] {
     join(dir, "browser", "key"),
     join(dir, "apns.p8"),
     join(dir, "apns.p8.tmp"),
+    join(dir, "reddit.json"),
+    join(dir, "reddit.json.tmp"),
     join(home, ".config", "zai", "key"),
     join(dir, "secrets"),
   ].map(realPath);

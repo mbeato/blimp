@@ -90,6 +90,10 @@ describe("guardFile", () => {
     // The file the key is written through, in case a crash leaves it behind.
     expect(secretPaths(home, blimp)).toContain(join(blimp, "apns.p8.tmp"));
     expect(status(() => guardFile(join(blimp, "apns.p8.tmp"), home, blimp))).toBe(403);
+    expect(secretPaths(home, blimp)).toContain(join(blimp, "reddit.json"));
+    expect(status(() => guardFile(join(blimp, "reddit.json"), home, blimp))).toBe(403);
+    expect(secretPaths(home, blimp)).toContain(join(blimp, "reddit.json.tmp"));
+    expect(status(() => guardFile(join(blimp, "reddit.json.tmp"), home, blimp))).toBe(403);
   });
 
   test("a symlink to one is refused", () => {
