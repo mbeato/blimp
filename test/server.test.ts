@@ -2740,6 +2740,14 @@ describe("texting the assistant", () => {
     expect((await call("/messages/in", relayKey, { method: "POST", body: "{}" })).status).toBe(400);
   });
 
+  // Past Bun's default idle timeout (10 s, cut at about 12), as the relay's 25 s wait needs.
+  test("a long wait with nothing to send answers once it's over, its request held open", async () => {
+    const start = Date.now();
+    const r = await call("/messages/out?wait=15", relayKey);
+    expect([r.status, await r.json()]).toEqual([200, { texts: [] }]);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(14_500);
+  }, 40000);
+
   test("a text in is typed into the assistant, once", async () => {
     const v = await view();
     const r = await textIn("g1", "hello from the phone");

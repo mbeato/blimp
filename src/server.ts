@@ -207,9 +207,8 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     theTexter().touch();
     if (path === "/messages/in" && req.method === "POST") return Response.json(await theTexter().receive(await req.json().catch(() => undefined)));
     if (path === "/messages/out" && get) {
+      // Held open up to 25 s, which serve's idleTimeout allows.
       const wait = Math.min(Math.max(Number(q.get("wait")) || 0, 0), 25);
-      // Held open up to 25 s: past Bun's 10 s idle timeout.
-      server.timeout(req, wait + 10);
       return Response.json({ texts: await theTexter().waitOut(wait * 1000, req.signal) });
     }
     const done = path.match(/^\/messages\/out\/([^/]+)\/sent$/);
@@ -519,6 +518,9 @@ export function serve(): Server {
     unix: sock,
     // Uploads stream to disk; the cap itself is checked as they go (files.ts).
     maxRequestBodySize: MAX_UPLOAD + 1024 * 1024,
+    // The relay's GET /messages/out waits up to 25 s for texts. Bun closes a request quiet for its default 10 s
+    // (about 12 in practice), and server.timeout() for one request does nothing on a unix socket.
+    idleTimeout: 35,
     async fetch(req, server) {
       // Preflights carry no token. `*` is safe because the token isn't a cookie.
       if (req.method === "OPTIONS")
