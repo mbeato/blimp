@@ -252,8 +252,9 @@ export function App() {
     if (session) takeSession(`${server}/${session}`);
     setLayout((l) => l && openTab(l, server, dir, session));
     // The assistant's folder isn't a project: opening the assistant (its pinned row, a notification, ⌘K) gives it a
-    // tab but never makes it a recent project.
-    const assistant = !!session && links.get(server)?.sessions?.find((s) => s.name === session)?.assistant === true;
+    // tab but never makes it a recent project. blimpd always names it exactly "assistant", so the name alone is enough
+    // (the session list may not have arrived yet).
+    const assistant = session === "assistant" || (!!session && links.get(server)?.sessions?.find((s) => s.name === session)?.assistant === true);
     if (dir && !assistant) void rememberProject(server, dir);
   };
 

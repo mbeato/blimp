@@ -107,6 +107,7 @@ function Assistant(props: { link: ServerLink; named: boolean }) {
   if (on === null) return null;
   const turn = (v: boolean) => {
     setAsking(false);
+    setError("");
     props.link.setAssistant(v).then(
       () => setError(""),
       (e) => setError(errorText(e)),
@@ -124,7 +125,14 @@ function Assistant(props: { link: ServerLink; named: boolean }) {
           <button className="danger" onClick={() => turn(false)}>
             Turn Off
           </button>
-          <button onClick={() => setAsking(false)}>Cancel</button>
+          <button
+            onClick={() => {
+              setAsking(false);
+              setError("");
+            }}
+          >
+            Cancel
+          </button>
         </div>
       )}
       {error && <p className="settings-error">{error}</p>}
