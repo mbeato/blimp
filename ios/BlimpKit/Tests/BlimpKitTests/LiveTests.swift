@@ -54,3 +54,10 @@ private let full = #"{"turn":{"session":"blimp-phone","dir":"/u/blimp","title":"
     #expect(LiveText.link(LiveState(rows: [work, ask], counts: WidgetSummary.Counts(needs: 1, new: 0, working: 1))) == WidgetLink.url(session: "ask"))
     #expect(LiveText.link(LiveState(rows: [work], counts: WidgetSummary.Counts(needs: 0, new: 0, working: 1))) == WidgetLink.app)
 }
+
+@Test func blimpdAsksTheOpenAppToStartThePanelOverTheEventsSocket() throws {
+    let l = try JSONDecoder().decode(LiveState.self, from: Data(full.utf8))
+    #expect(EventsMessage.decode(Data(#"{"type":"live","state":\#(full)}"#.utf8)) == .live(l))
+    #expect(EventsMessage.decode(Data(#"{"type":"live","state":{"rows":5}}"#.utf8)) == .other)
+    #expect(EventsMessage.decode(Data(#"{"type":"sessions","sessions":[]}"#.utf8)) == .sessions([]))
+}

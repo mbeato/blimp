@@ -359,20 +359,22 @@ public enum ChatEvent: Sendable, Equatable {
 }
 
 public enum EventsMessage: Sendable, Equatable {
-    /// The server browser's tabs (Browser.swift), every folder's.
-    case sessions([Session]), browser([BrowserTab]), other
+    /// The server browser's tabs (Browser.swift), every folder's. live: blimpd asks the open app to start the live
+    /// panel with this content (src/push/live.ts).
+    case sessions([Session]), browser([BrowserTab]), live(LiveState), other
 
     // One malformed session or tab must not blank the whole list, so each element decodes on its own.
     private struct Lenient<T: Decodable>: Decodable {
         let value: T?
         init(from decoder: Decoder) throws { value = try? T(from: decoder) }
     }
-    private struct Wire: Decodable { let type: String; let sessions: [Lenient<Session>]?; let tabs: [Lenient<BrowserTab>]? }
+    private struct Wire: Decodable { let type: String; let sessions: [Lenient<Session>]?; let tabs: [Lenient<BrowserTab>]?; let state: Lenient<LiveState>? }
 
     public static func decode(_ data: Data) -> EventsMessage {
         guard let w = try? JSONDecoder().decode(Wire.self, from: data) else { return .other }
         if w.type == "sessions", let s = w.sessions { return .sessions(s.compactMap(\.value)) }
         if w.type == "browser", let t = w.tabs { return .browser(t.compactMap(\.value)) }
+        if w.type == "live", let l = w.state?.value { return .live(l) }
         return .other
     }
 }

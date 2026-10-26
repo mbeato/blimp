@@ -1,4 +1,5 @@
-// Settings: which server this phone is paired with, notifications, the voice replies are read in, and sign out.
+// Settings: which server this phone is paired with, notifications, the live panel, the voice replies are read in, and
+// sign out.
 import AVFoundation
 import SwiftUI
 
@@ -10,6 +11,8 @@ struct SettingsView: View {
     @State private var chosen = UserDefaults.standard.string(forKey: Speaker.voiceKey)
     /// Notifications from this server (Push.off is the opposite).
     @State private var notify = !Push.off
+    /// The live panel on the lock screen (LiveShare.off is the opposite).
+    @State private var live = !LiveShare.off
 
     var body: some View {
         NavigationStack {
@@ -29,6 +32,17 @@ struct SettingsView: View {
                     Text(Push.shared.denied
                         ? "iOS has them off for blimp: Settings > Notifications > blimp."
                         : "When a session waits on you or a long turn ends, even with blimp closed. The server needs its push key first (blimpd push-key).")
+                }
+                Section {
+                    Toggle("Live panel on the lock screen", isOn: $live)
+                        .tint(.green)
+                        .accessibilityIdentifier("liveSwitch")
+                        .onChange(of: live) { _, on in
+                            LiveShare.off = !on
+                            if on { LiveShare.update() } else { LiveShare.stop() }
+                        }
+                } footer: {
+                    Text("What needs you and what's working, and a turn you start here step by step, on the lock screen and in the Dynamic Island. Titles show while the phone is locked.")
                 }
                 Section {
                     voiceRow("Automatic", detail: "The best one installed", id: nil)

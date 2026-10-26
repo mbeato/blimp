@@ -56,6 +56,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Set before launch ends, so a tap that launched the app still reaches it.
         UNUserNotificationCenter.current().delegate = self
+        // The live panel's tokens, also when iOS launches the app in the background to hand over one blimpd started.
+        LiveShare.observe()
         return true
     }
 

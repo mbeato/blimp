@@ -86,6 +86,8 @@ final class Store {
                     self.sessions = list
                 case .browser(let tabs):
                     self.browserTabs = tabs
+                case .live(let state):
+                    LiveShare.start(state)
                 case .other:
                     break
                 }
@@ -125,6 +127,7 @@ final class Store {
 
     func signOut() {
         stopPush()
+        LiveShare.stop()
         WidgetShare.forget(api: api)
         events?.stop()
         events = nil
@@ -187,6 +190,8 @@ final class Store {
                 self?.serverVersion = health.version
                 self?.serverHome = health.home
                 await WidgetShare.update(api: api) { self?.server == api.server }
+                // The live panel's tokens, with the widget key WidgetShare just left in the App Group.
+                LiveShare.update()
             }
         case .closed(code: 401):
             connection = .unauthorized

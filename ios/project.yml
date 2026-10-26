@@ -10,7 +10,7 @@ targets:
   Blimp:
     type: application
     platform: iOS
-    sources: [Blimp]
+    sources: [Blimp, Live]
     dependencies:
       - package: BlimpKit
       - target: BlimpWidgets
@@ -50,6 +50,10 @@ targets:
         NSMicrophoneUsageDescription: blimp listens while you hold the mic button, to type what you say.
         NSSpeechRecognitionUsageDescription: blimp turns what you say into text on this iPhone.
         NSCameraUsageDescription: blimp uses the camera to scan the pairing code from your server.
+        # The live panel (LiveShare.swift), a Live Activity that blimpd's pushes start and update. Frequent updates:
+        # a needs-you goes at priority 10, which iOS otherwise limits.
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
         # Only HTTPS and the system's own encryption, so TestFlight needn't ask about export rules for each build.
         ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
