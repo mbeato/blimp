@@ -1069,6 +1069,24 @@ describe("chat", () => {
     expect(await cli(["read", `${tag}-nope`])).toMatchObject({ code: 1, err: `blimpd read: no session named ${tag}-nope` });
     expect((await cli(["read", name, "--last", "0"])).code).toBe(1);
   }, 20000);
+
+  test("blimpd answer picks a waiting session's option by its number, as the phone does; not when nothing is asked", async () => {
+    const sid = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d";
+    const { name } = await fakeClaude("ans1", sid, []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    expect(await cli(["answer", name, "1"])).toMatchObject({ code: 1, err: `blimpd answer: ${name} isn't asking anything` });
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${name}.json`);
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
+    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
+    await until(async () => (await listed(name))?.prompt?.options?.length === 2, "the prompt's options");
+    expect(await cli(["answer", name, "3"])).toMatchObject({ code: 1, err: `blimpd answer: ${name}'s question has no option 3` });
+    expect(await cli(["answer", name, "x"])).toMatchObject({ code: 1, err: "blimpd answer: usage: blimpd answer <session> <option number>" });
+    expect(await cli(["answer", name, "1"])).toMatchObject({ code: 0, out: `answered ${name}: Yes` });
+    await enterUntil(viewer, "got:1", "the digit reached the session");
+    rmSync(status);
+    viewer.ws.close();
+  }, 20000);
 });
 
 describe("starting sessions", () => {
@@ -1104,6 +1122,21 @@ describe("starting sessions", () => {
     expect((await post({ dir, prompt: " \x1b " })).status).toBe(400);
     expect((await post({ dir, prompt: 5 })).status).toBe(400);
     expect((await post({ dir, shell: true, prompt: "hi" })).status).toBe(400);
+  }, 15000);
+
+  test("blimpd start starts a Claude session in a folder with its first message", async () => {
+    const dir = join(homeDir, tag);
+    mkdirSync(dir, { recursive: true });
+    const r = await cli(["start", dir, "look", "at", "the", "logs"]);
+    expect(r.code).toBe(0);
+    const name = r.out.match(/^started (\S+) in /)![1];
+    made.push(name);
+    expect(r.out).toBe(`started ${name} in ${dir}`);
+    const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    await until(() => s.text.includes("-- look at the logs]"), "the first message in Claude's arguments");
+    s.ws.close();
+    expect(await cli(["start", dir])).toMatchObject({ code: 1, err: "blimpd start: usage: blimpd start <folder> <first message>" });
+    expect((await cli(["start", join(tmp, "elsewhere"), "hi"])).code).toBe(1);
   }, 15000);
 
   test("a viewer that attaches at once sees what the session printed, while `zmx list` asks all the time", async () => {

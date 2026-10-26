@@ -15,11 +15,14 @@
 //   blimpd assistant on|off|status  the assistant: one Claude session blimpd keeps running (assistant.ts)
 //   blimpd overview            every project's sessions and unread past conversations, for the assistant (overview.ts)
 //   blimpd read <session or conversation id> [--last N]  its latest messages (overview.ts)
+//   blimpd start <folder> <message>  a new Claude session there with that first message (act.ts)
+//   blimpd answer <session> <n>      pick option n of what a session asks (act.ts)
 //   blimpd --version
 
 import pkg from "../package.json";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
+import { runAnswer, runStart } from "./act";
 import { runAssistant } from "./assistant";
 import { findChrome } from "./browser/chrome";
 import { runBrowserMcp } from "./browser/mcp";
@@ -97,9 +100,13 @@ if (cmd === "sessions") {
   process.exit(await runOverview());
 } else if (cmd === "read") {
   process.exit(await runRead(args));
+} else if (cmd === "start") {
+  process.exit(await runStart(args));
+} else if (cmd === "answer") {
+  process.exit(await runAnswer(args));
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | assistant on|off|status | overview | read <session or conversation id> [--last N] | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | assistant on|off|status | overview | read <session or conversation id> [--last N] | start <folder> <message> | answer <session> <option number> | --version");
   process.exit(cmd ? 1 : 0);
 }
