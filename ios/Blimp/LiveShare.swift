@@ -43,14 +43,21 @@ enum LiveShare {
         }
         Task {
             for await activity in Panel.activityUpdates {
+                // Off in Settings: a panel that came anyway (a push-to-start sent before blimpd heard) ends at once.
+                if off {
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                    continue
+                }
                 // A panel not seen before is the newest: the others go (the app's own is watched from start() on, so
-                // it never ends the one blimpd pushed).
-                if !watched.contains(activity.id) {
+                // it never ends the one blimpd pushed). It is watched first, so its own token is kept even if an end
+                // below is slow.
+                let isNew = !watched.contains(activity.id)
+                watch(activity)
+                if isNew {
                     for other in current where other.id != activity.id {
                         await other.end(nil, dismissalPolicy: .immediate)
                     }
                 }
-                watch(activity)
             }
         }
         for activity in current { watch(activity) }
@@ -88,9 +95,13 @@ enum LiveShare {
     }
 
     /// Each time the app is online, the tokens again: blimpd forgets them on pair --revoke, and one sent while offline
-    /// was lost.
+    /// was lost. With the switch off, the DELETEs again and the panels ended, in case the first were lost (as
+    /// Store.startPush does for notifications).
     static func update() {
-        guard !off else { return }
+        guard !off else {
+            stop()
+            return
+        }
         if let data = Panel.pushToStartToken { send("POST", kind: "start", token: hex(data)) }
         for activity in current {
             if let data = activity.pushToken { send("POST", kind: "activity", token: hex(data)) }

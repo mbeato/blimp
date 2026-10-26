@@ -11,7 +11,7 @@ import WidgetKit
 struct LiveWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: BlimpActivityAttributes.self) { context in
-            LivePanel(state: context.state).padding(14).widgetURL(LiveText.link(context.state))
+            LivePanel(state: context.state).padding(12).widgetURL(LiveText.link(context.state))
         } dynamicIsland: { context in
             let state = context.state
             let compact = LiveText.compact(state.counts)
@@ -45,14 +45,15 @@ struct LiveWidget: Widget {
     }
 }
 
-/// The lock screen's panel: the turn, the rows, then "blimp" and the counts.
+/// The lock screen's panel: the turn, the rows (2 under a turn with steps, which is taller; else as many as came), then
+/// "blimp" and the counts. iOS cuts a lock screen panel at about 160 pt.
 struct LivePanel: View {
     let state: LiveState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             if let turn = state.turn { TurnView(turn: turn) }
-            ForEach(state.rows) { LiveRowView(row: $0) }
+            ForEach(state.rows.prefix(state.turn?.steps == nil ? state.rows.count : 2)) { LiveRowView(row: $0) }
             HStack {
                 Text(verbatim: "blimp").font(.caption.bold())
                 Spacer()
