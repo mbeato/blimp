@@ -4,34 +4,59 @@
 // question still on screen, by its choice's text.
 
 import { resolve } from "node:path";
+import { ASSISTANT } from "./assistant";
 import { callBlimpd, getJson } from "./client";
 import { choiceLabel, type Prompt } from "./prompt";
 
 const errorOf = async (r: Response) => ((await r.json().catch(() => ({}))) as any)?.error ?? `blimpd answered ${r.status}`;
 
-// blimpd start <folder> <first message…>: a new Claude session there.
-export async function runStart(args: string[]): Promise<number> {
+// `--job <reason>` from anywhere in args: its words, and the other args.
+export function takeJob(args: string[]): { args: string[]; job?: string } {
+  const i = args.indexOf("--job");
+  if (i < 0) return { args };
+  return { args: [...args.slice(0, i), ...args.slice(i + 2)], job: args[i + 1] };
+}
+
+// Run by the assistant, an act on another session makes it one of the assistant's jobs (jobs.ts), named by --job or
+// else by what was said. The act is done either way, so a job that couldn't be recorded is only said.
+export async function recordJob(command: string, session: string, reason: string): Promise<void> {
+  if (process.env.ZMX_SESSION !== ASSISTANT || session === ASSISTANT) return;
+  const words = Array.from(reason.replace(/\s+/g, " ").trim()).slice(0, 80).join("") || session;
+  try {
+    const r = await callBlimpd("/assistant/jobs", { method: "POST", body: JSON.stringify({ session, reason: words }) });
+    if (!r.ok) console.error(`blimpd ${command}: done, but the job wasn't recorded: ${await errorOf(r)}`);
+  } catch (e) {
+    console.error(`blimpd ${command}: done, but the job wasn't recorded: ${(e as Error).message}`);
+  }
+}
+
+// blimpd start <folder> <first message…> [--job <reason>]: a new Claude session there.
+export async function runStart(argv: string[]): Promise<number> {
   const fail = (m: string) => (console.error(`blimpd start: ${m}`), 1);
+  const { args, job } = takeJob(argv);
   const [folder, ...words] = args;
   const text = words.join(" ");
-  if (!folder || !text.trim()) return fail("usage: blimpd start <folder> <first message>");
+  if (!folder || !text.trim()) return fail("usage: blimpd start <folder> <first message> [--job <reason>]");
   const dir = resolve(folder);
   try {
     const r = await callBlimpd("/sessions", { method: "POST", body: JSON.stringify({ dir, prompt: text }) });
     if (!r.ok) return fail(await errorOf(r));
-    console.log(`started ${((await r.json()) as { name: string }).name} in ${dir}`);
+    const { name } = (await r.json()) as { name: string };
+    console.log(`started ${name} in ${dir}`);
+    await recordJob("start", name, job || text);
     return 0;
   } catch (e) {
     return fail((e as Error).message);
   }
 }
 
-// blimpd answer <session> <option number>: option N (from 1, as overview numbers them) of what it asks now.
-export async function runAnswer(args: string[]): Promise<number> {
+// blimpd answer <session> <option number> [--job <reason>]: option N (from 1, as overview numbers them) of what it asks now.
+export async function runAnswer(argv: string[]): Promise<number> {
   const fail = (m: string) => (console.error(`blimpd answer: ${m}`), 1);
+  const { args, job } = takeJob(argv);
   const [name, option, ...rest] = args;
   const n = Number(option);
-  if (!name || rest.length || !Number.isInteger(n) || n < 1) return fail("usage: blimpd answer <session> <option number>");
+  if (!name || rest.length || !Number.isInteger(n) || n < 1) return fail("usage: blimpd answer <session> <option number> [--job <reason>]");
   try {
     const sessions = await getJson<{ name: string; state: string; prompt?: Prompt & { at: number } }[]>("/sessions");
     const s = sessions.find((x) => x.name === name);
@@ -45,6 +70,7 @@ export async function runAnswer(args: string[]): Promise<number> {
     const r = await callBlimpd(`/sessions/${encodeURIComponent(name)}/answer`, { method: "POST", body: JSON.stringify({ at: p.at, pick: n - 1, label }) });
     if (!r.ok) return fail(await errorOf(r));
     console.log(`answered ${name}: ${label}`);
+    await recordJob("answer", name, job || `answer: ${label}`);
     return 0;
   } catch (e) {
     return fail((e as Error).message);
