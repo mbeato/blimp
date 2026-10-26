@@ -52,6 +52,7 @@ export class LiveRunner {
   private panel?: Panel;
   private listed = false;
   private busy = false;
+  private firstSeen = new Map<string, number>();
 
   constructor(private deps: LiveDeps) {}
 
@@ -68,41 +69,48 @@ export class LiveRunner {
       }
       const now = this.deps.now();
       const list = await this.deps.sessions();
-      // An empty list after sessions is more likely a zmx list that failed than every session gone (as in watch.ts).
-      if (!list.length && this.listed) return;
-      this.listed = list.length > 0;
+      // An empty list after sessions is more likely a zmx list that failed than every session gone (as in watch.ts): no
+      // starts and no updates from it, but the quiet clock, the quiet end and the restart still run.
+      const doubtful = !list.length && this.listed;
+      if (list.length) this.listed = true;
       const state = this.deps.content(list, now);
       const token = this.deps.activities()[0];
       // blimpd started again while a panel was up: carry on with it, as of when its token came.
-      if (!this.panel && token) this.panel = { since: token.at, sent: "", needs: new Set() };
+      // The token's `at` moves when the app sends the same token again, so the first time seen counts.
+      if (!this.panel && token) {
+        if (!this.firstSeen.has(token.token)) this.firstSeen.set(token.token, token.at);
+        this.panel = { since: this.firstSeen.get(token.token) ?? token.at, sent: "", needs: new Set() };
+      }
       const p = this.panel;
       if (!p) {
-        if (isBusy(state)) await this.begin(creds, start, state, now);
+        if (isBusy(state) && !doubtful) await this.begin(creds, start, state, now);
         return;
       }
       if (isBusy(state)) p.quiet = undefined;
       else p.quiet ??= now;
       if (p.quiet !== undefined && now - p.quiet >= QUIET) return await this.end(creds, token, state, now);
       if (now - p.since >= RESTART) {
-        await this.end(creds, token, state, now);
-        if (isBusy(state)) await this.begin(creds, start, state, now);
+        if ((await this.end(creds, token, state, now)) && isBusy(state) && !doubtful) await this.begin(creds, start, state, now);
         return;
       }
       if (!token) {
         // The app was asked, and no token came: it wasn't open after all.
-        if (p.asked !== undefined && now - p.asked >= APP_GRACE) {
+        if (p.asked !== undefined && now - p.asked >= APP_GRACE && !doubtful) {
           p.asked = undefined;
           await this.pushStart(creds, start, state, p, now);
         }
         return;
       }
+      if (doubtful) return;
       const shape = liveShape(state);
       if (shape === p.sent) return;
       const needs = needsOf(state);
       const urgent = [...needs].some((n) => !p.needs.has(n));
-      p.sent = shape;
-      p.needs = needs;
-      await this.send(creds, "activities", token, livePayload("update", state, now), urgent ? 10 : 5);
+      // Only once Apple has answered does it count as sent: a push that didn't get through is tried again next tick.
+      if (!(await this.send(creds, "activities", token, livePayload("update", state, now), urgent ? 10 : 5))) {
+        p.sent = shape;
+        p.needs = needs;
+      }
     } catch (e) {
       this.deps.log(`push: live panel: ${(e as Error).message}`);
     } finally {
@@ -125,17 +133,21 @@ export class LiveRunner {
     await this.send(creds, "starts", start, livePayload("start", state, now), 10);
   }
 
-  private async end(creds: Creds, token: Device | undefined, state: LiveState, now: number) {
+  // False when the end didn't get through (no answer, or Apple failed): the panel and its token stay, for the next tick.
+  private async end(creds: Creds, token: Device | undefined, state: LiveState, now: number): Promise<boolean> {
+    if (token && (await this.send(creds, "activities", token, livePayload("end", state, now), 10))) return false;
     this.panel = undefined;
-    if (token) await this.send(creds, "activities", token, livePayload("end", state, now), 10);
     this.deps.clearActivities();
+    return true;
   }
 
-  private async send(creds: Creds, list: LiveList, d: Device, payload: object, priority: 5 | 10) {
+  // True when it should be tried again: no answer from Apple (status 0) or a failure on its side (5xx).
+  private async send(creds: Creds, list: LiveList, d: Device, payload: object, priority: 5 | 10): Promise<boolean> {
     const r = await this.deps.send(creds, d, payload, priority);
     if (goneDevice(r)) {
       this.deps.gone(list, d);
       this.deps.log(`push: Apple says a live panel token no longer works (${r.reason ?? r.status}), so it's removed`);
     } else if (r.status !== 200) this.deps.log(`push: Apple said ${r.status || "nothing"}${r.reason ? ` (${r.reason})` : ""} to the live panel`);
+    return r.status === 0 || r.status >= 500;
   }
 }

@@ -213,10 +213,13 @@ test("a panel whose token never came gets nothing more, and is forgotten after t
   t.state = working(2);
   await r.tick();
   t.state = quiet;
+  await r.tick(); // the quiet starts here
   t.clock += QUIET;
   await r.tick();
-  await r.tick();
   expect(events(t)).toEqual(["starts:start:10"]);
+  t.state = working();
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10", "starts:start:10"]);
 });
 
 test("tokens Apple says are gone are removed", async () => {
@@ -253,14 +256,93 @@ test("the push-to-start token gone (the switch off in Settings): it forgets the 
   expect(events(t)).toEqual(["starts:start:10", "starts:start:10"]);
 });
 
-test("an empty list after sessions (a failed zmx list) changes nothing", async () => {
+test("an empty list after a good one (a failed zmx list): that tick sends nothing new", async () => {
+  const { t, r } = setup();
+  t.state = working();
+  await r.tick();
+  t.activities = [panelToken(T)];
+  t.list = [];
+  t.state = working(2);
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10"]);
+});
+
+test("an empty list kept for the quiet 10 minutes still ends the panel", async () => {
   const { t, r } = setup();
   t.state = working();
   await r.tick();
   t.activities = [panelToken(T)];
   t.list = [];
   t.state = quiet;
-  t.clock += QUIET * 2;
+  await r.tick();
+  t.clock += QUIET - 1;
   await r.tick();
   expect(events(t)).toEqual(["starts:start:10"]);
+  t.clock += 1;
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10", "activities:end:10"]);
+});
+
+test("a good busy list after an empty tick resets the quiet clock", async () => {
+  const { t, r } = setup();
+  t.state = working();
+  await r.tick();
+  t.activities = [panelToken(T)];
+  t.list = [];
+  t.state = quiet;
+  await r.tick();
+  t.clock += QUIET - 1000;
+  t.list = [anySession];
+  t.state = working();
+  await r.tick();
+  t.clock += QUIET - 1000;
+  await r.tick();
+  expect(events(t).filter((e) => e.includes(":end:"))).toEqual([]);
+});
+
+test("an update Apple didn't take (no answer, 5xx) is sent again next tick; a 200 is not", async () => {
+  let status = 0;
+  const { t, r } = setup({ answer: (d) => (d.token === startToken.token ? { status: 200 } : { status }) });
+  t.state = working();
+  await r.tick();
+  t.activities = [panelToken(T)];
+  t.state = working(2);
+  await r.tick();
+  status = 503;
+  await r.tick();
+  status = 200;
+  await r.tick();
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10", "activities:update:5", "activities:update:5", "activities:update:5"]);
+});
+
+test("an end that fails (no answer) keeps the panel and its token, and is sent again", async () => {
+  let status = 0;
+  const { t, r } = setup({ answer: (d) => (d.token === startToken.token ? { status: 200 } : { status }) });
+  t.state = working();
+  await r.tick();
+  t.activities = [panelToken(T)];
+  t.state = quiet;
+  await r.tick();
+  t.clock += QUIET;
+  await r.tick();
+  expect(t.activities).toEqual([panelToken(T)]);
+  status = 200;
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10", "activities:update:5", "activities:end:10", "activities:end:10"]);
+  expect(t.activities).toEqual([]);
+});
+
+test("the same token sent again doesn't move the restart", async () => {
+  const { t, r } = setup();
+  t.activities = [panelToken(T - RESTART + 60_000)];
+  t.state = working();
+  await r.tick();
+  t.activities = [panelToken(T + 30_000)]; // the app posted it again
+  t.creds = undefined; // the panel is forgotten for a tick, and picked up from its token again
+  await r.tick();
+  t.creds = key;
+  t.clock += 60_000;
+  await r.tick();
+  expect(events(t)).toEqual(["activities:update:5", "activities:end:10", "starts:start:10"]);
 });
