@@ -25,7 +25,7 @@ function setup() {
     on: true,
     assistantOn: true,
     session: { name: "assistant", kind: "claude", state: "done", transcript: "/t.jsonl" } as Session | undefined,
-    reply: {} as { id?: string; text?: string },
+    reply: {} as { id?: string; text?: string; ended?: { id: string; text: string }[] },
     typed: [] as string[],
     typeFails: undefined as Error | undefined,
     answers: [] as { id: string; m: unknown }[],
@@ -38,7 +38,12 @@ function setup() {
     on: () => t.on,
     assistantOn: () => t.assistantOn,
     session: async () => t.session,
-    reply: async () => t.reply,
+    // As the real one: the replies that ended a turn are given once.
+    reply: async () => {
+      const r = t.reply;
+      t.reply = { ...r, ended: undefined };
+      return r;
+    },
     type: async (text) => {
       if (t.typeFails) throw t.typeFails;
       t.typed.push(text);
@@ -193,6 +198,32 @@ test("a turn's reply is texted once the turn is over, once, as plain text; the r
   t.reply = { id: "r2", text: "  " };
   await x.tick();
   expect([out().length, state().sentReply]).toEqual([1, "r2"]);
+});
+
+// A prompt can follow a reply before a tick sees the turn done: that reply comes as ended.
+test("a reply that ended a turn is texted while the next turn works, once, and before the reply of a turn now done", async () => {
+  const { t, x, set, out, state } = setup();
+  t.reply = { id: "r0", text: "old" };
+  await x.tick();
+  set({ state: "working" });
+  t.reply = { id: "r2", text: "in between", ended: [{ id: "r1", text: "**first**" }] };
+  await x.tick();
+  expect([out(), state().sentReply]).toEqual([["first"], "r1"]);
+  await x.tick();
+  expect(out()).toEqual(["first"]);
+  set({ state: "done" });
+  t.reply = { id: "r2", text: "second" };
+  await x.tick();
+  expect(out()).toEqual(["first", "second"]);
+  set({ state: "working" });
+  t.reply = { id: "r2", text: "second", ended: [{ id: "r2", text: "second" }] }; // texted at done already
+  await x.tick();
+  expect(out()).toEqual(["first", "second"]);
+  set({ state: "done" });
+  t.reply = { id: "r4", text: "fourth", ended: [{ id: "r3", text: "third" }] };
+  await x.tick();
+  await x.tick();
+  expect([out(), state().sentReply]).toEqual([["first", "second", "third", "fourth"], "r4"]);
 });
 
 test("with no conversation when texting began, the first reply is texted", async () => {

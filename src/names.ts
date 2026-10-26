@@ -79,12 +79,16 @@ export function addMessage(s: Summary, m: ChatMessage) {
   }
 }
 
-// Read in chunks with a turn of the event loop between them, like chat.ts readLast.
-export async function follow(file: string, s: Summary) {
+// Read in chunks with a turn of the event loop between them, like chat.ts readLast. each sees every new message
+// before it's added.
+export async function follow(file: string, s: Summary, each?: (m: ChatMessage) => void) {
   for (;;) {
     if (statSync(file).size < s.scan.offset) Object.assign(s, newSummary()); // rewritten shorter
     const from = s.scan.offset;
-    for (const m of readAppended(file, s.scan, 4 << 20)) addMessage(s, m);
+    for (const m of readAppended(file, s.scan, 4 << 20)) {
+      each?.(m);
+      addMessage(s, m);
+    }
     if (s.scan.offset === from) return;
     await Bun.sleep(0);
   }

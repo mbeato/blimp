@@ -2771,6 +2771,29 @@ describe("texting the assistant", () => {
     expect(await out()).toEqual([]);
   }, 20000);
 
+  // Claude Code writes a queued prompt about 0.25 s after the turn it waited for ends: sooner than a tick sees done.
+  // A prompt in the middle of a turn doesn't make the text before it a reply.
+  test("a reply a prompt came right after is texted too, before the next one; text in between isn't", async () => {
+    status({ state: "working", at: Date.now() });
+    const prompt = (uuid: string, text: string) => line({ type: "user", uuid, message: { role: "user", content: text } });
+    appendFileSync(
+      transcript,
+      said("a2", "first") +
+        prompt("u2", "and then?") +
+        line({ type: "assistant", uuid: "a2b", message: { role: "assistant", content: [{ type: "text", text: "looking" }, { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } }] } }) +
+        line({ type: "user", uuid: "u2b", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tu1", content: "x" }] } }) +
+        prompt("u2c", "also this") +
+        said("a3", "second"),
+    );
+    status({ state: "done", at: Date.now(), event: "Stop" });
+    const texts = await until(async () => {
+      const t = await out(2);
+      return t.some((x) => x.text === "second") ? t : undefined;
+    }, "the second reply texted", 10000);
+    expect(texts.map((t) => t.text)).toEqual(["first", "second"]);
+    for (const t of texts) await sent(t.id);
+  }, 20000);
+
   test("a permission question is texted, and a texted yes answers it", async () => {
     const v = await view();
     const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "blimpd send x hi" }, cwd: mDir });
