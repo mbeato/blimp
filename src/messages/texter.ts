@@ -39,6 +39,7 @@ export class Texter {
   private started: number;
   private relaySeen?: number;
   private alerted = false;
+  private onSince?: number; // when texting was last seen turned on; the relay can't call while it's off
 
   constructor(private deps: TexterDeps) {
     this.started = deps.now();
@@ -110,10 +111,14 @@ export class Texter {
     if (this.busy) return;
     this.busy = true;
     try {
-      if (!this.deps.on()) return;
+      if (!this.deps.on()) {
+        this.onSince = undefined;
+        return;
+      }
       const now = this.deps.now();
+      this.onSince ??= now;
       const file = this.deps.file;
-      if (!this.alerted && now - Math.max(this.relaySeen ?? 0, this.started) >= QUIET) {
+      if (!this.alerted && now - Math.max(this.relaySeen ?? 0, this.started, this.onSince) >= QUIET) {
         this.alerted = true;
         await this.deps.alert(OFFLINE).catch((e) => this.deps.log(`messages: couldn't tell the phone the relay is quiet (${(e as Error).message})`));
       }
@@ -193,7 +198,10 @@ const live = (): TexterDeps => ({
     if (!creds || !devices.length) return console.log(`messages: ${body} (no phone to tell)`);
     const apns = new Apns(creds, HOSTS);
     try {
-      for (const d of devices) await apns.send(d, { aps: { alert: { title: "blimp", body }, sound: "default" } });
+      for (const d of devices) {
+        const r = await apns.send(d, { aps: { alert: { title: "blimp", body }, sound: "default" } });
+        if (r.status !== 200) console.log(`messages: Apple didn't take the offline alert (${r.status || "nothing"}${r.reason ? `, ${r.reason}` : ""})`);
+      }
     } finally {
       apns.close();
     }

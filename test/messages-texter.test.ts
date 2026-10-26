@@ -221,6 +221,7 @@ test("a texted reply closes the question: a yes after it is a message", async ()
 
 test("a relay quiet for 5 minutes is told once; a call starts the count again; live means it called within 5 minutes", async () => {
   const { t, x, state } = setup();
+  await x.tick(); // texting is on from T
   t.clock = T + QUIET - 1;
   await x.tick();
   expect(t.alerts).toEqual([]);
@@ -255,4 +256,22 @@ test("waitOut: the texts at once when there are some, none after the wait", asyn
   const [o] = await x.waitOut(5000);
   expect(o.text).toBe(PICTURE_ONLY);
   expect(Object.keys(o).sort()).toEqual(["id", "text"]);
+});
+
+test("turning texting on after a long off spell doesn't alert at once: the quiet counts from when it was turned on", async () => {
+  const { t, x } = setup();
+  t.on = false;
+  for (let i = 0; i <= 10; i++) {
+    t.clock = T + i * QUIET;
+    await x.tick();
+  }
+  t.on = true;
+  t.clock = T + 10 * QUIET;
+  await x.tick();
+  expect(t.alerts).toEqual([]);
+  t.clock = T + 11 * QUIET;
+  await x.tick();
+  expect(t.alerts).toEqual([OFFLINE]);
+  await x.tick();
+  expect(t.alerts).toEqual([OFFLINE]);
 });
