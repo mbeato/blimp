@@ -525,7 +525,7 @@ final class BlimpUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5) // over a second on screen: it's seen once the feed moves on
         app.swipeUp()
         let two = element("feedCard-2222222222222222")
-        try until(two, "hittable == true", "the second card after a swipe up")
+        try until(two.buttons["feedSave"], "hittable == true", "the second card after a swipe up")
         two.buttons["feedSave"].tap()
         try until(two.buttons["feedSave"], "label CONTAINS 'Saved'", "Save to say Saved")
         shot("50b-feed-saved")
@@ -537,7 +537,7 @@ final class BlimpUITests: XCTestCase {
         try until(element("feedClose"), "exists == false", "the feed to close")
         try openDrawer()
         element("feedButton").tap()
-        try until(element("feedCard-3333333333333333"), "hittable == true", "the feed opening on the third card")
+        try until(element("feedCard-3333333333333333").buttons["feedSave"], "hittable == true", "the feed opening on the third card")
         if element("feedCard-1111111111111111").exists || element("feedCard-2222222222222222").exists {
             throw failed("a card already seen came back")
         }
