@@ -38,6 +38,7 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 | Someone who sees your locked phone | Read commands, questions or replies | A notification's text shows on the lock screen. iOS Settings > Notifications > Show Previews > When Unlocked hides it until Face ID. The README says so. |
 | Someone who gets the widget key (it's in blimp's App Group on the phone) | Read session names, titles, states, times and full folder paths, and counts | It reads `GET /widget` and nothing else. The App Group's files (the server's address and the widget key) can be in the phone's backups, and so reach a phone restored from one; the Keychain's address and token never do. To change the key: `blimpd pair --revoke`, then `blimpd pair` and pair the phone again. |
 | Someone who sees your locked phone, with blimp's rectangular widget on the lock screen | Read session titles | It shows the top two titles, as notifications show their text. The round and inline widgets show counts only. |
+| A hostile page, file or session output the assistant reads (prompt injection) | Get the assistant to act on your other sessions: type into one, start one, answer its question | The assistant's folder settings make Claude ask you before `blimpd start`, `send` and `answer` and before connectors' send tools, and blimpd starts it in default permission mode whatever your settings say. `ask` beats any `allow`. Read the command in the prompt before you allow it. This catches mistakes and tricks that use those commands; it isn't a wall (see Accepted). |
 
 ## Accepted
 
@@ -55,6 +56,7 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 - **The MCP comes from npm.** `npx` downloads `chrome-devtools-mcp`, pinned to 1.11.0, the first time a session uses it, and runs it as you.
 - **Token lifetime.** The token stays the same until you delete `~/.blimp/token` and restart blimpd. Anyone who has it can already reach you over SSH.
 - **Notifications go through Apple.** Once you add a push key, blimpd makes outbound HTTPS connections to Apple's push service, and a notification's text (a session's title, a command's summary, a question, the start of a reply, with secrets taken out) passes through Apple's servers to reach the phone.
+- **The assistant can get around its own prompts.** It runs as you, like every session, so a command that does what `blimpd send` does another way (curl to blimpd's socket with the token, or `zmx`) wouldn't match the `ask` rules. Its instructions forbid that, and its permission prompts catch the commands it's told to use. A separate guard that checks everything it sends out is possible later. Buying, posting or signing up in its browser tabs is a rule in its instructions, not a prompt: a click on Buy looks like any other click.
 
 ## Latency budget
 
