@@ -5,6 +5,7 @@
 // content-state, which iOS decodes into BlimpKit's LiveState (ios/BlimpKit/Sources/BlimpKit/Live.swift): the same
 // names, times in ms as numbers. Apple takes at most 4 KB a push, so titles are cut to fit.
 
+import { basename } from "node:path";
 import { followed } from "./followed";
 import { readHidden } from "./hidden";
 import type { Session } from "./sessions";
@@ -32,7 +33,7 @@ export function liveState(sessions: Session[], hidden: Set<string>, turn: { sess
   const rows = w.rows.filter((r) => r.session !== turn?.session.name).slice(0, turn ? ROWS_UNDER_TURN : ROWS_ALONE);
   const t = turn && {
     session: turn.session.name,
-    dir: turn.session.dir,
+    dir: basename(turn.session.dir), // the panel shows two letters of it, not the path
     title: turn.session.title,
     state: (turn.session.state === "waiting" ? "needs" : "working") as WidgetState,
     since: turn.at,
@@ -41,7 +42,7 @@ export function liveState(sessions: Session[], hidden: Set<string>, turn: { sess
   // Titles at most 80 characters, then 10 fewer at a time until it fits.
   const fit = (n: number): LiveState => ({
     ...(t && { turn: { ...t, title: cut(t.title, n) } }),
-    rows: rows.map((r) => ({ ...r, title: cut(r.title, n) })),
+    rows: rows.map((r) => ({ ...r, dir: basename(r.dir), title: cut(r.title, n) })),
     counts: w.counts,
   });
   let n = TITLE;

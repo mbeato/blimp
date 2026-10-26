@@ -36,7 +36,8 @@ test("a followed turn on top: its title, project, state, when its prompt went in
   const steps = { done: 3, total: 7, current: "Running the tests" };
   const l = liveState([followed, ...many(5)], new Set(), { session: followed, at: T - 3000, steps }, T);
   expect(ROWS_UNDER_TURN).toBe(3);
-  expect(l.turn).toEqual({ session: "phone", dir: "/u/cq", title: "Server update", state: "working", since: T - 3000, steps });
+  expect(l.turn).toEqual({ session: "phone", dir: "cq", title: "Server update", state: "working", since: T - 3000, steps });
+  expect(l.rows.every((r) => r.dir === "blimp")).toBe(true);
   expect(l.rows.map((r) => r.session)).toEqual(["w4", "w3", "w2"]);
   expect(l.counts.working).toBe(6);
 });

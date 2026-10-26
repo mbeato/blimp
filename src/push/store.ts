@@ -96,10 +96,12 @@ const writeLists = (file: string, l: Lists) =>
   );
 
 // Adds one, or moves it to the front with its env and time; only the 5 newest are kept.
-function add(key: keyof Lists, token: string, env: PushEnv, now: number, file: string): Device[] {
+// `keepAt`: one already kept keeps its first time (a panel's token: its age sets the restart).
+function add(key: keyof Lists, token: string, env: PushEnv, now: number, file: string, keepAt = false): Device[] {
   const t = token.toLowerCase();
   const l = readLists(file);
-  l[key] = [{ token: t, env, at: now }, ...l[key].filter((d) => d.token !== t)].slice(0, MAX_DEVICES);
+  const at = keepAt ? (l[key].find((d) => d.token === t)?.at ?? now) : now;
+  l[key] = [{ token: t, env, at }, ...l[key].filter((d) => d.token !== t)].slice(0, MAX_DEVICES);
   writeLists(file, l);
   return l[key];
 }
@@ -122,7 +124,7 @@ export const addWidget = (token: string, env: PushEnv, now = Date.now(), file = 
 export const removeWidget = (token: string, file = devicesFile()) => remove("widgets", token, file);
 
 export const readLive = (list: LiveList, file = devicesFile()): Device[] => readLists(file)[list];
-export const addLive = (list: LiveList, token: string, env: PushEnv, now = Date.now(), file = devicesFile()) => add(list, token, env, now, file);
+export const addLive = (list: LiveList, token: string, env: PushEnv, now = Date.now(), file = devicesFile()) => add(list, token, env, now, file, list === "activities");
 export const removeLive = (list: LiveList, token: string, file = devicesFile()) => remove(list, token, file);
 // A panel ended or a new one is starting: the tokens kept are an ended panel's.
 export function clearLive(list: LiveList, file = devicesFile()) {

@@ -381,3 +381,22 @@ test("after a failed update or end, nothing more for that panel for 30 s, then i
   expect(t.pushes.length).toBe(n + 1);
   expect(events(t).at(-1)).toBe("activities:end:10");
 });
+
+test("a push-to-start Apple didn't take (no answer, 5xx) is sent again after the wait, while still busy", async () => {
+  let status = 0;
+  const { t, r } = setup({ answer: () => ({ status }) });
+  t.state = working();
+  await r.tick();
+  t.clock += RETRY - 1;
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10"]);
+  t.clock += 1;
+  status = 503;
+  await r.tick();
+  t.clock += RETRY;
+  status = 200;
+  await r.tick();
+  t.clock += RETRY;
+  await r.tick();
+  expect(events(t)).toEqual(["starts:start:10", "starts:start:10", "starts:start:10"]);
+});

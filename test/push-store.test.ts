@@ -138,3 +138,14 @@ test("a live panel token is hex, 64 to 400 characters", () => {
   expect(isLiveToken("xyz")).toBe(false);
   expect(isLiveToken(undefined)).toBe(false);
 });
+
+test("a panel's token sent again keeps its first time and moves to the front; a push-to-start token's time moves", () => {
+  const file = devicesFile(fresh());
+  addLive("activities", "ef".repeat(70), "production", 10, file);
+  addLive("activities", "12".repeat(70), "production", 20, file);
+  addLive("activities", "ef".repeat(70), "production", 30, file);
+  expect(readLive("activities", file).map((d) => [d.token[0], d.at])).toEqual([["e", 10], ["1", 20]]);
+  addLive("starts", "cd".repeat(60), "production", 5, file);
+  addLive("starts", "cd".repeat(60), "production", 40, file);
+  expect(readLive("starts", file)[0]?.at).toBe(40);
+});

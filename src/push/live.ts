@@ -139,7 +139,11 @@ export class LiveRunner {
   private async pushStart(creds: Creds, start: Device, state: LiveState, p: Panel, now: number) {
     p.sent = liveShape(state);
     p.needs = needsOf(state);
-    await this.send(creds, "starts", start, livePayload("start", state, now), 10);
+    // Apple didn't take it: the "asked, no token" wait, tried again after the pause (the panel has no token to update).
+    if (await this.send(creds, "starts", start, livePayload("start", state, now), 10)) {
+      p.retryAt = now + RETRY;
+      p.asked = now - APP_GRACE;
+    }
   }
 
   // False when the end didn't get through (no answer, or Apple failed): the panel and its token stay, for the next tick.
