@@ -1,7 +1,8 @@
-// How sessions get the browser: Google's Chrome DevTools MCP, connected to the gate. Every Claude
-// session blimp starts gets one config file (mcp.json, the same for all); it runs
-// `blimpd browser-mcp`, which works out the rest where it runs: the session from ZMX_SESSION (zmx
-// sets it in every session), the gate's port from the port file, and the gate's key.
+// The MCP servers sessions get, in one config file every session blimp starts is given (<socket dir>/mcp.json, the
+// same for all): blimp's own, `blimpd visuals-mcp` (the show tool, visuals/mcp.ts), always; and the browser's,
+// `blimpd browser-mcp`: Google's Chrome DevTools MCP connected to the gate, once the gate is up. browser-mcp works
+// out the rest where it runs: the session from ZMX_SESSION (zmx sets it in every session), the gate's port from the
+// port file, and the gate's key.
 //
 // The key: a web page in the server's Chrome runs as you, so the gate's uid check lets it in; it
 // can't read the key file. The key goes in the MCP's argument list (the MCP takes no other way),
@@ -15,7 +16,7 @@ import { blimpDir } from "../sessions";
 export const MCP_PACKAGE = "chrome-devtools-mcp@1.11.0";
 
 export const browserDir = () => join(blimpDir(), "browser");
-export const mcpConfigPath = () => join(browserDir(), "mcp.json");
+export const mcpConfigPath = () => join(blimpDir(), "mcp.json");
 export const portFile = () => join(browserDir(), "port");
 const keyFile = () => join(browserDir(), "key");
 
@@ -33,9 +34,14 @@ export function gateKey(): string {
 // This blimpd, as a command: the built binary, or bun and the script while developing.
 export const selfCommand = (): string[] => (Bun.main.startsWith("/$bunfs/") ? [process.execPath] : [process.execPath, Bun.main]);
 
-export function mcpConfig(self: string[]): string {
-  return JSON.stringify({ mcpServers: { "blimp-browser": { command: self[0], args: [...self.slice(1), "browser-mcp"] } } }, null, 2) + "\n";
+export function mcpConfig(self: string[], browser: boolean): string {
+  const server = (sub: string) => ({ command: self[0], args: [...self.slice(1), sub] });
+  return JSON.stringify({ mcpServers: { blimp: server("visuals-mcp"), ...(browser && { "blimp-browser": server("browser-mcp") }) } }, null, 2) + "\n";
 }
+
+// Written when blimpd starts (without the browser) and again once the gate is up (with it), so a file left from
+// before never names a browser that isn't there.
+export const writeMcpConfig = (browser: boolean) => writeFileSync(mcpConfigPath(), mcpConfig(selfCommand(), browser), { mode: 0o600 });
 
 // What npx runs: the MCP, at the gate, as this session. No usage statistics, and no trace URLs
 // sent to Google's CrUX API.

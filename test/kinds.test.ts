@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpConfigPath } from "../src/browser/mcp";
+import { mcpConfig, mcpConfigPath } from "../src/browser/mcp";
 import { installed, kindLabel, launchFor, listKinds, readKindsFile } from "../src/kinds";
 
 // A temp home with nothing in it: no Z.ai key, no ~/.codex, no kinds.json.
@@ -110,10 +110,10 @@ test("GLM: the settings are set by the script, after the profile; the key only i
   const out = Bun.spawnSync(["/bin/sh", "-c", run.script!, ...run.args], {
     env: { PATH: bin, ...run.env, ANTHROPIC_BASE_URL: "https://elsewhere.example", ANTHROPIC_API_KEY: "theirs" },
   }).stdout.toString();
-  expect(out).toBe("https://api.z.ai/api/anthropic|it's $(x) `y`|zai-unit-key-0123456789|unset|unset|--resume abc\n");
+  expect(out).toBe(`https://api.z.ai/api/anthropic|it's $(x) \`y\`|zai-unit-key-0123456789|unset|unset|--mcp-config ${mcpConfigPath()} --resume abc\n`);
 });
 
-test("Claude Code and Codex get the server browser's MCP when there's a Chrome and npx", async () => {
+test("Claude Code and Codex always get blimp's MCP (the show tool), and the server browser's when there's a Chrome and npx", async () => {
   const bin = join(home, "bin-browser");
   process.env.SHELL = loginShellWith(bin);
   for (const p of ["claude", "codex", "npx"]) program(bin, p);
@@ -122,17 +122,30 @@ test("Claude Code and Codex get the server browser's MCP when there's a Chrome a
   const claude = await launchFor("claude", "abc", home, f, yes);
   expect(claude.args).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--resume", "abc"]);
   const codex = await launchFor("codex", undefined, home, f, yes);
-  expect(codex.args.slice(0, 2)).toEqual(["codex", "-c"]);
-  expect(codex.args[2]).toMatch(/^mcp_servers\.blimp-browser\.command=".+"$/);
-  expect(codex.args[4]).toMatch(/^mcp_servers\.blimp-browser\.args=\[.*"browser-mcp"\]$/);
-  // No Chrome: nothing added.
-  expect((await launchFor("claude", undefined, home, f, () => false)).args).toEqual(["claude"]);
-  expect((await launchFor("codex", undefined, home, f, () => false)).args).toEqual(["codex"]);
+  expect(codex.args[0]).toBe("codex");
+  expect(codex.args.filter((a) => a === "-c")).toHaveLength(4);
+  expect(codex.args[2]).toMatch(/^mcp_servers\.blimp\.command=".+"$/);
+  expect(codex.args[4]).toMatch(/^mcp_servers\.blimp\.args=\[.*"visuals-mcp"\]$/);
+  expect(codex.args[6]).toMatch(/^mcp_servers\.blimp-browser\.command=".+"$/);
+  expect(codex.args[8]).toMatch(/^mcp_servers\.blimp-browser\.args=\[.*"browser-mcp"\]$/);
+  // No Chrome: blimp's own only.
+  expect((await launchFor("claude", undefined, home, f, () => false)).args).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
+  const plain = (await launchFor("codex", undefined, home, f, () => false)).args;
+  expect(plain).toHaveLength(5);
+  expect(plain[4]).toMatch(/^mcp_servers\.blimp\.args=\[.*"visuals-mcp"\]$/);
 });
 
-test("no npx, no browser MCP", async () => {
+test("no npx: blimp's MCP still, no browser", async () => {
   const bin = join(home, "bin-no-npx");
   process.env.SHELL = loginShellWith(bin);
   program(bin, "claude");
-  expect((await launchFor("claude", undefined, home, kindsWith("no-npx-tool"), () => true)).args).toEqual(["claude"]);
+  expect((await launchFor("claude", undefined, home, kindsWith("no-npx-tool"), () => true)).args).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
+});
+
+test("mcp.json: blimp's server always, the browser's when asked", () => {
+  const self = ["/usr/local/bin/blimpd"];
+  expect(JSON.parse(mcpConfig(self, false))).toEqual({ mcpServers: { blimp: { command: "/usr/local/bin/blimpd", args: ["visuals-mcp"] } } });
+  expect(JSON.parse(mcpConfig(["bun", "/src/main.ts"], true))).toEqual({
+    mcpServers: { blimp: { command: "bun", args: ["/src/main.ts", "visuals-mcp"] }, "blimp-browser": { command: "bun", args: ["/src/main.ts", "browser-mcp"] } },
+  });
 });

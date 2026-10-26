@@ -9,6 +9,7 @@ import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
 import { answerOnce } from "./answer";
 import { newScan, readLast } from "./chat";
+import { writeMcpConfig } from "./browser/mcp";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
@@ -536,7 +537,9 @@ export function serve(): Server {
   });
   chmodSync(sock, 0o600);
   onBrowserChange(() => server.publish("sessions", browserMessage()));
-  // Without it, sessions just don't get the browser.
+  // Sessions get blimp's own MCP (the show tool) from the start, and the browser's once the gate is up (it writes
+  // the file again); without the gate, sessions just don't get the browser.
+  writeMcpConfig(false);
   startBrowserGate().catch((e) => console.log(`browser: ${(e as Error).message}`));
   startNaming(); // off with {"names": false} in <socket dir>/config.json
   startNotes(); // the same switch

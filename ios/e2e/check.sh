@@ -55,8 +55,8 @@ other=$(( $(wc -l < "$E2E_DIR/claude.args") - new_lines - resume_lines ))
 [ "$other" -eq 0 ] || { echo "$other sessions started that no test starts"; exit 1; }
 if ran test4StartAndEnd; then [ "$new_lines" -ge 1 ]; else [ "$new_lines" -eq 0 ]; fi || { echo "$new_lines blank-chat sessions started"; exit 1; }
 if ran test5Resume; then [ "$resume_lines" -ge 1 ]; else [ "$resume_lines" -eq 0 ]; fi || { echo "$resume_lines resumed sessions started"; exit 1; }
-# with the server browser's tools first: the runner has a Chrome
-mcp="--mcp-config $(dirname "$BLIMPD_SOCKET")/browser/mcp.json"
+# with blimp's MCP first (the show tool, and the server browser's: the runner has a Chrome)
+mcp="--mcp-config $(dirname "$BLIMPD_SOCKET")/mcp.json"
 zmx list > "$E2E_DIR/zmx.list"; cat "$E2E_DIR/zmx.list"
 if ran test4StartAndEnd; then
   read -r new _ newargs <<< "$(grep -F -- "-- Write the changelog]" "$E2E_DIR/claude.args" | tail -1)"

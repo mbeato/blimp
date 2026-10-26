@@ -1502,12 +1502,14 @@ describe("kinds and keys", () => {
   const kinds = async () => (await (await kApi("/kinds")).json()) as { id: string; label: string; available: boolean; note?: string }[];
   const dir = join(kHome, tag);
   const blimpdLog = join(kTmp, "blimpd.log");
-  // Claude and Codex get the browser MCP when this blimpd finds a Chrome (in kHome or on PATH) and
-  // npx (browser/mcp.ts): what's added to their arguments then.
   const kPath = `${fakeBin}:${env.PATH}`;
   const browserOn = !!findChrome(kHome, (n) => Bun.which(n, { PATH: kPath })) && !!Bun.which("npx", { PATH: kPath });
-  const claudeMcp = browserOn ? `--mcp-config ${join(kTmp, "browser", "mcp.json")}` : "";
-  const codexMcp = browserOn ? /-c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]/ : /^$/;
+  // Claude and Codex always get blimp's MCP (the show tool), and the browser's too when this blimpd finds a Chrome
+  // (in kHome or on PATH) and npx (browser/mcp.ts): what's added to their arguments.
+  const claudeMcp = `--mcp-config ${join(kTmp, "mcp.json")}`;
+  const blimpCodex = String.raw`-c mcp_servers\.blimp\.command="[^"]+" -c mcp_servers\.blimp\.args=\[[^\]]*"visuals-mcp"\]`;
+  const browserCodex = String.raw` -c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]`;
+  const codexMcp = new RegExp(`^${blimpCodex}${browserOn ? browserCodex : ""}$`);
   const withMcp = (rest: string) => [claudeMcp, rest].filter(Boolean).join(" ");
 
   // Starts a session of this kind and returns its name and what it printed first.
