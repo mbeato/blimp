@@ -149,6 +149,22 @@ struct API {
         _ = try await call("DELETE", "/browser/tabs/" + id)
     }
 
+    /// The feed: its unseen cards in order, the saved ones, each source's last run, and when the next run starts.
+    func feed() async throws -> Feed {
+        try await decode(call("GET", "/feed"))
+    }
+
+    /// Cards the phone showed and moved past: they don't come back.
+    func feedSeen(ids: [String]) async throws {
+        struct Body: Encodable { let ids: [String] }
+        _ = try await call("POST", "/feed/seen", body: JSONEncoder().encode(Body(ids: ids)))
+    }
+
+    func feedSaved(id: String, saved: Bool) async throws {
+        struct Body: Encodable { let id: String; let saved: Bool }
+        _ = try await call("POST", "/feed/saved", body: JSONEncoder().encode(Body(id: id, saved: saved)))
+    }
+
     /// A WebSocket address on this server: ws for http, wss for https, the token in the query
     /// (a WebSocket handshake can't carry the Authorization header here).
     func socketURL(_ path: String) -> URL {
