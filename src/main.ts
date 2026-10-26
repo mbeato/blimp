@@ -15,6 +15,7 @@
 //   blimpd visuals-mcp         blimp's own MCP a session runs: the show tool (visuals/mcp.ts)
 //   blimpd send <session> <message>  type a message into another session's Claude (send.ts)
 //   blimpd assistant on|off|status  the assistant: one Claude session blimpd keeps running (assistant.ts)
+//   blimpd messages on|off|status|revoke  texting the assistant through a relay on a Mac (messages/cli.ts)
 //   blimpd overview            every project's sessions and unread past conversations, for the assistant (overview.ts)
 //   blimpd read <session or conversation id> [--last N]  its latest messages (overview.ts)
 //   blimpd start <folder> <message>  a new Claude session there with that first message (act.ts)
@@ -29,6 +30,7 @@ import { runAssistant } from "./assistant";
 import { findChrome } from "./browser/chrome";
 import { runBrowserMcp } from "./browser/mcp";
 import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
+import { runMessages } from "./messages/cli";
 import { runOverview, runRead } from "./overview";
 import { runPair } from "./pair";
 import { runPushKey, runPushTest } from "./push/cli";
@@ -104,6 +106,8 @@ if (cmd === "sessions") {
   process.exit(await runSend(args));
 } else if (cmd === "assistant") {
   process.exit(await runAssistant(args));
+} else if (cmd === "messages") {
+  process.exit(runMessages(args));
 } else if (cmd === "overview") {
   process.exit(await runOverview());
 } else if (cmd === "read") {
@@ -115,6 +119,6 @@ if (cmd === "sessions") {
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | visuals-mcp | send <session> <message> | assistant on|off|status | overview | read <session or conversation id> [--last N] | start <folder> <message> | answer <session> <option number> | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | visuals-mcp | send <session> <message> | assistant on|off|status | messages on|off|status|revoke | overview | read <session or conversation id> [--last N] | start <folder> <message> | answer <session> <option number> | --version");
   process.exit(cmd ? 1 : 0);
 }
