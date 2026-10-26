@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpConfig, mcpConfigPath } from "../src/browser/mcp";
+import { browserMcpConfigPath, mcpConfig, mcpConfigPath } from "../src/browser/mcp";
 import { installed, kindLabel, launchFor, listKinds, readKindsFile } from "../src/kinds";
 
 // A temp home with nothing in it: no Z.ai key, no ~/.codex, no kinds.json.
@@ -120,7 +120,7 @@ test("Claude Code and Codex always get blimp's MCP (the show tool), and the serv
   const f = kindsWith("browser-tool");
   const yes = () => true;
   const claude = await launchFor("claude", "abc", home, f, yes);
-  expect(claude.args).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--resume", "abc"]);
+  expect(claude.args).toEqual(["claude", "--mcp-config", browserMcpConfigPath(), "--resume", "abc"]);
   const codex = await launchFor("codex", undefined, home, f, yes);
   expect(codex.args[0]).toBe("codex");
   expect(codex.args.filter((a) => a === "-c")).toHaveLength(4);

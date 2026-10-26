@@ -1505,8 +1505,8 @@ describe("kinds and keys", () => {
   const kPath = `${fakeBin}:${env.PATH}`;
   const browserOn = !!findChrome(kHome, (n) => Bun.which(n, { PATH: kPath })) && !!Bun.which("npx", { PATH: kPath });
   // Claude and Codex always get blimp's MCP (the show tool), and the browser's too when this blimpd finds a Chrome
-  // (in kHome or on PATH) and npx (browser/mcp.ts): what's added to their arguments.
-  const claudeMcp = `--mcp-config ${join(kTmp, "mcp.json")}`;
+  // (in kHome or on PATH) and npx (browser/mcp.ts): what's added to their arguments (Claude: the file with both then).
+  const claudeMcp = `--mcp-config ${browserOn ? join(kTmp, "browser", "mcp.json") : join(kTmp, "mcp.json")}`;
   const blimpCodex = String.raw`-c mcp_servers\.blimp\.command="[^"]+" -c mcp_servers\.blimp\.args=\[[^\]]*"visuals-mcp"\]`;
   const browserCodex = String.raw` -c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]`;
   const codexMcp = new RegExp(`^${blimpCodex}${browserOn ? browserCodex : ""}$`);

@@ -16,7 +16,7 @@ mkdirSync(folder);
 
 const { findChrome } = await import("../src/browser/chrome");
 const { browserTabs, startBrowserGate, stopBrowser, openTab } = await import("../src/browser/service");
-const { browserDir, gateKey, mcpConfigPath, portFile } = await import("../src/browser/mcp");
+const { browserDir, gateKey, browserMcpConfigPath, portFile } = await import("../src/browser/mcp");
 const { zmxPath, zmxEnv, parseZmxList } = await import("../src/sessions");
 
 const live = findChrome() ? test : test.skip;
@@ -83,7 +83,7 @@ async function cdp(path: string, key: string | null = gateKey(), headers: Record
 
 live("the gate writes its port and the MCP config sessions get: blimp's own and the browser's", () => {
   expect(Number(readFileSync(portFile(), "utf8"))).toBe(port);
-  const config = JSON.parse(readFileSync(mcpConfigPath(), "utf8"));
+  const config = JSON.parse(readFileSync(browserMcpConfigPath(), "utf8"));
   expect(config.mcpServers.blimp.args.at(-1)).toBe("visuals-mcp");
   expect(config.mcpServers["blimp-browser"].args.at(-1)).toBe("browser-mcp");
 });

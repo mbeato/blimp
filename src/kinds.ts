@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { HttpError } from "./files";
 import { browserReady } from "./browser/service";
-import { mcpConfigPath, selfCommand } from "./browser/mcp";
+import { browserMcpConfigPath, mcpConfigPath, selfCommand } from "./browser/mcp";
 import { blimpDir, loginShell } from "./sessions";
 
 // What GET /kinds lists. note: why one can't start, or a status (Codex signed in or not).
@@ -166,13 +166,14 @@ export function listKinds(have: Set<string>, home = homedir(), file = kindsFile(
 }
 
 // How to start kind `id`, or 400 if it's unknown or can't start here. resume: Claude Code only.
-// Claude Code and Codex always get blimp's MCP (the show tool, visuals/mcp.ts), and the server browser's when
-// there's a Chrome to run and npx to run that MCP with (browser: whether the first holds; a parameter for tests).
+// Claude Code and Codex always get blimp's MCP (the show tool, visuals/mcp.ts), and the server browser's too when
+// there's a Chrome to run and npx to run that MCP with (browser: whether the first holds; a parameter for tests):
+// Claude Code gets the config file with both then (browser/mcp.json), else the one with blimp's only.
 export async function launchFor(id: string, resume?: string, home = homedir(), file = kindsFile(), browser = browserReady): Promise<Launch> {
   const have = await installed(file);
   const resumeArgs = resume ? ["--resume", resume] : [];
   const browserMcp = have.has("npx") && browser();
-  const claudeArgs = ["claude", "--mcp-config", mcpConfigPath(), ...resumeArgs];
+  const claudeArgs = ["claude", "--mcp-config", browserMcp ? browserMcpConfigPath() : mcpConfigPath(), ...resumeArgs];
   // The login shell found nothing at all, so it couldn't tell: Claude Code is tried anyway, as
   // before kinds. A missing claude then shows in the session itself.
   if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", ...resumeArgs] };
