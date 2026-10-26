@@ -10,6 +10,7 @@ import { Splitter } from "./Splitter";
 import { TerminalView } from "./TerminalView";
 import { StateMark } from "./StateMark";
 import { InboxSummary } from "./InboxSummary";
+import { AssistantGroup } from "./AssistantGroup";
 import { SecretDialog } from "./SecretDialog";
 import { inbox } from "../lib/inbox";
 import { jobsOpen, jobsWords } from "../lib/jobs";
@@ -108,6 +109,7 @@ function useNow(ms: number) {
 // The bottom pane: the folder's sessions in terminal splits, side by side, and on their right
 // the list of them, as `claude --resume` scopes them: running ones (with their state), then
 // earlier conversations. Dragging a running session from the list onto a terminal splits it.
+// Above them all, in every tab, the assistant and its jobs (AssistantGroup) while it runs.
 // panes: the splits, kept by the window's tab (it's in the URL); onPanes updates them.
 // front: this tab is the one in front. showList: the list's show/hide button.
 // onMoveOut: sessions leaving for another window (right-click > Open in New Window, or a drag let
@@ -135,6 +137,8 @@ export function TerminalPane(props: {
   onOpenPort: (p: Port) => void;
   // The chevron's "Models and keys…": Settings, at Models.
   onModels: () => void;
+  // A row of the pinned Assistant group: that session, opened where it lives, as ⌘K opens one (App's pickSession).
+  onPick: (name: string) => void;
   actions: { current: PaneActions };
 }) {
   const { link, dir, panes: p, onPanes } = props;
@@ -810,6 +814,7 @@ export function TerminalPane(props: {
           </div>
         </div>
         <div className="slist-scroll" ref={scroll}>
+          <AssistantGroup sessions={link.sessions ?? []} onOpen={props.onPick} />
           <InboxSummary inbox={inbox(listed, past)} disabled={busy || !api} onSession={(s) => showHere(s.name)} onPast={(c) => void start({ resume: c.sessionId })} />
           {/* Each row (a session, or a split group) is one data-item: a drag drops between them. */}
           {items.flatMap((it, n) => [

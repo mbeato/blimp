@@ -1292,6 +1292,48 @@ body.dragging-session * {
   color: var(--fg-dim);
 }
 
+/* The assistant, pinned above the inbox in every tab's list: its row, then its jobs indented under it. */
+.assistant {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.assistant-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 12px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.assistant-line:hover {
+  background: var(--hover);
+}
+
+.assistant-job {
+  padding-left: 30px;
+}
+
+.assistant-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.assistant-title,
+.assistant-words {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-words {
+  color: var(--fg-dim);
+}
+
 .slist-note {
   margin: 6px 12px;
   font-size: 12px;
@@ -2662,5 +2704,28 @@ body.dragging-session * {
 .settings-error {
   margin: 4px 0;
   font-size: 12px;
+  color: var(--danger);
+}
+
+/* Settings > Assistant: Turn Off's question, in place of a confirm() box. */
+.settings-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.settings-confirm span {
+  flex: 1;
+}
+
+.settings-confirm button {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.settings-confirm button.danger {
   color: var(--danger);
 }

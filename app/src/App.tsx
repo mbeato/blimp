@@ -251,7 +251,10 @@ export function App() {
     setDialog(null);
     if (session) takeSession(`${server}/${session}`);
     setLayout((l) => l && openTab(l, server, dir, session));
-    if (dir) void rememberProject(server, dir);
+    // The assistant's folder isn't a project: opening the assistant (its pinned row, a notification, ⌘K) gives it a
+    // tab but never makes it a recent project.
+    const assistant = !!session && links.get(server)?.sessions?.find((s) => s.name === session)?.assistant === true;
+    if (dir && !assistant) void rememberProject(server, dir);
   };
 
   // ⌘K in another window picked a session in a folder this window has a tab for.
@@ -694,6 +697,7 @@ export function App() {
                   setSettingsAt("models");
                   setDialog("settings");
                 }}
+                onPick={(n) => void pickSession(l, n)}
                 actions={refFor(actions, key, noActions)}
               />
             }

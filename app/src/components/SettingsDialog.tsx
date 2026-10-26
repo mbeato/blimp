@@ -7,7 +7,7 @@ import { appVersion } from "../lib/version";
 import { Dialog } from "./Dialog";
 
 // Settings (⌘,): every change applies at once, in every window, and is kept on this Mac.
-// Models is the exception: keys and sign-ins belong to each server, where sessions run.
+// Models and Assistant are the exceptions: keys, sign-ins and the assistant belong to each server, where sessions run.
 // at: open scrolled to that section (the session chevron's "Models and keys…").
 // onCodexSignIn: start Codex's sign-in in a session on that server.
 export function SettingsDialog(props: { onClose: () => void; at?: "models"; links: ServerLink[]; onCodexSignIn: (l: ServerLink) => void }) {
@@ -81,12 +81,54 @@ export function SettingsDialog(props: { onClose: () => void; at?: "models"; link
             <Models key={l.key} link={l} named={props.links.length > 1} onCodexSignIn={() => props.onCodexSignIn(l)} />
           ))}
         </section>
+        <section aria-label="Assistant">
+          <h3>Assistant</h3>
+          {props.links.length === 0 && <p className="settings-note">Connect to a server to turn it on.</p>}
+          {props.links.map((l) => (
+            <Assistant key={l.key} link={l} named={props.links.length > 1} />
+          ))}
+        </section>
         <section>
           <h3>Updates</h3>
           {check("autoUpdate", "Check for updates automatically", `This is blimp ${appVersion}. blimp > Check for Updates… checks now.`)}
         </section>
       </div>
     </Dialog>
+  );
+}
+
+// One server's assistant (PUT /assistant): on, blimpd keeps one Claude chat running that isn't a project; off ends that
+// chat, after a question here (not confirm()). The box follows link.assistantOn, which blimpd's events message keeps;
+// an older blimpd never sends it, and its server shows nothing here.
+function Assistant(props: { link: ServerLink; named: boolean }) {
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState("");
+  const on = props.link.assistantOn;
+  if (on === null) return null;
+  const turn = (v: boolean) => {
+    setAsking(false);
+    props.link.setAssistant(v).then(
+      () => setError(""),
+      (e) => setError(errorText(e)),
+    );
+  };
+  return (
+    <div className="models" data-server={props.link.key}>
+      {props.named && <h4>{props.link.key}</h4>}
+      <Row label="Assistant" note="One Claude chat that isn't a project. It can look at every project and asks before it acts.">
+        <input type="checkbox" aria-label="Assistant" checked={on} onChange={(e) => (e.target.checked ? turn(true) : setAsking(true))} />
+      </Row>
+      {asking && (
+        <div className="settings-confirm">
+          <span>Turn off the assistant? Its chat ends.</span>
+          <button className="danger" onClick={() => turn(false)}>
+            Turn Off
+          </button>
+          <button onClick={() => setAsking(false)}>Cancel</button>
+        </div>
+      )}
+      {error && <p className="settings-error">{error}</p>}
+    </div>
   );
 }
 
