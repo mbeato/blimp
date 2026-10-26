@@ -253,6 +253,7 @@ blimpd assistant on
 - blimpd starts a Claude session named **assistant** in `~/.blimp/assistant` within a few seconds, and starts it again if it stops, carrying on the same chat. Open it like any session. The first time, Claude asks whether to trust its folder; answer Yes.
 - It knows what Claude knows in every session (your own instructions and settings), and its browser tabs use the same logins as your other blimp tabs.
 - It can look at every project freely: `blimpd overview` and `blimpd read`. Before it starts a session, types into one or answers one's question, Claude asks you, with the usual Allow prompt.
+- When it starts a session or messages one, that session becomes one of its jobs. When a job finishes or needs you, the assistant tells you in its chat, and the notification comes from the assistant, not from that session. A session that asks you something still notifies you itself, so you can answer at once.
 - Add your own instructions in `~/.blimp/assistant/CLAUDE.md`. blimp writes that file once and never changes it again.
 - `blimpd assistant off` ends it. Its folder and chats stay, and turning it on again carries on the latest.
 

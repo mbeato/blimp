@@ -1,6 +1,6 @@
 # The assistant: one chat that isn't a project
 
-Date: 2026-10-26. Branch `assistant` (worktree /Users/mbeato/blimp-assistant). Status: design, not built.
+Date: 2026-10-26. Branch `assistant` (worktree /Users/mbeato/blimp-assistant). Status: steps 1 and 2 built (plans docs/superpowers/plans/2026-10-26-assistant-part1.md and -part2.md); step 3 (the apps) not yet.
 
 ## What Max asked for
 
