@@ -28,6 +28,8 @@ The server can also answer a prompt without the terminal. The phone sends the an
 
 The notification's text (a session's title, a command, a question, the start of a reply) shows on the lock screen. To hide it until Face ID: iOS Settings > Notifications > Show Previews > When Unlocked.
 
+**A feed of what's new in tech, on the iPhone.** It is off by default. blimpd can fetch Hacker News, Reddit, GitHub trending and release notes every hour. The iPhone shows them one card at a time, each with a short summary that the small Claude model writes on your own sign-in (at most 6 calls an hour). To turn it on, add `"feed": { "on": true }` to `~/.blimp/config.json`. If there's no such file, make one with `{ "feed": { "on": true } }`. The same place takes your own lists: `"subreddits"`, `"rss"` (feed addresses) and `"interests"` (cards about these come first). Reddit needs a key. At https://www.reddit.com/prefs/apps, create an app of type "script" (any redirect address, for example `http://localhost`). Then run `blimpd reddit-key <client id> <secret>` on the server. Without a key, the feed skips Reddit and says so after the last card.
+
 ## Requirements
 
 **Server**

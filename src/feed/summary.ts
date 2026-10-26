@@ -1,7 +1,8 @@
 // The feed's summaries (docs/DESIGN.md, "Feed"): up to 10 cards in one call to the small model (askClaude: haiku,
 // no tools), each 2 or 3 plain sentences on what it is and why it's interesting, and whether it's about one of the
 // interests. The posts are text from the internet: they go inside <post> blocks the model is told are data, never
-// instructions. With no tools, the most a post can do is change its own summary, which the phone shows as plain text.
+// instructions. With no tools, the most a post can do is change what the summaries in its batch say, which the
+// phone shows as plain text.
 
 import { clip } from "../names";
 import type { Page } from "./page";

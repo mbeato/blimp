@@ -55,6 +55,8 @@ blimpd can start Claude sessions, type into them, and read and write every file 
 - **The MCP comes from npm.** `npx` downloads `chrome-devtools-mcp`, pinned to 1.11.0, the first time a session uses it, and runs it as you.
 - **Token lifetime.** The token stays the same until you delete `~/.blimp/token` and restart blimpd. Anyone who has it can already reach you over SSH.
 - **Notifications go through Apple.** Once you add a push key, blimpd makes outbound HTTPS connections to Apple's push service, and a notification's text (a session's title, a command's summary, a question, the start of a reply, with secrets taken out) passes through Apple's servers to reach the phone.
+- **The feed reads the internet.** With the feed on, blimpd fetches Hacker News, Reddit, GitHub, the blogs you list and the pages they link to, every hour. Their text goes to the small Claude model as data to summarize. The model has no tools, so a post can't make it run anything; the most a post can do is change what the summaries in its batch of 10 say, which the phone shows as plain text. The phone loads a card's picture straight from its address, so that site sees the phone's address, the same as opening the link.
+- **The Reddit key is typed on the command line.** `blimpd reddit-key <client id> <secret>` leaves the secret in your shell's history. It's a Reddit app's key that only reads Reddit as that app. Delete the line from your history if that matters to you.
 
 ## Latency budget
 
