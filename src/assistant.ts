@@ -6,9 +6,11 @@
 
 import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { selfCommand } from "./browser/mcp";
 import { projectFolderName } from "./folders";
-import { configFile, readConfig } from "./names";
-import { blimpDir, realDir } from "./sessions";
+import { launchFor, type Launch } from "./kinds";
+import { configFile, readConfig, saveConfig } from "./names";
+import { blimpDir, claudeDir, killSession, parseZmxList, realDir, sessionExists, startSession, type StartOptions, zmxListAsync } from "./sessions";
 
 export const ASSISTANT = "assistant";
 export const assistantDir = () => join(blimpDir(), "assistant");
@@ -109,4 +111,96 @@ export function hasConversation(dir: string, claude: string): boolean {
   } catch {
     return false;
   }
+}
+
+// The keep-alive: every 5 s, while it's on, a session named assistant is started if there's none, continuing the
+// folder's latest conversation once there is one. One that keeps stopping (3 starts within 2 minutes) waits
+// 10 minutes before the next try, so a broken claude doesn't start every 5 s.
+export type KeepDeps = {
+  on: () => boolean;
+  running: () => Promise<boolean>;
+  launch: () => Promise<Launch>;
+  start: (dir: string, opts: StartOptions) => Promise<string>;
+  dir: string;
+  claude: string;
+  self: string[];
+  now: () => number;
+  log: (m: string) => void;
+};
+export type KeepState = { tries: number[]; pausedUntil: number; busy: boolean };
+export const newKeepState = (): KeepState => ({ tries: [], pausedUntil: 0, busy: false });
+
+const TRIES = 3;
+const WINDOW = 2 * 60_000;
+const PAUSE = 10 * 60_000;
+
+const live = (): KeepDeps => ({
+  on: () => assistantOn(),
+  running: async () => parseZmxList(await zmxListAsync()).some((s) => s.name === ASSISTANT),
+  launch: () => launchFor("claude"),
+  start: startSession,
+  dir: assistantDir(),
+  claude: claudeDir(),
+  self: selfCommand(),
+  now: Date.now,
+  log: (m) => console.log(m),
+});
+
+const keep = newKeepState();
+
+export async function assistantTick(deps: KeepDeps = live(), state = keep): Promise<void> {
+  if (state.busy || !deps.on()) return;
+  state.busy = true;
+  try {
+    if (await deps.running()) return;
+    const t = deps.now();
+    if (t < state.pausedUntil) return;
+    state.tries = state.tries.filter((at) => t - at < WINDOW);
+    if (state.tries.length >= TRIES) {
+      state.tries = [];
+      state.pausedUntil = t + PAUSE;
+      deps.log("assistant: it stopped 3 times in 2 minutes; trying again in 10 minutes");
+      return;
+    }
+    state.tries.push(t);
+    writeAssistantFiles(deps.dir, deps.self);
+    const run = await deps.launch();
+    // Default mode, whatever the user's settings say: auto mode asks nothing, and the act commands must ask.
+    run.args.push("--permission-mode", "default");
+    if (hasConversation(deps.dir, deps.claude)) run.args.push("--continue");
+    await deps.start(deps.dir, { name: ASSISTANT, exact: true, kind: "claude", run });
+  } catch (e) {
+    deps.log(`assistant: couldn't start it: ${(e as Error).message}`);
+  } finally {
+    state.busy = false;
+  }
+}
+
+export function startAssistant(every = 5000) {
+  setInterval(() => void assistantTick(), every);
+}
+
+// blimpd assistant on | off | status. Off ends the session; its folder and conversations stay, and on again
+// continues the latest.
+export async function runAssistant(args: string[]): Promise<number> {
+  const [what, ...rest] = args;
+  const dir = assistantDir();
+  if (rest.length || (what !== undefined && !["on", "off", "status"].includes(what))) {
+    console.error("blimpd assistant: usage: blimpd assistant on | off | status");
+    return 1;
+  }
+  if (what === "on") {
+    saveConfig({ assistant: true });
+    console.log(`The assistant is on. blimpd starts it within a few seconds, in ${dir}.`);
+  } else if (what === "off") {
+    saveConfig({ assistant: false });
+    if (await sessionExists(ASSISTANT)) await killSession(ASSISTANT);
+    console.log("The assistant is off. Its folder and conversations stay; turning it on again continues the latest.");
+  } else {
+    const running = parseZmxList(await zmxListAsync()).some((s) => s.name === ASSISTANT);
+    console.log(
+      !assistantOn() ? "The assistant is off." : running ? `The assistant is on and running (session ${ASSISTANT}, in ${dir}).` : "The assistant is on, but not running yet. blimpd starts it within a few seconds while blimpd runs.",
+    );
+  }
+  return 0;
 }

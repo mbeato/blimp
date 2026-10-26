@@ -8,6 +8,7 @@ import { join } from "node:path";
 import pkg from "../package.json";
 import { promptFromHook } from "../src/prompt";
 import { findChrome } from "../src/browser/chrome";
+import { projectFolderName } from "../src/folders";
 import { parseZmxList, zmxPath } from "../src/sessions";
 import { widgetKey } from "../src/widget";
 
@@ -84,6 +85,14 @@ function socket(path: string) {
 const type = (ws: WebSocket, keys: string) => ws.send(new TextEncoder().encode(keys));
 // A busy session can be listed as unreachable, with no pid or client count: that's not 0 clients.
 const clients = (name: string) => parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name && s.pid > 0)?.clients;
+
+// blimpd's commands, as a session runs them, against this test's blimpd.
+const mainTs = join(import.meta.dir, "..", "src", "main.ts");
+async function cli(args: string[], extra: Record<string, string> = {}) {
+  const p = Bun.spawn(["bun", mainTs, ...args], { env: { ...env, ...extra }, stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  return { code, out: out.trim(), err: err.trim() };
+}
 
 // POST /sessions runs `$SHELL -l -i -c 'exec claude "$@"' claude`. This stand-in for the login shell
 // runs such a script with sh (blimpd's lookup too), after $BLIMP_TEST_PROFILE as a login profile
@@ -2133,6 +2142,41 @@ describe("secrets", () => {
       v.ws.close();
     }
   }, 20000);
+});
+
+describe("assistant", () => {
+  const dir = join(tmp, "assistant");
+  const screen = () => zmx("history", "assistant").stdout.toString();
+
+  test("on: blimpd starts a session named assistant in its folder, in default mode; killed, it's back, continuing once there's a conversation; off ends it", async () => {
+    made.push("assistant");
+    expect((await cli(["assistant", "status"])).out).toBe("The assistant is off.");
+    expect((await cli(["assistant", "on"])).code).toBe(0);
+    await until(() => zmxNames().includes("assistant") && screen().includes("--permission-mode default]"), "the assistant session", 15000);
+    expect(screen()).not.toContain("--continue");
+    expect(JSON.parse(readFileSync(join(tmp, "config.json"), "utf8"))).toMatchObject({ names: false, assistant: true });
+    expect(readFileSync(join(dir, "CLAUDE.md"), "utf8")).toStartWith("@blimp.md\n");
+    expect(JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf8")).permissions.defaultMode).toBe("default");
+    expect((await cli(["assistant", "status"])).out).toBe(`The assistant is on and running (session assistant, in ${dir}).`);
+
+    // A conversation now, the user's own CLAUDE.md, and an old blimp.md: then it stops.
+    const folder = join(tmp, "claude", "projects", projectFolderName(realpathSync(dir)));
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3.jsonl"), "");
+    writeFileSync(join(dir, "CLAUDE.md"), "@blimp.md\nmine\n");
+    writeFileSync(join(dir, "blimp.md"), "old");
+    zmx("kill", "assistant", "--force");
+    await until(() => zmxNames().includes("assistant") && screen().includes("--permission-mode default --continue]"), "the assistant back, continuing", 15000);
+    expect(readFileSync(join(dir, "CLAUDE.md"), "utf8")).toBe("@blimp.md\nmine\n");
+    expect(readFileSync(join(dir, "blimp.md"), "utf8")).toStartWith("# The blimp assistant");
+
+    expect((await cli(["assistant", "off"])).code).toBe(0);
+    expect(zmxNames()).not.toContain("assistant");
+    await Bun.sleep(6000); // more than a tick: it stays off
+    expect(zmxNames()).not.toContain("assistant");
+    expect((await cli(["assistant", "status"])).out).toBe("The assistant is off.");
+    expect(await cli(["assistant", "maybe"])).toMatchObject({ code: 1, err: "blimpd assistant: usage: blimpd assistant on | off | status" });
+  }, 45000);
 });
 
 describe("hidden folders", () => {

@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
 import { answerOnce } from "./answer";
+import { startAssistant } from "./assistant";
 import { newScan, readLast } from "./chat";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
@@ -499,6 +500,7 @@ export function serve(): Server {
   startNotes(); // the same switch
   startDigests(); // and again
   startHandoffs();
+  startAssistant(); // off unless {"assistant": true} in <socket dir>/config.json
   // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
   // widget push token (push/watch.ts).
   startPush();

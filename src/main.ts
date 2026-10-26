@@ -12,11 +12,13 @@
 //   blimpd browser             which Chrome the server browser runs, if any
 //   blimpd browser-mcp         the browser MCP a session runs (browser/mcp.ts)
 //   blimpd send <session> <message>  type a message into another session's Claude (send.ts)
+//   blimpd assistant on|off|status  the assistant: one Claude session blimpd keeps running (assistant.ts)
 //   blimpd --version
 
 import pkg from "../package.json";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
+import { runAssistant } from "./assistant";
 import { findChrome } from "./browser/chrome";
 import { runBrowserMcp } from "./browser/mcp";
 import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
@@ -86,9 +88,11 @@ if (cmd === "sessions") {
   process.exit(await runBrowserMcp());
 } else if (cmd === "send") {
   process.exit(await runSend(args));
+} else if (cmd === "assistant") {
+  process.exit(await runAssistant(args));
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | assistant on|off|status | --version");
   process.exit(cmd ? 1 : 0);
 }
