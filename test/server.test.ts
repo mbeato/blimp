@@ -2660,3 +2660,130 @@ describe("feed", () => {
     }
   });
 });
+
+// Texting (src/messages/): a blimpd with texting and the assistant on, a stand-in for the assistant's Claude that
+// echoes what it's typed, and HTTP calls in place of the relay.
+describe("texting the assistant", () => {
+  const mDir = mkdtempSync(join(tmpdir(), "blimp-msg-"));
+  const mSock = join(mDir, "blimpd.sock");
+  const mClaude = join(mDir, "claude");
+  const sid = "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1";
+  const transcript = join(mClaude, "projects", "p", `${sid}.jsonl`);
+  const ECHO = `while IFS= read -r l; do printf 'got:%s\\n' "$(printf %s "$l" | tr '\\033' '~')"; done`;
+  const line = (o: object) => JSON.stringify({ timestamp: new Date().toISOString(), ...o }) + "\n";
+  const said = (uuid: string, text: string) => line({ type: "assistant", uuid, message: { role: "assistant", content: [{ type: "text", text }] } });
+  let mServer: ReturnType<typeof Bun.spawn>;
+  let mToken = "";
+  let relayKey = "";
+  const call = (path: string, key: string, init: RequestInit = {}) =>
+    fetch(`http://blimpd${path}`, { ...init, unix: mSock, headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...(init.headers as any) } } as any);
+  const textIn = (id: string, text: string) => call("/messages/in", relayKey, { method: "POST", body: JSON.stringify({ id, from: "+15550000000", text }) });
+  const out = async (wait = 0) => ((await (await call(`/messages/out?wait=${wait}`, relayKey)).json()) as { texts: { id: string; text: string }[] }).texts;
+  const sent = (id: string) => call(`/messages/out/${encodeURIComponent(id)}/sent`, relayKey, { method: "POST" });
+  const status = (s: object) => {
+    mkdirSync(join(mDir, "status"), { recursive: true });
+    writeFileSync(join(mDir, "status", "assistant.json"), JSON.stringify({ sessionId: sid, ...s }));
+  };
+  // What the assistant's screen shows, from an attach socket.
+  async function view() {
+    const v = { text: "", ws: new WebSocket(`ws+unix://${mSock}:/sessions/assistant/attach?cols=200&rows=40&token=${mToken}`) };
+    v.ws.binaryType = "arraybuffer";
+    v.ws.onmessage = (e) => (v.text += typeof e.data === "string" ? "" : new TextDecoder().decode(e.data));
+    await new Promise((res, rej) => ((v.ws.onopen = res), (v.ws.onerror = () => rej(new Error("attach failed")))));
+    return v;
+  }
+
+  beforeAll(async () => {
+    mkdirSync(mDir, { recursive: true, mode: 0o700 });
+    for (const d of [join(mClaude, "sessions"), join(mClaude, "projects", "p")]) mkdirSync(d, { recursive: true });
+    writeFileSync(transcript, line({ type: "user", uuid: "u0", message: { role: "user", content: "hello" } }));
+    // The assistant's session, there before blimpd starts, so the keep-alive leaves it be.
+    Bun.spawnSync([zmxPath(), "attach", "assistant", "sh", "-c", ECHO], { env, cwd: mDir, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    await until(() => zmxNames().includes("assistant"), "the assistant's session");
+    const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === "assistant")!.pid;
+    writeFileSync(join(mClaude, "sessions", `${pid}.json`), JSON.stringify({ sessionId: sid, cwd: mDir, status: "idle" }));
+    writeFileSync(join(mDir, "config.json"), JSON.stringify({ names: false, assistant: true, messages: { on: true } }));
+    const on = Bun.spawnSync(["bun", mainTs, "messages", "on"], { env: { ...env, BLIMPD_SOCKET: mSock } });
+    expect(on.exitCode).toBe(0);
+    relayKey = readFileSync(join(mDir, "relay-key"), "utf8").trim();
+    mServer = Bun.spawn(["bun", mainTs, "serve"], { env: { ...env, BLIMPD_SOCKET: mSock, CLAUDE_CONFIG_DIR: mClaude }, stdout: "ignore", stderr: "inherit" });
+    await until(() => {
+      try {
+        return statSync(mSock).isSocket() && (mToken = readFileSync(join(mDir, "token"), "utf8").trim());
+      } catch {
+        return false;
+      }
+    }, "the texting blimpd");
+    // Texting has started once it has noted the assistant's reply at that moment.
+    await until(() => {
+      try {
+        return JSON.parse(readFileSync(join(mDir, "messages.json"), "utf8")).primed === true;
+      } catch {
+        return false;
+      }
+    }, "texting to start", 10000);
+  }, 30000);
+
+  // blimpd gone before its assistant: with the assistant on, it would start a real claude in its place.
+  afterAll(async () => {
+    mServer?.kill();
+    await mServer?.exited;
+    zmx("kill", "assistant", "--force");
+    rmSync(mDir, { recursive: true, force: true });
+  });
+
+  test("the relay's key reaches only /messages/, and no other key reaches those", async () => {
+    expect((await call("/sessions", relayKey)).status).toBe(401);
+    expect((await call("/messages/out?wait=0", mToken)).status).toBe(401);
+    expect((await call("/messages/out?wait=0", "0".repeat(64))).status).toBe(401);
+    expect((await call("/messages/out?wait=0", relayKey)).status).toBe(200);
+    expect((await call("/messages/in", relayKey, { method: "POST", body: "{}" })).status).toBe(400);
+  });
+
+  test("a text in is typed into the assistant, once", async () => {
+    const v = await view();
+    const r = await textIn("g1", "hello from the phone");
+    expect([r.status, await r.json()]).toEqual([200, { ok: true }]);
+    expect(await (await textIn("g1", "hello from the phone")).json()).toEqual({ ok: true, dup: true });
+    await until(() => v.text.includes("hello from the phone"), "the text typed into the assistant", 10000);
+    v.ws.close();
+  }, 20000);
+
+  test("a finished turn's reply goes out as plain text and stays until the relay says it's sent", async () => {
+    status({ state: "working", at: Date.now() });
+    appendFileSync(transcript, said("a1", "**Done.** See [the PR](https://e.com/1)."));
+    status({ state: "done", at: Date.now(), event: "Stop" });
+    const texts = await until(async () => {
+      const t = await out(2);
+      return t.length ? t : undefined;
+    }, "the reply texted", 10000);
+    expect(texts.map((t) => t.text)).toEqual(["Done. See the PR (https://e.com/1)."]);
+    expect((await out()).map((t) => t.id)).toEqual([texts[0].id]);
+    expect(await (await sent(texts[0].id)).json()).toEqual({ ok: true });
+    expect(await out()).toEqual([]);
+  }, 20000);
+
+  test("a permission question is texted, and a texted yes answers it", async () => {
+    const v = await view();
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "blimpd send x hi" }, cwd: mDir });
+    // Texted once it has asked for 3 s. Not backdated: a status file older than the session (a few seconds old
+    // here) is taken for an earlier session's, and ignored.
+    status({ state: "waiting", at: Date.now(), event: "PermissionRequest", prompt });
+    const [asked] = await until(async () => {
+      const t = (await out(2)).filter((x) => x.text.endsWith("Reply yes or no."));
+      return t.length ? t : undefined;
+    }, "the question texted", 10000);
+    expect(asked.text.startsWith("OK to run this?\n")).toBe(true);
+    expect(asked.text).toContain("blimpd send x hi");
+    await sent(asked.id);
+    expect((await textIn("g2", "yes")).status).toBe(200);
+    await until(() => (v.ws.send(new TextEncoder().encode("\r")), v.text.includes("got:1")), "the Yes typed into the assistant", 10000);
+    v.ws.close();
+  }, 20000);
+
+  test("texting off: every /messages/ route answers 403", async () => {
+    expect(Bun.spawnSync(["bun", mainTs, "messages", "off"], { env: { ...env, BLIMPD_SOCKET: mSock } }).exitCode).toBe(0);
+    for (const r of [await call("/messages/out?wait=0", relayKey), await textIn("g3", "hi"), await sent("x")])
+      expect([r.status, await r.json()]).toEqual([403, { error: "messages is off" }]);
+  });
+});

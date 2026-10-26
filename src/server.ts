@@ -20,6 +20,8 @@ import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZai
 import { askHandoff, startHandoffs } from "./handoff";
 import { readHidden, setHidden } from "./hidden";
 import { saveJob } from "./jobs";
+import { markSent, messagesOn, readRelayKey } from "./messages/store";
+import { startMessages, theTexter } from "./messages/texter";
 import { addOpened, readOpened } from "./opened";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
@@ -90,15 +92,15 @@ const same = (given: Buffer, token: string) => {
 };
 
 // Which token the request carries: the Mac's, the phone's (its value), the widget key (it reads only GET /widget,
-// widget.ts), or none (undefined).
-function authorized(req: Request, url: URL, token: string, dir: string): "mac" | "widget" | { phone: string } | undefined {
+// widget.ts), the relay's (only /messages/, see serve), or none (undefined).
+function authorized(req: Request, url: URL, token: string, dir: string): "mac" | "widget" | "relay" | { phone: string } | undefined {
   // HTTP sends a Bearer header; WebSockets can't, so they send ?token=.
   const h = req.headers.get("authorization");
   const given = Buffer.from(h?.startsWith("Bearer ") ? h.slice(7) : (url.searchParams.get("token") ?? ""));
   const phone = readPhoneToken(dir);
   // All compared every time, so the answer takes as long whichever matched.
-  const [mac, ph, widget] = [same(given, token), same(given, phone), same(given, widgetKey(phone))];
-  return mac ? "mac" : ph ? { phone } : widget ? "widget" : undefined;
+  const [mac, ph, widget, relay] = [same(given, token), same(given, phone), same(given, widgetKey(phone)), same(given, readRelayKey(dir))];
+  return mac ? "mac" : ph ? { phone } : widget ? "widget" : relay ? "relay" : undefined;
 }
 
 const error = (status: number, message: string, extra = {}) => Response.json({ error: message, ...extra }, { status });
@@ -198,6 +200,23 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (typeof on !== "boolean") throw new HttpError(400, "on must be true or false");
     await setAssistantOn(on);
     return new Response(null, { status: 204 });
+  }
+  // Texting the assistant (messages/): the relay on a Mac, with its own key (serve lets nothing else here).
+  if (path.startsWith("/messages/")) {
+    if (!messagesOn()) throw new HttpError(403, "messages is off");
+    theTexter().touch();
+    if (path === "/messages/in" && req.method === "POST") return Response.json(await theTexter().receive(await req.json().catch(() => undefined)));
+    if (path === "/messages/out" && get) {
+      const wait = Math.min(Math.max(Number(q.get("wait")) || 0, 0), 25);
+      // Held open up to 25 s: past Bun's 10 s idle timeout.
+      server.timeout(req, wait + 10);
+      return Response.json({ texts: await theTexter().waitOut(wait * 1000, req.signal) });
+    }
+    const done = path.match(/^\/messages\/out\/([^/]+)\/sent$/);
+    if (done && req.method === "POST") {
+      markSent(decodeURIComponent(done[1]));
+      return Response.json({ ok: true });
+    }
   }
   if (path === "/kinds" && get) return Response.json(listKinds(await installed()));
   // Keys go in, never out: GET /keys only says whether there is one.
@@ -522,11 +541,13 @@ export function serve(): Server {
       }
       // No CORS header on a 401: any web page could read it and learn that this port is blimp.
       const who = authorized(req, url, token, dir);
-      // The widget key reads the widgets' summary and nothing else.
-      if (!who || (who === "widget" && !(url.pathname === "/widget" && req.method === "GET"))) return error(401, "wrong or missing token");
+      // The widget key reads the widgets' summary and nothing else. The relay key reaches /messages/, and nothing
+      // else does.
+      const texting = url.pathname.startsWith("/messages/");
+      if (!who || (who === "widget" && !(url.pathname === "/widget" && req.method === "GET")) || (who === "relay") !== texting) return error(401, "wrong or missing token");
       let res: Response | undefined;
       try {
-        res = await route(req, url, server, who === "mac" || who === "widget" ? undefined : who.phone);
+        res = await route(req, url, server, typeof who === "string" ? undefined : who.phone);
       } catch (e) {
         res = errorResponse(e);
       }
@@ -587,6 +608,7 @@ export function serve(): Server {
     if (m !== lastAssistant) server.publish("sessions", (lastAssistant = m));
   }, 1000);
   startReports(); // the assistant's job updates (reports.ts): nothing while it's off or has no jobs
+  startMessages(); // texting (messages/texter.ts): nothing while it's off, unless {"messages": {"on": true}}
   // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
   // widget push token (push/watch.ts).
   startPush();
