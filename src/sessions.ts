@@ -22,7 +22,9 @@ import {
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type Git, type Job, sessionActivity } from "./activity";
+import { ASSISTANT } from "./assistant";
 import { type Handoffs, type HandoffView, handoffLinks, readHandoffs } from "./handoff";
+import { type Jobs, readJobs } from "./jobs";
 import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
 import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
@@ -58,6 +60,9 @@ export type Session = ZmxSession & {
   // file; on that new session, the zmx name of the one it came from.
   handoff?: HandoffView;
   parent?: string;
+  // The assistant (assistant.ts), and on a session it started or messaged, why and when (jobs.ts).
+  assistant?: true;
+  job?: { reason: string; at: number };
   // Commands in Claude's latest reply, newest first (runnable.ts): what the apps' Run button offers.
   runnable?: string[];
   runnableAt?: number; // when that reply began (ms): a run started before it is for an older reply
@@ -317,6 +322,7 @@ export function listSessions(
   activity = true, // jobs, context and git: `blimpd sessions` without --json shows none of them
   work = activity, // which session is on what (work.ts): `blimpd sessions --json` adds it itself, with withWorkNow
   handoffs: Handoffs = readHandoffs(),
+  jobs: Jobs = readJobs(),
 ): Session[] {
   const memo = readJson(memoFile);
   const custom = readKindsFile().kinds; // for the labels, once per list
@@ -354,6 +360,8 @@ export function listSessions(
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
       ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
       ...handoffLinks(handoffs, z.name, z.created),
+      ...(z.name === ASSISTANT && { assistant: true as const }),
+      ...(jobs[z.name] && { job: { reason: jobs[z.name].reason, at: jobs[z.name].at } }),
       ...(run && runFields(run)),
     };
   });
@@ -453,7 +461,8 @@ export function newSessionName(dir: string, at: Date, taken: string[], custom?: 
 //
 // One start at a time: two in the same second would pick the same name, and the second would just attach.
 let starting: Promise<unknown> = Promise.resolve();
-export type StartOptions = { name?: string; kind?: string; run?: Launch };
+// exact: name as given (the assistant's), not <folder>-<name>; it must be a plain name no session has.
+export type StartOptions = { name?: string; exact?: boolean; kind?: string; run?: Launch };
 export function startSession(dir: string, opts: StartOptions = {}): Promise<string> {
   const p = starting.then(() => start(dir, opts));
   starting = p.catch(() => {});
@@ -462,10 +471,12 @@ export function startSession(dir: string, opts: StartOptions = {}): Promise<stri
 
 const CLAUDE: Launch = { script: 'exec claude "$@"', args: ["claude"] };
 
-async function start(dir: string, { name: custom, kind = "claude", run = CLAUDE }: StartOptions): Promise<string> {
+async function start(dir: string, { name: custom, exact, kind = "claude", run = CLAUDE }: StartOptions): Promise<string> {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`not a folder: ${dir}`);
   const taken = parseZmxList(await zmxListAsync()).map((s) => s.name);
-  const name = newSessionName(dir, new Date(), taken, custom);
+  if (exact && (!custom || !isSafeName(custom))) throw new Error(`not a session name: ${custom}`);
+  if (exact && taken.includes(custom!)) throw new Error(`a session named ${custom} is already running`);
+  const name = exact ? custom! : newSessionName(dir, new Date(), taken, custom);
   const shell = loginShell();
   const cmd = run.script ? [shell, "-l", "-i", "-c", run.script, ...run.args] : [shell, "-l", "-i"];
   // Before it's listed, so it never shows up as the wrong kind.

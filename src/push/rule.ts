@@ -2,11 +2,12 @@
 // list each second and what it saw the second before: a session that starts waiting (an ask), and a Claude session
 // whose turn of 30 s or more ends (a finish). Each wait and each finish once. The first list blimpd sees (after it
 // starts, or after push is set up) counts as seen, so a restart doesn't tell them again.
+// With the assistant running, a job's finish is left to it, and its own turn that a job update began is told however short.
 
 import { CLAUDE_KINDS } from "../kinds";
 import type { Session, State } from "../sessions";
 
-export type PushSession = Pick<Session, "name" | "kind" | "state" | "stateSince" | "prompt">;
+export type PushSession = Pick<Session, "name" | "kind" | "state" | "stateSince" | "prompt" | "job" | "assistant">;
 // What a session was doing: its state, the wait told (or seen) while waiting, and when its turn began.
 export type Seen = { state: State; wait?: number; turn?: number };
 export type PushEvent = { kind: "ask" | "finish"; session: string; key: number };
@@ -17,11 +18,16 @@ export const ASK_SETTLE = 3000;
 export const FINISH_MIN = 30_000;
 // How long the phone waits while the Mac is in use.
 export const HOLD = 2 * 60_000;
+// A job update typed into the assistant (reports.ts) this long before its turn began still counts as what began it.
+export const UPDATE_SLACK = 15_000;
 
 // The wait: when the hook says it began, or for one without a prompt (Codex), when the state did.
 export const waitKey = (s: PushSession) => s.prompt?.at ?? s.stateSince ?? 0;
 
-export function pushChanges(before: Map<string, Seen> | undefined, list: PushSession[], now: number): { seen: Map<string, Seen>; events: PushEvent[] } {
+// updated: when a job update was last typed into the assistant, if ever.
+export function pushChanges(before: Map<string, Seen> | undefined, list: PushSession[], now: number, updated?: number, assistantOn = true): { seen: Map<string, Seen>; events: PushEvent[] } {
+  // While the assistant is on and running, it tells its jobs' finishes itself.
+  const reporting = assistantOn && list.some((s) => s.assistant);
   const seen = new Map<string, Seen>();
   const events: PushEvent[] = [];
   for (const s of list) {
@@ -40,7 +46,9 @@ export function pushChanges(before: Map<string, Seen> | undefined, list: PushSes
     } else {
       if (s.state === "done" && was?.state === "working" && was.turn !== undefined && CLAUDE_KINDS.includes(s.kind)) {
         const end = s.stateSince ?? now;
-        if (end - was.turn >= FINISH_MIN) events.push({ kind: "finish", session: s.name, key: end });
+        // The assistant's turn that an update began is told however short; a job's finish is the assistant's to tell.
+        const fromUpdate = !!s.assistant && updated !== undefined && updated >= was.turn - UPDATE_SLACK && updated <= end;
+        if ((end - was.turn >= FINISH_MIN || fromUpdate) && !(s.job && reporting)) events.push({ kind: "finish", session: s.name, key: end });
       }
       seen.set(s.name, { state: s.state });
     }

@@ -4,10 +4,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import pkg from "../package.json";
 import { promptFromHook } from "../src/prompt";
 import { findChrome } from "../src/browser/chrome";
+import { projectFolderName } from "../src/folders";
 import { parseZmxList, zmxPath } from "../src/sessions";
 import { visualKey } from "../src/visuals/store";
 import { widgetKey } from "../src/widget";
@@ -85,6 +86,14 @@ function socket(path: string) {
 const type = (ws: WebSocket, keys: string) => ws.send(new TextEncoder().encode(keys));
 // A busy session can be listed as unreachable, with no pid or client count: that's not 0 clients.
 const clients = (name: string) => parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name && s.pid > 0)?.clients;
+
+// blimpd's commands, as a session runs them, against this test's blimpd.
+const mainTs = join(import.meta.dir, "..", "src", "main.ts");
+async function cli(args: string[], extra: Record<string, string> = {}) {
+  const p = Bun.spawn(["bun", mainTs, ...args], { env: { ...env, ...extra }, stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  return { code, out: out.trim(), err: err.trim() };
+}
 
 // POST /sessions runs `$SHELL -l -i -c 'exec claude "$@"' claude`. This stand-in for the login shell
 // runs such a script with sh (blimpd's lookup too), after $BLIMP_TEST_PROFILE as a login profile
@@ -1037,6 +1046,112 @@ describe("chat", () => {
     }
     expect((await answerOver(name, { id: 5, stop: true })).status).toBe(400);
   });
+  test("blimpd overview lists a project's sessions with their state, and what a waiting one asks, numbered", async () => {
+    const sid = "0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e";
+    const { name } = await fakeClaude("ov1", sid, [user("u1", "fix the login"), said("a1", "fixed")]);
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${name}.json`);
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
+    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
+    await until(async () => (await listed(name))?.prompt?.options?.length === 2, "the prompt's options");
+    const r = await cli(["overview"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`  ${name}  "fix the login"  needs you, `);
+    expect(r.out).toContain("    asks: Bash: ");
+    expect(r.out).toContain("| options: 1. Yes  2. No");
+    rmSync(status);
+  }, 20000);
+
+  test("blimpd read prints a session's latest messages, and a past conversation's by its id", async () => {
+    const sid = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f";
+    const { name } = await fakeClaude("read1", sid, [user("u1", "one"), said("a1", "two"), user("u2", "three")]);
+    expect(await cli(["read", name, "--last", "2"])).toEqual({ code: 0, out: "claude: two\n\nyou: three", err: "" });
+    expect((await cli(["read", sid])).out).toBe("you: one\n\nclaude: two\n\nyou: three");
+    expect(await cli(["read", `${tag}-nope`])).toMatchObject({ code: 1, err: `blimpd read: no session named ${tag}-nope` });
+    expect((await cli(["read", name, "--last", "0"])).code).toBe(1);
+  }, 20000);
+
+  test("blimpd answer picks a waiting session's option by its number, as the phone does; not when nothing is asked", async () => {
+    const sid = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d";
+    const { name } = await fakeClaude("ans1", sid, []);
+    const viewer = await socket(`/sessions/${name}/attach?cols=80&rows=24`);
+    expect(await cli(["answer", name, "1"])).toMatchObject({ code: 1, err: `blimpd answer: ${name} isn't asking anything` });
+    mkdirSync(join(tmp, "status"), { recursive: true });
+    const status = join(tmp, "status", `${name}.json`);
+    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
+    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
+    await until(async () => (await listed(name))?.prompt?.options?.length === 2, "the prompt's options");
+    expect(await cli(["answer", name, "3"])).toMatchObject({ code: 1, err: `blimpd answer: ${name}'s question has no option 3` });
+    expect(await cli(["answer", name, "x"])).toMatchObject({ code: 1, err: "blimpd answer: usage: blimpd answer <session> <option number> [--job <reason>]" });
+    expect(await cli(["answer", name, "1", "--job", "unblock it"], { ZMX_SESSION: "assistant" })).toMatchObject({ code: 0, out: `answered ${name}: Yes` });
+    expect((await listed(name)).job).toMatchObject({ reason: "unblock it" });
+    await enterUntil(viewer, "got:1", "the digit reached the session");
+    rmSync(status);
+    viewer.ws.close();
+  }, 20000);
+
+  test("POST /assistant/jobs makes a session one of the assistant's jobs, shown in the session list", async () => {
+    const { name } = await fakeClaude("job1", "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a", []);
+    const post = (body: unknown) => api("/assistant/jobs", { method: "POST", body: JSON.stringify(body) });
+    expect((await post({ session: name, reason: "fix  the\x1b tests" })).status).toBe(204);
+    expect((await listed(name)).job).toMatchObject({ reason: "fix the tests" });
+    expect(statSync(join(tmp, "assistant-jobs.json")).mode & 0o777).toBe(0o600);
+    expect((await post({ session: "assistant", reason: "x" })).status).toBe(400);
+    expect((await post({ session: "../x", reason: "x" })).status).toBe(400);
+    expect((await post({ session: name, reason: " \x1b " })).status).toBe(400);
+    expect((await post({ session: name, reason: "x".repeat(201) })).status).toBe(400);
+    expect((await post({ session: `${tag}-nope`, reason: "x" })).status).toBe(404);
+  });
+
+  test("the session named assistant is marked as the assistant in the session list", async () => {
+    made.push("assistant");
+    Bun.spawnSync([zmxPath(), "attach", "assistant", "sh"], { env, cwd: tmp, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    await until(() => zmxNames().includes("assistant"), "a session named assistant");
+    expect((await listed("assistant")).assistant).toBe(true);
+    expect((await listed("assistant")).job).toBeUndefined();
+    zmx("kill", "assistant", "--force");
+    await until(() => !zmxNames().includes("assistant"), "the session named assistant to end");
+  });
+
+  test("blimpd send from the assistant makes the session a job, named by --job or the message's start; from another session it doesn't", async () => {
+    const { name } = await fakeClaude("job2", "2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b", []);
+    expect(await cli(["send", name, "first", "--job", "say hi"], { ZMX_SESSION: "blimp-other" })).toMatchObject({ code: 0, out: `sent to ${name}`, err: "" });
+    expect((await listed(name)).job).toBeUndefined();
+    expect(await cli(["send", name, "hello", "there", "--job", "say hi"], { ZMX_SESSION: "assistant" })).toEqual({ code: 0, out: `sent to ${name}`, err: "" });
+    expect((await listed(name)).job).toMatchObject({ reason: "say hi" });
+    await until(() => zmx("history", name).stdout.toString().includes("hello there"), "the message in the session");
+    expect(zmx("history", name).stdout.toString()).not.toContain("--job");
+    expect(await cli(["send", name, "check", "the", "logs"], { ZMX_SESSION: "assistant" })).toMatchObject({ code: 0 });
+    expect((await listed(name)).job).toMatchObject({ reason: "check the logs" });
+  }, 20000);
+
+  test("a job that starts waiting is told to the assistant within about 10 s, as a [blimp job update] line", async () => {
+    // A stand-in assistant that echoes what's typed into it; blimpd keeps it, since one is already running.
+    made.push("assistant");
+    Bun.spawnSync([zmxPath(), "attach", "assistant", "sh", "-c", LOOP], { env, cwd: tmp, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    await until(() => zmxNames().includes("assistant"), "the stand-in assistant");
+    let status = "";
+    let viewer: Awaited<ReturnType<typeof socket>> | undefined;
+    try {
+      writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false, assistant: true }));
+      viewer = await socket(`/sessions/assistant/attach?cols=250&rows=30`);
+      const sid = "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c";
+      const { name } = await fakeClaude("job3", sid, []);
+      expect((await api("/assistant/jobs", { method: "POST", body: JSON.stringify({ session: name, reason: "fix the tests" }) })).status).toBe(204);
+      await Bun.sleep(20); // the wait begins after the job was recorded
+      mkdirSync(join(tmp, "status"), { recursive: true });
+      status = join(tmp, "status", `${name}.json`);
+      const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
+      writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
+      await until(() => viewer.text.includes(`[blimp job update] ${basename(tmp)} · fix the tests (${name}): needs you — Bash: `), "the job update in the assistant", 25000);
+    } finally {
+      viewer?.ws.close();
+      if (status) rmSync(status, { force: true });
+      writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false }));
+      zmx("kill", "assistant", "--force");
+      await until(() => !zmxNames().includes("assistant"), "the stand-in assistant to end");
+    }
+  }, 40000);
 });
 
 describe("starting sessions", () => {
@@ -1072,6 +1187,22 @@ describe("starting sessions", () => {
     expect((await post({ dir, prompt: " \x1b " })).status).toBe(400);
     expect((await post({ dir, prompt: 5 })).status).toBe(400);
     expect((await post({ dir, shell: true, prompt: "hi" })).status).toBe(400);
+  }, 15000);
+
+  test("blimpd start starts a Claude session in a folder with its first message", async () => {
+    const dir = join(homeDir, tag);
+    mkdirSync(dir, { recursive: true });
+    const r = await cli(["start", dir, "look", "--job", "the logs", "at", "the", "logs"], { ZMX_SESSION: "assistant" });
+    expect(r.code).toBe(0);
+    const name = r.out.match(/^started (\S+) in /)![1];
+    made.push(name);
+    expect(r.out).toBe(`started ${name} in ${dir}`);
+    const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    await until(() => s.text.includes("-- look at the logs]"), "the first message in Claude's arguments");
+    s.ws.close();
+    expect(((await (await api("/sessions")).json()) as any[]).find((x) => x.name === name).job).toMatchObject({ reason: "the logs" });
+    expect(await cli(["start", dir])).toMatchObject({ code: 1, err: "blimpd start: usage: blimpd start <folder> <first message> [--job <reason>]" });
+    expect((await cli(["start", join(tmp, "elsewhere"), "hi"])).code).toBe(1);
   }, 15000);
 
   test("a viewer that attaches at once sees what the session printed, while `zmx list` asks all the time", async () => {
@@ -2136,6 +2267,41 @@ describe("secrets", () => {
       v.ws.close();
     }
   }, 20000);
+});
+
+describe("assistant", () => {
+  const dir = join(tmp, "assistant");
+  const screen = () => zmx("history", "assistant").stdout.toString();
+
+  test("on: blimpd starts a session named assistant in its folder, in default mode; killed, it's back, continuing once there's a conversation; off ends it", async () => {
+    made.push("assistant");
+    expect((await cli(["assistant", "status"])).out).toBe("The assistant is off.");
+    expect((await cli(["assistant", "on"])).code).toBe(0);
+    await until(() => zmxNames().includes("assistant") && screen().includes("--permission-mode default]"), "the assistant session", 15000);
+    expect(screen()).not.toContain("--continue");
+    expect(JSON.parse(readFileSync(join(tmp, "config.json"), "utf8"))).toMatchObject({ names: false, assistant: true });
+    expect(readFileSync(join(dir, "CLAUDE.md"), "utf8")).toStartWith("@blimp.md\n");
+    expect(JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf8")).permissions.defaultMode).toBe("default");
+    expect((await cli(["assistant", "status"])).out).toBe(`The assistant is on and running (session assistant, in ${dir}).`);
+
+    // A conversation now, the user's own CLAUDE.md, and an old blimp.md: then it stops.
+    const folder = join(tmp, "claude", "projects", projectFolderName(realpathSync(dir)));
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3.jsonl"), "");
+    writeFileSync(join(dir, "CLAUDE.md"), "@blimp.md\nmine\n");
+    writeFileSync(join(dir, "blimp.md"), "old");
+    zmx("kill", "assistant", "--force");
+    await until(() => zmxNames().includes("assistant") && screen().includes("--permission-mode default --continue]"), "the assistant back, continuing", 15000);
+    expect(readFileSync(join(dir, "CLAUDE.md"), "utf8")).toBe("@blimp.md\nmine\n");
+    expect(readFileSync(join(dir, "blimp.md"), "utf8")).toStartWith("# The blimp assistant");
+
+    expect((await cli(["assistant", "off"])).code).toBe(0);
+    expect(zmxNames()).not.toContain("assistant");
+    await Bun.sleep(6000); // more than a tick: it stays off
+    expect(zmxNames()).not.toContain("assistant");
+    expect((await cli(["assistant", "status"])).out).toBe("The assistant is off.");
+    expect(await cli(["assistant", "maybe"])).toMatchObject({ code: 1, err: "blimpd assistant: usage: blimpd assistant on | off | status" });
+  }, 45000);
 });
 
 describe("hidden folders", () => {

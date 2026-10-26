@@ -19,7 +19,7 @@ const activity = (s: Session) => Math.max(s.updatedAt ?? 0, s.stateSince ?? 0, s
 // ms: when it started waiting or working, else its activity (InboxLine.since).
 const since = (s: Session) => s.stateSince ?? activity(s);
 
-function widgetState(s: Session): WidgetState | undefined {
+export function widgetState(s: Session): WidgetState | undefined {
   if (s.state === "waiting" || (s.state === "done" && s.note?.status === "question")) return "needs";
   if (s.state === "done" && s.unread && s.note?.status !== "progress") return "new";
   if (s.state === "working") return "working";
