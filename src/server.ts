@@ -21,6 +21,8 @@ import { readHidden, setHidden } from "./hidden";
 import { addOpened, readOpened } from "./opened";
 import { startNaming } from "./names";
 import { startDigests } from "./digests";
+import { startFeed } from "./feed/job";
+import { FEED_ID, feedMessage, markFeedSeen, onFeedChange, setFeedSaved, shownFeed } from "./feed/store";
 import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
 import { addDevice, addWidget, isDeviceToken, isPushEnv, isWidgetToken, removeDevice, removeWidget } from "./push/store";
@@ -368,6 +370,21 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     return new Response(null, { status: 204 });
   }
 
+  // The phone's feed (feed/store.ts): its cards, the ones it saw, the ones it saved.
+  if (path === "/feed" && get) return Response.json(shownFeed());
+  if (path === "/feed/seen" && req.method === "POST") {
+    const { ids } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (!Array.isArray(ids) || ids.length > 500 || !ids.every((id) => typeof id === "string" && FEED_ID.test(id))) throw new HttpError(400, "ids must be card ids");
+    markFeedSeen(ids as string[]);
+    return new Response(null, { status: 204 });
+  }
+  if (path === "/feed/saved" && req.method === "POST") {
+    const { id, saved } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (typeof id !== "string" || !FEED_ID.test(id) || typeof saved !== "boolean") throw new HttpError(400, "id must be a card id, and saved true or false");
+    if (!setFeedSaved(id, saved)) throw new HttpError(404, "no such card");
+    return new Response(null, { status: 204 });
+  }
+
   if (path === "/fs/list" && get) {
     const p = q.get("path");
     return Response.json({ ...listDir(guardList(p)), path: resolve(p!) });
@@ -499,6 +516,13 @@ export function serve(): Server {
   startNaming(); // off with {"names": false} in <socket dir>/config.json
   startNotes(); // the same switch
   startDigests(); // and again
+  // The feed's message for the phone's Feed button, published when it changes (a run, a summary, a seen card, the switch).
+  let lastFeed = "";
+  onFeedChange(() => {
+    const m = feedMessage();
+    if (m !== lastFeed) server.publish("sessions", (lastFeed = m));
+  });
+  startFeed(); // off unless {"feed": {"on": true}} in <socket dir>/config.json
   startHandoffs();
   startAssistant(); // off unless {"assistant": true} in <socket dir>/config.json
   // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a

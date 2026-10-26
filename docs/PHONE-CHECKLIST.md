@@ -178,3 +178,14 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] Buttons are black (white in dark mode); links in Claude's replies are still blue; swipe actions keep their colours.
 - [ ] In dark mode, your messages, the send button and the mic while listening are white with black content, and readable.
 - [ ] In dark mode, the prominent buttons (Allow, Submit, Resume, Open, Run) are white with black text, and readable.
+
+## Feed
+
+- [ ] With `"feed": { "on": true }` in `~/.blimp/config.json`, the drawer shows the Feed button within a minute. With it off, the button goes.
+- [ ] The first run's cards come in within a few minutes. The button has a dot while there are cards you haven't seen.
+- [ ] One card fills the screen. A swipe up shows the next, a swipe down the one before, with no lag.
+- [ ] Open shows the page in Safari inside the app. Comments opens the thread, and asks which one for a card from HN and Reddit.
+- [ ] Save, then Saved (top right) lists it. A swipe left unsaves it.
+- [ ] Close the feed and open it again: the cards you swiped past don't come back.
+- [ ] After the last card: "All caught up", the next update's time, and any source that failed (for example "Reddit didn't load at …: no key").
+- [ ] With Tailscale off, the cards already loaded stay readable and the connecting bar shows.

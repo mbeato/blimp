@@ -9,6 +9,7 @@
 //   blimpd pair --revoke       delete the phone's token (the Mac keeps working)
 //   blimpd push-key <file.p8> --key-id <id> --team-id <id>  the push key from Apple, for the phone's notifications
 //   blimpd push-test           a test notification to every phone that asked for them
+//   blimpd reddit-key <client id> <secret>  your Reddit app's key, for the phone's feed (feed/reddit.ts)
 //   blimpd browser             which Chrome the server browser runs, if any
 //   blimpd browser-mcp         the browser MCP a session runs (browser/mcp.ts)
 //   blimpd send <session> <message>  type a message into another session's Claude (send.ts)
@@ -30,6 +31,7 @@ import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } fr
 import { runOverview, runRead } from "./overview";
 import { runPair } from "./pair";
 import { runPushKey, runPushTest } from "./push/cli";
+import { runRedditKey } from "./feed/reddit";
 import { runSend } from "./send";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
@@ -88,6 +90,8 @@ if (cmd === "sessions") {
   process.exit(runPushKey(args));
 } else if (cmd === "push-test") {
   process.exit(await runPushTest());
+} else if (cmd === "reddit-key") {
+  process.exit(runRedditKey(args));
 } else if (cmd === "browser") {
   console.log(findChrome() ?? "no Chrome or Chromium found; install one: npx playwright install chromium");
 } else if (cmd === "browser-mcp") {
@@ -107,6 +111,6 @@ if (cmd === "sessions") {
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | browser | browser-mcp | send <session> <message> | assistant on|off|status | overview | read <session or conversation id> [--last N] | start <folder> <message> | answer <session> <option number> | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | send <session> <message> | assistant on|off|status | overview | read <session or conversation id> [--last N] | start <folder> <message> | answer <session> <option number> | --version");
   process.exit(cmd ? 1 : 0);
 }

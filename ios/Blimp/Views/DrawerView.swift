@@ -1,13 +1,14 @@
 // The drawer from the left. Down its left side, the projects in a column: two letters each, with the mark of the
 // session there that needs you most. A tap shows that project's inbox behind the drawer and its sessions in it, and
 // the drawer stays open; press and hold one to hide it. At the column's foot, + (open a folder on the computer as a
-// project, FolderBrowserView) and Settings. Beside it the project's name, New session (the inbox's box, ready to
-// type into), its running sessions, the project's browser tabs (a dot on ones a session opened; a tap opens one full
-// screen, New Tab opens one, a swipe right closes one), then its past conversations folded under Earlier (each newest
-// activity first, with its mark, and under its title its branch, jobs and handoff). A tap opens one; a swipe right on
-// a row or press and hold has its actions (Stop, Mark read, End; Resume a past one). It follows the finger: a swipe
-// right in the chat pulls it out (HomeView's `pull`), a swipe left anywhere on it or beside it pushes it back, and
-// letting go settles it open or closed by where it is and how fast it went. A tap beside it closes it too.
+// project, FolderBrowserView), Feed (while the feed is on, with a dot while it has cards not seen) and Settings.
+// Beside it the project's name, New session (the inbox's box, ready to type into), its running sessions, the
+// project's browser tabs (a dot on ones a session opened; a tap opens one full screen, New Tab opens one, a swipe
+// right closes one), then its past conversations folded under Earlier (each newest activity first, with its mark, and
+// under its title its branch, jobs and handoff). A tap opens one; a swipe right on a row or press and hold has its
+// actions (Stop, Mark read, End; Resume a past one). It follows the finger: a swipe right in the chat pulls it out
+// (HomeView's `pull`), a swipe left anywhere on it or beside it pushes it back, and letting go settles it open or
+// closed by where it is and how fast it went. A tap beside it closes it too.
 import BlimpKit
 import SwiftUI
 
@@ -31,6 +32,8 @@ struct DrawerView: View {
     /// Opens the box that starts a session in this project.
     let onNewSession: () -> Void
     let onSettings: () -> Void
+    /// Opens the feed (FeedView).
+    let onFeed: () -> Void
     let actions: RowActions
     /// Opens a session: the one a row's Resume started.
     let onOpen: (String) -> Void
@@ -155,7 +158,8 @@ struct DrawerView: View {
     }
 
     /// The projects in a column down the drawer's left side, two letters each with their mark, the one shown lit; the
-    /// column scrolls when they don't all fit. Its foot, always in sight: + (open a folder) and Settings.
+    /// column scrolls when they don't all fit. Its foot, always in sight: + (open a folder), Feed (while it's on) and
+    /// Settings.
     private var strip: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -177,6 +181,21 @@ struct DrawerView: View {
             .accessibilityLabel("Open a folder")
             .accessibilityIdentifier("drawerOpenFolder")
             .padding(.vertical, 8)
+            if store.feedOn {
+                Button(action: onFeed) {
+                    Image(systemName: "newspaper")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
+                        .overlay(alignment: .topTrailing) {
+                            if store.feedUnseen > 0 {
+                                Circle().fill(.tint).frame(width: 8, height: 8).offset(x: -6, y: 8)
+                            }
+                        }
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(store.feedUnseen > 0 ? "Feed, new cards" : "Feed")
+                .accessibilityIdentifier("feedButton")
+            }
             Button(action: onSettings) {
                 Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44)
             }

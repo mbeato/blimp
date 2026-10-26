@@ -359,20 +359,28 @@ public enum ChatEvent: Sendable, Equatable {
 }
 
 public enum EventsMessage: Sendable, Equatable {
-    /// The server browser's tabs (Browser.swift), every folder's.
-    case sessions([Session]), browser([BrowserTab]), other
+    /// The server browser's tabs (Browser.swift), every folder's. The feed's switch and how many cards haven't been
+    /// seen (Feed.swift).
+    case sessions([Session]), browser([BrowserTab]), feed(on: Bool, unseen: Int), other
 
     // One malformed session or tab must not blank the whole list, so each element decodes on its own.
     private struct Lenient<T: Decodable>: Decodable {
         let value: T?
         init(from decoder: Decoder) throws { value = try? T(from: decoder) }
     }
-    private struct Wire: Decodable { let type: String; let sessions: [Lenient<Session>]?; let tabs: [Lenient<BrowserTab>]? }
+    private struct Wire: Decodable {
+        let type: String
+        let sessions: [Lenient<Session>]?
+        let tabs: [Lenient<BrowserTab>]?
+        let on: Bool?
+        let unseen: Int?
+    }
 
     public static func decode(_ data: Data) -> EventsMessage {
         guard let w = try? JSONDecoder().decode(Wire.self, from: data) else { return .other }
         if w.type == "sessions", let s = w.sessions { return .sessions(s.compactMap(\.value)) }
         if w.type == "browser", let t = w.tabs { return .browser(t.compactMap(\.value)) }
+        if w.type == "feed", let on = w.on { return .feed(on: on, unseen: max(0, w.unseen ?? 0)) }
         return .other
     }
 }
