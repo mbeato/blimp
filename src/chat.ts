@@ -4,15 +4,19 @@
 // said, one line per tool call, and the ! commands you ran with their output.
 
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { isKept, isVisualId } from "./visuals/store";
 
 export type ToolMessage = { id: string; at: number; role: "tool"; name: string; summary: string; input: string; output?: string; error?: boolean };
 export type ShellMessage = { id: string; at: number; role: "shell"; input: string; output?: string };
+// A page Claude showed with blimp's show tool (visuals/mcp.ts): a card on the phone. gone: its copy is no longer kept.
+export type VisualMessage = { id: string; at: number; role: "visual"; title: string; visual: string; summary: string; gone?: true };
 export type ChatMessage =
   | { id: string; at: number; role: "user"; text: string }
   | { id: string; at: number; role: "assistant"; text: string }
   | { id: string; at: number; role: "compacted" }
   | ToolMessage
-  | ShellMessage;
+  | ShellMessage
+  | VisualMessage;
 
 // tools: tool_use id -> its message, so a later result can fill it in (then it's dropped).
 // shells: the same for ! commands, by the command's entry (its output's entry is a child of it).
@@ -51,12 +55,28 @@ export function toolSummary(name: string, input: any, dir: string): string {
     case "Task":
     case "Agent":
       return `Agent: ${str(input?.description)}`;
+    case "mcp__blimp__show":
+      return `Showing ${cut(str(input?.title), 80)}`;
     default:
       return name;
   }
 }
 
 const toolInput = (name: string, input: any) => cap(name === "Bash" ? str(input?.command) : JSON.stringify(input ?? {}, null, 2));
+
+const SHOW = "mcp__blimp__show";
+
+// A show call whose result says which visual it made: that visual, under the call's id. Anything else: undefined.
+function visualOf(t: ToolMessage, result: string, error: boolean): VisualMessage | undefined {
+  const id = /^Shown on the phone and the Mac\. visual: ([0-9a-f]{12})$/m.exec(result)?.[1];
+  if (t.name !== SHOW || error || !id || !isVisualId(id)) return;
+  let title = "";
+  try {
+    title = str(JSON.parse(t.input)?.title).trim();
+  } catch {} // an input cut at 20 000 characters isn't JSON: no title
+  title ||= "Visual";
+  return { id: t.id, at: t.at, role: "visual", title, visual: id, summary: `Showed ${title}`, ...(!isKept(id) && { gone: true as const }) };
+}
 
 // What's between <tag> and the last </tag>: output can itself print the closing tag.
 const inTag = (c: string, tag: string) => {
@@ -107,7 +127,7 @@ export function messagesFromLine(line: string, s: ChatScan): ChatMessage[] {
         s.tools.delete(b.tool_use_id);
         t.output = cap(resultText(b.content));
         if (b.is_error) t.error = true;
-        out.push({ ...t });
+        out.push(visualOf(t, t.output, !!b.is_error) ?? { ...t });
       }
     });
   } else if (r?.type === "assistant" && Array.isArray(c)) {
