@@ -20,8 +20,22 @@ describe("assistantSettings", () => {
     }
     expect(s.permissions.ask).toContain("mcp__claude_ai_Gmail__send_message");
     expect(s.permissions.ask).toContain("mcp__claude_ai_Slack__slack_send_message");
+    expect(s.permissions.ask).toContain("mcp__claude_ai_Google_Drive__share_file");
     expect(s.permissions.allow).toEqual(["Bash(blimpd overview)", "Bash(/opt/blimpd overview)", "Bash(blimpd read:*)", "Bash(/opt/blimpd read:*)", "Read(~/**)"]);
     expect(s.permissions.allow.filter((r) => s.permissions.ask.includes(r))).toEqual([]);
+    expect(s.permissions.deny).toEqual([
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.blimp/token)",
+      "Read(~/.blimp/phone-token)",
+      "Read(~/.blimp/secrets/**)",
+      "Read(~/.blimp/browser/key)",
+      "Read(~/.blimp/apns.p8)",
+      "Read(~/.config/zai/**)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.codex/auth.json)",
+    ]);
+    expect(s.permissions.deny.filter((r) => s.permissions.allow.includes(r) || s.permissions.ask.includes(r))).toEqual([]);
   });
 
   test("blimpd on PATH as plain blimpd: each rule once", () => {
@@ -126,6 +140,13 @@ describe("assistantTick", () => {
     const up = deps({ running: async () => true });
     await assistantTick(up.d, newKeepState());
     expect([off.started, up.started]).toEqual([[], []]);
+  });
+
+  test("switched off after launch (blimpd assistant off from another process): nothing starts", async () => {
+    let calls = 0;
+    const t = deps({ on: () => ++calls === 1 });
+    await assistantTick(t.d, newKeepState());
+    expect(t.started).toEqual([]);
   });
 
   test("on and not running: its files, then a Claude session named exactly assistant in its folder, in default mode", async () => {

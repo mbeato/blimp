@@ -69,8 +69,8 @@ Sources: [Meta's announcement](https://about.fb.com/news/2026/09/introducing-mus
 - **Kept alive.** While the assistant is on, blimpd checks every 5 s that a session named `assistant` is
   running, and starts one if not. If the folder already has a Claude conversation (a transcript in Claude's
   projects folder for that path), the new session gets `--continue` and picks it up. Otherwise it starts
-  fresh, since `--continue` fails with nothing to continue. After 3 failed starts in a row it waits
-  10 minutes and logs why.
+  fresh, since `--continue` fails with nothing to continue. After 3 starts within 2 minutes (it keeps
+  stopping, or can't start) it waits 10 minutes and logs why.
 - **Long chats:** Claude Code's own compaction. `/clear` starts a fresh chat in the same place.
 - **The switch:** `{"assistant": true}` in `<socket dir>/config.json`, next to `names`.
   - `blimpd assistant on | off | status` on the server (step 1). `off` also ends the session.

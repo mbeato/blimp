@@ -71,7 +71,22 @@ const SEND_TOOLS = [
   "mcp__claude_ai_Gmail__forward",
   "mcp__claude_ai_Slack__slack_send_message",
   "mcp__claude_ai_Slack__slack_schedule_message",
+  "mcp__claude_ai_Google_Drive__share_file",
   "mcp__claude_ai_Zapier__execute_zapier_write_action",
+];
+
+// Known secret files, never read: deny beats allow and ask.
+const SECRET_FILES = [
+  "Read(~/.ssh/**)",
+  "Read(~/.aws/**)",
+  "Read(~/.blimp/token)",
+  "Read(~/.blimp/phone-token)",
+  "Read(~/.blimp/secrets/**)",
+  "Read(~/.blimp/browser/key)",
+  "Read(~/.blimp/apns.p8)",
+  "Read(~/.config/zai/**)",
+  "Read(~/.claude/.credentials.json)",
+  "Read(~/.codex/auth.json)",
 ];
 
 // The folder's Claude settings. Each command rule is there under the bare name (blimpd on PATH) and under the
@@ -83,6 +98,7 @@ export function assistantSettings(cmd: string) {
       defaultMode: "default" as const,
       allow: [...both("overview"), ...both("read:*"), "Read(~/**)"],
       ask: [...both("start:*"), ...both("send:*"), ...both("answer:*"), ...SEND_TOOLS],
+      deny: SECRET_FILES,
     },
   };
 }
@@ -165,6 +181,7 @@ export async function assistantTick(deps: KeepDeps = live(), state = keep): Prom
     state.tries.push(t);
     writeAssistantFiles(deps.dir, deps.self);
     const run = await deps.launch();
+    if (!deps.on()) return; // blimpd assistant off ran while launch() was working
     // Default mode, whatever the user's settings say: auto mode asks nothing, and the act commands must ask.
     run.args.push("--permission-mode", "default");
     if (hasConversation(deps.dir, deps.claude)) run.args.push("--continue");
@@ -191,7 +208,7 @@ export async function runAssistant(args: string[]): Promise<number> {
   }
   if (what === "on") {
     saveConfig({ assistant: true });
-    console.log(`The assistant is on. blimpd starts it within a few seconds, in ${dir}.`);
+    console.log(`The assistant is on. blimpd starts it within a few seconds while blimpd runs, in ${dir}.`);
   } else if (what === "off") {
     saveConfig({ assistant: false });
     if (await sessionExists(ASSISTANT)) await killSession(ASSISTANT);
@@ -199,7 +216,7 @@ export async function runAssistant(args: string[]): Promise<number> {
   } else {
     const running = parseZmxList(await zmxListAsync()).some((s) => s.name === ASSISTANT);
     console.log(
-      !assistantOn() ? "The assistant is off." : running ? `The assistant is on and running (session ${ASSISTANT}, in ${dir}).` : "The assistant is on, but not running yet. blimpd starts it within a few seconds while blimpd runs.",
+      !assistantOn() ? (running ? `The assistant is off, but a session named ${ASSISTANT} is still running. blimpd assistant off ends it.` : "The assistant is off.") : running ? `The assistant is on and running (session ${ASSISTANT}, in ${dir}).` : "The assistant is on, but not running yet. blimpd starts it within a few seconds while blimpd runs.",
     );
   }
   return 0;
