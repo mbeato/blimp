@@ -18,7 +18,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.blimp.phone
         PRODUCT_NAME: blimp
-        MARKETING_VERSION: "0.3.12"
+        MARKETING_VERSION: "0.3.13"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1"
@@ -69,7 +69,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.blimp.phone.widgets
         PRODUCT_NAME: BlimpWidgets
-        MARKETING_VERSION: "0.3.12"
+        MARKETING_VERSION: "0.3.13"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
