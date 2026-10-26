@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseTrending, readGithub, readmeUrl, readReadme, TRENDING } from "../src/feed/github";
 import { HN_FRONT, hnComments, hnItem, parseFront, parseItem, readHn } from "../src/feed/hn";
 import { parsePage, readPage } from "../src/feed/page";
 import { parseFeed, readRss } from "../src/feed/rss";
@@ -135,5 +136,50 @@ describe("linked pages", () => {
     expect((await readPage(get, "https://e.com/a"))?.text).toBe("Hi");
     expect(await readPage(get, "https://e.com/pdf")).toBeUndefined();
     expect(await readPage(get, "https://e.com/gone")).toBeUndefined();
+  });
+});
+
+describe("GitHub trending", () => {
+  test("parseTrending: each repo's name, description and stars today, its picture, and its place", async () => {
+    const page = `<article class="Box-row">
+  <h2 class="h3 lh-condensed"><a href="/oven-sh/bun" class="Link">oven-sh / bun</a></h2>
+  <p class="col-9 color-fg-muted my-1 pr-4">Incredibly fast JavaScript runtime &amp; bundler</p>
+  <div class="f6 color-fg-muted mt-2"><span class="d-inline-block float-sm-right">1,234 stars today</span></div>
+</article>
+<article class="Box-row">
+  <h2 class="h3 lh-condensed"><a href="/no/description" class="Link">no / description</a></h2>
+  <div class="f6 color-fg-muted mt-2"><span class="d-inline-block float-sm-right">56 stars today</span></div>
+</article>`;
+    expect(await parseTrending(page)).toEqual([
+      {
+        kind: "github",
+        source: "GitHub",
+        rank: 1,
+        url: "https://github.com/oven-sh/bun",
+        title: "oven-sh/bun",
+        score: 1234,
+        text: "Incredibly fast JavaScript runtime & bundler",
+        image: "https://opengraph.githubassets.com/1/oven-sh/bun",
+        ref: "oven-sh/bun",
+      },
+      { kind: "github", source: "GitHub", rank: 2, url: "https://github.com/no/description", title: "no/description", score: 56, image: "https://opengraph.githubassets.com/1/no/description", ref: "no/description" },
+    ]);
+  });
+  test("the real page: at least 10 repos, each owner/name with stars today, most with a description", async () => {
+    const repos = await parseTrending(fixture("github-trending.html"));
+    expect(repos.length).toBeGreaterThanOrEqual(10);
+    for (const r of repos) {
+      expect(r.title).toMatch(/^[\w.-]+\/[\w.-]+$/);
+      expect(r.score).toBeGreaterThan(0);
+    }
+    expect(repos.filter((r) => r.text).length).toBeGreaterThan(repos.length / 2);
+  });
+  test("a page with no repos (GitHub changed it) is a failure that says so", async () => {
+    await expect(readGithub(fakeGet({ [TRENDING]: "<html>changed</html>" }).get)).rejects.toThrow("no repos on the page");
+  });
+  test("readReadme asks GitHub's API for the raw README", async () => {
+    const { get, asked } = fakeGet({ [readmeUrl("oven-sh/bun")]: { status: 200, text: "# Bun\nFast.", type: "text/plain" } });
+    expect(await readReadme(get, "oven-sh/bun")).toBe("# Bun\nFast.");
+    expect(asked).toEqual(["https://api.github.com/repos/oven-sh/bun/readme"]);
   });
 });
