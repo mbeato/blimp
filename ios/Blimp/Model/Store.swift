@@ -16,6 +16,10 @@ final class Store {
     var sessions: [Session] = []
     /// The server browser's tabs, every folder's (the drawer shows the project's).
     var browserTabs: [BrowserTab] = []
+    /// The feed's switch and how many cards haven't been seen, from the events' feed message: the drawer's Feed
+    /// button and its dot. Off until blimpd says (an older one never does).
+    var feedOn = false
+    var feedUnseen = 0
     /// Words for a chat's box from elsewhere (the browser's Send to Session): that chat adds them to its box
     /// and sets this back.
     var insert: DraftInsert?
@@ -86,6 +90,9 @@ final class Store {
                     self.sessions = list
                 case .browser(let tabs):
                     self.browserTabs = tabs
+                case .feed(let on, let unseen):
+                    self.feedOn = on
+                    self.feedUnseen = unseen
                 case .other:
                     break
                 }
@@ -132,6 +139,8 @@ final class Store {
         server = nil
         sessions = []
         browserTabs = []
+        feedOn = false
+        feedUnseen = 0
         connection = .connecting
         everOnline = false
         tailnetOff = false

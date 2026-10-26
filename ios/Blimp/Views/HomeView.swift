@@ -5,7 +5,8 @@
 // On any screen, a session in any project that starts waiting gives a double haptic, and away from a chat a banner
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
 // live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
-// from the drawer opens full screen over all of it (BrowserView), and not under the lock's cover.
+// from the drawer opens full screen over all of it (BrowserView), and not under the lock's cover. The feed from the
+// drawer's Feed button opens the same way (FeedView).
 import BlimpKit
 import SwiftUI
 
@@ -24,6 +25,8 @@ struct HomeView: View {
     @State private var drawer = false
     /// The server browser tab open over the chat (BrowserView), by id.
     @State private var browserTab: String?
+    /// The feed, full screen over everything (FeedView), from the drawer's Feed button.
+    @State private var showFeed = false
     /// The drawer's New session was tapped: the inbox's box takes the keyboard, and sets this back.
     @State private var newSession = false
     /// A swipe right that's pulling the drawer out: how far it has gone; nil while there's none.
@@ -100,6 +103,7 @@ struct HomeView: View {
                        rows: rows, selected: selected,
                        onPick: pick, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },
+                       onFeed: { drawer = false; showFeed = true },
                        actions: actions, onOpen: { show(.session($0)) },
                        tabs: store.dir.map { BrowserTab.inFolder(store.browserTabs, $0) } ?? [],
                        onTab: { browserTab = $0.id; drawer = false }, onNewTab: newTab, onCloseTab: closeTab)
@@ -108,6 +112,11 @@ struct HomeView: View {
             if !covered, let browserTab, let tab = store.browserTabs.first(where: { $0.id == browserTab }) {
                 BrowserView(tab: tab, onClose: { self.browserTab = nil }, onSend: sendToChat, onCloseTab: { closeTab(tab) })
                     .id(tab.id)
+            }
+        }
+        .overlay {
+            if !covered, showFeed {
+                FeedView(onClose: { showFeed = false })
             }
         }
         .environment(\.sideScrollers, sideScrollers)
@@ -174,6 +183,7 @@ struct HomeView: View {
                     Push.shared.open = nil
                     // Close what could cover the chat.
                     browserTab = nil
+                    showFeed = false
                     showSettings = false
                     showFolders = false
                     show(.session(name))

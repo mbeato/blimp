@@ -523,6 +523,46 @@ final class BlimpUITests: XCTestCase {
         try until(row, "label CONTAINS 'tapped typed:hi'", "the tap and the typing to reach the page")
     }
 
+    // MARK: - The feed
+
+    /// The feed (ios/e2e/setup.ts: on, three cards, Reddit's last run failed): the drawer's Feed button opens it on
+    /// the first card; a swipe up shows the second; Save keeps it in Saved. Both were on screen for over a second
+    /// before the screen moved on or the feed closed, so they're seen: the feed opens again on the third.
+    func testFeed() throws {
+        // Seen marks persist in blimpd's feed.json, so a retried run starts from the fixture again (setup.ts).
+        let feedPath = hostFile("feed-path").trimmingCharacters(in: .whitespacesAndNewlines)
+        let fixture = hostFile("feed-fixture.json")
+        if feedPath.isEmpty || fixture.isEmpty { throw failed("the feed fixture from setup.ts") }
+        try fixture.write(toFile: feedPath, atomically: true, encoding: .utf8)
+        try launchPaired()
+        try openDrawer()
+        let button = element("feedButton")
+        try wait(button, "the Feed button in the drawer")
+        button.tap()
+        try wait(labeled("Demo card one"), "the first card")
+        shot("50a-feed")
+        Thread.sleep(forTimeInterval: 1.5) // over a second on screen: it's seen once the feed moves on
+        app.swipeUp()
+        let two = element("feedCard-2222222222222222")
+        try until(two.buttons["feedSave"], "hittable == true", "the second card after a swipe up")
+        let save = two.buttons["feedSave"]
+        try tap(save, until: "label CONTAINS 'Saved'", "Save to say Saved", first: 3) { !save.label.contains("Saved") }
+        shot("50b-feed-saved")
+        element("feedSavedButton").tap()
+        try wait(element("saved-2222222222222222"), "the saved card in Saved")
+        shot("50c-feed-saved-list")
+        app.buttons["savedDone"].tap()
+        element("feedClose").tap()
+        try until(element("feedClose"), "exists == false", "the feed to close")
+        try openDrawer()
+        element("feedButton").tap()
+        try until(element("feedCard-3333333333333333").buttons["feedSave"], "hittable == true", "the feed opening on the third card")
+        if element("feedCard-1111111111111111").exists || element("feedCard-2222222222222222").exists {
+            throw failed("a card already seen came back")
+        }
+        shot("50d-feed-again")
+    }
+
     // MARK: - A start that's stuck
 
     /// demo-stuck is Claude Code that never says which conversation it is and shows no question blimpd reads (as
