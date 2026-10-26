@@ -9,6 +9,7 @@ import pkg from "../package.json";
 import { promptFromHook } from "../src/prompt";
 import { findChrome } from "../src/browser/chrome";
 import { projectFolderName } from "../src/folders";
+import { addOpened } from "../src/opened";
 import { parseZmxList, zmxPath } from "../src/sessions";
 import { widgetKey } from "../src/widget";
 
@@ -2299,6 +2300,44 @@ describe("assistant", () => {
     expect((await cli(["assistant", "status"])).out).toBe("The assistant is off.");
     expect(await cli(["assistant", "maybe"])).toMatchObject({ code: 1, err: "blimpd assistant: usage: blimpd assistant on | off | status" });
   }, 45000);
+
+  test("GET and PUT /assistant: the switch and, while it runs, the session's name; off ends it; the events socket says so on connect and when it changes", async () => {
+    made.push("assistant");
+    const put = (on: unknown) => api("/assistant", { method: "PUT", body: JSON.stringify({ on }) });
+    const e = await socket("/events");
+    const told = () => e.messages.filter((m) => m.type === "assistant").map((m) => m.on);
+    try {
+      await until(() => told().length === 1, "the assistant message on connect");
+      expect(told()).toEqual([false]);
+      expect(await (await api("/assistant")).json()).toEqual({ on: false });
+      for (const bad of ["yes", 1, null]) expect((await put(bad)).status).toBe(400);
+      expect((await api("/assistant", { method: "PUT", body: "{}" })).status).toBe(400);
+
+      expect((await put(true)).status).toBe(204);
+      expect(JSON.parse(readFileSync(join(tmp, "config.json"), "utf8"))).toMatchObject({ names: false, assistant: true });
+      await until(() => told().at(-1) === true, "the assistant message saying it's on", 3000);
+      await until(async () => (await (await api("/assistant")).json()).session === "assistant", "GET /assistant to name the session", 15000);
+      expect(await (await api("/assistant")).json()).toEqual({ on: true, session: "assistant" });
+
+      expect((await put(false)).status).toBe(204);
+      expect(zmxNames()).not.toContain("assistant");
+      expect(await (await api("/assistant")).json()).toEqual({ on: false });
+      await until(() => told().at(-1) === false, "the assistant message saying it's off", 3000);
+      expect(told()).toEqual([false, true, false]);
+    } finally {
+      e.ws.close();
+      await put(false);
+    }
+  }, 30000);
+
+  test("the assistant's folder is never one of the recent folders, even when it was opened as one", async () => {
+    mkdirSync(dir, { recursive: true });
+    // An opened folder skips the temp-folder check that a transcript's folder gets, so this one would show.
+    addOpened(dir, Date.now(), join(tmp, "opened.json"));
+    const recent = ((await (await api("/folders/recent")).json()) as { dir: string }[]).map((f) => f.dir);
+    expect(recent).not.toContain(dir);
+    expect(recent).not.toContain(realpathSync(dir));
+  });
 });
 
 describe("hidden folders", () => {

@@ -208,6 +208,12 @@ export function startAssistant(every = 5000) {
   setInterval(() => void assistantTick(), every);
 }
 
+// The switch, for `blimpd assistant on | off` and PUT /assistant: off also ends the session.
+export async function setAssistantOn(on: boolean) {
+  saveConfig({ assistant: on });
+  if (!on && (await sessionExists(ASSISTANT))) await killSession(ASSISTANT);
+}
+
 // blimpd assistant on | off | status. Off ends the session; its folder and conversations stay, and on again
 // continues the latest.
 export async function runAssistant(args: string[]): Promise<number> {
@@ -218,11 +224,10 @@ export async function runAssistant(args: string[]): Promise<number> {
     return 1;
   }
   if (what === "on") {
-    saveConfig({ assistant: true });
+    await setAssistantOn(true);
     console.log(`The assistant is on. blimpd starts it within a few seconds while blimpd runs, in ${dir}.`);
   } else if (what === "off") {
-    saveConfig({ assistant: false });
-    if (await sessionExists(ASSISTANT)) await killSession(ASSISTANT);
+    await setAssistantOn(false);
     console.log("The assistant is off. Its folder and conversations stay; turning it on again continues the latest.");
   } else {
     const running = parseZmxList(await zmxListAsync()).some((s) => s.name === ASSISTANT);
