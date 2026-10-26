@@ -6,7 +6,8 @@
 // that opens it (a chat has its own); one that finishes working gives a light tick. A row's actions (RowActions)
 // live here: End's question, a failure's alert, and the new session a handoff started, which opens. A browser tab
 // from the drawer opens full screen over all of it (BrowserView), and not under the lock's cover. The feed from the
-// drawer's Feed button opens the same way (FeedView).
+// drawer's Feed button opens the same way (FeedView). The assistant's icon at the top of the strip opens its chat (its
+// folder isn't a project, so the project stays), with its jobs bar (JobsBar) on top; a job opened there goes back to it.
 import BlimpKit
 import SwiftUI
 
@@ -55,6 +56,8 @@ struct HomeView: View {
     @AppStorage("inboxLeftAt") private var leftAt: Double = 0
     /// Back after a while away: when it left. nil otherwise, and once a session opens.
     @State private var away: Double?
+    /// The chat on screen is a job opened from the assistant's jobs bar: its back arrow goes back to the assistant.
+    @State private var fromAssistant = false
 
     var body: some View {
         NavigationStack {
@@ -104,6 +107,7 @@ struct HomeView: View {
                        onPick: pick, onNewSession: startNew,
                        onSettings: { drawer = false; showSettings = true },
                        onFeed: { drawer = false; showFeed = true },
+                       onAssistant: { show(.session(AssistantJobs.assistant)) },
                        actions: actions, onOpen: { show(.session($0)) },
                        tabs: store.dir.map { BrowserTab.inFolder(store.browserTabs, $0) } ?? [],
                        onTab: { browserTab = $0.id; drawer = false }, onNewTab: newTab, onCloseTab: closeTab)
@@ -229,6 +233,12 @@ struct HomeView: View {
             }
         case .session(let name):
             SessionView(name: name, onOpen: { show(.session($0)) })
+                // The assistant's chat: its jobs bar on top (no job to show: none).
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if name == AssistantJobs.assistant {
+                        JobsBar(rows: AssistantJobs.rows(store.sessions)) { show(.session($0), fromAssistant: true) }
+                    }
+                }
         case .past(let c):
             if let dir = store.dir { StartView(dir: dir, past: c) { show(.session($0)) }.id(c.sessionId) }
         }
@@ -245,15 +255,18 @@ struct HomeView: View {
                 .accessibilityIdentifier("drawerButton")
                 .accessibilityHidden(covered)
             } else {
-                // In a chat: back to the project's inbox, with the same mark. A swipe right opens the drawer.
-                Button { show(.inbox) } label: {
+                // In a chat: back to the project's inbox, with the same mark; in a job opened from the assistant's jobs
+                // bar, back to the assistant. A swipe right opens the drawer.
+                Button {
+                    if fromAssistant { show(.session(AssistantJobs.assistant)) } else { show(.inbox) }
+                } label: {
                     HStack(spacing: 2) {
                         Image(systemName: "chevron.left").font(.body.weight(.semibold))
-                        Text(projectName).lineLimit(1).frame(maxWidth: 120, alignment: .leading)
+                        Text(backName).lineLimit(1).frame(maxWidth: 120, alignment: .leading)
                     }
                     .overlay(alignment: .topTrailing) { badge.offset(x: 8, y: -3) }
                 }
-                .accessibilityLabel(badgeLabel.map { "Back to \(projectName), \($0)" } ?? "Back to \(projectName)")
+                .accessibilityLabel(badgeLabel.map { "Back to \(backName), \($0)" } ?? "Back to \(backName)")
                 .accessibilityIdentifier("inboxBack")
                 .accessibilityHidden(covered)
             }
@@ -276,6 +289,9 @@ struct HomeView: View {
     }
 
     private var projectName: String { store.dir.map(Drawer.name(of:)) ?? "blimp" }
+
+    /// The back arrow's words: Assistant in a job its jobs bar opened, else the project's name.
+    private var backName: String { fromAssistant ? "Assistant" : projectName }
 
     /// Needs you's rule (Drawer.badge), so the badge and the band agree. Not a hidden project's sessions (but the
     /// one on screen's): nothing in the drawer would say where the mark comes from.
@@ -421,13 +437,15 @@ struct HomeView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
-    /// A session from another project (a banner's) brings its project along. Opening one
-    /// ends "since you left".
-    private func show(_ o: Opened) {
+    /// A session from another project (a banner's) brings its project along; the assistant's doesn't, as its folder
+    /// isn't a project. Opening one ends "since you left". fromAssistant: a job opened from the assistant's jobs bar,
+    /// whose back arrow then goes back to the assistant; opening anything any other way clears it.
+    private func show(_ o: Opened, fromAssistant: Bool = false) {
         if case .session(let name) = o {
             away = nil
-            if let s = store.sessions.first(where: { $0.name == name }), s.dir != store.dir { store.dir = s.dir }
+            if let s = store.sessions.first(where: { $0.name == name }), s.assistant != true, s.dir != store.dir { store.dir = s.dir }
         }
+        self.fromAssistant = fromAssistant
         opened = o
         drawer = false
     }

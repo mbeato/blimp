@@ -1,4 +1,5 @@
-// Settings: which server this phone is paired with, notifications, the voice replies are read in, and sign out.
+// Settings: which server this phone is paired with, notifications, the assistant's switch, the voice replies are read
+// in, and sign out.
 import AVFoundation
 import SwiftUI
 
@@ -10,6 +11,9 @@ struct SettingsView: View {
     @State private var chosen = UserDefaults.standard.string(forKey: Speaker.voiceKey)
     /// Notifications from this server (Push.off is the opposite).
     @State private var notify = !Push.off
+    /// The Assistant switch going off asks first (its chat ends); a refusal from blimpd shows in an alert.
+    @State private var confirmOff = false
+    @State private var assistantFailure: String?
 
     var body: some View {
         NavigationStack {
@@ -29,6 +33,20 @@ struct SettingsView: View {
                     Text(Push.shared.denied
                         ? "iOS has them off for blimp: Settings > Notifications > blimp."
                         : "When a session waits on you or a long turn ends, even with blimp closed. The server needs its push key first (blimpd push-key).")
+                }
+                Section {
+                    Toggle("Assistant", isOn: Binding(get: { store.assistantOn }, set: { on in
+                        if on { setAssistant(true) } else { confirmOff = true }
+                    }))
+                    .tint(.green)
+                    .accessibilityIdentifier("assistantSwitch")
+                    .confirmationDialog("Turn off the assistant? Its chat ends; its folder and conversations stay.",
+                                        isPresented: $confirmOff, titleVisibility: .visible) {
+                        Button("Turn Off", role: .destructive) { setAssistant(false) }
+                        Button("Cancel", role: .cancel) {}
+                    }
+                } footer: {
+                    Text("One Claude chat that isn't a project. It can look at every project and asks before it acts.")
                 }
                 Section {
                     voiceRow("Automatic", detail: "The best one installed", id: nil)
@@ -53,6 +71,19 @@ struct SettingsView: View {
             .toolbar { Button("Done") { dismiss() } }
             .onAppear { voices = Speaker.installed }
             .onDisappear { Speaker.shared.stop() }
+            .plainAlert("Couldn't change the assistant", message: $assistantFailure)
+        }
+    }
+
+    /// The switch shows its new place at once, and goes back if blimpd refused, saying why. The events' assistant
+    /// message then says the same.
+    private func setAssistant(_ on: Bool) {
+        store.assistantOn = on
+        Task {
+            do { try await store.setAssistant(on: on) } catch {
+                store.assistantOn = !on
+                assistantFailure = Store.words(for: error)
+            }
         }
     }
 

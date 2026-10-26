@@ -165,6 +165,13 @@ struct API {
         _ = try await call("POST", "/feed/saved", body: JSONEncoder().encode(Body(id: id, saved: saved)))
     }
 
+    /// The assistant's switch: on, blimpd keeps its chat running; off ends it (its folder and conversations stay). An
+    /// older blimpd has no such route: "not found".
+    func setAssistant(on: Bool) async throws {
+        struct Body: Encodable { let on: Bool }
+        _ = try await call("PUT", "/assistant", body: JSONEncoder().encode(Body(on: on)))
+    }
+
     /// A WebSocket address on this server: ws for http, wss for https, the token in the query
     /// (a WebSocket handshake can't carry the Authorization header here).
     func socketURL(_ path: String) -> URL {
