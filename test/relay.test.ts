@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import type { Incoming } from "../relay/chatdb";
 import { inStep, outStep, parseConfig, parseState, type RelayDeps } from "../relay/relay";
-import { SEND_SCRIPT, sendText } from "../relay/send";
+import { pokeMessages, SEND_SCRIPT, sendText } from "../relay/send";
 
 const hi = (id: string, text = "hi", from = "+15550000000"): Incoming => ({ id, from, text, picture: false });
 
@@ -128,6 +128,14 @@ test("sendText: osascript with the script on stdin, the text and handle as argum
   expect(runs).toEqual([[["osascript", "-", "it's \"done\"", "+15550000000"], SEND_SCRIPT]]);
   expect(sendText("x", "y", () => ({ code: 1, err: "execution error" }))).toBe("execution error");
   expect(sendText("x", "y", () => ({ code: 2, err: "" }))).toBe("osascript exited 2");
+});
+
+test("pokeMessages: one harmless Apple event to Messages through osascript, so macOS asks for Automation at start", () => {
+  const runs: [string[], string][] = [];
+  expect(pokeMessages((cmd, stdin) => (runs.push([cmd, stdin]), { code: 0, err: "" }))).toBeUndefined();
+  expect(runs).toEqual([[["osascript", "-"], 'tell application "Messages" to get name']]);
+  expect(pokeMessages(() => ({ code: 1, err: "Not authorized to send Apple events to Messages." }))).toBe("Not authorized to send Apple events to Messages.");
+  expect(pokeMessages(() => ({ code: 2, err: "" }))).toBe("osascript exited 2");
 });
 
 test("a first run on a quiet chat.db saves the watermark", async () => {

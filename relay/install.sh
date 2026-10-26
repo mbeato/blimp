@@ -12,8 +12,14 @@ launchctl bootout "gui/$(id -u)/dev.blimp.relay" 2>/dev/null || true
 cp "$src/blimp-relay" "$app/blimp-relay"
 chmod 755 "$app/blimp-relay"
 codesign --force --sign - "$app/blimp-relay"
-# relay.json holds blimpd's key: it moves into this user's folder and the shared copy goes.
+# relay.json holds blimpd's key: it moves into this user's folder and the shared copy goes. Its owner leaves it
+# mode 600 with an ACL that lets this user read and delete it, so no other user can read it.
 if [ -f "$src/relay.json" ]; then
+  if [ ! -r "$src/relay.json" ]; then
+    echo "Can't read $src/relay.json. As the user who copied it there, run this, then run install.sh again:"
+    echo "  chmod 600 '$src/relay.json' && chmod +a '$(id -un) allow read,delete' '$src/relay.json'"
+    exit 1
+  fi
   cp "$src/relay.json" "$app/relay.json"
   rm -f "$src/relay.json" || echo "Couldn't delete $src/relay.json. Delete it by hand: it holds blimpd's key."
 fi
@@ -41,5 +47,5 @@ open -R "$app/blimp-relay"
 read -r -p "Press Enter once blimp-relay is in the list and switched on. "
 launchctl bootstrap "gui/$(id -u)" "$plist"
 echo
-echo "The relay is running. Now text this account from your phone. When the Mac asks whether blimp-relay may"
-echo "control Messages, click OK. Its log: ~/Library/Logs/blimp-relay.log"
+echo "The relay is running. The Mac now asks whether blimp-relay may control Messages: click OK. Then text this"
+echo "account from your phone. Its log: ~/Library/Logs/blimp-relay.log"

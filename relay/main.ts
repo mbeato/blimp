@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { newTexts, openChatDb, watermark } from "./chatdb";
 import { inLoop, outLoop, parseConfig, parseState, type RelayDeps, type State } from "./relay";
-import { sendText } from "./send";
+import { pokeMessages, sendText } from "./send";
 
 const dir = process.env.BLIMP_RELAY_DIR || dirname(process.execPath);
 const logs = join(homedir(), "Library", "Logs");
@@ -52,6 +52,8 @@ try {
     sleep: (ms) => Bun.sleep(ms),
   };
   log(`started, ${config.server ? `with blimpd at ${config.server}` : "in echo mode"}`);
+  const why = pokeMessages();
+  if (why) log(`couldn't reach Messages at start: ${why}`);
   if (config.server) void outLoop(d);
   await inLoop(d);
 } catch (e) {
