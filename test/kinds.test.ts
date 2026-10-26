@@ -91,7 +91,7 @@ test("a lookup that finds nothing isn't kept: the next one asks again", async ()
 test("Claude Code is still tried when the lookup found nothing; other kinds aren't", async () => {
   process.env.SHELL = loginShellWith(join(home, "bin-none"));
   const f = kindsWith("none-tool");
-  expect(await launchFor("claude", undefined, home, f)).toEqual({ script: 'exec claude "$@"', args: ["claude"] });
+  expect(await launchFor("claude", undefined, home, f)).toEqual({ script: 'exec claude "$@"', args: ["claude", "--mcp-config", mcpConfigPath()] });
   await expect(launchFor("codex", undefined, home, f)).rejects.toThrow("codex isn't installed");
   await expect(launchFor("mine", undefined, home, f)).rejects.toThrow("none-tool isn't installed");
 });

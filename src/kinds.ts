@@ -176,7 +176,7 @@ export async function launchFor(id: string, resume?: string, home = homedir(), f
   const claudeArgs = ["claude", "--mcp-config", browserMcp ? browserMcpConfigPath() : mcpConfigPath(), ...resumeArgs];
   // The login shell found nothing at all, so it couldn't tell: Claude Code is tried anyway, as
   // before kinds. A missing claude then shows in the session itself.
-  if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", ...resumeArgs] };
+  if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", "--mcp-config", mcpConfigPath(), ...resumeArgs] };
   // Settings' Codex sign-in: the user finishes it in the terminal (a code to type in a browser).
   if (id === "codex-login") {
     if (!have.has("codex")) throw new HttpError(400, "codex isn't installed");
