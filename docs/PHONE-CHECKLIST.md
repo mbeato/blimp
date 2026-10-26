@@ -175,7 +175,8 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] In a turn sent from the phone where Claude keeps a task list: "Step n of m", a bar that fills, and the step in progress, changing as Claude goes.
 - [ ] Dynamic Island: ?n and ●n; while a turn from the phone runs, its timer instead of ●n. Long-press: the turn and the first rows.
 - [ ] A tap opens the turn's chat; with no turn, the oldest that needs you.
-- [ ] Swipe the panel away on the lock screen (or end it from the Dynamic Island): it goes away, and blimpd doesn't start another until something new needs you or starts working.
+- [ ] Swipe the panel away on the lock screen (or end it from the Dynamic Island): it goes away, and blimpd doesn't start another until 10 quiet minutes have passed (or the 7 h 45 min restart comes).
+- [ ] The fullest panel (a turn with steps, and rows under it) isn't cut off at the bottom, also at a larger text size (Settings, Display & Brightness, Text Size).
 - [ ] 10 minutes after nothing needs you or works, the panel goes away by itself.
 - [ ] Settings > "Live panel on the lock screen" off: the panel goes away and doesn't come back. On again: it's back with the next busy turn.
 - [ ] After 8 busy hours, a panel is still there (blimpd started a new one at 7 h 45 min, with another quiet banner).
