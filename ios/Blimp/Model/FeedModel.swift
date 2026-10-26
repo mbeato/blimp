@@ -56,11 +56,16 @@ final class FeedModel {
     }
 
     private func send(_ api: API) async {
-        let ids = Array(Self.unsent)
-        guard !ids.isEmpty else { return }
-        do {
-            try await api.feedSeen(ids: ids)
+        while !Self.unsent.isEmpty {
+            let ids = Array(Self.unsent.prefix(500))
+            do {
+                try await api.feedSeen(ids: ids)
+            } catch APIError.server {
+                // blimpd refused them (a card id it doesn't take): sending them again would fail the same way.
+            } catch {
+                return // offline or the like: they wait for the next one, or the next open
+            }
             Self.unsent.subtract(ids)
-        } catch {}
+        }
     }
 }
