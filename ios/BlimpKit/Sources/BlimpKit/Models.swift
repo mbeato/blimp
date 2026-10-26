@@ -320,7 +320,7 @@ public struct Note: Codable, Sendable, Equatable {
 }
 
 public enum ChatRole: String, Codable, Sendable, Equatable {
-    case user, assistant, tool, compacted, shell
+    case user, assistant, tool, compacted, shell, visual
     public init(from decoder: Decoder) throws {
         self = ChatRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .tool
     }
@@ -336,6 +336,11 @@ public struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
     public let input: String?
     public let output: String?
     public let error: Bool?
+    /// A visual's (role visual, a page Claude showed): its title, its copy's id, and true once the copy is no longer
+    /// kept. Defaults, so the other roles' messages are made without them.
+    public var title: String? = nil
+    public var visual: String? = nil
+    public var gone: Bool? = nil
 }
 
 public enum ChatEvent: Sendable, Equatable {
