@@ -12,6 +12,7 @@
 //   blimpd reddit-key <client id> <secret>  your Reddit app's key, for the phone's feed (feed/reddit.ts)
 //   blimpd browser             which Chrome the server browser runs, if any
 //   blimpd browser-mcp         the browser MCP a session runs (browser/mcp.ts)
+//   blimpd visuals-mcp         blimp's own MCP a session runs: the show tool (visuals/mcp.ts)
 //   blimpd send <session> <message>  type a message into another session's Claude (send.ts)
 //   blimpd --version
 
@@ -27,6 +28,7 @@ import { runRedditKey } from "./feed/reddit";
 import { runSend } from "./send";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
+import { runVisualsMcp } from "./visuals/mcp";
 import { withWorkNow } from "./work";
 
 // Codex's part of install-hooks and uninstall-hooks. A hooks.json that isn't strict JSON (comments,
@@ -88,11 +90,13 @@ if (cmd === "sessions") {
   console.log(findChrome() ?? "no Chrome or Chromium found; install one: npx playwright install chromium");
 } else if (cmd === "browser-mcp") {
   process.exit(await runBrowserMcp());
+} else if (cmd === "visuals-mcp") {
+  process.exit(await runVisualsMcp());
 } else if (cmd === "send") {
   process.exit(await runSend(args));
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | send <session> <message> | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | visuals-mcp | send <session> <message> | --version");
   process.exit(cmd ? 1 : 0);
 }
