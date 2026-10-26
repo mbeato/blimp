@@ -71,6 +71,8 @@ person. He asked whether a spare AT&T number or an email address would be easier
 - **Mac permissions, granted once by hand:**
   - Full Disk Access for `blimp-relay` (it can't read chat.db without it).
   - Automation, so it can control Messages. The first send asks for this.
+  - macOS ties both grants to the exact binary. A rebuilt relay may need them again, so the relay stays small
+    and rarely changes.
 - **After a restart** of the Mac, someone signs the Assistant user back in. macOS auto-signs-in one user
   only. The offline alert (section 3) is how Max finds out.
 
