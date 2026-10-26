@@ -54,6 +54,14 @@ func conversation(_ id: String, updated: Double, unread: Bool? = nil) -> Convers
     #expect(Drawer.projects(sessions: sessions, recent: recent, hidden: []).map(\.name) == ["alpha", "gamma", "beta"])
 }
 
+@Test func theAssistantsFolderIsntAProjectInTheStrip() {
+    var assistant = session("assistant", dir: "/h/.blimp/assistant", created: 4, state: .waiting, updated: 9_000)
+    assistant.assistant = true
+    let sessions = [session("a1", dir: "/h/alpha", created: 1, updated: 5_000), assistant]
+    let recent = [RecentFolder(dir: "/h/.blimp/assistant", lastUsed: 99_000)]
+    #expect(Drawer.projects(sessions: sessions, recent: recent).map(\.name) == ["alpha"])
+}
+
 @Test func drawerButtonShowsWhatNeedsYouOutsideTheChatOnScreen() {
     let sessions = [
         session("a1", dir: "/h/alpha", created: 1, state: .waiting),

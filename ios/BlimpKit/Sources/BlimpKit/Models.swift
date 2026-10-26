@@ -167,6 +167,10 @@ public struct Session: Codable, Sendable, Equatable, Identifiable {
     public var run: Run? = nil
     /// Its checkout, branch and pull requests.
     public var work: Work? = nil
+    /// On the assistant's own session (blimpd's assistant.ts): true.
+    public var assistant: Bool? = nil
+    /// On a session the assistant started or messaged: why, and when.
+    public var job: AssistantJob? = nil
 
     public var id: String { name }
     /// blimpd can show a session as chat only when Claude Code runs in it.
@@ -178,7 +182,7 @@ public struct Session: Codable, Sendable, Equatable, Identifiable {
 extension Session {
     private enum CodingKeys: String, CodingKey {
         case name, created, dir, kind, label, sessionId, title, updatedAt, state, stateSince, prompt, unread, note
-        case jobs, context, git, handoff, parent, runnable, runnableAt, run, work
+        case jobs, context, git, handoff, parent, runnable, runnableAt, run, work, assistant, job
     }
 
     // The fields before blimpd 0.3 as the synthesized decoding had them; the newer ones each on their own.
@@ -207,6 +211,8 @@ extension Session {
         runnableAt = try? c.decodeIfPresent(Double.self, forKey: .runnableAt)
         run = try? c.decodeIfPresent(Run.self, forKey: .run)
         work = try? c.decodeIfPresent(Work.self, forKey: .work)
+        assistant = try? c.decodeIfPresent(Bool.self, forKey: .assistant)
+        job = try? c.decodeIfPresent(AssistantJob.self, forKey: .job)
     }
 }
 
@@ -243,6 +249,13 @@ public struct Job: Codable, Sendable, Equatable, Identifiable {
     public var exit: Int? = nil
     /// A running command's or Monitor's last output line, at most 10 s old.
     public var lastLine: String? = nil
+}
+
+/// On a session the assistant started or messaged (blimpd's jobs.ts): why, in a few words, and when it last acted on
+/// it (ms).
+public struct AssistantJob: Codable, Sendable, Equatable {
+    public let reason: String
+    public let at: Double
 }
 
 public struct ContextWindow: Codable, Sendable, Equatable {
@@ -365,8 +378,8 @@ public enum ChatEvent: Sendable, Equatable {
 
 public enum EventsMessage: Sendable, Equatable {
     /// The server browser's tabs (Browser.swift), every folder's. The feed's switch and how many cards haven't been
-    /// seen (Feed.swift).
-    case sessions([Session]), browser([BrowserTab]), feed(on: Bool, unseen: Int), other
+    /// seen (Feed.swift). Whether the assistant is on (Settings' switch).
+    case sessions([Session]), browser([BrowserTab]), feed(on: Bool, unseen: Int), assistant(on: Bool), other
 
     // One malformed session or tab must not blank the whole list, so each element decodes on its own.
     private struct Lenient<T: Decodable>: Decodable {
@@ -386,6 +399,7 @@ public enum EventsMessage: Sendable, Equatable {
         if w.type == "sessions", let s = w.sessions { return .sessions(s.compactMap(\.value)) }
         if w.type == "browser", let t = w.tabs { return .browser(t.compactMap(\.value)) }
         if w.type == "feed", let on = w.on { return .feed(on: on, unseen: max(0, w.unseen ?? 0)) }
+        if w.type == "assistant", let on = w.on { return .assistant(on: on) }
         return .other
     }
 }

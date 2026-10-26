@@ -123,6 +123,9 @@ export class ServerLink {
   ports: Port[] = [];
   portsKnown = false; // the first port list has arrived
   browserTabs: BrowserTab[] = [];
+  // The assistant's switch, from the events socket's assistant message; null until it says (an older blimpd never
+  // does, and Settings then shows no switch for it).
+  assistantOn: boolean | null = null;
   conn: Conn | null = null;
   api: Api | null = null;
   private events: EventsSocket | null = null;
@@ -187,6 +190,10 @@ export class ServerLink {
           this.browserTabs = tabs;
           this.onChange(this);
         },
+        onAssistant: (on) => {
+          this.assistantOn = on;
+          this.onChange(this);
+        },
         onFs: (paths) => this.fsListeners.forEach((f) => f(paths)),
         onVisual: (v) => this.visualListeners.forEach((f) => f(v)),
         onClose: () => this.retry("Lost the connection to blimpd."),
@@ -248,6 +255,14 @@ export class ServerLink {
     } finally {
       this.checking = false;
     }
+  }
+
+  // Settings' Assistant switch: PUT /assistant, shown at once (blimpd's events message says the same within a second).
+  async setAssistant(on: boolean) {
+    if (!this.api) throw new Error("Not connected.");
+    await this.api.setAssistant(on);
+    this.assistantOn = on;
+    this.onChange(this);
   }
 
   // Also during a connect: disconnect cancels a tunnel that is still starting.

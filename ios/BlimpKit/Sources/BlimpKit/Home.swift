@@ -58,16 +58,18 @@ public enum Drawer {
     }
 
     /// The strip's projects: folders with sessions running and recent folders, newest activity first, each with
-    /// the top mark of its sessions. A hidden one is left out, even with sessions running there.
+    /// the top mark of its sessions. A hidden one is left out, even with sessions running there. So is the assistant's folder.
     public static func projects(sessions: [Session], recent: [RecentFolder], hidden: Set<String> = []) -> [ProjectChoice] {
-        let running = Dictionary(grouping: sessions, by: \.dir).map { dir, list in
+        // The assistant's folder isn't a project (blimpd leaves it out of the recent folders too).
+        let assistant = Set(sessions.filter { $0.assistant == true }.map(\.dir))
+        let running = Dictionary(grouping: sessions.filter { $0.assistant != true }, by: \.dir).map { dir, list in
             ProjectChoice(dir: dir, name: name(of: dir), mark: Mark.top(list.map(\.mark)), activity: list.map(\.activity).max() ?? 0)
         }
         let dirs = Set(running.map(\.dir))
         let idle = recent.filter { !dirs.contains($0.dir) }.map {
             ProjectChoice(dir: $0.dir, name: name(of: $0.dir), mark: .none, activity: $0.lastUsed)
         }
-        return (running + idle).filter { !hidden.contains($0.dir) }
+        return (running + idle).filter { !hidden.contains($0.dir) && !assistant.contains($0.dir) }
             .sorted { $0.activity != $1.activity ? $0.activity > $1.activity : $0.dir < $1.dir }
     }
 

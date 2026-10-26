@@ -23,6 +23,9 @@
 //   the feed: on, three cards ready ("Demo card one" to "three", ids 1111…, 2222…, 3333…), Reddit's last run failed
 //              for want of a key, and lastRun now, so blimpd fetches nothing while the tests run;
 //              testFeed restores this fixture at its start ($E2E_DIR/feed-fixture.json to the path in $E2E_DIR/feed-path)
+//   assistant  in the socket folder's assistant/ (not a project, so not in the strip): a stand-in for the assistant,
+//              with a conversation; demo-ask is its job ("run the test suite", in assistant-jobs.json), and config.json
+//              turns the assistant on once it runs, so blimpd's keep-alive never starts one of its own
 // The folders are under the home folder ($E2E_WORK, else ~/e2e-work): blimpd starts sessions only there. Sessions
 // the app starts run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for. The ports
 // ($E2E_PORT for the app's link, $E2E_SITE_PORT for the page) are each shard's own when shards share a Mac.
@@ -208,6 +211,12 @@ const opened = await fetch("http://localhost/browser/tabs", {
 });
 if (!opened.ok) throw new Error(`couldn't open the browser tab: ${opened.status} ${await opened.text()}`);
 console.log(`browser tab ${(await opened.json()).id} in blimp-demo`);
+// The assistant (testAssistantIconAndJobsBar). The job updates blimpd types into it go nowhere.
+await standIn("assistant", join(dirname(sock), "assistant"), "exec cat > /dev/null", "e2e00000-0000-0000-0000-000000000008",
+  [user("u1", "What's waiting on me?"), said("a1", "demo-ask in api-server wants to run npm test.")]);
+writeFileSync(join(dirname(sock), "assistant-jobs.json"), JSON.stringify({ "demo-ask": { reason: "run the test suite", at: Date.now() } }));
+console.log("assistant: a stand-in, with demo-ask as its job");
+
 // The feed (testFeed): feed.json before the switch, so blimpd's job never sees it on with no lastRun.
 const feedAt = Date.now();
 const feedCard = (n: number, word: string) => {
@@ -223,8 +232,8 @@ const feedFixture = JSON.stringify({
 writeFileSync(join(dirname(sock), "feed.json"), feedFixture);
 writeFileSync(join(root, "feed-fixture.json"), feedFixture);
 writeFileSync(join(root, "feed-path"), join(dirname(sock), "feed.json"));
-writeFileSync(join(dirname(sock), "config.json"), JSON.stringify({ feed: { on: true } }));
-console.log("feed: on, three cards");
+writeFileSync(join(dirname(sock), "config.json"), JSON.stringify({ feed: { on: true }, assistant: true }));
+console.log("feed: on, three cards; assistant: on");
 
 writeFileSync(join(root, "link"), `blimp://pair?url=${encodeURIComponent(`http://127.0.0.1:${port}`)}&token=${token}`);
 console.log("stand-ins ready");

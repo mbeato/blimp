@@ -1,10 +1,12 @@
 // The events socket: the session list whenever it changes, the ports programs in sessions listen on (ports.ts),
-// the server browser's tabs (browser/service.ts), the phone feed's switch and unseen count (feed/store.ts), and
+// the server browser's tabs (browser/service.ts), the phone feed's switch and unseen count (feed/store.ts), whether
+// the assistant is on (assistant.ts), and
 // changes to the paths the app watches. The Mac app also says here when a blimp window is in front, so the
 // phone's notifications wait (push/watch.ts).
 
 import { type FSWatcher, statSync, watch } from "node:fs";
 import type { Server, ServerWebSocket } from "bun";
+import { assistantOn } from "./assistant";
 import { browserTabs } from "./browser/service";
 import { shownDigests } from "./digests";
 import { feedMessage } from "./feed/store";
@@ -37,6 +39,8 @@ const sessionsMessage = (zmx: string) => {
   return JSON.stringify({ type: "sessions", sessions, digests: shownDigests([...new Set(sessions.map((s) => s.dir))]) });
 };
 export const browserMessage = () => JSON.stringify({ type: "browser", tabs: browserTabs() });
+// The apps' Assistant switch: on connect, and from serve()'s 1 s check when it changes.
+export const assistantMessage = () => JSON.stringify({ type: "assistant", on: assistantOn() });
 const portsMessage = async (zmx: string) => JSON.stringify({ type: "ports", ports: await sessionPorts(parseZmxList(zmx)) });
 
 async function tick(server: Server) {
@@ -68,6 +72,7 @@ export async function openEvents(ws: ServerWebSocket<EventsData>, server: Server
   } catch {}
   ws.send(browserMessage());
   ws.send(feedMessage());
+  ws.send(assistantMessage());
 }
 
 const MAX_WATCHES = 2000;

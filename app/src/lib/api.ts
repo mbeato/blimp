@@ -43,6 +43,8 @@ export type Session = {
   runnableAt?: number; // ms, when that reply began: runs from before it are an older reply's (older blimpd: absent)
   run?: Run; // a run session's command and the Claude session it's for (older blimpd: absent)
   work?: Work; // its checkout, branch and pull requests (older blimpd: absent)
+  assistant?: true; // the assistant's own session (blimpd's assistant.ts; older blimpd: absent)
+  job?: AssistantJob; // a session the assistant started or messaged: why, and when (older blimpd, or none: absent)
 };
 
 // Which session is on what (blimpd's work.ts). root: the checkout's top folder; worktree: a linked one.
@@ -76,6 +78,10 @@ export type Job = {
   exit?: number;
   lastLine?: string;
 };
+
+// On a session the assistant started or messaged (blimpd's jobs.ts): why, in a few words, and when it last acted on
+// it (ms).
+export type AssistantJob = { reason: string; at: number };
 
 export type RecentFolder = { dir: string; lastUsed: number };
 // A secret given to sessions (GET /secrets): its name and when it was last saved (ms). Never its value.
@@ -181,6 +187,11 @@ export class Api {
 
   async removeZaiKey() {
     await this.req("/keys/zai", { method: "DELETE" });
+  }
+
+  // The assistant's switch: on, blimpd keeps its chat running; off ends it (its folder and conversations stay).
+  async setAssistant(on: boolean) {
+    await this.req("/assistant", { method: "PUT", body: JSON.stringify({ on }), headers: { "Content-Type": "application/json" } });
   }
 
   // Secrets given to sessions: names and when each was saved, never a value (older blimpd: 404).

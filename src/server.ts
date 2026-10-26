@@ -8,12 +8,12 @@ import { dirname, join, resolve } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json";
 import { answerOnce } from "./answer";
-import { ASSISTANT, startAssistant } from "./assistant";
+import { ASSISTANT, assistantDir, assistantOn, setAssistantOn, startAssistant } from "./assistant";
 import { newScan, readLast } from "./chat";
 import { writeMcpConfig } from "./browser/mcp";
 import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
-import { browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
+import { assistantMessage, browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, deleteEntry, download, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, renameEntry, upload, writeFile } from "./files";
 import { conversations, projectFolderName, recentFolders, resumedKind, tempRoots } from "./folders";
 import { CLAUDE_KINDS, installed, launchFor, listKinds, readKindsFile, removeZaiKey, setZaiKey, zaiKey } from "./kinds";
@@ -120,6 +120,10 @@ async function bodyPath(req: Request): Promise<string> {
   return path;
 }
 
+// The recent folders: not the hidden ones, nor the assistant's folder, which isn't a project (by its path and its
+// real path: Claude's transcripts can name either).
+const recent = () => recentFolders(claudeDir(), tempRoots(), new Set([...readHidden(), assistantDir(), realDir(assistantDir())]), readOpened());
+
 async function route(req: Request, url: URL, server: Server, phone?: string): Promise<Response | undefined> {
   const { pathname: path, searchParams: q } = url;
   const get = req.method === "GET";
@@ -184,6 +188,15 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (!words) throw new HttpError(400, "reason must be text of at most 200 characters");
     if (!(await sessionExists(session))) throw new HttpError(404, `no session named ${session}`);
     saveJob(session, words, Date.now());
+    return new Response(null, { status: 204 });
+  }
+  // The assistant's switch, for the apps' Settings: GET says whether it's on, and names its session while one runs;
+  // PUT turns it on or off (off ends the session), as `blimpd assistant on | off` does.
+  if (path === "/assistant" && get) return Response.json({ on: assistantOn(), ...((await sessionExists(ASSISTANT)) && { session: ASSISTANT }) });
+  if (path === "/assistant" && req.method === "PUT") {
+    const { on } = ((await req.json()) ?? {}) as Record<string, unknown>;
+    if (typeof on !== "boolean") throw new HttpError(400, "on must be true or false");
+    await setAssistantOn(on);
     return new Response(null, { status: 204 });
   }
   if (path === "/kinds" && get) return Response.json(listKinds(await installed()));
@@ -348,7 +361,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
   }
 
   if (path === "/ports" && get) return Response.json(await sessionPorts(parseZmxList(await zmxListAsync())));
-  if (path === "/folders/recent" && get) return Response.json(recentFolders(claudeDir(), tempRoots(), new Set(readHidden()), readOpened()));
+  if (path === "/folders/recent" && get) return Response.json(recent());
   // The projects you hid from the phone's strip; POST { dir, hidden } hides one or shows it again.
   if (path === "/folders/hidden" && get) return Response.json(readHidden());
   if (path === "/folders/hidden" && req.method === "POST") {
@@ -371,7 +384,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (!folder) throw new HttpError(400, "dir must be a folder inside your home folder");
     setHidden(full, false);
     addOpened(full);
-    return Response.json(recentFolders(claudeDir(), tempRoots(), new Set(readHidden()), readOpened()));
+    return Response.json(recent());
   }
   if (path === "/conversations" && get) {
     const dir = q.get("dir");
@@ -566,6 +579,13 @@ export function serve(): Server {
   startFeed(); // off unless {"feed": {"on": true}} in <socket dir>/config.json
   startHandoffs();
   startAssistant(); // off unless {"assistant": true} in <socket dir>/config.json
+  // Whether the assistant is on, published when it changes: PUT /assistant, `blimpd assistant on | off`, or
+  // config.json edited by hand, each within a second.
+  let lastAssistant = assistantMessage();
+  setInterval(() => {
+    const m = assistantMessage();
+    if (m !== lastAssistant) server.publish("sessions", (lastAssistant = m));
+  }, 1000);
   startReports(); // the assistant's job updates (reports.ts): nothing while it's off or has no jobs
   // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
   // widget push token (push/watch.ts).

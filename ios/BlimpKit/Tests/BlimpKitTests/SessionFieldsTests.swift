@@ -87,3 +87,14 @@ private struct DecodeFailed: Error {}
     let failed = try JSONDecoder().decode(Handoff.self, from: Data(#"{"state":"failed","error":"Claude didn't write a handoff in 20 minutes"}"#.utf8))
     #expect(failed.error == "Claude didn't write a handoff in 20 minutes")
 }
+
+@Test func decodesTheAssistantAndItsJobsAndALeftOutOneThatDoesntDecode() throws {
+    let base = #""created":1,"dir":"/home/u/web","kind":"claude","title":"t","state":"done""#
+    let decode = { (json: String) in try JSONDecoder().decode(Session.self, from: Data(json.utf8)) }
+    let a = try decode(#"{"name":"assistant",\#(base),"assistant":true}"#)
+    #expect(a.assistant == true && a.job == nil)
+    let j = try decode(#"{"name":"web-1",\#(base),"job":{"reason":"fix the tests","at":1792624236489}}"#)
+    #expect(j.job == AssistantJob(reason: "fix the tests", at: 1792624236489) && j.assistant == nil)
+    let bad = try decode(#"{"name":"web-2",\#(base),"job":{"reason":3},"assistant":"yes"}"#)
+    #expect(bad.name == "web-2" && bad.job == nil && bad.assistant == nil)
+}

@@ -20,6 +20,9 @@ final class Store {
     /// button and its dot. Off until blimpd says (an older one never does).
     var feedOn = false
     var feedUnseen = 0
+    /// The assistant's switch, from the events' assistant message: Settings' Assistant switch. Off until blimpd says
+    /// (an older one never does).
+    var assistantOn = false
     /// Words for a chat's box from elsewhere (the browser's Send to Session): that chat adds them to its box
     /// and sets this back.
     var insert: DraftInsert?
@@ -93,6 +96,8 @@ final class Store {
                 case .feed(let on, let unseen):
                     self.feedOn = on
                     self.feedUnseen = unseen
+                case .assistant(let on):
+                    self.assistantOn = on
                 case .other:
                     break
                 }
@@ -141,6 +146,7 @@ final class Store {
         browserTabs = []
         feedOn = false
         feedUnseen = 0
+        assistantOn = false
         connection = .connecting
         everOnline = false
         tailnetOff = false
@@ -168,6 +174,12 @@ final class Store {
     func closeTab(_ id: String) async throws {
         guard let api else { throw APIError.offline }
         try await api.closeTab(id)
+    }
+
+    /// Settings' Assistant switch (PUT /assistant). The events' assistant message says it changed.
+    func setAssistant(on: Bool) async throws {
+        guard let api else { throw APIError.offline }
+        try await api.setAssistant(on: on)
     }
 
     /// An error in plain words for an alert.

@@ -1,7 +1,8 @@
 // The drawer from the left. Down its left side, the projects in a column: two letters each, with the mark of the
 // session there that needs you most. A tap shows that project's inbox behind the drawer and its sessions in it, and
 // the drawer stays open; press and hold one to hide it. At the column's foot, + (open a folder on the computer as a
-// project, FolderBrowserView), Feed (while the feed is on, with a dot while it has cards not seen) and Settings.
+// project, FolderBrowserView), Feed (while the feed is on, with a dot while it has cards not seen) and Settings. Above
+// the projects, while the assistant runs, its blimp icon with its mark opens its chat.
 // Beside it the project's name, New session (the inbox's box, ready to type into), its running sessions, the
 // project's browser tabs (a dot on ones a session opened; a tap opens one full screen, New Tab opens one, a swipe
 // right closes one), then its past conversations folded under Earlier (each newest activity first, with its mark, and
@@ -34,6 +35,8 @@ struct DrawerView: View {
     let onSettings: () -> Void
     /// Opens the feed (FeedView).
     let onFeed: () -> Void
+    /// Opens the assistant's chat (its icon at the top of the strip).
+    let onAssistant: () -> Void
     let actions: RowActions
     /// Opens a session: the one a row's Resume started.
     let onOpen: (String) -> Void
@@ -158,10 +161,16 @@ struct DrawerView: View {
     }
 
     /// The projects in a column down the drawer's left side, two letters each with their mark, the one shown lit; the
-    /// column scrolls when they don't all fit. Its foot, always in sight: + (open a folder), Feed (while it's on) and
-    /// Settings.
+    /// column scrolls when they don't all fit. Above it, while the assistant runs, the assistant's icon and a thin line.
+    /// Its foot, always in sight: + (open a folder), Feed (while it's on) and Settings.
     private var strip: some View {
         VStack(spacing: 0) {
+            if let assistant {
+                assistantIcon(assistant)
+                    .padding(.top, 12)
+                    .padding(.bottom, 10)
+                Divider().frame(width: 40)
+            }
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(Strip.held(projects, order: order, shown: dir)) { stripIcon($0) }
@@ -224,6 +233,30 @@ struct DrawerView: View {
         .accessibilityIdentifier("strip-" + p.name)
         .contextMenu {
             Button("Hide \(p.name)", systemImage: "eye.slash") { onHide(p.dir) }
+        }
+    }
+
+    /// The assistant's session while it runs (blimpd marks it).
+    private var assistant: Session? { store.sessions.first { $0.assistant == true } }
+
+    /// The assistant: the blimp, with its session's mark. A tap opens its chat, with the drawer closed.
+    private func assistantIcon(_ s: Session) -> some View {
+        Button(action: onAssistant) {
+            BlimpMark(width: 30)
+                .frame(width: 40, height: 40)
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .topTrailing) { MarkView(mark: s.mark).offset(x: 4, y: -4) }
+        }
+        .accessibilityLabel(Self.assistantLabel(s.mark))
+        .accessibilityIdentifier("assistantIcon")
+    }
+
+    /// "Assistant, asking you something", "Assistant, new reply", "Assistant".
+    private static func assistantLabel(_ mark: Mark) -> String {
+        switch mark {
+        case .asking: "Assistant, asking you something"
+        case .unread: "Assistant, new reply"
+        case .working, .none: "Assistant"
         }
     }
 

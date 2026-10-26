@@ -197,3 +197,13 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] Close the feed and open it again: the cards you swiped past don't come back.
 - [ ] After the last card: "All caught up", the next update's time, and any source that failed (for example "Reddit didn't load at …: no key").
 - [ ] With Tailscale off, the cards already loaded stay readable and the connecting bar shows.
+
+## Assistant
+
+- [ ] With the assistant off, the drawer's column has no blimp at its top, and Settings > Assistant is off.
+- [ ] Settings > Assistant on: within a few seconds the blimp shows at the top of the column, above the projects, with a thin line under it. Its folder (assistant) is not in the column.
+- [ ] Tap the blimp: the drawer closes and the assistant's chat opens. ‹ at the top left goes to the same project's inbox as before.
+- [ ] Ask it to start something in a project and Allow it. On top of its chat, a folded bar says "1 working". Tap it: a row with the project, the reason, the mark and the note.
+- [ ] Tap the row: that session's chat opens, and its top left says ‹ Assistant. Tap it: back in the assistant's chat, the bar folded again.
+- [ ] When the job finishes or asks something, the bar's count changes (done, needs you). Opening a done job takes it off the bar.
+- [ ] Settings > Assistant off: it asks first ("Turn off the assistant? …"). Cancel keeps it on. Turn Off: the blimp leaves the column within a few seconds.

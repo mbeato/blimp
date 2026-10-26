@@ -722,6 +722,40 @@ final class BlimpUITests: XCTestCase {
         if gone.isEnabled { throw failed("a card of a copy no longer kept that can be tapped") }
     }
 
+    // MARK: - The assistant
+
+    /// The assistant (setup.ts's stand-in, a session named assistant whose folder isn't a project) is pinned at the top
+    /// of the drawer's strip: its icon opens its chat, whose jobs bar, folded, says "1 needs you" (demo-ask is its job).
+    /// Unfolded, demo-ask's row opens demo-ask's chat, whose back arrow says Assistant and goes back to the assistant's
+    /// chat. (In shard a, after test1 answered demo-ask: its status file still says it waits.)
+    func testAssistantIconAndJobsBar() throws {
+        try launchPaired()
+        try openDrawer()
+        let icon = element("assistantIcon")
+        try wait(icon, "the assistant's icon at the top of the strip")
+        if element("strip-assistant").exists { throw failed("no assistant folder among the projects") }
+        icon.tap()
+        try until(element("drawerStrip"), "exists == false", "the drawer to close as the assistant's chat opens")
+        try wait(message("message.user", "What's waiting on me?"), "the assistant's chat from its icon")
+        let bar = element("jobsBar")
+        try wait(bar, "the jobs bar on top of the assistant's chat")
+        try until(bar, "label CONTAINS '1 needs you'", "the jobs bar's counts")
+        let row = element("job-demo-ask")
+        if row.exists { throw failed("the jobs bar to start folded") }
+        shot("51-assistant")
+        bar.tap()
+        try wait(row, "demo-ask's row in the unfolded jobs bar")
+        try until(row, "label CONTAINS 'api-server · run the test suite'", "demo-ask's project and reason on its row")
+        shot("52-jobs-bar")
+        row.tap()
+        try wait(message("message.user", "Run the test suite"), "demo-ask's chat from its row")
+        let back = element("inboxBack")
+        try until(back, "label CONTAINS 'Assistant'", "the back arrow to say Assistant")
+        back.tap()
+        try wait(message("message.user", "What's waiting on me?"), "the assistant's chat again from the back arrow")
+        try wait(element("jobsBar"), "the jobs bar again")
+    }
+
     // MARK: - Helpers
 
     /// Picks a project from the drawer's strip; its inbox shows behind the drawer, which stays open with its
