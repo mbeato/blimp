@@ -1,7 +1,7 @@
 // The feed's store (src/feed/store.ts): settings, feed.json, cleanup, order, what the phone gets, seen and saved.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { byOrder, type Card, cleanup, DEFAULT_RSS, DEFAULT_SUBREDDITS, feedMessage, type FeedFile, markFeedSeen, onFeedChange, readFeed, readFeedSettings, setFeedSaved, shownFeed, updateFeed } from "../src/feed/store";
@@ -63,6 +63,13 @@ describe("readFeed and updateFeed", () => {
     const f = fresh();
     writeFileSync(f, "{not json");
     expect(readFeed(f).cards).toEqual({});
+  });
+  test("a file that can't be read throws, and a change is not written over it", () => {
+    const f = fresh();
+    mkdirSync(f);
+    expect(() => readFeed(f)).toThrow();
+    expect(() => updateFeed((g) => (g.lastRun = 5), f)).toThrow();
+    expect(existsSync(f + ".tmp")).toBe(false);
   });
   test("a card without a link, title, sources or time is left out, and a saved id with no card", () => {
     const f = fresh();

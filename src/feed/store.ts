@@ -78,12 +78,20 @@ export function readFeedSettings(file = configFile()): FeedSettings {
 
 const empty = (): FeedFile => ({ cards: {}, seen: {}, saved: [], runs: {}, lastRun: 0, calls: [] });
 
-// Missing or broken: empty (the next run fills it). A card without a link, title, sources or time is left out, and
+// Missing or broken: empty (the next run fills it). Any other failure to read it (a busy or unreadable file) throws,
+// so a change is never written over saved and seen that were only unreadable for a moment. A card without a link, title, sources or time is left out, and
 // a saved id without its card.
 export function readFeed(file = feedFile()): FeedFile {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return empty();
+    throw e;
+  }
   let v: any;
   try {
-    v = JSON.parse(readFileSync(file, "utf8"));
+    v = JSON.parse(text);
   } catch {
     return empty();
   }
