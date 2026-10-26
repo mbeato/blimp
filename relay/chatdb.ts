@@ -42,7 +42,7 @@ export function newTexts(db: Database, after: number, allow: string[]): { last: 
     if (taken.has(r.rowid) || r.mine || r.reaction || r.style !== DIRECT || !r.handle || !allowed.has(r.handle.toLowerCase())) continue;
     taken.add(r.rowid);
     // U+FFFC marks where an attachment sits in the text.
-    const text = (r.text ?? decodeBody(r.body) ?? "").replace(/￼/g, "");
+    const text = (r.text || decodeBody(r.body) || "").replace(/￼/g, "");
     const picture = r.pics === 1;
     if (!text.trim() && !picture) continue;
     texts.push({ id: r.guid, from: r.handle, text, picture });
@@ -51,9 +51,12 @@ export function newTexts(db: Database, after: number, allow: string[]): { last: 
 }
 
 // Newer macOS keeps the text in attributedBody (a typedstream NSAttributedString) when `text` is NULL: the
-// NSString's bytes after the '+' that starts them, behind a length (0x81, 0x82, 0x83: a 1, 2 or 3-byte
-// little-endian length follows). Adapted from the official Claude Code iMessage plugin
-// (github.com/anthropics/claude-plugins-official, external_plugins/imessage, Apache-2.0).
+// NSString's bytes after the '+' that starts them, behind a length. A byte under 0x80 is the length; 0x81 means a
+// 2-byte little-endian length follows, 0x82 a 4-byte one. Anything else, or a length cut off by the end of the
+// blob, gives undefined. Adapted from the official Claude Code iMessage plugin
+// (github.com/anthropics/claude-plugins-official, external_plugins/imessage, Apache-2.0). The length reading is
+// fixed relative to that plugin, which read one byte after 0x81 and cut texts over 127 bytes (reported as
+// github.com/anthropics/claude-code/issues/41520).
 export function decodeBody(blob: Uint8Array | null): string | undefined {
   if (!blob) return undefined;
   const buf = Buffer.from(blob);
@@ -65,14 +68,15 @@ export function decodeBody(blob: Uint8Array | null): string | undefined {
   const b = buf[i++];
   let len = b;
   if (b === 0x81) {
-    len = buf[i];
-    i += 1;
-  } else if (b === 0x82) {
+    if (i + 2 > buf.length) return undefined;
     len = buf.readUInt16LE(i);
     i += 2;
-  } else if (b === 0x83) {
-    len = buf.readUIntLE(i, 3);
-    i += 3;
+  } else if (b === 0x82) {
+    if (i + 4 > buf.length) return undefined;
+    len = buf.readUInt32LE(i);
+    i += 4;
+  } else if (b >= 0x80) {
+    return undefined;
   }
   return i + len <= buf.length ? buf.toString("utf8", i, i + len) : undefined;
 }

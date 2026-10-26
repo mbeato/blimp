@@ -35,7 +35,7 @@ function add(rowid: number, m: Msg) {
 function body(text: string): Uint8Array {
   const bytes = Buffer.from(text, "utf8");
   const n = bytes.length;
-  const len = n < 0x80 ? [n] : n < 0x100 ? [0x81, n] : [0x82, n & 0xff, n >> 8];
+  const len = n < 0x80 ? [n] : n <= 0xffff ? [0x81, n & 0xff, n >> 8] : [0x82, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
   return Buffer.concat([Buffer.from("\x04\x0bstreamtyped\x81\xe8\x03\x84\x01@\x84\x84\x84\x12NSAttributedString\x00\x84\x84\x08NSObject\x00\x85\x92\x84\x84\x84\x08NSString\x01\x94\x84\x01", "latin1"), Buffer.from([0x2b, ...len]), bytes, Buffer.from([0x86])]);
 }
 
@@ -71,9 +71,38 @@ test("text kept only in attributedBody is decoded, short and long", () => {
   add(1, { text: null, body: body("hi there"), handle: 1, chat: 1 });
   add(2, { text: null, body: body("x".repeat(200)), handle: 1, chat: 1 });
   add(3, { text: null, body: body(long), handle: 1, chat: 1 });
-  expect(newTexts(openChatDb(join(dir, "chat.db")), 0, all).texts.map((t) => t.text)).toEqual(["hi there", "x".repeat(200), long]);
+  add(4, { text: null, body: body("y".repeat(70000)), handle: 1, chat: 1 }); // 4-byte length
+  expect(newTexts(openChatDb(join(dir, "chat.db")), 0, all).texts.map((t) => t.text)).toEqual(["hi there", "x".repeat(200), long, "y".repeat(70000)]);
   expect(decodeBody(null)).toBeUndefined();
   expect(decodeBody(Buffer.from("no string here"))).toBeUndefined();
+});
+
+test("an empty text falls back to attributedBody", () => {
+  add(1, { text: "", body: body("from the body"), handle: 1, chat: 1 });
+  expect(newTexts(openChatDb(join(dir, "chat.db")), 0, all).texts).toEqual([{ id: "G1", from: "+15550000000", text: "from the body", picture: false }]);
+});
+
+// A length prefix cut off by the end of the blob: nothing to read, so no text, and no throw.
+function cut(tail: number[]): Uint8Array {
+  return Buffer.concat([Buffer.from("NSString\x01", "latin1"), Buffer.from([0x2b, ...tail])]);
+}
+
+test("a blob that ends inside its length prefix decodes to undefined", () => {
+  expect(decodeBody(cut([0x81]))).toBeUndefined();
+  expect(decodeBody(cut([0x81, 0x05]))).toBeUndefined();
+  expect(decodeBody(cut([0x82]))).toBeUndefined();
+  expect(decodeBody(cut([0x82, 0x05, 0x00]))).toBeUndefined();
+  expect(decodeBody(cut([0x83, 0x05, 0x00, 0x00]))).toBeUndefined(); // unknown length marker
+});
+
+test("a row with a truncated body is skipped without throwing, and last still moves past it", () => {
+  add(1, { text: null, body: cut([0x81]), handle: 1, chat: 1 });
+  add(2, { text: null, body: cut([0x82, 0x05, 0x00]), handle: 1, chat: 1 });
+  add(3, { text: null, body: body("ok"), handle: 1, chat: 1 });
+  expect(newTexts(openChatDb(join(dir, "chat.db")), 0, all)).toEqual({
+    last: 3,
+    texts: [{ id: "G3", from: "+15550000000", text: "ok", picture: false }],
+  });
 });
 
 test("pictures: flagged, with the attachment mark taken out of the text; an empty text with nothing attached is skipped", () => {
