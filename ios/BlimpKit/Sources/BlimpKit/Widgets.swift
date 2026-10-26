@@ -6,7 +6,7 @@ import Foundation
 public struct WidgetSummary: Codable, Sendable, Equatable {
     public enum State: String, Codable, Sendable { case needs, new, working }
 
-    public struct Counts: Codable, Sendable, Equatable {
+    public struct Counts: Codable, Sendable, Hashable {
         public let needs: Int
         public let new: Int
         public let working: Int
@@ -18,7 +18,7 @@ public struct WidgetSummary: Codable, Sendable, Equatable {
         }
     }
 
-    public struct Row: Codable, Sendable, Equatable, Identifiable {
+    public struct Row: Codable, Sendable, Hashable, Identifiable {
         public let session: String
         public let dir: String
         public let title: String
