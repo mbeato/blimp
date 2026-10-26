@@ -1087,6 +1087,29 @@ describe("chat", () => {
     rmSync(status);
     viewer.ws.close();
   }, 20000);
+
+  test("POST /assistant/jobs makes a session one of the assistant's jobs, shown in the session list", async () => {
+    const { name } = await fakeClaude("job1", "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a", []);
+    const post = (body: unknown) => api("/assistant/jobs", { method: "POST", body: JSON.stringify(body) });
+    expect((await post({ session: name, reason: "fix  the\x1b tests" })).status).toBe(204);
+    expect((await listed(name)).job).toMatchObject({ reason: "fix the tests" });
+    expect(statSync(join(tmp, "assistant-jobs.json")).mode & 0o777).toBe(0o600);
+    expect((await post({ session: "assistant", reason: "x" })).status).toBe(400);
+    expect((await post({ session: "../x", reason: "x" })).status).toBe(400);
+    expect((await post({ session: name, reason: " \x1b " })).status).toBe(400);
+    expect((await post({ session: name, reason: "x".repeat(201) })).status).toBe(400);
+    expect((await post({ session: `${tag}-nope`, reason: "x" })).status).toBe(404);
+  });
+
+  test("the session named assistant is marked as the assistant in the session list", async () => {
+    made.push("assistant");
+    Bun.spawnSync([zmxPath(), "attach", "assistant", "sh"], { env, cwd: tmp, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    await until(() => zmxNames().includes("assistant"), "a session named assistant");
+    expect((await listed("assistant")).assistant).toBe(true);
+    expect((await listed("assistant")).job).toBeUndefined();
+    zmx("kill", "assistant", "--force");
+    await until(() => !zmxNames().includes("assistant"), "the session named assistant to end");
+  });
 });
 
 describe("starting sessions", () => {
