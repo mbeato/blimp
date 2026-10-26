@@ -21,7 +21,8 @@
 //   a server browser tab in blimp-demo on $E2E_DIR/site/index.html (the job serves it on 127.0.0.1:$E2E_SITE_PORT): a
 //              button and a field that put what reached them in the page's title, which the drawer's row shows
 //   the feed: on, three cards ready ("Demo card one" to "three", ids 1111…, 2222…, 3333…), Reddit's last run failed
-//              for want of a key, and lastRun now, so blimpd fetches nothing while the tests run
+//              for want of a key, and lastRun now, so blimpd fetches nothing while the tests run;
+//              testFeed restores this fixture at its start ($E2E_DIR/feed-fixture.json to the path in $E2E_DIR/feed-path)
 // The folders are under the home folder ($E2E_WORK, else ~/e2e-work): blimpd starts sessions only there. Sessions
 // the app starts run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for. The ports
 // ($E2E_PORT for the app's link, $E2E_SITE_PORT for the page) are each shard's own when shards share a Mac.
@@ -202,11 +203,15 @@ const feedCard = (n: number, word: string) => {
   const id = String(n).repeat(16);
   return [id, { id, url: `https://example.com/${n}`, title: `Demo card ${word}`, summary: `The ${word} demo card.`, sources: [{ kind: "hn", name: "Hacker News", score: 100 * n, comments: 10 * n, thread: `https://news.ycombinator.com/item?id=${n}` }], at: feedAt, rank: n, tries: 0 }];
 };
-writeFileSync(join(dirname(sock), "feed.json"), JSON.stringify({
+const feedFixture = JSON.stringify({
   cards: Object.fromEntries([feedCard(1, "one"), feedCard(2, "two"), feedCard(3, "three")]),
   seen: {}, saved: [], lastRun: feedAt, calls: [],
   runs: { "Hacker News": { at: feedAt, ok: true }, Reddit: { at: feedAt, ok: false, reason: "no key" } },
-}));
+});
+// testFeed puts the fixture back at its start (seen marks persist, so a retried run needs it again).
+writeFileSync(join(dirname(sock), "feed.json"), feedFixture);
+writeFileSync(join(root, "feed-fixture.json"), feedFixture);
+writeFileSync(join(root, "feed-path"), join(dirname(sock), "feed.json"));
 writeFileSync(join(dirname(sock), "config.json"), JSON.stringify({ feed: { on: true } }));
 console.log("feed: on, three cards");
 
