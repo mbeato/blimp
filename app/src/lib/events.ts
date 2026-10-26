@@ -1,5 +1,5 @@
 // The /events WebSocket: the session list as it changes, the ports sessions listen on, the
-// server browser's tabs, and changes to watched paths.
+// server browser's tabs, whether the assistant is on, and changes to watched paths.
 
 import type { Api, BrowserTab, Port, Session } from "./api";
 
@@ -7,6 +7,7 @@ export type EventHandlers = {
   onSessions: (sessions: Session[]) => void;
   onPorts: (ports: Port[]) => void;
   onBrowser: (tabs: BrowserTab[]) => void;
+  onAssistant: (on: boolean) => void; // the assistant's switch (Settings)
   onFs: (paths: string[]) => void;
   onClose: () => void; // the socket dropped or never opened; the caller decides when to retry
 };
@@ -31,6 +32,7 @@ export class EventsSocket {
       if (msg.type === "sessions" && Array.isArray(msg.sessions)) this.h.onSessions(msg.sessions);
       else if (msg.type === "ports" && Array.isArray(msg.ports)) this.h.onPorts(msg.ports);
       else if (msg.type === "browser" && Array.isArray(msg.tabs)) this.h.onBrowser(msg.tabs);
+      else if (msg.type === "assistant" && typeof msg.on === "boolean") this.h.onAssistant(msg.on);
       else if (msg.type === "fs" && Array.isArray(msg.paths)) this.h.onFs(msg.paths);
     };
     this.ws.onclose = () => {

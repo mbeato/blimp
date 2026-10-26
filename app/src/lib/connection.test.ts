@@ -27,8 +27,9 @@ test("stop() during a connect still disconnects that tunnel", () => {
   expect(calls).toContainEqual(["disconnect", { id: "u@h:2222" }]);
 });
 
-// A blimpd that answers /health while `healthy` is true, and whose events socket sends an empty
-// session list as soon as it opens. The base URL's port (1) is the tunnel's local port.
+// A blimpd that answers /health (and any other call) while `healthy` is true, and whose events socket sends an
+// empty session list, then that the assistant is on, as soon as it opens. The base URL's port (1) is the tunnel's
+// local port.
 let healthy = true;
 globalThis.fetch = (async () => {
   if (!healthy) throw new TypeError("Load failed");
@@ -39,7 +40,10 @@ class FakeSocket {
   onmessage?: (e: { data: string }) => void;
   onclose?: () => void;
   constructor() {
-    queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: "sessions", sessions: [] }) }));
+    queueMicrotask(() => {
+      this.onmessage?.({ data: JSON.stringify({ type: "sessions", sessions: [] }) });
+      this.onmessage?.({ data: JSON.stringify({ type: "assistant", on: true }) });
+    });
   }
   send() {}
   close() {}
@@ -117,4 +121,16 @@ test("a link stopped while its check waits doesn't reconnect", async () => {
   await checking;
   expect(calls).toEqual([]);
   healthy = true;
+});
+
+test("assistantOn is null until the events socket says, then what it says; setAssistant shows the new one at once", async () => {
+  const quiet = new ServerLink({ host: "quiet" }, () => {});
+  expect(quiet.assistantOn).toBeNull();
+  quiet.stop();
+  healthy = true;
+  const link = await connected("assistant");
+  expect(link.assistantOn).toBe(true);
+  await link.setAssistant(false);
+  expect(link.assistantOn).toBe(false);
+  link.stop();
 });
