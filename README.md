@@ -268,12 +268,12 @@ You can text the assistant from Messages instead of opening blimp. A small progr
 - Everything the assistant finishes saying is texted to you, including its reports on jobs. Its chat in blimp shows the same conversation.
 - When it asks before acting, you get a text like "OK to run this? … Reply yes or no." Other words count as no and go to the assistant as what to do instead. A numbered question takes a number or your own words.
 - While the relay works, the assistant's own questions and answers come as texts, not blimp notifications. Jobs that need you still notify from blimp.
-- If blimpd hasn't heard from the relay for 5 minutes, your phone gets one notification. After the Mac restarts, sign that Mac user back in.
+- If blimpd hasn't heard from the relay for 5 minutes, or the relay calls but a text has waited 5 minutes to go out, your phone gets one notification, and the assistant's questions and answers notify from blimp again until the relay works. After the Mac restarts, sign that Mac user back in.
 
 To set it up:
 
 1. Make an Apple ID from an email address, for the assistant.
-2. On the Mac, add a standard user. Sign in to it, open Messages and sign in with that Apple ID.
+2. On the Mac, add a standard user. Sign in to it, open Messages and sign in with that Apple ID. A standard user can't change privacy settings alone: giving blimp-relay Full Disk Access in step 5 asks for an admin's name and password.
 3. On the server, run `blimpd messages on`. It makes the relay's key, `~/.blimp/relay-key`.
 4. Build the relay with `bun run relay` (it makes `dist/blimp-relay`). Copy it to `/Users/Shared/blimp-relay` on the Mac, with `relay/install.sh` and a `relay.json`. `server` is the address the phone uses:
 
@@ -282,7 +282,15 @@ To set it up:
    ```
 
    Without `server`, the relay texts back `got: <your text>`. That tests the Mac on its own.
-5. Still signed in as that Mac user, run `bash /Users/Shared/blimp-relay/install.sh` and give blimp-relay Full Disk Access when it asks. Then text the account from your phone, and click OK when macOS asks whether blimp-relay may control Messages.
+
+   `relay.json` holds the key, so let only the relay's Mac user read it. In that folder, as the user who copied it there, run this (`assistant` is that Mac user's short name):
+
+   ```sh
+   chmod 600 relay.json && chmod +a "assistant allow read,delete" relay.json
+   ```
+
+   `delete` lets `install.sh` remove the shared copy once it has moved it.
+5. Still signed in as that Mac user, run `bash /Users/Shared/blimp-relay/install.sh` and give blimp-relay Full Disk Access when it asks. When the relay starts, macOS asks whether it may control Messages: click OK. Then text the account from your phone.
 6. Switch back to your own Mac user, and leave the other one signed in.
 
 Other commands:

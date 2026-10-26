@@ -72,7 +72,9 @@ person. He asked whether a spare AT&T number or an email address would be easier
   relay in this mode.
 - **Mac permissions, granted once by hand:**
   - Full Disk Access for `blimp-relay` (it can't read chat.db without it).
-  - Automation, so it can control Messages. The first send asks for this.
+  - Automation, so it can control Messages. The relay asks for this as it starts, with one Apple event that
+    changes nothing (`tell application "Messages" to get name`), so the prompt comes while someone is signed
+    in to click OK.
   - macOS ties both grants to the exact binary. A rebuilt relay may need them again, so the relay stays small
     and rarely changes.
 - **After a restart** of the Mac, someone signs the Assistant user back in. macOS auto-signs-in one user
@@ -83,6 +85,7 @@ person. He asked whether a spare AT&T number or an email address would be easier
 - **On and off:**
   - `blimpd messages on|off|status|revoke`, stored as `"messages": {"on": true}` in `config.json`.
   - `on` also makes the relay key if it's missing. `revoke` deletes the key.
+  - On from off starts afresh: texts left in the outbox or held from before are dropped.
   - `status` prints:
     - whether it's on;
     - when the relay last checked in;
@@ -105,12 +108,17 @@ person. He asked whether a spare AT&T number or an email address would be easier
     (`follow`/`newSummary` from names.ts, which now also keeps the reply's message id).
   - It texts that reply if its id isn't the last one texted, so a reply is never sent twice. When texting
     starts, blimpd only notes the latest reply's id, so nothing from before is sent.
+  - A prompt queued during a turn is written about 0.25 s after the turn ends, before a tick can see `done`.
+    So blimpd reads the transcript every tick, and a reply that a prompt comes right after (not after a
+    tool's output, as one in the middle of a turn does) is texted too, before the next one.
   - It turns the reply into plain text: the same marks `plainText` (push/payload.ts) removes, but line
     breaks kept. Then it adds it to the outbox.
   - An empty reply (a turn of only tool calls) sends nothing. In-between text in a turn is never sent.
 - **Approvals:** when the assistant has been waiting at least 3 s (`ASK_SETTLE`), blimpd texts the wait once,
-  keyed by `prompt.at`.
-  - **Permission:** "<summary>. OK? Reply yes or no." The summary is `prompt.summary`.
+  keyed as push keys it (`waitKey`: `prompt.at`, or `stateSince` for a wait with no prompt, which is texted as
+  "Open blimp to answer", below).
+  - **Permission:** "OK to run this?" for a command, or "OK to use <tool>?" for another tool; then
+    `prompt.summary` on its own line (at most 600 characters); then a blank line and "Reply yes or no."
     - "yes", "y", "ok" or "okay" (any case, trimmed) picks "Yes".
     - "no" or "n" picks "No".
     - Anything else is a deny with Max's words, which blimp's existing `deny` answer types after the Esc.
@@ -120,9 +128,9 @@ person. He asked whether a spare AT&T number or an email address would be easier
     something only blimp can show. Open blimp to answer."
   - Answers go through `answer()` (answer.ts) with the wait's `at`. If the wait is gone or changed (answered
     in blimp, say), blimpd texts "That was already answered." and types nothing.
-- **Alerts:** while Messages is on and the relay has checked in within 5 minutes, the push rule doesn't push
-  the assistant's own questions or finished turns, because the text is the alert. Jobs' "needs you" pushes
-  are unchanged.
+- **Alerts:** while Messages is on, the relay has checked in within 5 minutes and no text has waited 5
+  minutes to go out, the push rule doesn't push the assistant's own questions or finished turns, because the
+  text is the alert. Jobs' "needs you" pushes are unchanged.
 - **blimp.md** gets a "## Messages" section:
 
   > Max mostly reads you in Messages on his phone, and everything you finish saying is texted to him.
@@ -152,7 +160,11 @@ person. He asked whether a spare AT&T number or an email address would be easier
   - If Messages is on and the relay hasn't called for 5 minutes, it sends one push: "The Messages relay is
     offline: blimp hasn't heard from it in 5 minutes. Check the Mac it runs on."
   - The alert goes out once per outage. The first check is 5 minutes after blimpd starts.
-  - It's sent through the same APNs client the test push (`blimpd push test`) uses.
+  - A relay that calls but can't send (Automation taken back, Messages signed out) leaves texts in the outbox.
+    Once one has waited 5 minutes while the relay kept calling, blimpd sends one push: "The Messages relay
+    can't send texts: some have waited 5 minutes. Check Messages on the Mac it runs on." It's sent again only
+    after the outbox has moved.
+  - Both are sent through the same APNs client the test push (`blimpd push test`) uses.
 
 ## 4. Setup
 
@@ -161,7 +173,7 @@ person. He asked whether a spare AT&T number or an email address would be easier
 2. On the work Mac, add the standard user "Assistant". Sign in to it, open Messages and sign in with the new
    Apple ID.
 3. Still as Assistant, run `bash /Users/Shared/blimp-relay/install.sh`, then grant the two permissions when
-   asked.
+   asked. Full Disk Access asks for an admin's name and password, since Assistant is a standard user.
 4. Switch back to his own user, leaving Assistant signed in.
 5. Save the address as "Assistant" on his phone and text it.
 6. Tell Claude the phone number and Apple ID emails he texts from, for the allowlist.
@@ -169,13 +181,18 @@ person. He asked whether a spare AT&T number or an email address would be easier
 **Claude:**
 - Build, test, and copy the bundle to `/Users/Shared/blimp-relay/` over SSH as `mbeato`: the binary,
   `install.sh`, and `relay.json` holding the server URL, key and allowlist.
+  - `relay.json` holds the key. At 644 every local user could read it; at 600 alone the Assistant user
+    couldn't. So it gets mode 600 and an ACL for the Assistant user (short name `assistant` here):
+    `chmod 600 relay.json && chmod +a "assistant allow read,delete" relay.json`. `delete` lets install.sh
+    remove it without write access to the shared folder.
 - `install.sh`:
   - copies the binary into the Assistant user's home;
-  - moves `relay.json` there with mode 600 and deletes the shared copy;
+  - moves `relay.json` there with mode 600 and deletes the shared copy (if it can't read it, it prints the
+    `chmod +a` line to run and stops);
   - writes and loads the LaunchAgent;
   - reveals the binary in Finder and opens the Full Disk Access pane;
-  - loads the LaunchAgent and asks Max to text the account. The relay's first reply raises the Automation
-    prompt for him to accept.
+  - loads the LaunchAgent. The relay raises the Automation prompt as it starts, for Max to accept; then he
+    texts the account.
 - The key never appears in chat.
 - Then `blimpd messages on` on claude1, and watch the first texts go through.
 
