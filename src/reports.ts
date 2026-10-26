@@ -18,7 +18,7 @@ export const BATCH = 10_000;
 
 // A job's turn that ended at `end` (its stateSince), first seen at `noticed`.
 export type Pending = { session: string; end: number; noticed: number };
-export type Line = { session: string; end: number; text: string };
+export type Line = { session: string; end: number; wait: boolean; text: string };
 
 // note: the turn's own note, if there is one yet.
 export function reportLine(s: Session, reason: string, note?: ShownNote): string {
@@ -28,24 +28,28 @@ export function reportLine(s: Session, reason: string, note?: ShownNote): string
   return `[blimp job update] ${basename(s.dir)} · ${reason} (${s.name}): ${status}${words ? ` — ${words}` : ""}`;
 }
 
+// A turn's key: for a wait, when its question began (the hook's prompt.at), which stays put while Claude's own status
+// file catches up, as push/rule.ts keys waits; else when its state began.
+const turnKey = (s: Session) => (s.state === "waiting" ? (s.prompt?.at ?? s.stateSince) : s.stateSince);
+
 // One look at the jobs' sessions: turns that ended since their job was acted on and last told become pending; pending
 // ones become lines (a wait at once, else with that turn's note or after 30 s), or go if the job moved on or ended.
 export function jobStep(jobs: Jobs, list: Session[], pending: Pending[], now: number): { pending: Pending[]; lines: Line[] } {
   const all = [...pending];
   for (const s of list) {
     const job = jobs[s.name];
-    if (!job || s.name === ASSISTANT || (s.state !== "done" && s.state !== "waiting") || !s.stateSince) continue;
-    if (s.stateSince > Math.max(job.at, job.reported ?? 0) && !all.some((p) => p.session === s.name && p.end === s.stateSince))
-      all.push({ session: s.name, end: s.stateSince, noticed: now });
+    if (!job || s.name === ASSISTANT || (s.state !== "done" && s.state !== "waiting") || !turnKey(s)) continue;
+    const key = turnKey(s)!;
+    if (key > Math.max(job.at, job.reported ?? 0) && !all.some((p) => p.session === s.name && p.end === key)) all.push({ session: s.name, end: key, noticed: now });
   }
   const next: Pending[] = [];
   const lines: Line[] = [];
   for (const p of all) {
     const s = list.find((x) => x.name === p.session);
     const job = jobs[p.session];
-    if (!s || !job || p.session === ASSISTANT || s.stateSince !== p.end) continue;
+    if (!s || !job || p.session === ASSISTANT || turnKey(s) !== p.end) continue;
     const note = s.note && s.note.at >= p.end ? s.note : undefined;
-    if (s.state === "waiting" || note || now - p.noticed >= NOTE_WAIT) lines.push({ session: p.session, end: p.end, text: reportLine(s, job.reason, note) });
+    if (s.state === "waiting" || note || now - p.noticed >= NOTE_WAIT) lines.push({ session: p.session, end: p.end, wait: s.state === "waiting", text: reportLine(s, job.reason, note) });
     else next.push(p);
   }
   return { pending: next, lines };
@@ -65,7 +69,7 @@ export type ReportDeps = {
 
 export class Reporter {
   private pending: Pending[] = [];
-  private outbox: { text: string; at: number }[] = [];
+  private outbox: { session: string; end: number; wait: boolean; text: string; at: number }[] = [];
   private busy = false;
   private failing = false;
   // When an update was last typed into the assistant: the push rule tells the user about the turn it begins.
@@ -91,8 +95,10 @@ export class Reporter {
       this.pending = step.pending;
       for (const l of step.lines) {
         this.deps.reported(l.session, l.end);
-        this.outbox.push({ text: l.text, at: now });
+        this.outbox.push({ session: l.session, end: l.end, wait: l.wait, text: l.text, at: now });
       }
+      // A wait that's over by now (answered elsewhere, or the session ended) isn't news: it isn't typed.
+      this.outbox = this.outbox.filter((o) => !o.wait || list.some((s) => s.name === o.session && s.state === "waiting" && turnKey(s) === o.end));
       const assistant = list.find((s) => s.name === ASSISTANT);
       if (!this.outbox.length || now - this.outbox[0].at < BATCH || !assistant || assistant.state === "waiting") return;
       try {

@@ -36,6 +36,7 @@ function setup(o: { devices?: Device[]; creds?: Creds; answer?: Sent; reply?: (f
       t.sent.push({ device, payload, collapseId });
       return o.answer ?? { status: 200 };
     },
+    assistantOn: () => true,
     gone: (d) => void t.gone.push(d),
     reply:
       o.reply ??

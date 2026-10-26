@@ -1129,22 +1129,27 @@ describe("chat", () => {
     made.push("assistant");
     Bun.spawnSync([zmxPath(), "attach", "assistant", "sh", "-c", LOOP], { env, cwd: tmp, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
     await until(() => zmxNames().includes("assistant"), "the stand-in assistant");
-    writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false, assistant: true }));
-    const viewer = await socket(`/sessions/assistant/attach?cols=250&rows=30`);
-    const sid = "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c";
-    const { name } = await fakeClaude("job3", sid, []);
-    expect((await api("/assistant/jobs", { method: "POST", body: JSON.stringify({ session: name, reason: "fix the tests" }) })).status).toBe(204);
-    await Bun.sleep(20); // the wait begins after the job was recorded
-    mkdirSync(join(tmp, "status"), { recursive: true });
-    const status = join(tmp, "status", `${name}.json`);
-    const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
-    writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
-    await until(() => viewer.text.includes(`[blimp job update] ${basename(tmp)} · fix the tests (${name}): needs you — Bash: `), "the job update in the assistant", 25000);
-    viewer.ws.close();
-    rmSync(status);
-    writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false }));
-    zmx("kill", "assistant", "--force");
-    await until(() => !zmxNames().includes("assistant"), "the stand-in assistant to end");
+    let status = "";
+    let viewer: Awaited<ReturnType<typeof socket>> | undefined;
+    try {
+      writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false, assistant: true }));
+      viewer = await socket(`/sessions/assistant/attach?cols=250&rows=30`);
+      const sid = "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c";
+      const { name } = await fakeClaude("job3", sid, []);
+      expect((await api("/assistant/jobs", { method: "POST", body: JSON.stringify({ session: name, reason: "fix the tests" }) })).status).toBe(204);
+      await Bun.sleep(20); // the wait begins after the job was recorded
+      mkdirSync(join(tmp, "status"), { recursive: true });
+      status = join(tmp, "status", `${name}.json`);
+      const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "ls" }, cwd: tmp });
+      writeFileSync(status, JSON.stringify({ state: "waiting", at: Date.now(), sessionId: sid, event: "PermissionRequest", prompt }));
+      await until(() => viewer.text.includes(`[blimp job update] ${basename(tmp)} · fix the tests (${name}): needs you — Bash: `), "the job update in the assistant", 25000);
+    } finally {
+      viewer?.ws.close();
+      if (status) rmSync(status, { force: true });
+      writeFileSync(join(tmp, "config.json"), JSON.stringify({ names: false }));
+      zmx("kill", "assistant", "--force");
+      await until(() => !zmxNames().includes("assistant"), "the stand-in assistant to end");
+    }
   }, 40000);
 });
 

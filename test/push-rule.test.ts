@@ -122,6 +122,15 @@ test("while the assistant runs, a job's finish isn't told: the assistant tells i
   const turn = (others: PushSession[]) => run([job("working", T - 60_000), ...others], [[T + 1000, [job("done", T + 1000), ...others]]]);
   expect(turn([assistant])).toEqual([[]]);
   expect(turn([])).toEqual([[{ kind: "finish", session: "j", key: T + 1000 }]]);
+  // With the assistant switched off its stand-in tells nothing, so the finish is told.
+  const off = (others: PushSession[]) => {
+    const seen = pushChanges(undefined, [job("working", T - 60_000), ...others], T).seen;
+    return pushChanges(seen, [job("done", T + 1000), ...others], T + 1000, undefined, false).events;
+  };
+  expect(off([assistant])).toEqual([{ kind: "finish", session: "j", key: T + 1000 }]);
+  // A job's wait is still told while the assistant runs.
+  const wait = job("waiting", T + 1000) as PushSession;
+  expect(run([job("working", T - 60_000), assistant], [[T + 1000 + ASK_SETTLE, [{ ...wait, prompt: { kind: "other", answerable: false, at: T + 1000 } } as PushSession, assistant]]])).toEqual([[{ kind: "ask", session: "j", key: T + 1000 }]]);
 });
 
 test("the assistant's turn that a job update began is told however short; its other short turns aren't", () => {

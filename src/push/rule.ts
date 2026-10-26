@@ -25,9 +25,9 @@ export const UPDATE_SLACK = 15_000;
 export const waitKey = (s: PushSession) => s.prompt?.at ?? s.stateSince ?? 0;
 
 // updated: when a job update was last typed into the assistant, if ever.
-export function pushChanges(before: Map<string, Seen> | undefined, list: PushSession[], now: number, updated?: number): { seen: Map<string, Seen>; events: PushEvent[] } {
-  // While the assistant runs, it tells its jobs' finishes itself.
-  const reporting = list.some((s) => s.assistant);
+export function pushChanges(before: Map<string, Seen> | undefined, list: PushSession[], now: number, updated?: number, assistantOn = true): { seen: Map<string, Seen>; events: PushEvent[] } {
+  // While the assistant is on and running, it tells its jobs' finishes itself.
+  const reporting = assistantOn && list.some((s) => s.assistant);
   const seen = new Map<string, Seen>();
   const events: PushEvent[] = [];
   for (const s of list) {

@@ -44,8 +44,16 @@ describe("jobStep", () => {
   });
 
   test("a wait is a line at once", () => {
-    const w = s("blimp-1", { state: "waiting", stateSince: T - 1000, prompt });
-    expect(step([w])).toEqual({ pending: [], lines: [{ session: "blimp-1", end: T - 1000, text: reportLine(w, "fix CI") }] });
+    const w = s("blimp-1", { state: "waiting", stateSince: T - 1000, prompt: { ...prompt, at: T - 1000 } });
+    expect(step([w])).toEqual({ pending: [], lines: [{ session: "blimp-1", end: T - 1000, wait: true, text: reportLine(w, "fix CI") }] });
+  });
+
+  test("one wait is told once, though its state's start moves when Claude's own status file catches up", () => {
+    const at = (since: number) => s("blimp-1", { state: "waiting", stateSince: since, prompt: { ...prompt, at: T - 1000 } });
+    const first = step([at(T - 1000)]);
+    expect(first.lines.map((l) => l.end)).toEqual([T - 1000]);
+    const told: Jobs = { "blimp-1": { reason: "fix CI", at: T - 60_000, reported: T - 1000 } };
+    expect(step([at(T + 500)], first.pending, T + 2000, told).lines).toEqual([]);
   });
 
   test("a finished turn waits for that turn's note, then goes with it", () => {
@@ -53,14 +61,14 @@ describe("jobStep", () => {
     const first = step([old]);
     expect(first).toEqual({ pending: [{ session: "blimp-1", end: T - 1000, noticed: T }], lines: [] });
     const fresh = s("blimp-1", { state: "done", stateSince: T - 1000, note: note("done", "CI green", T + 4000) });
-    expect(step([fresh], first.pending, T + 5000)).toEqual({ pending: [], lines: [{ session: "blimp-1", end: T - 1000, text: "[blimp job update] blimp · fix CI (blimp-1): done — CI green" }] });
+    expect(step([fresh], first.pending, T + 5000)).toEqual({ pending: [], lines: [{ session: "blimp-1", end: T - 1000, wait: false, text: "[blimp job update] blimp · fix CI (blimp-1): done — CI green" }] });
   });
 
   test("with no note after 30 s it goes without one", () => {
     const done = s("blimp-1", { state: "done", stateSince: T - 1000 });
     const first = step([done]);
     expect(step([done], first.pending, T + NOTE_WAIT - 1).lines).toEqual([]);
-    expect(step([done], first.pending, T + NOTE_WAIT).lines).toEqual([{ session: "blimp-1", end: T - 1000, text: "[blimp job update] blimp · fix CI (blimp-1): done" }]);
+    expect(step([done], first.pending, T + NOTE_WAIT).lines).toEqual([{ session: "blimp-1", end: T - 1000, wait: false, text: "[blimp job update] blimp · fix CI (blimp-1): done" }]);
   });
 
   test("a turn the job moved on from is dropped; a session that ended, too", () => {
@@ -124,6 +132,19 @@ describe("Reporter", () => {
     expect(t.typed).toEqual([[reportLine(waits("blimp-1", T - 1000), "fix CI"), reportLine(waits("api-1", T + 3000), "tests")].join("\n")]);
     expect(r.lastTyped).toBe(T + BATCH);
     expect(t.dropped.at(-1)).toEqual(["assistant", "blimp-1", "api-1"]);
+  });
+
+  test("a wait that's over before the message goes (answered elsewhere) isn't typed; it stays reported", async () => {
+    const { t, r } = setup();
+    t.list = [assistant(), waits("blimp-1", T - 1000)];
+    await r.tick();
+    t.now = T + 4000;
+    t.list = [assistant(), s("blimp-1", { state: "working", stateSince: T + 3000 })];
+    await r.tick();
+    t.now = T + BATCH;
+    await r.tick();
+    expect(t.typed).toEqual([]);
+    expect(t.reported).toEqual([["blimp-1", T - 1000]]);
   });
 
   test("held while the assistant asks something or isn't running, and while typing says it's asking", async () => {

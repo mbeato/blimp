@@ -5,6 +5,7 @@
 // same tick, and likewise only with a key and a widget push token.
 
 import { readHidden } from "../hidden";
+import { assistantOn as isAssistantOn } from "../assistant";
 import { follow, newSummary, type Summary } from "../names";
 import { lastReportTyped } from "../reports";
 import { claudeDir, listSessionsLite, type Session, zmxListAsync } from "../sessions";
@@ -28,6 +29,8 @@ export type PushDeps = {
   active: () => number;
   // When a job update was last typed into the assistant (reports.ts).
   updated: () => number | undefined;
+  // Whether the assistant is switched on (config.json).
+  assistantOn: () => boolean;
   log: (line: string) => void;
 };
 
@@ -60,7 +63,7 @@ export class PushWatcher {
       // An empty list after sessions is more likely a zmx list that failed than every session gone, and forgetting
       // them would tell their waits again.
       if (!list.length && this.seen?.size) return;
-      const { seen, events } = pushChanges(this.seen, list, now, this.deps.updated());
+      const { seen, events } = pushChanges(this.seen, list, now, this.deps.updated(), this.deps.assistantOn());
       this.seen = seen;
       const due = dueAt(now, this.deps.active());
       this.held.push(...events.map((e) => ({ e, due })));
@@ -133,6 +136,7 @@ const live: PushDeps = {
   now: Date.now,
   active: lastActiveAt,
   updated: lastReportTyped,
+  assistantOn: () => isAssistantOn(),
   log: (line) => console.log(line),
 };
 
