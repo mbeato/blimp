@@ -48,6 +48,8 @@ import {
   transcriptTitles,
   zmxListAsync,
 } from "./sessions";
+import { visualResponse } from "./visuals/http";
+import { cleanVisuals, makeVisual, visualKey } from "./visuals/store";
 import { widgetKey, widgetSummary } from "./widget";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
 
@@ -285,6 +287,19 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     return Response.json({ key });
   }
 
+  // Visuals (visuals/store.ts): a session's show tool hands over a page (visuals/mcp.ts); the apps hear of it on
+  // the events socket and read it with their visual key (served before the token check, in serve).
+  if (path === "/visuals/key" && get) return Response.json({ key: visualKey(phone ?? loadToken(blimpDir())) });
+  if (path === "/visuals" && req.method === "POST") {
+    const { session, path: file, title } = (await req.json()) as Record<string, unknown>;
+    if (typeof session !== "string" || typeof file !== "string" || typeof title !== "string") throw new HttpError(400, "session, path and title are required");
+    const s = listSessionsLite(claudeDir(), await zmxListAsync()).find((x) => x.name === session);
+    if (!s) throw new HttpError(404, `no session named ${session}`);
+    const v = makeVisual(session, s.dir, file, title);
+    server.publish("sessions", JSON.stringify({ type: "visual", ...v }));
+    return Response.json({ id: v.id }, { status: 201 });
+  }
+
   if (path === "/events" && get) {
     if (upgrade(eventsData())) return;
     throw new HttpError(400, "expected a WebSocket");
@@ -444,6 +459,9 @@ export function serve(): Server {
   const dir = dirname(sock);
   const token = loadToken(dir);
   startSeen();
+  // Visuals' copies over 30 days old: now, then once a day.
+  cleanVisuals();
+  setInterval(() => cleanVisuals(), 24 * 3600 * 1000);
   // Sockets opened with the phone token close within a second of `blimpd pair --revoke` (or a new pair).
   const phoneSockets = new Set<ServerWebSocket<WsData>>();
   setInterval(() => {
@@ -467,6 +485,14 @@ export function serve(): Server {
           },
         });
       const url = new URL(req.url);
+      // A visual's page and blimp's kit (visuals/http.ts), read with the visual key in the path instead of a token,
+      // so the page's relative kit/ paths carry it. It reads these and nothing else; a wrong key is a 401.
+      const visual = url.pathname.match(/^\/visuals\/([0-9a-f]{64})\/(.+)$/);
+      if (visual && req.method === "GET") {
+        const given = Buffer.from(visual[1]);
+        const ok = [same(given, visualKey(token)), same(given, visualKey(readPhoneToken(dir)))].some(Boolean);
+        return ok ? await visualResponse(visual[2], req) : error(401, "wrong or missing token");
+      }
       // No CORS header on a 401: any web page could read it and learn that this port is blimp.
       const who = authorized(req, url, token, dir);
       // The widget key reads the widgets' summary and nothing else.
