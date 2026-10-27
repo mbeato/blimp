@@ -53,6 +53,12 @@ describe("blimpMd", () => {
     expect(md).toContain("everything you finish saying is texted to them");
   });
 
+  test("blimp.md says to look at files with Read, Grep and Glob, not shell commands, which ask the user", () => {
+    const flat = blimpMd("blimpd").replace(/\s+/g, " ");
+    expect(flat).toContain("with Read, Grep and Glob, which don't ask the user");
+    expect(flat).toContain("Shell commands (ls, cat, grep, git and the like) ask the user every time");
+  });
+
   test("names every command with blimpd's own path, says which ones ask, and the browser rule; for any user", () => {
     const md = blimpMd("/opt/blimpd");
     for (const c of ["overview", "read <session or conversation id>", "start <folder> <message>", "send <session> <message>", "answer <session> <option number>"])

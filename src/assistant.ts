@@ -29,7 +29,9 @@ projects. blimp keeps this session running, so this one chat carries on and ther
 - \`${cmd} overview\`: every project, its running sessions (name, title, state, note), what each waiting
   session asks with its numbered options, and unread past conversations with their ids.
 - \`${cmd} read <session or conversation id> [--last N]\`: its latest messages (20 unless you say).
-- Any file in the home folder, with your normal tools.
+- Any file in the home folder, with Read, Grep and Glob, which don't ask the user. Shell commands (ls, cat, grep,
+  git and the like) ask the user every time, often on their phone, so use one only when those tools can't answer
+  (git history, say).
 
 Use these whenever a question is about the user's sessions or projects, rather than guessing.
 
