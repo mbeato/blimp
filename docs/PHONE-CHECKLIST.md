@@ -98,6 +98,16 @@ Set up first: follow `ios/README.md` (tunnel, token, Run in the simulator). The 
 - [ ] Moving the caret moves no drawer. Type a line in the box, then press and hold on the words and drag right and left: the caret follows the finger, the keyboard stays up, and the drawer doesn't come out.
 - [ ] Context gauge. In a session whose context is half full or more, a ring with the percent shows in the top bar, red from 80%. Tap it: the menu says "Context 62% (620k of 1M tokens)" and has Continue in New Session. Tap that: the chat says "Writing handoff…", then a chip "Handed off. Open the new session" opens the new one.
 
+## Photos and videos
+
+- [ ] In a chat, tap + in the box, pick Photo Library and one photo. Its small picture shows above the box with a spinner, then without. Send is there with no words typed. Send it with "what is this": Claude answers about the picture, and your side of the chat shows your words and the picture. Tap the picture: it opens full screen; pinch zooms; × goes back.
+- [ ] Pick three photos at once and send them with a question about all three: Claude has all three, in the order you picked them.
+- [ ] Pick a video (under a minute). It uploads (slower), and its tile has a play mark. Send it and ask what happens in it: Claude gets the file's path, and can pull pictures out of it if the server has ffmpeg. Your side of the chat shows the video's name.
+- [ ] Camera: take a photo, then a video, from + > Camera. The first time, iOS asks for the camera (and the microphone, for a video). Both arrive as above.
+- [ ] On cellular: a photo uploads in a few seconds. Turn on Airplane Mode while one uploads: it gets a retry mark and words under the row; with the link back, a tap on it uploads it.
+- [ ] × on a tile takes it off. Leave the chat with a photo in the row and come back: it's still there. After 10 files, + is off.
+- [ ] While Claude asks something, Send with a photo says to answer first, and the photo stays in the row.
+
 ## Ended sessions
 
 - [ ] Session ended. End a session on the Mac while its chat is open on the phone. The chat shows "Session ended" (blimpd closes the chat with code 4000). If it has a conversation, a Resume button shows. Resume opens the new session on the same screen.

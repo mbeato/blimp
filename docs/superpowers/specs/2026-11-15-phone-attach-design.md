@@ -1,6 +1,6 @@
 # Phone attach: send photos and videos to a session from the iPhone's chat
 
-Date: 2026-11-15. Branch `phone-attach` (after `visuals-3d`). Size: M.
+Date: 2026-11-15. Branch `phone-attach` (on top of `visuals-3d`). Size: M. Built 11/15; as built.
 
 ## Why
 
@@ -25,19 +25,19 @@ Today the phone's chat sends text only. On the Mac you drop a file on a terminal
 - **Files in `~/.blimp/uploads` are removed after 30 days.*** Nothing removes them today (18 screenshots since
   October), and videos are large. This also removes what the Mac dropped.
 
-## Spike first (not done yet)
+## Spike (11/15, done, with a real Claude Code 2.1.325; kept as `test/real-claude-files.test.ts`)
 
-With a real Claude Code session, through the chat socket's writes:
-
-1. A paste of only image paths, then a paste of the text and Enter: do the pictures attach (`[Image #1]`) as they
-   do for the Mac's drop? If the two pastes must be apart in time, how long?
-2. What the transcript holds for that message, so the chat can show the pictures. A dropped screenshot is recorded
-   as a text block `[Image: source: <path>]`; the entry that carries the typed words needs checking.
-3. A video's path: it should stay as text, and Claude should read frames from it when asked.
-4. While Claude is working: the message is queued, as text is. Do its pictures stay with it?
-
-The design below assumes 1 works. If it doesn't, the paths go in the text and Claude reads the files itself, which
-can ask for permission, and the plan changes.
+1. A pasted path of a picture is attached (`[Image #1]` in Claude Code's box), but a moment after the paste: with
+   the next part typed 50 ms later, the second of two pictures arrived after the message had gone, and stayed in
+   the box. So blimpd waits after each picture's paste until the box shows a new `[Image #n]` (it reads what its
+   own zmx client is sent to draw), or 5 s. With that, two pictures and the words arrive together, in order, and
+   Claude names what's in them without running a tool.
+2. The transcript holds the prompt as the words with the marks in them (`[Image #1]what is this`), the picture
+   itself, and `imagePasteIds`; then an entry of Claude Code's own (`isMeta`) with `[Image: source: <path>]` for
+   each picture. The chat makes its cards from that entry, so a picture dropped from the Mac gets one too.
+3. A path that isn't a picture's (`.mp4`) stays in the words as text, and Claude repeats it exactly.
+4. Not tried: a message with pictures while Claude is working (it is typed the same way; text alone is queued
+   by Claude Code then). It's on the checklist.
 
 ## The server
 
@@ -46,27 +46,30 @@ can ask for permission, and the plan changes.
   for this route; the Mac keeps its own calls), making the folder if it isn't there. At most 2 GB, as
   `PUT /fs/upload`. Returns `{ path }`.
 - **The chat socket's `input` message gains `files`**: a list of at most 10 paths, each an existing file in
-  `~/.blimp/uploads` (anything else is refused, and nothing is typed). blimpd types the paths as one paste, then
-  the text as another with its Enter, in one write if the spike allows. `text` may be empty when there are files.
-- **The chat** (`chat.ts`): a picture in a user's message becomes `image: <path>` on that message when the path is
-  in `~/.blimp/uploads`. The text stays as it is, so an app from before this change shows what it shows today.
-- **`GET /uploads/<name>`** (Mac or phone token): the file, for the chat's pictures. Only that folder.
+  `~/.blimp/uploads` (anything else is refused, and nothing is typed). blimpd types each path as a paste of its
+  own, waits for a picture to be attached (the spike's 1), then types the text with its Enter. `text` may be
+  empty when there are files.
+- **The chat** (`chat.ts`): a file you sent is a message of its own, `{ role: "file", file, name, image?, summary,
+  gone? }`, after your words: a picture from Claude Code's note of where it came from, any other file from its
+  path in the words. The marks and the paths leave the words. An app from before this change hides the new role.
+- **No new route to read a picture:** the phone asks `GET /fs/file?path=`, which it could already.
 - **Clean-up:** files in `~/.blimp/uploads` older than 30 days go, when blimpd starts and once a day.
 
 ## The phone
 
 - **A + button at the start of the message box.** A tap opens a menu: Photo Library (the system's picker, photos
   and videos, several at once, no permission needed) and Camera (a photo or a video).
-- **What you picked sits in a row above the box**, each as a small picture with × to remove it, and a ring while
+- **What you picked sits in a row above the box**, each as a small picture with × to remove it, and a spinner while
   it uploads. Uploading starts when you pick, so Send is quick. A failed one shows a retry mark.
 - **Send** is on once there's text or a file. Tapped while files are still uploading, it waits for them, then
   sends. The row and the box clear together when blimpd has the message.
 - **Refused on the phone, with words that say why:** over 10 files; a video over 500 MB after it's made smaller;
   a blimpd from before this change ("Update blimpd on the server to send photos").
-- **In the chat**, your message shows its pictures above its words, each a small picture loaded from blimpd when
-  it comes on screen; a tap shows it full screen. A video shows as a row with a film symbol and its name. Once the
-  file is gone from the server: a grey box, "No longer kept".
-- **Kept per chat**, as the typed draft is: the row survives leaving the chat and coming back while the app runs.
+- **In the chat**, your message shows its files after its words, each picture a small picture loaded from blimpd
+  when it comes on screen; a tap shows it full screen. A video shows as a row with a film symbol and its name. Once
+  the file is gone from the server: its name, greyed, "No longer kept".
+- **Kept per chat** while the app runs (on the chat's model, as its messages are): the row survives leaving the
+  chat and coming back. Not across a cold launch, as the typed draft is.
 - **Permissions:** `NSCameraUsageDescription` gets new words that cover photos and videos for a session, not only
   the pairing code. The microphone's words already cover a video's sound.
 - Not while Claude asks something: as with text, the message isn't sent ("Claude is asking something. Answer it
@@ -78,15 +81,16 @@ Nothing changes. Its drop keeps its own upload calls; it could move to `POST /up
 
 ## Tests
 
-- Server (`bun test`): `POST /uploads` (a plain free name, the folder made, the size cap, each token);
-  `GET /uploads/<name>` (the file; `..` and other folders refused); the socket's `files` (typed as the spike
-  settles; a path outside the folder, a missing file and an 11th file refused); chat.test.ts (a picture becomes
-  `image`, one outside the folder doesn't); the 30-day clean-up.
+- Server (`bun test`): `POST /uploads` (a plain free name, each token, `GET /fs/file` reads it back); the socket's
+  `files` against a stand-in that attaches a picture 300 ms after its paste (the parts in order, Enter only after
+  both marks; a path outside the folder, a missing file and an 11th file refused); chat.test.ts (a picture's and a
+  video's cards, the marks and paths out of the words, one outside the folder not); the 30-day clean-up.
+- Real Claude Code, opt-in (`BLIMP_REAL_CLAUDE=1 bun test test/real-claude-files.test.ts`): the spike's 1 to 3.
 - BlimpKit (`swift test`): the `input` message with `files`; the message's `image`; a photo's size after scaling;
   the upload's name.
-- Phone UI test: the picker can't be driven in the simulator, so the test build takes a file from `$E2E_WORK` by
-  a launch argument; the row shows it, Send types the path into demo-chat's fake session, and the chat shows the
-  picture.
+- Phone UI test (`testSendAPhoto`): the picker can't be driven in the simulator, so with `-attachDemo YES` + adds
+  a picture made in the app; the row shows it uploaded, Send types its path into demo-chat's stand-in with the
+  words, and the chat shows both.
 - PHONE-CHECKLIST.md: "send a photo, three photos, a video and a camera shot, on Wi-Fi and cellular; ask what's
   in them".
 

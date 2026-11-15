@@ -1,6 +1,6 @@
 # Visuals in 3D: a visual can be a folder, and the kit gets three.js
 
-Date: 2026-11-15. Branch `visuals-3d`. Size: M.
+Date: 2026-11-15. Branch `visuals-3d`. Size: M. Built 11/15; as built.
 
 ## Why
 
@@ -50,9 +50,13 @@ engines, both cases:
 6. Still blocked: another visual, any other blimpd route (GET and POST), the internet, an image from another
    visual.
 7. A kit file asked for under the page's folder and answered with a 307 to the shared kit loads, as a module too.
+8. With `script-src 'self'`, a page can `import()` another visual's script file and read what it exports (the
+   files are sent with `Access-Control-Allow-Origin`). With `script-src` naming only the page's folder and the
+   kit's, written with their scheme, that fails and three.js still loads.
 
-Not covered: iOS's WKWebView and the Mac's real web view, on a real graphics chip. The phone's UI test and both
-checklists check them.
+Not covered by the spike: iOS's WKWebView and the Mac's real web view. Since then the phone's UI test has drawn
+the fixture in the simulator's WKWebView (GitHub's Macs), and the Mac's e2e in Chromium with WebGL on. A real
+iPhone and the real Mac app are on the checklists.
 
 ## The tool
 
@@ -102,11 +106,13 @@ Served from files built into the binary, as the rest of the kit is. Sent gzipped
   - `GET /visuals/<key>/<id>/kit/<file>`: a 307 to `/visuals/<key>/kit/<file>`, so every visual shares one cached
     kit.
 - **Headers:**
-  - The policy on the page gains its own folder: `img-src data: blob: <folder>` and `connect-src <folder> blob:`
-    in place of `connect-src 'none'`. `<folder>` is `http://<host>/visuals/<key>/<id>/` and the same with
+  - The policy on the page gains its own folder: `img-src data: blob: <folder>`, `connect-src <folder> blob:`
+    in place of `connect-src 'none'`, and `script-src 'unsafe-inline' <folder> <kit>` in place of `'self'`
+    (the spike's 8), with `<kit>` the kit's `/visuals/<key>/kit/` written as `<folder>` is. `<folder>` is `http://<host>/visuals/<key>/<id>/` and the same with
     `https://`, with `<host>` from the request's `Host` header (blimpd can't tell whether a proxy added TLS, and
     WebKit needs the scheme). A `Host` that isn't letters, digits, dots, colons, hyphens and brackets is left out,
-    and the page then loads no files. Everything else in the policy is as it was.
+    and the page then gets the policy from before folders and loads no files. Everything else in the policy is
+    as it was.
   - Every file of a copy is sent with that policy too, so an HTML file beside the page gets no more than the page.
   - Kit files, the redirect and a copy's files get `Access-Control-Allow-Origin: *`. The address holds the visual
     key, so only something that already has the key can ask.
@@ -142,7 +148,7 @@ Served from files built into the binary, as the rest of the kit is. Sent gzipped
     404; the kit redirect; the kit's three.js files and their header.
   - visuals-mcp.test.ts: the description's new parts; a folder path makes a copy.
   - The kit's three.js files match their pinned sums.
-- Mac (Playwright against a real blimpd, `app/e2e/visuals.spec.ts`): a folder visual with three.js and a GLB
+- Mac (Playwright against a real blimpd, `app/e2e/visuals-3d.spec.ts`, with WebGL on): a folder visual with three.js and a GLB
   draws (a pixel of the canvas), reads its own file, and fails to read another visual and a blimpd route.
 - Phone: BlimpKit's test for the address. `testVisualCardOpensThePage`'s fixture becomes a folder whose page reads
   a file beside it and draws with three.js, then writes "drawn" for the test to find.
