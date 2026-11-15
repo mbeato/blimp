@@ -259,9 +259,10 @@ export class Api {
     return (await this.json<{ key: string }>("/visuals/key")).key;
   }
 
-  // A visual's page, with the key in its path, so the page's relative kit/ paths carry it: what VisualView's frame loads.
+  // A visual's page, with the key in its path and a / at its end, so the page's relative paths (blimp's kit/, the
+  // files it came with) land in its own folder with the key: what VisualView's frame loads.
   visualUrl(key: string, id: string) {
-    return new URL(`/visuals/${key}/${id}`, this.conn.base).toString();
+    return new URL(`/visuals/${key}/${id}/`, this.conn.base).toString();
   }
 
   fsList(path: string) {

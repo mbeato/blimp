@@ -52,7 +52,7 @@ test("a session's visual opens in its project's tab, locked down, with the kit; 
   await expect(frame).toBeVisible();
   // Scripts, but no allow-same-origin: the page isn't the app's origin, nor blimpd's.
   await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-  await expect(frame).toHaveAttribute("src", new RegExp(`/visuals/[0-9a-f]{64}/${id}$`));
+  await expect(frame).toHaveAttribute("src", new RegExp(`/visuals/[0-9a-f]{64}/${id}/$`));
   const doc = frame.contentFrame();
   await expect(doc.locator("h1")).toHaveText("Visual fixture");
   // The kit drew the chart and the diagram; both of the page's requests failed.
@@ -65,7 +65,7 @@ test("a session's visual opens in its project's tab, locked down, with the kit; 
   const id2 = await show(here, join(dir, "chart.html"), "Test results, again");
   await expect(tab).toHaveCount(1);
   await expect(tab).toHaveText(/Test results, again/);
-  await expect(frame).toHaveAttribute("src", new RegExp(`/visuals/[0-9a-f]{64}/${id2}$`));
+  await expect(frame).toHaveAttribute("src", new RegExp(`/visuals/[0-9a-f]{64}/${id2}/$`));
   await expect(doc.locator("h1")).toHaveText("Visual fixture, again");
 
   // Another folder's session: not in this project.
