@@ -4,6 +4,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { KIT } from "../src/visuals/kit";
 import { handle, SHOW_DESCRIPTION } from "../src/visuals/mcp";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-mcp-"));
@@ -37,6 +38,22 @@ test("tools/list: show, with what it does and how to make a page", async () => {
   });
   for (const s of ["kit/blimp.css", "kit/chart.js", "kit/mermaid.js", "kit/blimp.js", "not /tmp", "390 px", "14 px", "2 MB", "maintainAspectRatio: false", '<pre class="mermaid">'])
     expect(SHOW_DESCRIPTION).toContain(s);
+  // A folder with files beside the page, and three.js: the import map three.js's own examples use, and what the kit has.
+  for (const s of [
+    "as index.html and pass the folder",
+    "100 MB and 500 files",
+    '{ "imports": { "three": "./kit/three/three.module.js", "three/addons/": "./kit/three/addons/" } }',
+    'import { OrbitControls } from "three/addons/controls/OrbitControls.js"',
+    "loaders/GLTFLoader.js",
+    "environments/RoomEnvironment.js",
+    "geometries/RoundedBoxGeometry.js",
+    "no Draco, Meshopt or KTX2",
+    "Math.min(devicePixelRatio, 2)",
+  ])
+    expect(SHOW_DESCRIPTION).toContain(s);
+  // Every kit path the description names is one blimpd serves.
+  for (const [, path] of SHOW_DESCRIPTION.matchAll(/kit\/([\w./-]+\.(?:js|css))/g)) expect(Object.keys(KIT)).toContain(path);
+  for (const [, addon] of SHOW_DESCRIPTION.matchAll(/\b((?:controls|loaders|utils|environments|geometries)\/\w+\.js)/g)) expect(Object.keys(KIT)).toContain(`three/addons/${addon}`);
 });
 
 test("tools/call show: the line the chat reads the id from, or Not shown with the reason", async () => {

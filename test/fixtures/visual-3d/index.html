@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3D fixture</title>
+    <link rel="stylesheet" href="kit/blimp.css" />
+    <script type="importmap">
+      { "imports": { "three": "./kit/three/three.module.js", "three/addons/": "./kit/three/addons/" } }
+    </script>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      #scene { display: block; width: 100%; height: 60%; touch-action: none; }
+      h1, pre { margin: 8px 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>3D fixture</h1>
+    <canvas id="scene"></canvas>
+    <!-- A box drawn with three.js, a model and a file read from beside the page, and four requests that must fail. -->
+    <pre id="out">loading</pre>
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+      const out = { three: THREE.REVISION };
+      const canvas = document.getElementById("scene");
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0000ff);
+      const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+      camera.position.set(0, 0, 2);
+      const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+      scene.add(box);
+      const controls = new OrbitControls(camera, canvas);
+      const draw = () => {
+        const w = canvas.clientWidth || 300;
+        const h = canvas.clientHeight || 200;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+      };
+      draw();
+      // Read back at once, while the picture is still in the drawing buffer: the box's green at the centre.
+      const gl = renderer.getContext();
+      const px = new Uint8Array(4);
+      gl.readPixels(gl.drawingBufferWidth >> 1, gl.drawingBufferHeight >> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      out.scene = px.join() === "0,255,0,255" ? "drawn" : `not drawn (${px.join()})`;
+      controls.addEventListener("change", draw);
+      addEventListener("resize", draw);
+
+      const model = new Promise((done) =>
+        new GLTFLoader().load(
+          "models/triangle.glb",
+          (g) => {
+            const mesh = g.scene.getObjectByProperty("type", "Mesh");
+            scene.add(g.scene);
+            draw();
+            done(`${mesh.geometry.attributes.position.count} points, ${mesh.material.map?.image ? "textured" : "no texture"}`);
+          },
+          undefined,
+          () => done("failed"),
+        ),
+      );
+      const file = fetch("data.json").then((r) => r.json()).then((d) => `${d.rooms} rooms`, () => "failed");
+      // blimpd, a website, a path beside the page's folder, and a script from one: none of them is the page's own.
+      const others = Promise.allSettled([fetch("/health"), fetch("https://example.com/"), fetch("../kit/blimp.js"), import("../000000000000/scene.js")]);
+      [out.model, out.file] = await Promise.all([model, file]);
+      out.others = (await others).map((x) => x.status).join(",");
+      document.getElementById("out").textContent = JSON.stringify(out);
+    </script>
+  </body>
+</html>

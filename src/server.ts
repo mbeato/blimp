@@ -504,7 +504,7 @@ export function serve(): Server {
   const dir = dirname(sock);
   const token = loadToken(dir);
   startSeen();
-  // Visuals' copies over 30 days old: now, then once a day.
+  // Visuals' copies over 30 days old, and the oldest of what's over 2 GB: now, then once a day.
   cleanVisuals();
   setInterval(() => cleanVisuals(), 24 * 3600 * 1000);
   // Sockets opened with the phone token close within a second of `blimpd pair --revoke` (or a new pair).
@@ -539,7 +539,7 @@ export function serve(): Server {
       if (visual && req.method === "GET") {
         const given = Buffer.from(visual[1]);
         const ok = [same(given, visualKey(token)), same(given, visualKey(readPhoneToken(dir)))].some(Boolean);
-        return ok ? await visualResponse(visual[2], req) : error(401, "wrong or missing token");
+        return ok ? await visualResponse(visual[1], visual[2], req) : error(401, "wrong or missing token");
       }
       // No CORS header on a 401: any web page could read it and learn that this port is blimp.
       const who = authorized(req, url, token, dir);

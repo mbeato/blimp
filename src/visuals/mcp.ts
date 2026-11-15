@@ -1,15 +1,15 @@
 // `blimpd visuals-mcp`: blimp's own MCP server, which every session blimp starts gets as "blimp" (browser/mcp.ts's
-// mcp.json). One tool, show: Claude hands it a page it wrote, and blimpd keeps a copy and shows it on the phone and
-// the Mac (POST /visuals, visuals/store.ts). MCP over stdio is JSON-RPC 2.0, one message per line; this answers the
-// few methods a client calls, with no MCP library. It finds its session from ZMX_SESSION, as browser-mcp does, and
-// reaches blimpd on its socket with the Mac's token, as `blimpd send` does.
+// mcp.json). One tool, show: Claude hands it a page it wrote, or a folder with the page and its files, and blimpd
+// keeps a copy and shows it on the phone and the Mac (POST /visuals, visuals/store.ts). MCP over stdio is JSON-RPC
+// 2.0, one message per line; this answers the few methods a client calls, with no MCP library. It finds its session
+// from ZMX_SESSION, as browser-mcp does, and reaches blimpd on its socket with the Mac's token, as `blimpd send` does.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../../package.json";
 import { blimpDir, socketPath } from "../sessions";
 
-export const SHOW_DESCRIPTION = `Show the user a visual on their phone and Mac: a chart, a diagram, a table, a timeline or a small report, as one HTML page you wrote. Use it when a picture explains better than text, or when the user asks to see something.
+export const SHOW_DESCRIPTION = `Show the user a visual on their phone and Mac: a chart, a diagram, a table, a timeline, a small report or a 3D scene they can turn, as an HTML page you wrote. Use it when a picture explains better than text, or when the user asks to see something.
 
 Write the page under the home folder, not /tmp (blimp can't read there): in the project if it should be kept, else in ~/.cache/blimp-visuals/. Then call show with its path and a short title. After you change the file, call show again: each call shows a new copy.
 
@@ -20,7 +20,15 @@ The page has no internet and can make no requests. Load only blimp's kit, by the
   <script src="kit/blimp.js"></script>          after those: sets them to blimp's look, draws the diagrams, follows light and dark
 Put everything else in the file: your own <style> and <script> after the kit, inline SVG, data: images.
 
-Design for a phone first (about 390 px wide) and make it work in a wide Mac tab too: one column that becomes a grid where there's room (.grid). Start with <meta name="viewport" content="width=device-width, initial-scale=1">. Text at least 14 px. Nothing that works only on hover: a tap on a chart shows its values. Give each chart a box: <div class="chart"><canvas></canvas></div>, with the Chart.js option maintainAspectRatio: false. Use the kit's colours (var(--c1) to var(--c6) for series, --fg, --fg-dim, --line); datasets without colours get them. At most 2 MB.`;
+Design for a phone first (about 390 px wide) and make it work in a wide Mac tab too: one column that becomes a grid where there's room (.grid). Start with <meta name="viewport" content="width=device-width, initial-scale=1">. Text at least 14 px. Nothing that works only on hover: a tap on a chart shows its values. Give each chart a box: <div class="chart"><canvas></canvas></div>, with the Chart.js option maintainAspectRatio: false. Use the kit's colours (var(--c1) to var(--c6) for series, --fg, --fg-dim, --line); datasets without colours get them. At most 2 MB.
+
+Files: to show a page with files beside it (3D models, photos, data, your own scripts), put them in one folder with the page as index.html and pass the folder as path. The page loads them by relative paths (fetch, <img>, import); it can reach nothing outside its folder. The whole folder is copied, so keep only what the page loads in it: at most 100 MB and 500 files, no links, and no folder of its own called kit.
+
+3D: the kit has three.js r187 as ES modules. In <head>:
+  <script type="importmap">{ "imports": { "three": "./kit/three/three.module.js", "three/addons/": "./kit/three/addons/" } }</script>
+then in a <script type="module">: import * as THREE from "three"; import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+Only these addons are there: controls/OrbitControls.js, loaders/GLTFLoader.js, utils/BufferGeometryUtils.js, utils/SkeletonUtils.js, environments/RoomEnvironment.js (soft light with no image file), geometries/RoundedBoxGeometry.js. WebGLRenderer only. Models: plain .glb or .gltf in the folder (no Draco, Meshopt or KTX2 compression); textures: .png, .jpg, .webp.
+Make the canvas fill the page (html, body { margin: 0; height: 100% }) and draw it again when the window's size changes. Use OrbitControls so the user can go in and look around: one finger or the left button turns, two fingers or the wheel zoom and move. Set a target and a starting camera that show the whole scene. renderer.setPixelRatio(Math.min(devicePixelRatio, 2)). Show a line of text while a model loads and if it fails. Build simple things (rooms, furniture, charts in 3D) from three.js's own shapes; use model files when the user gives them or wants real detail.`;
 
 const TOOLS = [
   {
@@ -29,7 +37,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "The page: an absolute path, or one relative to the session's folder. Under the home folder." },
+        path: { type: "string", description: "The page, or a folder with the page in it as index.html: an absolute path, or one relative to the session's folder. Under the home folder." },
         title: { type: "string", description: "A short title for the card and the tab, like 'Test runs this week'.", maxLength: 80 },
       },
       required: ["path", "title"],

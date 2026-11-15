@@ -2512,7 +2512,7 @@ describe("visuals", () => {
     const ev = await until(() => e.messages.find((m) => m.type === "visual"), "the visual event");
     expect(ev).toEqual({ type: "visual", id, title: "Test results", session: name, dir: realpathSync(tmp), source: join(homeDir, "chart.html"), at: ev.at });
     e.ws.close();
-    expect(readFileSync(join(tmp, "visuals", `${id}.html`), "utf8")).toBe(page());
+    expect(readFileSync(join(tmp, "visuals", id, "index.html"), "utf8")).toBe(page());
 
     expect(await (await api("/visuals/key")).json()).toEqual({ key: visualKey(token) });
     writeFileSync(phoneFile, phone);
@@ -2543,17 +2543,25 @@ describe("visuals", () => {
     const { id } = await (await show({ session: name, path: join(homeDir, "read.html"), title: "Read me" })).json();
     const key = visualKey(token);
 
-    const r = await raw(`/visuals/${key}/${id}`);
-    expect(r.status).toBe(200);
-    expect(await r.text()).toBe(page());
-    expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(r.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts",
-    );
-    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(r.headers.get("referrer-policy")).toBe("no-referrer");
-    expect(r.headers.get("cache-control")).toBe("private, max-age=2592000, immutable");
-    expect(r.headers.get("access-control-allow-origin")).toBeNull();
+    // The page: at <id>/, which both apps load, and at <id>, which an app from before visuals could be folders does.
+    const csp = (host: string) => {
+      const both = (path: string) => `http://${host}/visuals/${key}/${path} https://${host}/visuals/${key}/${path}`;
+      return `default-src 'none'; script-src 'unsafe-inline' ${both(`${id}/`)} ${both("kit/")}; style-src 'self' 'unsafe-inline'; img-src data: blob: ${both(`${id}/`)}; font-src data:; connect-src ${both(`${id}/`)} blob:; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts`;
+    };
+    for (const path of [`/visuals/${key}/${id}/`, `/visuals/${key}/${id}`]) {
+      const r = await raw(path);
+      expect(r.status).toBe(200);
+      expect(await r.text()).toBe(page());
+      expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      expect(r.headers.get("content-security-policy")).toBe(csp("blimpd"));
+      expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(r.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(r.headers.get("cache-control")).toBe("private, max-age=2592000, immutable");
+      expect(r.headers.get("access-control-allow-origin")).toBeNull();
+    }
+    // The folder is named at the host the app asked, with its port.
+    expect((await raw(`/visuals/${key}/${id}/`, { headers: { Host: "100.64.0.7:4873" } })).headers.get("content-security-policy")).toBe(csp("100.64.0.7:4873"));
+    expect((await raw(`/visuals/${key}/${id}/`, { headers: { Host: "[fd7a::1]:4873" } })).headers.get("content-security-policy")).toBe(csp("[fd7a::1]:4873"));
 
     const kit = await raw(`/visuals/${key}/kit/chart.js`, { headers: { "Accept-Encoding": "gzip" } });
     expect(kit.status).toBe(200);
@@ -2561,6 +2569,18 @@ describe("visuals", () => {
     expect(kit.headers.get("content-encoding")).toBe("gzip");
     expect((await kit.arrayBuffer()).byteLength).toBe(208_522); // fetch unzips it
     expect(kit.headers.get("cache-control")).toBe("private, max-age=3600");
+    // The page's origin is null, so its modules are cross-origin: the kit says anyone with its address may read it.
+    expect(kit.headers.get("access-control-allow-origin")).toBe("*");
+    const three = await raw(`/visuals/${key}/kit/three/three.module.js`);
+    expect(three.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(three.headers.get("access-control-allow-origin")).toBe("*");
+    expect((await three.arrayBuffer()).byteLength).toBe(658_900);
+    expect((await raw(`/visuals/${key}/kit/three/addons/loaders/GLTFLoader.js`)).status).toBe(200);
+    // Asked for under the page's folder, where its kit/ paths land: sent on to the one kit.
+    const sent = await raw(`/visuals/${key}/${id}/kit/three/three.module.js`, { redirect: "manual" });
+    expect(sent.status).toBe(307);
+    expect(sent.headers.get("location")).toBe(`/visuals/${key}/kit/three/three.module.js`);
+    expect(sent.headers.get("access-control-allow-origin")).toBe("*");
     const plain = await raw(`/visuals/${key}/kit/blimp.css`, { headers: { "Accept-Encoding": "identity" } });
     expect(plain.headers.get("content-encoding")).toBeNull();
     expect(await plain.text()).toContain("prefers-color-scheme: dark");
@@ -2582,6 +2602,56 @@ describe("visuals", () => {
     // The key is no token: it reads nothing else.
     for (const p of ["/sessions", "/visuals/key", "/health", `/fs/file?path=${encodeURIComponent(join(homeDir, "read.html"))}`])
       expect((await api(p, { headers: { Authorization: `Bearer ${key}` } }, false)).status).toBe(401);
+  });
+  test("a folder's files, read beside its page with the same headers, and nothing outside the copy", async () => {
+    const name = await shSession("visual-folder");
+    const dir = join(homeDir, "render");
+    mkdirSync(join(dir, "models"), { recursive: true });
+    writeFileSync(join(dir, "index.html"), page());
+    const glb = Buffer.from([0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0xff, 0x80]);
+    writeFileSync(join(dir, "models", "couch one.glb"), glb);
+    writeFileSync(join(dir, "wall.JPG"), "jpg");
+    writeFileSync(join(dir, "scene.js"), "export const a = 1;");
+    writeFileSync(join(dir, "data.xyz"), "?");
+    writeFileSync(join(dir, "other.html"), "<p>other</p>");
+    const { id } = await (await show({ session: name, path: dir, title: "The flat" })).json();
+    const other = (await (await show({ session: name, path: dir, title: "Another" })).json()).id;
+    const key = visualKey(token);
+    const policy = (await raw(`/visuals/${key}/${id}/`)).headers.get("content-security-policy")!;
+    expect(policy).toContain(`connect-src http://blimpd/visuals/${key}/${id}/ https://blimpd/visuals/${key}/${id}/ blob:;`);
+
+    const r = await raw(`/visuals/${key}/${id}/models/couch%20one.glb`);
+    expect(r.status).toBe(200);
+    expect(Buffer.from(await r.arrayBuffer())).toEqual(glb);
+    expect(r.headers.get("content-type")).toBe("model/gltf-binary");
+    expect(r.headers.get("access-control-allow-origin")).toBe("*");
+    expect(r.headers.get("content-security-policy")).toBe(policy);
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(r.headers.get("cache-control")).toBe("private, max-age=2592000, immutable");
+    const type = async (path: string) => (await raw(`/visuals/${key}/${id}/${path}`)).headers.get("content-type");
+    expect(await type("wall.JPG")).toBe("image/jpeg");
+    expect(await type("scene.js")).toBe("text/javascript; charset=utf-8");
+    expect(await type("data.xyz")).toBe("application/octet-stream");
+    // An HTML file beside the page gets no more than the page does.
+    const html = await raw(`/visuals/${key}/${id}/other.html`);
+    expect(html.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(html.headers.get("content-security-policy")).toBe(policy);
+
+    // fetch would resolve a plain ../ before sending it; an encoded one reaches blimpd.
+    for (const bad of ["nope.glb", "models", "models/", `..%2F${other}%2Findex.html`, `..%2F${id}.json`, "..%2F..%2Ftoken", "%2Fetc%2Fhostname", "models%2F..%2F..%2F..%2Ftoken", "%E0%A4%A", "a%00.glb"])
+      expect((await raw(`/visuals/${key}/${id}/${bad}`)).status).toBe(404);
+    expect((await raw(`/visuals/${key}/${id}x`)).status).toBe(404);
+    expect((await raw(`/visuals/${key}/${id}/models/couch%20one.glb`, { method: "POST" })).status).toBe(401);
+    expect((await raw(`/visuals/${"0".repeat(64)}/${id}/wall.JPG`)).status).toBe(401);
+  });
+
+  test("POST /visuals refuses a folder it can't show, with the reason", async () => {
+    const name = await shSession("visual-folder-bad");
+    const dir = join(homeDir, "no-page");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "a.glb"), "x");
+    const r = await show({ session: name, path: dir, title: "T" });
+    expect([r.status, (await r.json()).error]).toEqual([400, `no index.html in ${dir}: a folder's page is its index.html`]);
   });
 });
 
