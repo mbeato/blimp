@@ -12,8 +12,10 @@ import { claudeDir, listSessionsLite, type Session, sessionExists, zmxEnv, zmxLi
 import { followSize, lastSize } from "./terminal";
 
 // A session's zmx client, started on the first write. queue: the last thing this typist typed. typed: its
-// client has had keys (a write whose check refused it attached one and typed none).
-export type Typist = { name: string; proc?: Subprocess; ready?: Promise<void>; unfollow?: () => void; queue?: Promise<unknown>; typed?: boolean };
+// client has had keys (a write whose check refused it attached one and typed none). out: the last of what its client
+// was sent to draw, the session's screen as it changes, for a write that waits to see something there.
+export type Typist = { name: string; proc?: Subprocess; ready?: Promise<void>; unfollow?: () => void; queue?: Promise<unknown>; typed?: boolean; out?: string };
+const OUT = 20_000;
 
 export const typist = (name: string): Typist => ({ name });
 
@@ -43,11 +45,20 @@ function client(t: Typist) {
   let ready!: () => void;
   t.ready = new Promise<void>((r) => (ready = r));
   t.typed = false;
+  const decoder = new TextDecoder();
+  t.out = "";
   const proc = (t.proc = Bun.spawn([zmxPath(), "attach", t.name], {
     env: { ...zmxEnv(), TERM: "xterm-256color", COLORTERM: "truecolor" },
-    // Its output is the same screen the viewers see, so nobody needs it here. zmx draws that screen
+    // Its output is the same screen the viewers see: only its last part is kept (t.out). zmx draws that screen
     // as it attaches the client: the first output says input will reach the session.
-    terminal: { cols, rows, data: () => ready() },
+    terminal: {
+      cols,
+      rows,
+      data: (_term, bytes) => {
+        ready();
+        t.out = ((t.out ?? "") + decoder.decode(bytes, { stream: true })).slice(-OUT);
+      },
+    },
   }));
   proc.exited.then(() => proc.terminal?.close()); // killed, or ended on its own (the next input starts another)
   t.unfollow?.();

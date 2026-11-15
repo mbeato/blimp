@@ -377,8 +377,8 @@ describe("chat", () => {
   const tline = (o: object) => JSON.stringify({ timestamp: T, ...o }) + "\n";
 
   // A session that looks like Claude to blimpd: its pid has a status file naming a transcript.
-  async function fakeClaude(suffix: string, sessionId: string, lines: string[]) {
-    const name = await shSession(suffix, ["sh", "-c", LOOP]);
+  async function fakeClaude(suffix: string, sessionId: string, lines: string[], cmd = ["sh", "-c", LOOP]) {
+    const name = await shSession(suffix, cmd);
     const pid = parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name)!.pid;
     mkdirSync(join(claudeDir, "sessions"), { recursive: true });
     mkdirSync(join(claudeDir, "projects", "p"), { recursive: true });
@@ -479,6 +479,78 @@ describe("chat", () => {
     expect(h.messages.map((m: any) => m.id)).toEqual(Array.from({ length: 200 }, (_, i) => (i % 2 ? `a${2800 + i}#0` : `u${2800 + i}`)));
     c.ws.close();
   });
+
+  test("a message's files: each path is a paste of its own before the text, and a picture is waited for until Claude Code has attached it", async () => {
+    // A stand-in that reads keys as they come, as Claude Code does: a pasted path that ends .png gets its mark
+    // 300 ms later (Claude Code attaches a picture a moment after the paste), and Enter prints what was pasted since
+    // the last one and how many marks were up by then.
+    const standIn = join(tmp, "attach-stand-in.js");
+    writeFileSync(
+      standIn,
+      String.raw`process.stdin.setRawMode(true);
+let buf = "", marks = 0, pastes = [];
+process.stdin.on("data", (d) => {
+  buf += d.toString();
+  for (;;) {
+    const end = buf.indexOf("\x1b[201~");
+    if (buf.startsWith("\x1b[200~") && end > 0) {
+      const p = buf.slice(6, end);
+      buf = buf.slice(end + 6);
+      pastes.push(p);
+      if (/\.png $/.test(p)) setTimeout(() => console.log("[Image #" + ++marks + "]"), 300);
+    } else if (buf.startsWith("\r")) {
+      console.log("sent:" + JSON.stringify(pastes) + " marks=" + marks);
+      pastes = [];
+      buf = buf.slice(1);
+    } else break;
+  }
+});
+`,
+    );
+    const { name } = await fakeClaude("chat-files", "3f3f3f3f-3333-3333-3333-333333333333", [], [process.execPath, standIn]);
+    const viewer = await socket(`/sessions/${name}/attach?cols=200&rows=40`);
+    const c = await socket(`/sessions/${name}/chat`);
+    await until(() => c.messages.find((m) => m.type === "history"), "history");
+    const saved: string[] = [];
+    const up = async (file: string) => {
+      const r = await api(`/uploads?name=${encodeURIComponent(file)}`, { method: "POST", body: "x" });
+      expect(r.status).toBe(201);
+      saved.push(((await r.json()) as any).path);
+      return saved.at(-1)!;
+    };
+    try {
+      const [a, v, b] = [await up(`${tag}-a.png`), await up(`${tag}-v.mp4`), await up(`${tag}-b.png`)];
+      c.ws.send(JSON.stringify({ type: "input", id: "f1", text: "look at these", files: [a, v, b] }));
+      await until(() => c.messages.find((m) => m.type === "ack" && m.id === "f1"), "ack", 15000);
+      // In order, the text last, and Enter only after both pictures' marks were up: 50 ms apart it would have
+      // found none.
+      await until(() => viewer.text.includes("sent:"), "the message reached the session");
+      expect(viewer.text).toContain(`sent:${JSON.stringify([`${a} `, `${v} `, `${b} `, "look at these"])} marks=2`);
+
+      // Files alone, with no words.
+      c.ws.send(JSON.stringify({ type: "input", id: "f2", text: "", files: [v] }));
+      await until(() => viewer.text.includes(`sent:${JSON.stringify([`${v} `, ""])} marks=2`), "a message of one file");
+
+      // Refused, and nothing typed: what isn't a list, an 11th file, and anything that isn't a file in the uploads folder.
+      const refused = async (id: string, files: unknown) => {
+        c.ws.send(JSON.stringify({ type: "input", id, text: "never typed", files }));
+        return (await until(() => c.messages.find((m) => m.type === "error" && m.id === id), `${id} refused`)).error;
+      };
+      const gone = "a file isn't in blimp's uploads folder any more: add it again";
+      expect(await refused("r1", Array(11).fill(a))).toBe("at most 10 files on one message");
+      expect(await refused("r2", [a, join(homeDir, "chart.html")])).toBe(gone);
+      expect(await refused("r3", [join(tmp, "token")])).toBe(gone);
+      expect(await refused("r4", [`${a}.missing`])).toBe(gone);
+      expect(await refused("r5", [3])).toBe(gone);
+      expect(await refused("r6", "nope")).toBe(gone);
+      await Bun.sleep(300);
+      expect(viewer.text).not.toContain("never typed");
+    } finally {
+      for (const p of saved) if (basename(p).startsWith(tag)) rmSync(p, { force: true });
+      c.ws.close();
+      viewer.ws.close();
+    }
+  }, 30000);
 
   test("input is typed as a paste plus Enter, once per id, at the viewer's size", async () => {
     const { name } = await fakeClaude("chat2", "33333333-3333-3333-3333-333333333333", []);
@@ -2652,6 +2724,61 @@ describe("visuals", () => {
     writeFileSync(join(dir, "a.glb"), "x");
     const r = await show({ session: name, path: dir, title: "T" });
     expect([r.status, (await r.json()).error]).toEqual([400, `no index.html in ${dir}: a folder's page is its index.html`]);
+  });
+});
+
+describe("uploads", () => {
+  const saved: string[] = [];
+  afterAll(() => {
+    for (const p of saved) if (basename(p).startsWith(tag)) rmSync(p, { force: true });
+  });
+  const up = async (name: string | null, body: BodyInit | null, headers: Record<string, string> = {}, auth = true) => {
+    const r = await api(`/uploads${name === null ? "" : `?name=${encodeURIComponent(name)}`}`, { method: "POST", body, headers }, auth);
+    const j = (await r.json()) as any;
+    if (j.path) saved.push(j.path);
+    return [r.status, j] as const;
+  };
+
+  test("POST /uploads saves a file in ~/.blimp/uploads under a plain name no file there has, for the Mac's token and the phone's", async () => {
+    const dir = join(realpathSync(homedir()), ".blimp", "uploads");
+    const photo = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x80]);
+    const [status, first] = await up(`${tag} photo (1).jpg`, photo);
+    expect(status).toBe(201);
+    expect(first).toEqual({ path: join(dir, `${tag}-photo-1-.jpg`), size: 6 });
+    expect(readFileSync(first.path)).toEqual(photo);
+    // The same name again: beside the first, never over it.
+    const [, second] = await up(`${tag} photo (1).jpg`, "other");
+    expect(second.path).toBe(join(dir, `${tag}-photo-1--2.jpg`));
+    const [, third] = await up(`${tag} photo (1).jpg`, "third");
+    expect(third.path).toBe(join(dir, `${tag}-photo-1--3.jpg`));
+    expect(readFileSync(first.path)).toEqual(photo);
+    // A name can't leave the folder.
+    const [, away] = await up(`../../${tag}-away.png`, "x");
+    expect(away.path).toBe(join(dir, `${tag}-away.png`));
+
+    const phoneFile = join(tmp, "phone-token");
+    const phone = "cafe".repeat(16);
+    writeFileSync(phoneFile, phone);
+    try {
+      const [s2, fromPhone] = await up(`${tag}-phone.mp4`, "video", { Authorization: `Bearer ${phone}` }, false);
+      expect(s2).toBe(201);
+      expect(fromPhone.path).toBe(join(dir, `${tag}-phone.mp4`));
+      // What the phone's chat loads a picture with: the file, by its path.
+      const read = await api(`/fs/file?path=${encodeURIComponent(first.path)}`, { headers: { Authorization: `Bearer ${phone}` } }, false);
+      expect(read.status).toBe(200);
+      expect(read.headers.get("content-type")).toBe("image/jpeg");
+      expect(Buffer.from(await read.arrayBuffer())).toEqual(photo);
+    } finally {
+      rmSync(phoneFile, { force: true });
+    }
+  });
+
+  test("POST /uploads refuses a request with no name, no file or no token", async () => {
+    expect(await up(null, "x")).toEqual([400, { error: "name is required" }]);
+    expect(await up("", "x")).toEqual([400, { error: "name is required" }]);
+    expect((await up(`${tag}-none.png`, "x", {}, false))[0]).toBe(401);
+    expect((await api(`/uploads?name=${tag}-get.png`)).status).toBe(404);
+    expect(existsSync(join(realpathSync(homedir()), ".blimp", "uploads", `${tag}-none.png`))).toBe(false);
   });
 });
 

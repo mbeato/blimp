@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mergeById, messagesFromLine, newScan, readAppended, readLast, toolSummary } from "../src/chat";
+import { uploadsDir } from "../src/uploads";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-chat-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -58,6 +59,49 @@ describe("messagesFromLine", () => {
     ]);
     // Output whose command came before what was read: skipped, as a tool result is.
     expect(messagesFromLine(user("u5", "<bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>", { parentUuid: "gone" }), s)).toEqual([]);
+  });
+
+  test("files you sent from the uploads folder are cards: a picture Claude Code attached, and a path typed with the words", () => {
+    const s = newScan("/home/u/p");
+    const dir = uploadsDir();
+    mkdirSync(dir, { recursive: true });
+    const kept = join(dir, `blimptest-chat-${process.pid}.jpg`);
+    writeFileSync(kept, "x");
+    try {
+      // The prompt as Claude Code writes it with a picture attached: its mark in the words, the picture itself,
+      // and the paste's id beside them. The mark isn't shown.
+      const prompt = user("u1", [{ type: "text", text: "[Image #1]what is this" }, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } }], { imagePasteIds: [1] });
+      expect(messagesFromLine(prompt, s)).toEqual([{ id: "u1#0", at, role: "user", text: "what is this" }]);
+      // Then its note of where each picture came from: the card. One that is no longer there is gone.
+      const from = user("m1", [{ type: "text", text: `[Image: source: ${kept}]` }, { type: "text", text: `[Image: source: ${dir}/blimptest-chat-missing.png]` }], { isMeta: true });
+      expect(messagesFromLine(from, s)).toEqual([
+        { id: "m1#0", at, role: "file", file: kept, name: `blimptest-chat-${process.pid}.jpg`, image: true, summary: `Sent blimptest-chat-${process.pid}.jpg` },
+        { id: "m1#1", at, role: "file", file: `${dir}/blimptest-chat-missing.png`, name: "blimptest-chat-missing.png", image: true, summary: "Sent blimptest-chat-missing.png", gone: true },
+      ]);
+      // Pictures alone, with no words: only the cards.
+      expect(messagesFromLine(user("u2", [{ type: "text", text: "[Image #2][Image #3]" }], { imagePasteIds: [2, 3] }), s)).toEqual([]);
+      // A picture from anywhere else (pasted on the Mac, or a path Claude Code read) isn't blimp's to show.
+      expect(messagesFromLine(user("m2", [{ type: "text", text: "[Image: source: /home/u/p/shot.png]" }], { isMeta: true }), s)).toEqual([]);
+      expect(messagesFromLine(user("m3", [{ type: "text", text: `[Image: source: ${dir}/../token]` }], { isMeta: true }), s)).toEqual([]);
+      expect(messagesFromLine(user("m4", [{ type: "text", text: `see ${kept}` }], { isMeta: true }), s)).toEqual([]);
+      // Words that only look like a mark stay, when no picture came with them.
+      expect(messagesFromLine(user("u3", "what does [Image #1] mean"), s)).toEqual([{ id: "u3", at, role: "user", text: "what does [Image #1] mean" }]);
+
+      // A file that isn't a picture (a video): its path is in the words, as typed. It becomes a card after them.
+      expect(messagesFromLine(user("u4", `${kept} ${dir}/clip.mp4 watch these`), s)).toEqual([
+        { id: "u4", at, role: "user", text: "watch these" },
+        { id: "u4f0", at, role: "file", file: kept, name: `blimptest-chat-${process.pid}.jpg`, summary: `Sent blimptest-chat-${process.pid}.jpg` },
+        { id: "u4f1", at, role: "file", file: `${dir}/clip.mp4`, name: "clip.mp4", summary: "Sent clip.mp4", gone: true },
+      ]);
+      expect(messagesFromLine(user("u5", [{ type: "text", text: `${dir}/clip.mp4 ` }]), s)).toEqual([
+        { id: "u5#0f0", at, role: "file", file: `${dir}/clip.mp4`, name: "clip.mp4", summary: "Sent clip.mp4", gone: true },
+      ]);
+      // Only a file in the folder itself, as a word of its own.
+      const not = `look in ${dir}/ and ${dir}/a/b.png and x${dir}/c.png`;
+      expect(messagesFromLine(user("u6", not), s)).toEqual([{ id: "u6", at, role: "user", text: not }]);
+    } finally {
+      rmSync(kept, { force: true });
+    }
   });
 
   test("a show call (blimp's tool) becomes a visual, under the call's id, once its result says which", () => {

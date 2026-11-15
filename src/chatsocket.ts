@@ -11,6 +11,7 @@ import { cleanText } from "./prompt";
 import { existsSync } from "node:fs";
 import { claudeDir, type Session, transcriptPath } from "./sessions";
 import { Asking, findSession, forget, release, typed, type Typist, typist, wasTyped } from "./typing";
+import { isUpload, MAX_FILES } from "./uploads";
 
 export type ChatData = {
   kind: "chat";
@@ -31,6 +32,21 @@ export type ChatData = {
 export const chatData = (name: string): ChatData => ({ kind: "chat", name, ticks: 0, typist: typist(name) });
 
 const HISTORY = 200;
+
+// The files Claude Code attaches as pictures when it is pasted their path.
+const PICTURE = /\.(png|jpe?g|gif|webp)$/i;
+const ATTACH_MS = 5000;
+
+// Waits until Claude Code's box shows a picture's mark it didn't before ([Image #n], read off what the typist's
+// client was sent to draw, its colours and cursor moves taken out), or 5 s: then the message goes on without the
+// wait, as it would have. Resolves with the marks seen so far.
+async function attached(t: Typist, before: Set<string>): Promise<Set<string>> {
+  const seen = () => new Set([...(t.out ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").matchAll(/\[Image\s*#(\d+)\]/g)].map((m) => m[1]));
+  for (const end = Date.now() + ATTACH_MS; ; await Bun.sleep(50)) {
+    const now = seen();
+    if ([...now].some((n) => !before.has(n)) || Date.now() > end) return new Set([...before, ...now]);
+  }
+}
 
 const send = (ws: ServerWebSocket<ChatData>, m: object) => ws.data.closed || ws.send(JSON.stringify(m));
 
@@ -155,16 +171,34 @@ async function handle(ws: ServerWebSocket<ChatData>, msg: string | Buffer) {
     if (m.type !== "input" && wasTyped(d.name, id)) return send(ws, { type: "ack", id });
     if (m.type === "input") {
       if (typeof m.text !== "string" || m.text.length > 100_000) return fail("text must be a string of at most 100 000 characters");
+      // Photos and videos the phone uploaded for this message (uploads.ts): files in the uploads folder only.
+      const files: unknown[] = m.files === undefined ? [] : Array.isArray(m.files) ? m.files : [null];
+      if (files.length > MAX_FILES) return fail(`at most ${MAX_FILES} files on one message`);
+      if (!files.every(isUpload)) return fail("a file isn't in blimp's uploads folder any more: add it again");
       // No control characters from the phone: ESC would end the paste early and turn the rest into key
       // presses, ctrl+\ detaches zmx's client, ctrl+C interrupts. Newlines and tabs stay; \r is a newline.
       const text = cleanText(m.text);
       // Not while Claude asks something: the Enter after the paste would confirm its highlighted choice.
       // Checked right before the paste, which goes in one write with its Enter (Claude 2.1.300 sends it,
       // queues it while working): a question can't start between them and leave the text in Claude's box.
-      await typed(d.typist, id, async () => {
-        if ((await find(d.name))?.state === "waiting") throw new Asking();
-        return ["\x1b[200~" + text + "\x1b[201~\r"];
-      });
+      // Each file's path is a paste of its own first, as the Mac's drop types it: Claude Code attaches a picture
+      // from a pasted path, and any other file's path stays in the message as text. It attaches a picture a moment
+      // after the paste ([Image #n] in its box), and a message sent before that goes without it, so each picture
+      // is waited for (attached) before the next part. Checked again for a question before each part.
+      let marks = new Set<string>();
+      await typed(
+        d.typist,
+        id,
+        async () => {
+          if ((await find(d.name))?.state === "waiting") throw new Asking();
+          d.typist.out = "";
+          return [...(files as string[]).map((f) => "\x1b[200~" + f + " \x1b[201~"), "\x1b[200~" + text + "\x1b[201~\r"];
+        },
+        async (part) => {
+          if (PICTURE.test(files[part - 1] as string)) marks = await attached(d.typist, marks);
+          if ((await find(d.name))?.state === "waiting") throw new Asking();
+        },
+      );
       return send(ws, { type: "ack", id });
     }
     // answer, interrupt and deny (answer.ts); anything else is "unknown message".

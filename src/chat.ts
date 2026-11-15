@@ -3,20 +3,26 @@
 // user entries. Only what a person would see in a chat app is kept: what you typed, what Claude
 // said, one line per tool call, and the ! commands you ran with their output.
 
-import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
+import { basename, dirname } from "node:path";
+import { uploadsDir } from "./uploads";
 import { isKept, isVisualId } from "./visuals/store";
 
 export type ToolMessage = { id: string; at: number; role: "tool"; name: string; summary: string; input: string; output?: string; error?: boolean };
 export type ShellMessage = { id: string; at: number; role: "shell"; input: string; output?: string };
 // A page Claude showed with blimp's show tool (visuals/mcp.ts): a card on the phone. gone: its copy is no longer kept.
 export type VisualMessage = { id: string; at: number; role: "visual"; title: string; visual: string; summary: string; gone?: true };
+// A file you sent with a message, from blimp's uploads folder (uploads.ts): a picture Claude Code attached, or a
+// file whose path went in the message (a video). gone: it is no longer kept.
+export type FileMessage = { id: string; at: number; role: "file"; file: string; name: string; image?: true; summary: string; gone?: true };
 export type ChatMessage =
   | { id: string; at: number; role: "user"; text: string }
   | { id: string; at: number; role: "assistant"; text: string }
   | { id: string; at: number; role: "compacted" }
   | ToolMessage
   | ShellMessage
-  | VisualMessage;
+  | VisualMessage
+  | FileMessage;
 
 // tools: tool_use id -> its message, so a later result can fill it in (then it's dropped).
 // shells: the same for ! commands, by the command's entry (its output's entry is a child of it).
@@ -33,6 +39,35 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 // Command wrappers (<command-name>), command output and system reminders all start with a tag;
 // what a person types doesn't (the same rule titles use).
 const typed = (t: unknown): t is string => typeof t === "string" && t.trim() !== "" && !t.startsWith("<");
+
+const fileMessage = (id: string, at: number, file: string, image: boolean): FileMessage => ({
+  id,
+  at,
+  role: "file",
+  file,
+  name: basename(file),
+  ...(image && { image: true as const }),
+  summary: `Sent ${basename(file)}`,
+  ...(!existsSync(file) && { gone: true as const }),
+});
+
+// Claude Code's note of where an attached picture came from, one per picture, in an entry of its own after the prompt.
+const PICTURE_FROM = /^\[Image: source: (.+)\]$/;
+
+// A prompt's text without what stands for its files: the marks of attached pictures ([Image #1]), and the paths of
+// files in the uploads folder (a video's, typed in with the message), which are given back as `files`.
+function withoutFiles(text: string, pictures: boolean): { text: string; files: string[] } {
+  if (pictures) text = text.replace(/\[Image #\d+\] ?/g, "");
+  const files: string[] = [];
+  if (text.includes("/.blimp/uploads/")) {
+    const dir = uploadsDir();
+    text = text
+      .split(/(\s+)/)
+      .filter((word) => !(word.startsWith(dir + "/") && dirname(word) === dir && files.push(word)))
+      .join("");
+  }
+  return { text: text.trim(), files };
+}
 
 const rel = (p: string, dir: string) => (dir && p.startsWith(dir + "/") ? p.slice(dir.length + 1) : p);
 
@@ -116,11 +151,27 @@ export function messagesFromLine(line: string, s: ChatScan): ChatMessage[] {
     m.output = cap([inTag(c, "bash-stdout"), inTag(c, "bash-stderr")].map((t) => t.replace(/\n+$/, "")).filter(Boolean).join("\n"));
     return [{ ...m }];
   }
+  // The pictures a prompt came with, from the uploads folder: a card each (what Claude Code attached from the
+  // Mac's drop or the phone's message). Its other notes to itself aren't shown.
+  if (r?.type === "user" && r.isMeta && Array.isArray(c)) {
+    c.forEach((b: any, i: number) => {
+      const from = b?.type === "text" && typeof b.text === "string" && b.text.includes("/.blimp/uploads/") ? PICTURE_FROM.exec(b.text)?.[1] : undefined;
+      if (from && dirname(from) === uploadsDir()) out.push(fileMessage(`${r.uuid}#${i}`, at, from, true));
+    });
+    return out;
+  }
   if (r?.type === "user" && !r.isMeta) {
-    if (typeof c === "string") return typed(c) ? [{ id: r.uuid, at, role: "user", text: c }] : [];
+    const pictures = Array.isArray(r.imagePasteIds) && r.imagePasteIds.length > 0;
+    // What you typed, with its files as cards after it (a video's path; the pictures' come in the next entry).
+    const said = (id: string, words: string): ChatMessage[] => {
+      if (!typed(words)) return [];
+      const { text, files } = withoutFiles(words, pictures);
+      return [...(text ? [{ id, at, role: "user" as const, text }] : []), ...files.map((f, k) => fileMessage(`${id}f${k}`, at, f, false))];
+    };
+    if (typeof c === "string") return said(r.uuid, c);
     if (!Array.isArray(c)) return [];
     c.forEach((b: any, i: number) => {
-      if (b?.type === "text" && typed(b.text)) out.push({ id: `${r.uuid}#${i}`, at, role: "user", text: b.text });
+      if (b?.type === "text") out.push(...said(`${r.uuid}#${i}`, b.text));
       if (b?.type === "tool_result") {
         const t = s.tools.get(b.tool_use_id);
         if (!t) return;

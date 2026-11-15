@@ -54,6 +54,7 @@ import {
   transcriptTitles,
   zmxListAsync,
 } from "./sessions";
+import { cleanUploads, saveUpload } from "./uploads";
 import { visualResponse } from "./visuals/http";
 import { cleanVisuals, makeVisual, visualKey } from "./visuals/store";
 import { widgetKey, widgetSummary } from "./widget";
@@ -471,6 +472,10 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const r = await upload(guardFile(q.get("path")), req.body, q.get("mode") ?? "new", Number(req.headers.get("content-length") ?? 0));
     return Response.json(r, { status: 201 });
   }
+  // A photo or a video for a session, from the phone's chat (uploads.ts): saved in ~/.blimp/uploads under a plain,
+  // free name. Its path then goes with the message, in the chat socket's `files`.
+  if (path === "/uploads" && req.method === "POST")
+    return Response.json(await saveUpload(q.get("name"), req.body, Number(req.headers.get("content-length") ?? 0)), { status: 201 });
   if (path === "/fs/mkdir" && req.method === "POST") return Response.json(makeDir(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/create" && req.method === "POST") return Response.json(createFile(guardFile(await bodyPath(req))), { status: 201 });
   if (path === "/fs/files" && get) {
@@ -507,6 +512,9 @@ export function serve(): Server {
   // Visuals' copies over 30 days old, and the oldest of what's over 2 GB: now, then once a day.
   cleanVisuals();
   setInterval(() => cleanVisuals(), 24 * 3600 * 1000);
+  // Files the apps handed to sessions over 30 days ago, the same.
+  cleanUploads();
+  setInterval(() => cleanUploads(), 24 * 3600 * 1000);
   // Sockets opened with the phone token close within a second of `blimpd pair --revoke` (or a new pair).
   const phoneSockets = new Set<ServerWebSocket<WsData>>();
   setInterval(() => {
