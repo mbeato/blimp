@@ -52,6 +52,8 @@ private struct ChatContent: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.covered) private var covered
     @State private var draft = ""
+    /// Send was tapped with files still uploading: it waits for them (the box shows it's sending).
+    @State private var sendingFiles = false
     @State private var atBottom = true
     @State private var unseen = false
     @State private var resuming = false
@@ -319,10 +321,11 @@ private struct ChatContent: View {
                 }
                 errorLine
                 InputBar(
-                    text: $draft, sending: model.sendingText || model.redirecting, listening: micOn || micStopping, onSend: send,
+                    text: $draft, sending: model.sendingText || model.redirecting || sendingFiles, listening: micOn || micStopping, onSend: send,
                     onMicDown: micDown, onMicUp: micUp,
                     chips: ReplyChips.row(after: model.log.shown, draft: draft, asking: model.prompt != nil || model.waitingUnknown),
-                    onChip: { chip in Task { _ = await model.send(chip) } })
+                    onChip: { chip in Task { _ = await model.send(chip) } },
+                    attachments: model.attachments)
             }
         }
     }
@@ -432,11 +435,18 @@ private struct ChatContent: View {
     }
 
     /// The box clears only once blimpd has the text; anything typed meanwhile stays.
+    /// The box's words with the files picked for them. Files still uploading are waited for first; if one failed,
+    /// nothing is sent (the row says why). The words and the files go once blimpd has the message.
     private func send() {
+        guard !sendingFiles else { return }
         let text = draft
+        sendingFiles = !model.attachments.isEmpty
         Task {
-            if await model.send(text), draft.hasPrefix(text) {
-                draft.removeFirst(text.count)
+            defer { sendingFiles = false }
+            guard let files = await model.attachments.paths() else { return }
+            if await model.send(text, files: files) {
+                if draft.hasPrefix(text) { draft.removeFirst(text.count) }
+                model.attachments.sent(files)
             }
         }
     }

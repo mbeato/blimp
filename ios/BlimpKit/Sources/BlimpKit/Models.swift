@@ -333,7 +333,7 @@ public struct Note: Codable, Sendable, Equatable {
 }
 
 public enum ChatRole: String, Codable, Sendable, Equatable {
-    case user, assistant, tool, compacted, shell, visual
+    case user, assistant, tool, compacted, shell, visual, file
     public init(from decoder: Decoder) throws {
         self = ChatRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .tool
     }
@@ -354,6 +354,10 @@ public struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
     public var title: String? = nil
     public var visual: String? = nil
     public var gone: Bool? = nil
+    /// A file you sent's (role file, a photo or a video from blimp's uploads folder): its path on the server, and
+    /// true for a picture Claude Code attached. Its `name` is the file's name; `gone` once it is no longer kept.
+    public var file: String? = nil
+    public var image: Bool? = nil
 }
 
 public enum ChatEvent: Sendable, Equatable {
@@ -405,7 +409,8 @@ public enum EventsMessage: Sendable, Equatable {
 }
 
 public enum ChatCommand: Encodable, Sendable, Equatable {
-    case input(id: String, text: String)
+    /// `files`: photos and videos uploaded for this message (API.upload), by their paths on the server.
+    case input(id: String, text: String, files: [String] = [])
     /// `label` is the choice's text as shown at `pick`: blimpd refuses the answer if that's changed.
     case answer(id: String, at: Double, pick: Int, label: String)
     case interrupt(id: String)
@@ -417,17 +422,19 @@ public enum ChatCommand: Encodable, Sendable, Equatable {
     /// What blimpd's ack or error names.
     public var id: String {
         switch self {
-        case let .input(id, _), let .answer(id, _, _, _), let .interrupt(id), let .dismiss(id, _), let .answers(id, _, _, _): id
+        case let .input(id, _, _), let .answer(id, _, _, _), let .interrupt(id), let .dismiss(id, _), let .answers(id, _, _, _): id
         }
     }
 
-    private enum Key: String, CodingKey { case type, id, text, at, pick, label, answers, labels }
+    private enum Key: String, CodingKey { case type, id, text, at, pick, label, answers, labels, files }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
         switch self {
-        case let .input(id, text):
+        case let .input(id, text, files):
             try c.encode("input", forKey: .type); try c.encode(id, forKey: .id); try c.encode(text, forKey: .text)
+            // Left out when there are none: a blimpd from before files reads the message as it always did.
+            if !files.isEmpty { try c.encode(files, forKey: .files) }
         case let .answer(id, at, pick, label):
             try c.encode("answer", forKey: .type); try c.encode(id, forKey: .id); try c.encode(at, forKey: .at); try c.encode(pick, forKey: .pick)
             try c.encode(label, forKey: .label)

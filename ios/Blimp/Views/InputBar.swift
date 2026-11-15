@@ -5,7 +5,10 @@
 // something, the chat may take the words as the answer). Above the box, while it's empty and nothing is
 // asked: one-tap replies. A tap sends after a short Undo; a long press puts the words in the box instead.
 // Stop is on the chat's working row, not here. What's typed is kept per chat (keepsDraft).
+// In a chat, + at the box's start adds photos and videos to the next message (Attachments): from the photo
+// library or the camera. What's picked sits in a row above the box (AttachRow), and Send shows for files alone.
 import BlimpKit
+import PhotosUI
 import SwiftUI
 
 /// How a press on the mic ended.
@@ -32,6 +35,8 @@ struct InputBar: View {
     var onChip: ((String) -> Void)? = nil
     /// Set: the box takes the keyboard (now, or as it appears) and sets it back (the drawer's New session).
     var takeFocus: Binding<Bool>? = nil
+    /// Set: + adds photos and videos to the next message, shown above the box. nil: no +.
+    var attachments: Attachments? = nil
 
     @State private var pressedAt: Date?
     /// A tap started it: it listens until the next tap.
@@ -46,18 +51,24 @@ struct InputBar: View {
     /// so a tap on the box carries on after them instead of typing in front.
     @State private var selection: TextSelection?
     @FocusState private var focused: Bool
+    /// The photo library's picker is up, and what it handed back; the camera is up.
+    @State private var picking = false
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var camera = false
 
     private static let tapTime: TimeInterval = 0.3
     private static let undoTime: Duration = .seconds(2)
 
     private var hasText: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    /// Send shows once there's text, not while listening (the words heard are still coming), or always
-    /// for a box with no mic.
-    private var showsSend: Bool { onMicDown == nil || (hasText && !listening) }
+    private var hasFiles: Bool { attachments?.isEmpty == false }
+    /// Send shows once there's text or a file, not while listening (the words heard are still coming), or
+    /// always for a box with no mic.
+    private var showsSend: Bool { onMicDown == nil || ((hasText || hasFiles) && !listening) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !chips.isEmpty, !listening, !sending { chipRow }
+            if let attachments, !attachments.isEmpty { AttachRow(attachments: attachments) }
             box
         }
         // A tapped chip is sent only from the row it was tapped on: text in the box, a prompt or a new reply
@@ -78,6 +89,7 @@ struct InputBar: View {
 
     private var box: some View {
         HStack(alignment: .bottom, spacing: 4) {
+            if let attachments { attach(attachments) }
             TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
                 .focused($focused)
                 .onChange(of: text, initial: true) { _, now in
@@ -89,7 +101,7 @@ struct InputBar: View {
                     takeFocus.wrappedValue = false
                 }
                 .lineLimit(1...6)
-                .padding(.leading, 14)
+                .padding(.leading, attachments == nil ? 14 : 2)
                 .padding(.vertical, 9)
                 .accessibilityIdentifier("messageField")
             // The mic keeps its place while it listens, so the press never ends under the finger.
@@ -98,7 +110,7 @@ struct InputBar: View {
                 if sending {
                     ProgressView().frame(width: 32, height: 32)
                 } else if showsSend {
-                    send.disabled(!hasText)
+                    send.disabled(!hasText && !hasFiles)
                 }
             }
             .padding(.trailing, 4)
@@ -126,6 +138,48 @@ struct InputBar: View {
             guard !now, pressedAt != nil else { return }
             pressedAt = nil
             if !latched { onMicUp?(.keep) }
+        }
+    }
+
+    /// + at the box's start: the photo library (photos and videos, several at once; the system's picker, which
+    /// needs no permission) or the camera. Off once the message has its 10 files.
+    @ViewBuilder private func attach(_ attachments: Attachments) -> some View {
+        let plus = Image(systemName: "plus")
+            .font(.body.weight(.medium))
+            .frame(width: 32, height: 32)
+            .contentShape(Circle())
+        Group {
+            if Attachments.demo {
+                // The UI tests: the picker can't be driven, so + adds a picture made here.
+                Button { attachments.add(.photo(Attachments.demoPhoto())) } label: { plus }
+            } else {
+                Menu {
+                    Button("Photo Library", systemImage: "photo.on.rectangle") { picking = true }
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("Camera", systemImage: "camera") { camera = true }
+                    }
+                } label: { plus }
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.primary)
+        .disabled(attachments.room == 0)
+        .padding(.leading, 4)
+        .padding(.bottom, 4)
+        .accessibilityLabel("Add photos or videos")
+        .accessibilityIdentifier("attachButton")
+        .photosPicker(isPresented: $picking, selection: $picked, maxSelectionCount: max(1, attachments.room), matching: .any(of: [.images, .videos]))
+        .onChange(of: picked) { _, now in
+            guard !now.isEmpty else { return }
+            attachments.add(now)
+            picked = []
+        }
+        .fullScreenCover(isPresented: $camera) {
+            CameraPicker { taken in
+                camera = false
+                if let taken { attachments.add(taken) }
+            }
+            .ignoresSafeArea()
         }
     }
 

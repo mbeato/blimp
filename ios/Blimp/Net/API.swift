@@ -182,6 +182,38 @@ struct API {
 
     /// A WebSocket address on this server: ws for http, wss for https, the token in the query
     /// (a WebSocket handshake can't carry the Authorization header here).
+    /// Hands a photo or a video to blimpd for a session (POST /uploads): where blimpd saved it, to send with a
+    /// message (ChatCommand.input's files). The file goes up from disk, and is given 10 minutes between two
+    /// packets, not 10 s in all. An older blimpd has no such route: "not found".
+    func upload(file: URL, name: String) async throws -> String {
+        var c = components("/uploads")
+        c.queryItems = [URLQueryItem(name: "name", value: name)]
+        guard let url = c.url else { throw APIError.other("bad address") }
+        var req = URLRequest(url: url, timeoutInterval: 600)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(server.token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.upload(for: req, fromFile: file)
+        } catch let e as URLError where e.code == .cancelled {
+            throw CancellationError()
+        } catch let e as URLError where API.offlineCodes.contains(e.code) {
+            throw APIError.offline
+        } catch {
+            throw APIError.other(error.localizedDescription)
+        }
+        struct Saved: Decodable { let path: String }
+        let saved: Saved = try decode(try Self.checked(data, response))
+        return saved.path
+    }
+
+    /// A file under the home folder as blimpd sends it (GET /fs/file, at most 50 MB): a picture you sent, for
+    /// the chat (SentFile).
+    func file(path: String) async throws -> Data {
+        try await call("GET", "/fs/file", query: [URLQueryItem(name: "path", value: path)])
+    }
+
     func socketURL(_ path: String) -> URL {
         var c = components(path)
         c.scheme = c.scheme?.lowercased() == "https" ? "wss" : "ws"
@@ -218,6 +250,11 @@ struct API {
         } catch {
             throw APIError.other(error.localizedDescription)
         }
+        return try Self.checked(data, response)
+    }
+
+    /// The reply's body, or what went wrong: a refused token, blimpd's own reason, or its status.
+    private static func checked(_ data: Data, _ response: URLResponse) throws -> Data {
         guard let http = response as? HTTPURLResponse else { throw APIError.other("not an HTTP reply") }
         if http.statusCode == 401 { throw APIError.unauthorized }
         guard (200..<300).contains(http.statusCode) else {

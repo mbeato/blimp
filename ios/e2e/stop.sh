@@ -19,4 +19,6 @@ if [ -d "$ZMX_DIR" ]; then
   [ -z "$names" ] || zmx kill $names --force >/dev/null 2>&1
 fi
 pkill -9 -f "user-data-dir=$(dirname "$BLIMPD_SOCKET")/" 2>/dev/null
+# The picture testSendAPhoto uploads: blimpd saves it in the home folder's ~/.blimp/uploads, under this name only.
+rm -f "$HOME"/.blimp/uploads/blimp-e2e-photo*.jpg
 true

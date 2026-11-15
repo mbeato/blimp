@@ -47,9 +47,9 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSFaceIDUsageDescription: blimp locks with Face ID because it can run anything on your server.
-        NSMicrophoneUsageDescription: blimp listens while you hold the mic button, to type what you say.
+        NSMicrophoneUsageDescription: blimp listens while you hold the mic button, to type what you say, and records sound with a video you take for a session.
         NSSpeechRecognitionUsageDescription: blimp turns what you say into text on this iPhone.
-        NSCameraUsageDescription: blimp uses the camera to scan the pairing code from your server.
+        NSCameraUsageDescription: blimp uses the camera to scan the pairing code from your server, and to take a photo or a video you send to a session.
         # Only HTTPS and the system's own encryption, so TestFlight needn't ask about export rules for each build.
         ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:

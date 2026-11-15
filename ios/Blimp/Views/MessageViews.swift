@@ -1,6 +1,7 @@
 // How each chat message looks: your prompts as bubbles, Claude's replies as native Markdown (a long
-// one folded, with Show more, except the newest), and a page Claude showed as a card that opens it (VisualCard). Tool steps aren't shown; the working row says the latest
-// one. In Claude's latest reply, a code block blimpd offers to run has Run under it (ChatExtras.swift).
+// one folded, with Show more, except the newest), a page Claude showed as a card that opens it (VisualCard), and a
+// photo or a video you sent on your side of the chat (SentFile, AttachViews.swift). Tool steps aren't shown; the
+// working row says the latest one. In Claude's latest reply, a code block blimpd offers to run has Run under it (ChatExtras.swift).
 import BlimpKit
 import SwiftUI
 
@@ -24,6 +25,7 @@ struct MessageRow: View {
                 .accessibilityIdentifier("message.compacted")
         case .shell: ShellRun(command: message.input ?? "", output: message.output)
         case .visual: VisualCard(message: message)
+        case .file: SentFile(message: message)
         }
     }
 }

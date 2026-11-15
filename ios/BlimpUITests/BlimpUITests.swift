@@ -736,6 +736,37 @@ final class BlimpUITests: XCTestCase {
         try until(page, "exists == false", "the chat after × on the 3D page")
     }
 
+    /// A photo from the chat. Launched with -attachDemo YES: the system's photo picker can't be driven, so + adds
+    /// a picture made in the app, larger than a photo is sent at. Its tile shows above the box, uploaded, and Send
+    /// shows for it alone. Sent with a few words, blimpd saves it and types its path with them (demo-chat's stand-in
+    /// writes what it read to its transcript), so the chat shows the words and the file on your side, and the row
+    /// is empty again.
+    func testSendAPhoto() throws {
+        try launchPaired(arguments: ["-attachDemo", "YES"])
+        app.open(URL(string: "blimp://open?session=demo-chat")!)
+        // A link brings the app back through the lock, as a tapped notification can
+        if app.buttons["Unlock"].firstMatch.waitForExistence(timeout: 5) { try unlockWithFace() }
+        let plus = element("attachButton")
+        try wait(plus, "the + in the message box")
+        if app.buttons["sendButton"].exists { throw failed("no Send while the box is empty") }
+        plus.tap()
+        let tile = element("attachTile")
+        try wait(tile, "the picked photo above the box")
+        try until(tile, "value == 'Ready'", "the photo to be uploaded", timeout: 40)
+        let send = app.buttons["sendButton"]
+        try wait(send, "Send for a photo alone")
+        shot("49-attach-row")
+        let field = element("messageField")
+        field.tap()
+        field.typeText("what is this")
+        send.tap()
+        try wait(message("message.user", "what is this"), "the words in the chat", timeout: 40)
+        try wait(message("message.file", "blimp-e2e-photo"), "the photo in the chat")
+        try until(tile, "exists == false", "the row to be empty after sending")
+        if element("attachFailure").exists { throw failed("no failure under the row") }
+        shot("49-attach-sent")
+    }
+
     // MARK: - The assistant
 
     /// The assistant (setup.ts's stand-in, a session named assistant whose folder isn't a project) is pinned at the top

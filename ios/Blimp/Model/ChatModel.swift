@@ -10,6 +10,9 @@ import Observation
 @Observable @MainActor
 final class ChatModel {
     let name: String
+    /// The photos and videos picked for the next message: kept with the chat, so they're still there after
+    /// leaving it and coming back.
+    let attachments: Attachments
     private(set) var log = ChatLog()
     /// Ids sent and not yet acknowledged.
     private(set) var sending: Set<String> = []
@@ -66,6 +69,7 @@ final class ChatModel {
         self.name = name
         self.store = store
         self.server = store.server
+        self.attachments = Attachments { [weak store] in store?.api }
     }
 
     /// The chats kept loaded, the latest first.
@@ -192,17 +196,18 @@ final class ChatModel {
 
     /// Types `text` into the session. true once blimpd acknowledged it; false (and lastError set)
     /// if it didn't, and then nothing is kept or queued. Not during Stop and send: it sends the box's text itself.
-    func send(_ text: String) async -> Bool {
+    /// `files`: photos and videos already uploaded for it (attachments), by their paths on the server.
+    func send(_ text: String, files: [String] = []) async -> Bool {
         guard !redirecting else { return false }
-        return await type(text)
+        return await type(text, files: files)
     }
 
-    private func type(_ text: String) async -> Bool {
+    private func type(_ text: String, files: [String] = []) async -> Bool {
         let id = UUID().uuidString
         lastError = nil
         inputId = id
         defer { inputId = nil }
-        switch await request(.input(id: id, text: text), id: id) {
+        switch await request(.input(id: id, text: text, files: files), id: id, wait: Attach.patience(files: files.count)) {
         case .ack: return true
         case .ended: break
         // blimpd types nothing while Claude asks something: Enter would confirm its highlighted choice.
@@ -427,13 +432,14 @@ final class ChatModel {
     }
 
     /// Sends one command and waits for blimpd's reply: 10 s, then the same id once more for 10 s
-    /// (blimpd types an id only once, so a resend after a lost ack is safe).
-    private func request(_ command: ChatCommand, id: String) async -> Reply {
+    /// (blimpd types an id only once, so a resend after a lost ack is safe). `wait`: longer for a message
+    /// with files, which blimpd types a part at a time.
+    private func request(_ command: ChatCommand, id: String, wait: Double = 10) async -> Reply {
         guard let data = try? JSONEncoder().encode(command) else { return .notSent }
         sending.insert(id)
         defer { sending.remove(id) }
-        var result = await attempt(data, id: id)
-        if case .timeout = result { result = await attempt(data, id: id) }
+        var result = await attempt(data, id: id, wait: wait)
+        if case .timeout = result { result = await attempt(data, id: id, wait: wait) }
         // blimpd's reply for typing into a session that's no longer there
         if case .failed("the session ended") = result {
             endChat()
@@ -442,7 +448,7 @@ final class ChatModel {
         return result
     }
 
-    private func attempt(_ data: Data, id: String) async -> Reply {
+    private func attempt(_ data: Data, id: String, wait: Double) async -> Reply {
         await withCheckedContinuation { (c: CheckedContinuation<Reply, Never>) in
             replies[id] = c
             Task { [weak self] in
@@ -451,7 +457,7 @@ final class ChatModel {
                 do { try await socket.send(data) } catch { self?.reply(id, (error as? SocketError) == .unconfirmed ? .timeout : .notSent) }
             }
             timers[id] = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(10))
+                try? await Task.sleep(for: .seconds(wait))
                 if !Task.isCancelled { self?.reply(id, .timeout) }
             }
         }
