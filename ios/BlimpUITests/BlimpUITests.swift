@@ -690,9 +690,10 @@ final class BlimpUITests: XCTestCase {
         shot("45-widget-link")
     }
 
-    /// demo-chat's two show calls (ios/e2e/setup.ts): the kept one's card opens the page (the fixture: a chart, a
-    /// diagram, two requests that fail), which neither its link nor a script can leave; × goes back. The other's copy is gone: greyed, and
-    /// it opens nothing.
+    /// demo-chat's three show calls (ios/e2e/setup.ts): the kept one's card opens the page (the fixture: a chart, a
+    /// diagram, two requests that fail), which neither its link nor a script can leave; × goes back. Another's copy is
+    /// gone: greyed, and it opens nothing. The third is a folder: its page draws in 3D with the kit's three.js and
+    /// reads a model and a data file beside it, and its four requests to anywhere else fail.
     func testVisualCardOpensThePage() throws {
         try launchPaired()
         app.open(URL(string: "blimp://open?session=demo-chat")!)
@@ -720,6 +721,19 @@ final class BlimpUITests: XCTestCase {
         let gone = message("message.visual", "No longer kept")
         try wait(gone, "the card of a copy no longer kept")
         if gone.isEnabled { throw failed("a card of a copy no longer kept that can be tapped") }
+        let flat = message("message.visual", "The flat in 3D")
+        try wait(flat, "the 3D visual's card")
+        flat.tap()
+        try wait(page, "the 3D visual's page")
+        try wait(page.staticTexts["3D fixture"], "the 3D page's heading")
+        let report = { (part: String) in page.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", part)).firstMatch }
+        try wait(report("\"three\":\"187\""), "the page's report that three.js loaded")
+        try wait(report("\"scene\":\"drawn\""), "the page's report that it drew in 3D")
+        try wait(report("\"model\":\"3 points, textured\",\"file\":\"2 rooms\""), "the page's report that it read the files beside it")
+        try wait(report("rejected,rejected,rejected,rejected"), "the page's report that its requests elsewhere failed")
+        shot("48-visual-3d")
+        element("visualClose").tap()
+        try until(page, "exists == false", "the chat after × on the 3D page")
     }
 
     // MARK: - The assistant

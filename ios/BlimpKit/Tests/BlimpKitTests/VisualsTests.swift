@@ -20,12 +20,12 @@ import Testing
     #expect(log.latestStep?.id == "t#0")
 }
 
-@Test func aVisualsPageIsTheServerTheKeyAndTheId() {
+@Test func aVisualsPageIsTheServerTheKeyAndTheIdAsAFolder() {
     let key = String(repeating: "ab", count: 32)
     let server = URL(string: "https://box.tail1234.ts.net")!
-    #expect(VisualLink.page(server: server, key: key, id: "0123456789ab")?.absoluteString == "https://box.tail1234.ts.net/visuals/\(key)/0123456789ab")
+    #expect(VisualLink.page(server: server, key: key, id: "0123456789ab")?.absoluteString == "https://box.tail1234.ts.net/visuals/\(key)/0123456789ab/")
     #expect(VisualLink.page(server: URL(string: "https://box.tail1234.ts.net/")!, key: key, id: "0123456789ab")?.absoluteString
-        == "https://box.tail1234.ts.net/visuals/\(key)/0123456789ab")
+        == "https://box.tail1234.ts.net/visuals/\(key)/0123456789ab/")
     #expect(VisualLink.page(server: server, key: key, id: "../../token") == nil)
     #expect(VisualLink.page(server: server, key: key, id: "0123456789AB") == nil)
     #expect(VisualLink.page(server: server, key: "nope", id: "0123456789ab") == nil)

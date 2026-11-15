@@ -30,7 +30,7 @@
 // the app starts run the stand-in claude in ios/e2e/bin. The texts here are what BlimpUITests looks for. The ports
 // ($E2E_PORT for the app's link, $E2E_SITE_PORT for the page) are each shard's own when shards share a Mac.
 
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { projectFolderName } from "../../src/folders";
 import { promptFromHook } from "../../src/prompt";
@@ -82,11 +82,14 @@ for (const f of [chatIn, promptIn, stopIn, permIn]) writeFileSync(f, "");
 const chatSid = "e2e00000-0000-0000-0000-000000000001";
 const chatLog = join(claude, "projects", "e2e", `${chatSid}.jsonl`);
 const echo = String.raw`n=0; while IFS= read -r l; do printf '%s\n' "$l" >> '${chatIn}'; n=$((n+1)); t=$(printf %s "$l" | tr -d '\033' | sed 's/\[20[01]~//g'); ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); printf '{"type":"user","uuid":"in%s","timestamp":"%s","message":{"role":"user","content":"%s"}}\n{"type":"assistant","uuid":"out%s","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Shipped: %s"}]}}\n' "$n" "$ts" "$t" "$n" "$ts" "$t" >> '${chatLog}'; done`;
-// Two pages Claude showed in demo-chat (blimp's show tool): one blimpd still keeps (the fixture the Mac's e2e shows
-// too), and one whose copy is gone, a greyed card.
+// Three pages Claude showed in demo-chat (blimp's show tool): one blimpd keeps as the one file an earlier blimpd made
+// (the fixture the Mac's e2e shows too), one whose copy is gone, a greyed card, and one that is a folder: a page that
+// draws in 3D with the kit's three.js and reads a model and a data file beside it (the Mac's e2e shows it too).
 const VISUAL = "a1b2c3d4e5f6";
+const VISUAL_3D = "b1b2c3d4e5f6";
 mkdirSync(join(dirname(sock), "visuals"), { recursive: true });
 writeFileSync(join(dirname(sock), "visuals", `${VISUAL}.html`), readFileSync(join(import.meta.dir, "..", "..", "test", "fixtures", "visual.html")));
+cpSync(join(import.meta.dir, "..", "..", "test", "fixtures", "visual-3d"), join(dirname(sock), "visuals", VISUAL_3D), { recursive: true });
 const shown = (n: number, title: string, id: string) => [
   line({ type: "assistant", uuid: `v${n}`, message: { role: "assistant", content: [{ type: "tool_use", id: `s${n}`, name: "mcp__blimp__show", input: { path: "results.html", title } }] } }),
   line({ type: "user", uuid: `w${n}`, message: { role: "user", content: [{ type: "tool_result", tool_use_id: `s${n}`, content: [{ type: "text", text: `Shown on the phone and the Mac. visual: ${id}` }] }] } }),
@@ -100,6 +103,7 @@ await standIn("demo-chat", join(work, "blimp-demo"), echo, chatSid, [
   line({ type: "user", uuid: "u2", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "Test Suite 'All tests' passed" }] } }),
   ...shown(1, "Test results", VISUAL),
   ...shown(2, "Last week's results", "0000000000ff"),
+  ...shown(3, "The flat in 3D", VISUAL_3D),
   said("a2", "Done. The toggle is in **Settings**, under Appearance.\n\n- `SettingsView.swift`: the new toggle\n- `Theme.swift`: reads it at launch"),
 ]);
 
