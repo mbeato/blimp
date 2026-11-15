@@ -175,6 +175,7 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] A tap on a bar shows its value. Pinch zooms if the page allows it. A link in the page does nothing.
 - [ ] × goes back to the same place in the chat. The lock hides it; after Face ID it's there again.
 - [ ] Ask Claude to change the chart: a second card; the first still shows the old one.
+- [ ] Ask Claude for a 3D model of a room with a few pieces of furniture. Its card opens the scene. One finger turns it, a pinch zooms, two fingers move it; the page itself doesn't zoom or scroll under the scene. On Wi-Fi and on cellular.
 
 ## The blimp
 

@@ -384,34 +384,53 @@ The iPhone's widgets (home screen and lock screen; design in `docs/superpowers/s
 
 ### Visuals
 
-A session can show you a page it wrote, a chart, a diagram or a small report, on the phone and the Mac (design in
-`docs/superpowers/specs/2026-10-26-visuals-design.md`).
+A session can show you a page it wrote, a chart, a diagram, a small report or a 3D scene, on the phone and the Mac
+(design in `docs/superpowers/specs/2026-10-26-visuals-design.md` and `2026-11-15-visuals-3d-design.md`).
 
 - **The show tool** (`src/visuals/mcp.ts`): `blimpd visuals-mcp`, blimp's own MCP server over stdio, which every
   session blimp starts gets (see Server browser, Sessions). One tool, `show { path, title }`; Claude Code calls it
   `mcp__blimp__show`. Its description is Claude's instructions for a page. A call is `POST /visuals` on blimpd's
   socket with the Mac's token, for its session (`ZMX_SESSION`); the result is `Shown on the phone and the Mac.
   visual: <id>`, or `Not shown: <reason>` as the tool's error.
-- **`POST /visuals { session, path, title }`** → 201 `{ id }` (`src/visuals/store.ts`): a copy of the page as it is
-  now, `<socket dir>/visuals/<id>.html` with `<id>.json` (`{ id, title, session, dir, source, at }`), 600. `path` is
-  absolute or relative to the session's folder, under home and never one of blimp's own files (`guardFile`); at most
-  2 MB of UTF-8; a title of 1 to 80 characters. 404 for no such file or session, 413 over 2 MB, 400 otherwise.
-  Copies over 30 days old are deleted when blimpd starts and once a day. Then it publishes
+- **`POST /visuals { session, path, title }`** → 201 `{ id }` (`src/visuals/store.ts`): a copy as it is now, the
+  folder `<socket dir>/visuals/<id>/` (700, its files 600) with `<id>.json` (`{ id, title, session, dir, source,
+  at }`, 600) beside it. `path` is a page, copied as the folder's `index.html`, or a folder with its page as
+  `index.html`, copied whole (names that start with a dot are left out). It is absolute or relative to the session's
+  folder, under home and never one of blimp's own files (`guardFile`, for every file). The page: at most 2 MB of
+  UTF-8. A folder: at most 100 MB and 500 files, no links, and no `kit` of its own at the top. A title of 1 to 80
+  characters. 404 for no such file or session, 413 over a size, 400 otherwise. Copies over 30 days old are deleted
+  when blimpd starts and once a day; over 2 GB in all, the oldest go first, then and after each show (never the one
+  just made). A copy an earlier blimpd made is `<id>.html`, and is still read. Then it publishes
   `{ "type": "visual", id, title, session, dir, source, at }` on the events socket.
-- **The visual key** reads `GET /visuals/<key>/<id>` (the copy) and `GET /visuals/<key>/kit/<file>` (the kit) and
-  nothing else; it is in the path, not a header, so the page's relative `kit/` paths carry it, and a wrong one is a
-  401. It is HMAC-SHA256 of a token with the text `blimp visuals`, hex: the Mac's and the phone's each have one, from
+- **The visual key** reads `GET /visuals/<key>/<id>/` (the page; without the `/` too, for an app from before a
+  visual could be a folder), `GET /visuals/<key>/<id>/<path>` (a file of the copy; 404 for a path that leaves it) and
+  `GET /visuals/<key>/kit/<file>` (the kit), and nothing else. `GET /visuals/<key>/<id>/kit/<file>`, where a page's
+  relative `kit/` paths land, is a 307 to the kit, so every visual shares one cached kit. The key is in the path, not
+  a header, so the page's relative paths carry it, and a wrong one is a 401. It is HMAC-SHA256 of a token with the text `blimp visuals`, hex: the Mac's and the phone's each have one, from
   `GET /visuals/key` → `{ key }`, which each app asks for every time a page opens. A new phone token (`blimpd pair
   --revoke`, `blimpd pair`) changes the phone's.
-- **The page's headers** (`src/visuals/http.ts`): `Content-Security-Policy: default-src 'none'; script-src 'self'
-  'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none';
-  frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts`, nosniff,
-  `Referrer-Policy: no-referrer`, cached 30 days (a copy never changes). The kit's files: an hour, gzipped when asked.
+- **The page's headers** (`src/visuals/http.ts`): `Content-Security-Policy: default-src 'none'; script-src
+  'unsafe-inline' <own> <kit>; style-src 'self' 'unsafe-inline'; img-src data: blob: <own>; font-src data:;
+  connect-src <own> blob:; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox
+  allow-scripts`, nosniff, `Referrer-Policy: no-referrer`, cached 30 days (a copy never changes). `<own>` is the
+  page's own folder, `http://<host>/visuals/<key>/<id>/` and the same with `https://`, and `<kit>` is
+  `/visuals/<key>/kit/` written the same way, with `<host>` from the request's `Host` header: WebKit matches no source
+  without a scheme under `sandbox`, and blimpd can't tell whether a proxy added TLS. So a page reads its own files
+  and runs the kit's scripts and its own, and reaches no other visual, no other route and no website. (`blob:` is how
+  three.js reads the textures inside a model.) A `Host` that isn't a plain host and port names nothing: the policy is
+  then `script-src 'self' 'unsafe-inline'`, `img-src data: blob:` and `connect-src 'none'`, as before folders. A
+  copy's files get the same policy, so an HTML file beside the page gets no more than the page. The kit's files: an
+  hour, gzipped when asked. The kit's files, the redirect to them and a copy's files are sent with
+  `Access-Control-Allow-Origin: *`: the page's origin is `null` (from `sandbox`), so its modules and requests are
+  cross-origin, and the address holds the visual key, so only what already has the key can ask.
 - **The kit** (`src/visuals/kit/`, built into the binary): `blimp.css` (blimp's colours for light and dark, the
   system font, `.grid`, `.card`, `.stats`/`.stat`, `.chart`, `.scroll`, tables, `.tag`), `blimp.js` (Chart.js's and
   Mermaid's look from it; it draws `<pre class="mermaid">` diagrams, draws both again when the scheme changes, and
   stops a tap on a link),
-  Chart.js 4.5.1 and Mermaid 12.1.0, vendored (`kit/LICENSES.md`; `test/visuals-kit.test.ts` checks their sums).
+  Chart.js 4.5.1 and Mermaid 12.1.0, and three.js 0.187.0 as the ES modules it ships as (`three/three.module.js`,
+  `three/three.core.js`, and under `three/addons/` OrbitControls, GLTFLoader with the two utils it imports,
+  RoomEnvironment and RoundedBoxGeometry; a page maps `three` and `three/addons/` to them with an import map, as
+  three.js's own examples do). All vendored (`kit/LICENSES.md`; `test/visuals-kit.test.ts` checks their sums).
 - **In the chat** (`src/chat.ts`): a `mcp__blimp__show` call is a tool step (`Showing <title>`) until its result
   names the copy; then, under the same id, `{ role: "visual", title, visual: <id>, summary: "Showed <title>",
   gone? }`, `gone` when the copy is no longer kept. Older phone apps read the role as a tool step and hide it.

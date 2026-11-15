@@ -175,6 +175,7 @@ Each item says what to do, and what should happen. If the result is different, w
 - [ ] The chart and any diagram are drawn, in light and dark (System Settings > Appearance while it's open: it redraws). A narrow window and a wide one both lay it out.
 - [ ] Ask for a change: the same tab shows the new copy. A visual from a session in another project doesn't open here.
 - [ ] While you type in a file, a new visual's tab is added without taking the editor's place.
+- [ ] Ask Claude for a 3D model of a room with a few pieces of furniture. It draws. Drag turns it, the wheel zooms, a right drag moves it. A narrow window and a wide one both fill with it.
 
 ## Links
 
