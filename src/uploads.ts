@@ -4,7 +4,7 @@
 // attaches a picture it is given the path of. Kept 30 days.
 
 import { lstatSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { guardFile, HttpError, realHome, upload } from "./files";
 
 export const KEEP_MS = 30 * 24 * 3600 * 1000;
@@ -48,9 +48,11 @@ export async function saveUpload(name: string | null, body: ReadableStream<Uint8
   }
 }
 
-// A file in the uploads folder itself: what a message's `files` may name, and what the chat shows as a picture.
+// A file in the uploads folder itself, under a plain name: what a message's `files` may name. Its path is typed into
+// the session as it is, so a name with anything else in it (a space, an Esc, a newline: a file put there another
+// way) is refused.
 export function isUpload(path: unknown): path is string {
-  if (typeof path !== "string" || dirname(path) !== uploadsDir()) return false;
+  if (typeof path !== "string" || dirname(path) !== uploadsDir() || !/^[A-Za-z0-9._-]+$/.test(basename(path))) return false;
   try {
     return lstatSync(path).isFile();
   } catch {

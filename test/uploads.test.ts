@@ -43,6 +43,16 @@ test("only a file in the uploads folder itself is one", () => {
   expect(isUpload(`${uploadsDir()}/../uploads/${mine}.png`)).toBe(false);
   expect(isUpload(`${mine}.png`)).toBe(false);
   expect(isUpload("/etc/hostname")).toBe(false);
+  // A name that isn't one plain word would be typed into the session as it is: an Esc or a newline in it would
+  // be keys. Such a file can only have been put there another way.
+  for (const odd of [`${mine} x.png`, `${mine}\x1b[201~.png`, `${mine}\n.png`, `${mine};x.png`]) {
+    writeFileSync(join(uploadsDir(), odd), "x");
+    try {
+      expect(isUpload(join(uploadsDir(), odd))).toBe(false);
+    } finally {
+      rmSync(join(uploadsDir(), odd), { force: true });
+    }
+  }
   for (const bad of [undefined, null, 3, {}, [real]]) expect(isUpload(bad)).toBe(false);
 });
 
