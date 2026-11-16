@@ -8,6 +8,7 @@ export const OUT_ERRORS = ["rate_limit", "billing_error"]; // StopFailure errors
 export const OUT_MS = 5 * 3600_000; // how long an account that ran out is skipped
 export const QUIET_MS = 30_000; // a limit stop this soon after a switch left before it: no second switch
 export const FILE_AFTER_MS = 120_000; // a change to the live file is filed this long after it's seen
+export const SETTLE_MS = 10_000; // a /login writes the login file a moment before the account record: no filing or switch on a change this new
 
 export const isOut = (s: State, id: string, now: number) => (s.out[id]?.until ?? 0) > now;
 

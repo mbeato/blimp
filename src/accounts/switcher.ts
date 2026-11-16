@@ -12,8 +12,8 @@ import { apnsFor } from "../push/watch";
 import { readCreds, readDevices } from "../push/store";
 import { blimpDir, claudeDir, isSafeName, listSessionsLite, type Session, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
 import { typeInto } from "../typing";
-import { FILE_AFTER_MS, filing, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS } from "./rules";
-import { accountsDir, accountsOn, listSaved, liveFile, liveMtime, putLive, type Rec, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
+import { FILE_AFTER_MS, filing, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, SETTLE_MS } from "./rules";
+import { accountsDir, accountsOn, hasLogin, listSaved, liveFile, liveMtime, putLive, type Rec, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
 
 export type Stop = { session: string; at: number; error: string; details?: string; message?: string };
 export type SwitcherDeps = {
@@ -30,6 +30,7 @@ export type SwitcherDeps = {
 };
 
 export const CONTINUE_AFTER_MS = 3000; // a session that just stopped gets a moment before "continue"
+const ERROR_AGAIN_MS = 600_000; // the same error is logged again after this long, so one that comes back leaves a line
 
 const plural = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
 
@@ -42,7 +43,8 @@ export class Switcher {
   private asked = new Map<string, number>();
   private continued = new Map<string, number>();
   private toldOutFor?: number; // switchedAt when "every account is out" was last told
-  private lastError?: string;
+  private lastError?: { text: string; at: number };
+  private looked = false; // whether a tick has checked the live login for a lost swap yet
   private busy = false;
 
   constructor(
@@ -60,7 +62,12 @@ export class Switcher {
       const now = this.deps.now();
       const state = readState(this.deps.dir);
 
+      // A swap whose state write was lost is unmistakable, so it's adopted at once: a renewal in the
+      // next two minutes would hide it. On the first tick whatever the mtime (a crash can come between
+      // the swap and its state write); after that on any change not yet filed.
       const m = liveMtime(this.deps.live);
+      if (m !== undefined && (!this.looked || m !== state.filed?.mtime)) this.adopt(state, m);
+      this.looked = true;
       if (m === undefined || m === state.filed?.mtime) this.seen = undefined;
       else if (now - (this.seen ??= now) >= FILE_AFTER_MS) this.file(state);
 
@@ -75,7 +82,10 @@ export class Switcher {
       // started is a stale status file: neither asks for a switch. The live file is filed first, so the
       // copy put back later has the newest refresh token; a login filed then moves switchedAt to the
       // login, so the stops are asked again after it (a request that left on the old account is quiet).
-      const asks = (s: Stop) => this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started;
+      // A change seconds old and not yet filed may be a /login whose account record hasn't landed:
+      // filed now it would pass for a renewal. Nothing switches this tick; the stops ask again next tick.
+      const settling = m !== undefined && m !== state.filed?.mtime && now - m < SETTLE_MS;
+      const asks = (s: Stop) => !settling && this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started;
       if (out.some(asks)) this.file(state);
       const asking = out.filter(asks);
       let switched: { from: string; to: string } | undefined;
@@ -108,15 +118,20 @@ export class Switcher {
       const due = out.filter((s) => this.continued.get(s.session) !== s.at && (switched || (sw !== undefined && sw < s.at && s.at <= sw + QUIET_MS)));
       let done = 0;
       let left = 0;
+      let unread = false;
       if (due.length) {
         await this.deps.wait(CONTINUE_AFTER_MS);
         // Only into a session still stopped on that same limit: one that moved on during the wait is
-        // dropped, counted neither way. A list that can't be read types into nobody.
-        const still = await this.deps.stops().catch((e) => {
-          this.error(e);
-          return [] as Stop[];
-        });
+        // dropped, counted neither way. A list that can't be read is tried three more times, a second
+        // apart; still unread, nobody is typed into and the notification says why.
+        let still: Stop[] | undefined;
+        for (let i = 0; i < 4 && !still; i++) {
+          if (i) await this.deps.wait(1000);
+          still = await this.deps.stops().catch((e) => void this.error(e));
+        }
+        unread = !still;
         for (const s of due) {
+          if (!still) break;
           if (!still.some((x) => x.session === s.session && x.at === s.at && OUT_ERRORS.includes(x.error))) continue;
           this.continued.set(s.session, s.at); // tried once, whatever happens
           try {
@@ -133,7 +148,11 @@ export class Switcher {
       }
 
       if (switched) {
-        const body = done || left ? `${plural(done)} continued.${left ? ` ${left} left as they were.` : ""}` : "No session was waiting on it.";
+        const body = unread
+          ? "blimp could not read the sessions, so none was continued."
+          : done || left
+            ? `${plural(done)} continued.${left ? ` ${left} left as they were.` : ""}`
+            : "No session was waiting on it.";
         await this.deps.tell(`Now on ${switched.to}`, `${switched.from} ran out. ${body}`);
       }
     } catch (e) {
@@ -144,12 +163,14 @@ export class Switcher {
   }
 
   // A step that keeps failing would write the same line every second: an error is logged only when it
-  // differs from the last one logged.
+  // differs from the last one logged, or that was 10 minutes ago. A store write's temp file has a new
+  // random name each time, so the name is taken out first.
   private error(e: unknown) {
-    const error = (e as Error).message;
-    if (error === this.lastError) return;
-    this.lastError = error;
-    this.deps.log({ event: "error", error });
+    const text = String((e as Error)?.message ?? e).replace(/\.tmp-[0-9a-f]+/g, ".tmp");
+    const now = this.deps.now();
+    if (text === this.lastError?.text && now - this.lastError.at < ERROR_AGAIN_MS) return;
+    this.lastError = { text, at: now };
+    this.deps.log({ event: "error", error: text });
   }
 
   // By hand (`blimpd account use`): file, swap, tell. Nothing is marked out and nobody gets "continue".
@@ -176,34 +197,19 @@ export class Switcher {
     const mtime = liveMtime(this.deps.live);
     if (mtime === undefined || mtime === s.filed?.mtime) return;
     this.seen = undefined;
+    if (this.adopt(s, mtime)) return;
     const rec = this.deps.record();
     const who = filing(s, rec);
     const text = readFileSync(this.deps.live, "utf8");
-    // Exactly another saved account's login: a swap whose state write was lost (a throw, a crash, or
-    // `account use` in another process). That account is in use, from the swap's time; saving would put
-    // its login over this one's.
-    const owner = savedWith(text, this.deps.dir);
-    if (owner && owner !== who?.id) {
-      s.active = owner;
-      s.switchedAt = mtime;
-      s.filed = { mtime, record: s.filed?.record ?? "" };
-      writeState(s, this.deps.dir);
-      this.deps.log({ event: "adopted", account: owner });
-      return;
-    }
     // Nobody to file it under, or no login in it (after /logout, say): noted as filed, so it isn't tried
-    // again every second.
-    const unfiled = () => {
+    // again every second. Any other failure to save is thrown, and tried again next tick.
+    if (!who || !hasLogin(text)) {
       s.filed = { mtime, record: s.filed?.record ?? "" };
       writeState(s, this.deps.dir);
       this.deps.log({ event: "unfiled" });
-    };
-    if (!who) return unfiled();
-    try {
-      saveLogin(who.id, text, who.login ? rec!.account : undefined, this.deps.dir);
-    } catch {
-      return unfiled();
+      return;
     }
+    saveLogin(who.id, text, who.login ? rec!.account : undefined, this.deps.dir);
     if (!s.order.includes(who.id)) s.order.push(who.id);
     s.active = who.id;
     s.filed = { mtime, record: rec?.raw ?? s.filed?.record ?? "" };
@@ -212,6 +218,20 @@ export class Switcher {
     if (who.login) s.switchedAt = mtime;
     writeState(s, this.deps.dir);
     this.deps.log({ event: who.login ? "login" : "renewal", account: who.id });
+  }
+
+  // The live login is exactly another saved account's than the active one: a swap whose state write
+  // was lost (a throw, a crash, or `account use` in another process). That account is in use, from
+  // the swap's time; filing would put its login over the active one's.
+  private adopt(s: State, mtime: number): boolean {
+    const owner = savedWith(readFileSync(this.deps.live, "utf8"), this.deps.dir);
+    if (!owner || owner === s.active) return false;
+    s.active = owner;
+    s.switchedAt = mtime;
+    s.filed = { mtime, record: s.filed?.record ?? "" };
+    writeState(s, this.deps.dir);
+    this.deps.log({ event: "adopted", account: owner });
+    return true;
   }
 }
 

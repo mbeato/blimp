@@ -136,6 +136,16 @@ export function listSaved(dir = accountsDir(), state = readState(dir)): Saved[] 
   return list;
 }
 
+// Whether a credentials file's text holds an account login (claudeAiOauth): one without can't be saved.
+export function hasLogin(credentials: string): boolean {
+  try {
+    loginIn(credentials);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Which saved account's login a credentials file's text holds (its claudeAiOauth, compared as JSON). Only
 // an id comes back, never any of the login. Undefined: none, or no login in the text.
 export function savedWith(credentials: string, dir = accountsDir()): string | undefined {

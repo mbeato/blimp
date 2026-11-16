@@ -2,7 +2,7 @@
 // settable clock, and fakes for the sessions, the typist and the phone. Tokens are made up.
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FILE_AFTER_MS, OUT_MS, QUIET_MS } from "../src/accounts/rules";
@@ -350,11 +350,10 @@ test("menuOn: a cursor on a numbered row or a confirm footer is a menu; Claude's
   expect(menuOn([limitMenu, ...Array(40).fill("⏺ later output"), prompt].join("\n"))).toBe(false);
 });
 
-test("a swap whose state write was lost is adopted, not filed over the old account", async () => {
+test("a swap whose state write was lost is adopted on the next tick, not filed over the old account", async () => {
   const { t, sw } = setup();
-  swapped(t.live, t.dir, "id-b");
   await sw.tick();
-  t.clock = T + FILE_AFTER_MS;
+  swapped(t.live, t.dir, "id-b");
   await sw.tick();
   expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
   const s = readState(t.dir);
@@ -386,6 +385,7 @@ test("a live file with no login in it is noted as unfiled once, and nothing thro
   expect(t.logs.filter((e) => e.event === "unfiled").length).toBe(1);
   expect(t.logs.filter((e) => e.event === "error")).toEqual([]);
   expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(readState(t.dir).filed?.mtime).toBe(liveMtime(t.live)!);
 });
 
 test("a session that leaves the stop list during the wait, or stops again, isn't typed into", async () => {
@@ -459,4 +459,107 @@ test("an error that keeps coming back is logged once, a different one again", as
     { event: "error", error: "zmx went away" },
     { event: "error", error: "something else" },
   ]);
+});
+
+test("a fresh switcher adopts on its first tick a live login that is another account's, even with the mtime filed", async () => {
+  const { t, deps } = setup();
+  const mtime = swapped(t.live, t.dir, "id-b");
+  writeState({ ...readState(t.dir), filed: { mtime, record: rec("id-a", "a@x.com").raw } }, t.dir);
+  await new Switcher(deps, 0).tick();
+  expect(readState(t.dir).active).toBe("id-b");
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(t.logs).toContainEqual({ event: "adopted", account: "id-b" });
+});
+
+test("a save that fails for another reason is retried, and nothing switches until it works", async () => {
+  const { t, sw } = setup();
+  rewrite(t.live, creds("tok-A2"));
+  const before = readState(t.dir).filed;
+  renameSync(join(t.dir, "id-a"), join(t.dir, "id-a.away"));
+  writeFileSync(join(t.dir, "id-a"), "not a folder");
+  t.stops = [limit("s1", T)];
+  await sw.tick();
+  await sw.tick();
+  expect(readState(t.dir).filed).toEqual(before);
+  expect(readState(t.dir).active).toBe("id-a");
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-A2"));
+  expect(t.logs.some((e) => e.event === "unfiled")).toBe(false);
+  expect(t.logs.filter((e) => e.event === "error").length).toBe(1);
+
+  rmSync(join(t.dir, "id-a"));
+  renameSync(join(t.dir, "id-a.away"), join(t.dir, "id-a"));
+  t.clock = T + 1000;
+  await sw.tick();
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A2"));
+  expect(readState(t.dir).active).toBe("id-b");
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B"));
+});
+
+test("a login seconds old isn't filed or switched on; once its record lands it is filed under its account", async () => {
+  const { t, sw } = setup();
+  writeFileSync(t.live, creds("tok-C"));
+  utimesSync(t.live, (T - 1000) / 1000, (T - 1000) / 1000);
+  t.stops = [limit("s1", T - 500)];
+  await sw.tick();
+  expect(existsSync(join(t.dir, "id-c"))).toBe(false);
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(readState(t.dir).active).toBe("id-a");
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-C"));
+
+  t.rec = rec("id-c", "c@x.com");
+  t.clock = T + 11_000;
+  await sw.tick();
+  expect(saved(t.dir, "id-c")).toBe(creds("tok-C"));
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  const s = readState(t.dir);
+  expect(s.active).toBe("id-c");
+  expect(s.out).toEqual({});
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-C"));
+});
+
+test("a re-read of the stops that throws is tried again", async () => {
+  const { t, sw } = setup();
+  let reads = 0;
+  t.stops = async () => {
+    if (++reads === 2) throw new Error("zmx went away");
+    return [limit("s1", T)];
+  };
+  await sw.tick();
+  expect(reads).toBe(3);
+  expect(t.typed).toEqual(["s1"]);
+  expect(t.told[0].body).toBe("a@x.com ran out. 1 session continued.");
+});
+
+test("a re-read that can't be done types into nobody, and the notification says so", async () => {
+  const { t, sw } = setup();
+  let reads = 0;
+  t.stops = async () => {
+    if (++reads > 1) throw new Error("zmx went away");
+    return [limit("s1", T)];
+  };
+  await sw.tick();
+  expect(reads).toBe(5);
+  expect(t.waits).toEqual([3000, 1000, 1000, 1000]);
+  expect(t.typed).toEqual([]);
+  expect(readState(t.dir).active).toBe("id-b");
+  expect(t.told[0]).toEqual({ title: "Now on b@x.com", body: "a@x.com ran out. blimp could not read the sessions, so none was continued." });
+});
+
+test("errors that differ only in a temp file's name are logged once, and again after 10 minutes", async () => {
+  const { t, sw } = setup();
+  let n = 0;
+  t.stops = () => Promise.reject(new Error(`ENOENT: no such file or directory, open '/x/accounts/.tmp-${(++n).toString(16).padStart(12, "a")}'`));
+  for (let i = 0; i < 3; i++) await sw.tick();
+  expect(t.logs.length).toBe(1);
+  t.clock = T + 600_000;
+  await sw.tick();
+  expect(t.logs.length).toBe(2);
+  expect(t.logs[1].event).toBe("error");
+});
+
+test("a thrown value with no message is still logged", async () => {
+  const { t, sw } = setup();
+  t.stops = () => Promise.reject("zmx said no");
+  await sw.tick();
+  expect(t.logs).toEqual([{ event: "error", error: "zmx said no" }]);
 });

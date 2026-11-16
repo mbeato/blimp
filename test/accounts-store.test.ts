@@ -5,7 +5,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { forgetLogin, listSaved, putLive, readRecord, readState, savedWith, saveLogin, writeState } from "../src/accounts/store";
+import { forgetLogin, hasLogin, listSaved, putLive, readRecord, readState, savedWith, saveLogin, writeState } from "../src/accounts/store";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-accounts-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -223,5 +223,15 @@ describe("savedWith", () => {
     expect(savedWith(JSON.stringify({ mcpOAuth: {} }), dir)).toBeUndefined();
     expect(savedWith("not json", dir)).toBeUndefined();
     expect(savedWith(creds("tok-A"), join(dir, "nowhere"))).toBeUndefined();
+  });
+});
+
+describe("hasLogin", () => {
+  test("true only for a text holding an account login", () => {
+    expect(hasLogin(creds("tok-A"))).toBe(true);
+    expect(hasLogin(JSON.stringify({ mcpOAuth: {}, ...JSON.parse(creds("tok-A")) }))).toBe(true);
+    expect(hasLogin(JSON.stringify({ mcpOAuth: {} }))).toBe(false);
+    expect(hasLogin(JSON.stringify({ claudeAiOauth: "x" }))).toBe(false);
+    expect(hasLogin("not json")).toBe(false);
   });
 });
