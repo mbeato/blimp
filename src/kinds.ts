@@ -229,3 +229,10 @@ export function kindLabel(kind: string, custom: { id: string; label: string }[])
   if (kind === "claude" || kind === "shell") return;
   return SHORT[kind] ?? custom.find((k) => k.id === kind)?.label ?? kind;
 }
+
+// The label of a Claude Code session's row: its model's short name, by what the id contains. An id
+// that names none of them is shown as it is, cut so it fits the row.
+export function modelLabel(model: string): string {
+  const id = model.replace(/\[1m\]$/i, "");
+  return ["Fable", "Opus", "Sonnet", "Haiku"].find((n) => id.toLowerCase().includes(n.toLowerCase())) ?? id.slice(0, 24);
+}

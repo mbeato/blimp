@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { browserMcpConfigPath, mcpConfig, mcpConfigPath } from "../src/browser/mcp";
-import { installed, kindLabel, launchFor, listKinds, readKindsFile } from "../src/kinds";
+import { installed, kindLabel, launchFor, listKinds, modelLabel, readKindsFile } from "../src/kinds";
 
 // A temp home with nothing in it: no Z.ai key, no ~/.codex, no kinds.json.
 const home = mkdtempSync(join(tmpdir(), "blimp-kinds-"));
@@ -38,6 +38,15 @@ test("labels for session rows: none for Claude Code and a shell; a custom kind's
   expect(kindLabel("aider", custom)).toBe("Aider");
   expect(kindLabel("gone-from-the-file", custom)).toBe("gone-from-the-file");
   rmSync(file);
+});
+
+test("a Claude Code row's label is its model's short name; an unknown id as it is, cut to 24 characters", () => {
+  expect(["claude-fable-6", "claude-opus-5-5", "claude-sonnet-4-5-20250929", "claude-haiku-4-5"].map(modelLabel)).toEqual(["Fable", "Opus", "Sonnet", "Haiku"]);
+  expect(modelLabel("Claude-OPUS-5-5")).toBe("Opus");
+  expect(modelLabel("claude-sonnet-4-5[1m]")).toBe("Sonnet");
+  expect(modelLabel("gpt-9[1m]")).toBe("gpt-9");
+  expect(modelLabel("gpt-9")).toBe("gpt-9");
+  expect(modelLabel("some-model-nobody-has-heard-of-yet-12345")).toBe("some-model-nobody-has-he");
 });
 
 test("a custom kind whose command the login shell doesn't find is greyed, saying so", () => {

@@ -3,7 +3,7 @@
 //   jobs     background work Claude started: Bash commands run (or moved) in the background, Monitors,
 //            async agents and workflows. Each ends with a <task-notification>, or a TaskStop, or with
 //            the Claude process that started it.
-//   context  how full Claude's context window is: the latest reply's input tokens.
+//   context  how full Claude's context window is: the latest reply's input tokens. And that reply's model.
 //   git      the folder of the latest line (it follows a `cd` into a worktree), and the branch checked
 //            out there, read from git's own files: a line's gitBranch is the start folder's branch.
 //   runnable the commands in Claude's latest reply (since your last prompt), for the Run button (runnable.ts),
@@ -404,7 +404,7 @@ function readBranch(cwd: string): string | undefined {
 // What the session list shows of a transcript (sessions.ts): only what there is. processStart: when the
 // Claude process now on it started (ms). Background work dies with the process that started it, and a
 // process that exits writes nothing to say so, so what still runs from before a resume has stopped.
-export function sessionActivity(file: string, kind: string, now = Date.now(), processStart?: number): { jobs?: Job[]; context?: { used: number; limit: number }; git?: Git; runnable?: string[]; runnableAt?: number } {
+export function sessionActivity(file: string, kind: string, now = Date.now(), processStart?: number): { jobs?: Job[]; context?: { used: number; limit: number }; model?: string; git?: Git; runnable?: string[]; runnableAt?: number } {
   const a = transcriptActivity(file);
   if (!a) return {};
   if (processStart) for (const j of a.jobs.values()) if (j.status === "running" && j.startedAt < processStart) Object.assign(j, { status: "stopped", endedAt: processStart });
@@ -414,6 +414,7 @@ export function sessionActivity(file: string, kind: string, now = Date.now(), pr
   return {
     ...(jobs.length && { jobs }),
     ...(a.context && { context: { used: a.context.used, limit: contextLimit(a.context.model, kind) } }),
+    ...(a.context?.model && { model: a.context.model }),
     ...(a.cwd && { git: { cwd: a.cwd, ...(branch && { branch }) } }),
     ...(runnable.length && { runnable, runnableAt: a.replyAt ?? 0 }),
   };

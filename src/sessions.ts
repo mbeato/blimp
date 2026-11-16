@@ -25,7 +25,7 @@ import { type Git, type Job, sessionActivity } from "./activity";
 import { ASSISTANT } from "./assistant";
 import { type Handoffs, type HandoffView, handoffLinks, readHandoffs } from "./handoff";
 import { type Jobs, readJobs } from "./jobs";
-import { CLAUDE_KINDS, kindLabel, readKindsFile, type Launch } from "./kinds";
+import { CLAUDE_KINDS, kindLabel, modelLabel, readKindsFile, type Launch } from "./kinds";
 import { type Names, shownNames } from "./names";
 import { type Notes, type ShownNote, shownNote, shownNotes } from "./notes";
 import { type Prompt, trustPrompt, withScreenOptions } from "./prompt";
@@ -39,7 +39,7 @@ export type Session = ZmxSession & {
   // The kind it was started with (kinds.ts). Sessions from before kinds, or from outside blimp:
   // "claude" if Claude runs in it, else "shell".
   kind: string;
-  label?: string; // the small label for kinds other than Claude Code and a shell: GLM, Codex…
+  label?: string; // the small label: Claude Code's model (Opus…), or the kind's for others but a shell: GLM, Codex…
   sessionId?: string;
   transcript?: string; // its conversation's file, for another session to read
   title: string;
@@ -52,9 +52,10 @@ export type Session = ZmxSession & {
   unread: boolean; // Claude replied since either app last had it on screen (seen.ts)
   note?: ShownNote; // Haiku's note on its last turn (notes.ts)
   // From its transcript (activity.ts), only when there is some: background work Claude started, how
-  // full its context window is (tokens), and the folder and branch it's working in.
+  // full its context window is (tokens), the model of its latest reply, and the folder and branch it's working in.
   jobs?: Job[];
   context?: { used: number; limit: number };
+  model?: string;
   git?: Git;
   // One-click handoff (handoff.ts): on the session that handed off, its state, the new session and the
   // file; on that new session, the zmx name of the one it came from.
@@ -343,10 +344,12 @@ export function listSessions(
     const prompt = trust ? { ...trust, at: z.created * 1000 } : asked && { ...asked, at: hook.at as number };
     // A run is listed with its Claude session's folder (it may run in a worktree of it), titled by its command.
     const run = kind === "run" && isSafeName(z.name) ? readRun(z.name) : undefined;
+    const act = file && activity ? sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined) : undefined;
     return {
       ...z,
       kind,
-      label: kindLabel(kind, custom),
+      // Claude Code's row shows its model once it has replied; other kinds keep their kind's label.
+      label: kind === "claude" && act?.model ? modelLabel(act.model) : kindLabel(kind, custom),
       dir: realDir(info.cwd || z.dir || "/"),
       sessionId: info.sessionId,
       ...(file && { transcript: file }),
@@ -358,7 +361,7 @@ export function listSessions(
       ...(prompt && { prompt }),
       unread: isUnread(seen, info.sessionId, scan?.replied),
       ...(info.sessionId && notes[info.sessionId] && { note: shownNote(notes[info.sessionId]) }),
-      ...(file && activity && sessionActivity(file, kind, Date.now(), typeof info.startedAt === "number" ? info.startedAt : undefined)),
+      ...act,
       ...handoffLinks(handoffs, z.name, z.created),
       ...(z.name === ASSISTANT && { assistant: true as const }),
       ...(jobs[z.name] && { job: { reason: jobs[z.name].reason, at: jobs[z.name].at } }),

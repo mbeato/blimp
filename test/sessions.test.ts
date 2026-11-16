@@ -152,6 +152,10 @@ test("listSessions joins zmx with Claude's session file, transcript and blimp's 
     { name: "web-1", pid: 42, clients: 1, created: 5, kind: "claude", dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", transcript: join(home, "projects", "-home-u-web", "s1.jsonl"), title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123, unread: false },
     { name: "sh-2", pid: 43, clients: 0, created: 6, kind: "shell", dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000, unread: false },
   ]);
+  // No reply yet: no model, so no label.
+  const [fresh] = listSessions(home, zmxOut, join(home, "status"), undefined, {}, { since: 0, seen: {} });
+  expect(fresh).not.toHaveProperty("model");
+  expect(fresh.label).toBeUndefined();
   // Claude's reply after what was seen: unread
   writeFileSync(join(home, "projects", "-home-u-web", "s1.jsonl"),
     JSON.stringify({ type: "assistant", timestamp: new Date(9000).toISOString(), message: { content: [{ type: "text", text: "done" }] } }) + "\n");
@@ -182,15 +186,20 @@ test("listSessions adds a Claude session's background jobs, context and git fold
   expect(s.git).toEqual({ cwd: "/Users/u/blimp" }); // no such folder here, so no branch
   expect(t).not.toHaveProperty("jobs");
   expect(t.context).toEqual({ used: 2 + 791 + 91091, limit: 1_000_000 });
+  // The latest reply's model; Claude Code's row is labelled with its short name, GLM's keeps its kind's.
+  expect([t.model, t.label]).toEqual(["claude-opus-5-5", "Opus"]);
+  expect([s.model, s.label]).toEqual(["GLM-5.3", "GLM"]);
   // `blimpd sessions` without --json shows none of it, so it doesn't read it.
-  const bare = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} }, {}, false)[0];
-  for (const k of ["jobs", "context", "git"]) expect(bare).not.toHaveProperty(k);
+  const bare = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} }, {}, false);
+  for (const k of ["jobs", "context", "git", "model"]) expect(bare[0]).not.toHaveProperty(k);
+  expect(bare[1].label).toBeUndefined();
   // Nor the background loops and lookups (names, notes, digests, typing), which use none of it: so they
   // run no git or gh with no app connected.
   const { listSessionsLite } = await import("../src/sessions");
-  const lite = listSessionsLite(home, zmxOut)[0];
-  for (const k of ["jobs", "context", "git", "work", "runnable"]) expect(lite).not.toHaveProperty(k);
-  expect(lite).toMatchObject({ name: "web-1", sessionId: "s1", kind: "claude" });
+  const lite = listSessionsLite(home, zmxOut);
+  for (const k of ["jobs", "context", "git", "work", "runnable", "model"]) expect(lite[0]).not.toHaveProperty(k);
+  expect(lite[0]).toMatchObject({ name: "web-1", sessionId: "s1", kind: "claude" });
+  expect(lite.map((x) => x.label)).toEqual([undefined, undefined]);
   // Claude started again on this transcript (a resume): the job didn't survive the old process.
   writeFileSync(join(home, "sessions", "42.json"), JSON.stringify({ sessionId: "s1", cwd: "/home/u/web", status: "busy", startedAt: Date.now() - 1000 }));
   const [r] = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} });
