@@ -3,7 +3,8 @@
 // credentials.json (the live login file as it was) and account.json (the oauthAccount object), and
 // state.json beside them. Every file is 600 and written through a temp file and a rename, so never
 // half written. The live login file is put in place the same way: it stays a regular file, never a
-// symlink, because Claude Code opens it with O_NOFOLLOW. A login is a secret: nothing here logs one,
+// symlink, because Claude Code opens it with O_NOFOLLOW. That file also keeps other sign-ins (MCP
+// servers' under mcpOAuth), so only its claudeAiOauth key is saved and only that key is swapped. A login is a secret: nothing here logs one,
 // and no error message carries one. .claude.json is only read, never written.
 
 import { randomBytes } from "node:crypto";
@@ -77,12 +78,23 @@ export function writeState(s: State, dir = accountsDir()) {
   write(join(dir, "state.json"), JSON.stringify(s));
 }
 
-// credentials is the live file's text as it was; account, when given, replaces account.json.
+// The account's login in a credentials file's text. Throws, with nothing from the text, when there is none.
+function loginIn(text: string): object {
+  let login: unknown;
+  try {
+    login = JSON.parse(text)?.claudeAiOauth;
+  } catch {}
+  if (!login || typeof login !== "object") throw new Error("the credentials file has no account login (claudeAiOauth)");
+  return login;
+}
+
+// credentials is the live file's text; only its claudeAiOauth is kept. account, when given, replaces account.json.
 export function saveLogin(id: string, credentials: string, account: unknown | undefined, dir = accountsDir()) {
   checkId(id);
+  const claudeAiOauth = loginIn(credentials);
   privateDir(dir);
   privateDir(join(dir, id));
-  write(join(dir, id, "credentials.json"), credentials);
+  write(join(dir, id, "credentials.json"), JSON.stringify({ claudeAiOauth }));
   if (account !== undefined) write(join(dir, id, "account.json"), JSON.stringify(account));
 }
 
@@ -119,11 +131,20 @@ export function listSaved(dir = accountsDir(), state = readState(dir)): Saved[] 
   return list;
 }
 
-// Puts a saved login in place of the live one. Returns the live file's new mtimeMs, so the change
-// can be told apart from one blimpd didn't make. Throws, with the live file untouched, if it isn't saved.
+// Puts a saved login in place of the live one: only claudeAiOauth changes, every other key stays. A live
+// file that is missing or isn't a JSON object becomes the saved login alone. Returns the live file's new
+// mtimeMs, so the change can be told apart from one blimpd didn't make. Throws, with the live file
+// untouched, if it isn't saved.
 export function putLive(id: string, live = liveFile(), dir = accountsDir()): number {
   checkId(id);
-  write(live, readFileSync(join(dir, id, "credentials.json"), "utf8"));
+  const claudeAiOauth = loginIn(readFileSync(join(dir, id, "credentials.json"), "utf8"));
+  let file: Record<string, unknown> = {};
+  try {
+    const j = JSON.parse(readFileSync(live, "utf8"));
+    if (j && typeof j === "object" && !Array.isArray(j)) file = j;
+  } catch {}
+  file.claudeAiOauth = claudeAiOauth;
+  write(live, JSON.stringify(file));
   return statSync(live).mtimeMs;
 }
 

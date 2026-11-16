@@ -2,7 +2,7 @@
 // rename, state.json and the oauthAccount record. Everything happens in temp folders with made-up tokens.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { forgetLogin, listSaved, putLive, readRecord, readState, saveLogin, writeState } from "../src/accounts/store";
@@ -39,9 +39,41 @@ describe("saveLogin", () => {
   test("folders that were opened up are made 700 again", () => {
     const dir = fresh();
     mkdirSync(join(dir, "id-a"), { recursive: true, mode: 0o755 });
+    chmodSync(dir, 0o755);
+    chmodSync(join(dir, "id-a"), 0o755);
     saveLogin("id-a", creds("tok-A"), undefined, dir);
     expect(mode(dir)).toBe(0o700);
     expect(mode(join(dir, "id-a"))).toBe(0o700);
+  });
+
+  test("only the account's login is kept, not the other sign-ins in the same file", () => {
+    const dir = fresh();
+    const text = JSON.stringify({ ...JSON.parse(creds("tok-A")), mcpOAuth: { slack: { accessToken: "tok-M" } } });
+    saveLogin("id-a", text, undefined, dir);
+    const saved = readFileSync(join(dir, "id-a", "credentials.json"), "utf8");
+    expect(saved).toBe(creds("tok-A"));
+    expect(saved).not.toContain("tok-M");
+  });
+
+  test("a text that isn't JSON or has no account login is refused, saying nothing of it and writing nothing", () => {
+    const dir = fresh();
+    saveLogin("id-a", creds("tok-A"), acct("id-a", "a@x.com"), dir);
+    for (const bad of ["not json tok-Z", "{}", JSON.stringify({ claudeAiOauth: "tok-Z" })])
+      for (const id of ["id-a", "id-z"]) {
+        let message = "";
+        try {
+          saveLogin(id, bad, acct(id, "z@x.com"), dir);
+        } catch (e) {
+          message = (e as Error).message;
+        }
+        expect(message).not.toBe("");
+        expect(message).not.toContain(bad);
+        expect(message).not.toContain("tok-Z");
+        expect(message).not.toContain("not json");
+      }
+    expect(readdirSync(dir)).toEqual(["id-a"]);
+    expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toBe(creds("tok-A"));
+    expect(JSON.parse(readFileSync(join(dir, "id-a", "account.json"), "utf8"))).toEqual(acct("id-a", "a@x.com"));
   });
 });
 
@@ -93,6 +125,35 @@ describe("putLive", () => {
     expect(readdirSync(top).sort()).toEqual([".credentials.json", "accounts"]);
   });
 
+  test("only the account's login in the live file is replaced; the other sign-ins and keys stay as they were", () => {
+    const top = join(root, "keep");
+    const dir = join(top, "accounts");
+    const live = join(top, ".credentials.json");
+    saveLogin("id-a", creds("tok-A"), undefined, dir);
+    const mcpOAuth = { slack: { accessToken: "tok-M", expiresAt: 5 } };
+    const other = { nested: [1, { x: "y" }] };
+    writeFileSync(live, JSON.stringify({ claudeAiOauth: JSON.parse(creds("tok-X")).claudeAiOauth, mcpOAuth, other }), { mode: 0o600 });
+    putLive("id-a", live, dir);
+    const after = JSON.parse(readFileSync(live, "utf8"));
+    expect(after.claudeAiOauth).toEqual(JSON.parse(creds("tok-A")).claudeAiOauth);
+    expect(after.mcpOAuth).toEqual(mcpOAuth);
+    expect(after.other).toEqual(other);
+    expect(Object.keys(after)).toEqual(["claudeAiOauth", "mcpOAuth", "other"]);
+    expect(mode(live)).toBe(0o600);
+    expect(lstatSync(live).isFile()).toBe(true);
+    expect(lstatSync(live).isSymbolicLink()).toBe(false);
+  });
+
+  test("a live file that isn't JSON is replaced by the saved login alone", () => {
+    const top = join(root, "badlive");
+    const dir = join(top, "accounts");
+    const live = join(top, ".credentials.json");
+    saveLogin("id-a", creds("tok-A"), undefined, dir);
+    writeFileSync(live, "not json", { mode: 0o600 });
+    putLive("id-a", live, dir);
+    expect(readFileSync(live, "utf8")).toBe(creds("tok-A"));
+  });
+
   test("an account that isn't saved is refused and the live file is left as it was", () => {
     const top = join(root, "nolive");
     const dir = join(top, "accounts");
@@ -110,12 +171,14 @@ describe("state", () => {
     const dir = fresh();
     expect(readState(dir)).toEqual({ order: [], out: {} });
     mkdirSync(dir, { recursive: true });
+    chmodSync(dir, 0o755);
     writeFileSync(join(dir, "state.json"), "not json");
     expect(readState(dir)).toEqual({ order: [], out: {} });
     const s = { active: "id-a", order: ["id-a", "id-b"], out: { "id-b": { at: 1, until: 2 } }, switchedAt: 3, filed: { mtime: 4, record: "{}" } };
     writeState(s, dir);
     expect(readState(dir)).toEqual(s);
     expect(mode(join(dir, "state.json"))).toBe(0o600);
+    expect(mode(dir)).toBe(0o700);
     expect(readdirSync(dir)).toEqual(["state.json"]);
   });
 });
