@@ -1,7 +1,7 @@
 // Saved logins (docs/superpowers/specs/2026-11-16-account-switching-design.md, "Saved accounts"):
 // <socket dir>/accounts/ (700), one folder per account named by its accountUuid, holding
-// credentials.json (the live login file as it was) and account.json (the oauthAccount object), and
-// state.json beside them. Every file is 600 and written through a temp file and a rename, so never
+// credentials.json (the live login file as it was), credentials.prev.json (the one it replaced, kept
+// once), account.json (the oauthAccount object), and state.json beside them. Every file is 600 and written through a temp file and a rename, so never
 // half written. The live login file is put in place the same way: it stays a regular file, never a
 // symlink, because Claude Code opens it with O_NOFOLLOW. That file also keeps other sign-ins (MCP
 // servers' under mcpOAuth), so only its claudeAiOauth key is saved and only that key is swapped. A login is a secret: nothing here logs one,
@@ -16,13 +16,15 @@ import { blimpDir, claudeDir } from "../sessions";
 
 export type Saved = { id: string; email: string; expires?: number }; // expires: the refresh token's, ms
 export type Out = { at: number; until: number };
-export type Filed = { mtime: number; record: string }; // the live file's mtimeMs and oauthAccount's JSON when last filed
+export type Filed = { mtime: number; at: number }; // the live file's mtimeMs when last settled, and when blimp settled it
 export type State = { active?: string; order: string[]; out: Record<string, Out>; switchedAt?: number; filed?: Filed };
-export type Rec = { id: string; email: string; raw: string; account: unknown }; // oauthAccount; raw is JSON.stringify of it
+export type Rec = { id: string; email: string; fetchedAt?: number; account: unknown }; // oauthAccount; fetchedAt is its profileFetchedAt
 
 export const accountsDir = (dir = blimpDir()) => join(dir, "accounts");
 export const liveFile = (claude = claudeDir()) => join(claude, ".credentials.json");
 export const recordFile = () => join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json");
+// Written by `blimpd hook` (hooks.ts) when Claude Code says a /login succeeded. dir is the socket dir.
+export const loginNoteFile = (dir = blimpDir()) => join(dir, "auth-success.json");
 
 // Switching is off unless <socket dir>/config.json has "accounts": true, so no copy of a login is made
 // until the user asks. dir is the socket dir.
@@ -59,7 +61,17 @@ export function readRecord(file = recordFile()): Rec | undefined {
     const account = JSON.parse(readFileSync(file, "utf8"))?.oauthAccount;
     if (typeof account?.accountUuid !== "string") return;
     const email = typeof account.emailAddress === "string" ? account.emailAddress : "";
-    return { id: account.accountUuid, email, raw: JSON.stringify(account), account };
+    const rec: Rec = { id: account.accountUuid, email, account };
+    if (typeof account.profileFetchedAt === "number") rec.fetchedAt = account.profileFetchedAt;
+    return rec;
+  } catch {}
+}
+
+// When Claude Code last said a /login succeeded (ms). Undefined: no note, or one that can't be read.
+export function readLoginNote(file = loginNoteFile()): number | undefined {
+  try {
+    const at = JSON.parse(readFileSync(file, "utf8"))?.at;
+    if (typeof at === "number") return at;
   } catch {}
 }
 
@@ -69,11 +81,16 @@ export function liveMtime(live = liveFile()): number | undefined {
   } catch {}
 }
 
-// Missing or broken: no accounts yet.
+// Missing or broken: no accounts yet. A filed entry from before `at` existed reads as settled at 0.
 export function readState(dir = accountsDir()): State {
   try {
     const j = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
-    if (j && typeof j === "object") return { ...j, order: Array.isArray(j.order) ? j.order : [], out: j.out && typeof j.out === "object" ? j.out : {} };
+    if (j && typeof j === "object") {
+      const s: State = { ...j, order: Array.isArray(j.order) ? j.order : [], out: j.out && typeof j.out === "object" ? j.out : {} };
+      const f = j.filed;
+      s.filed = typeof f?.mtime === "number" ? { mtime: f.mtime, at: typeof f.at === "number" ? f.at : 0 } : undefined;
+      return s;
+    }
   } catch {}
   return { order: [], out: {} };
 }
@@ -94,12 +111,18 @@ function loginIn(text: string): object {
 }
 
 // credentials is the live file's text; only its claudeAiOauth is kept. account, when given, replaces account.json.
+// A different login already saved there is kept once as credentials.prev.json, so a wrong filing can be undone.
 export function saveLogin(id: string, credentials: string, account: unknown | undefined, dir = accountsDir()) {
   checkId(id);
-  const claudeAiOauth = loginIn(credentials);
+  const text = JSON.stringify({ claudeAiOauth: loginIn(credentials) });
   privateDir(dir);
   privateDir(join(dir, id));
-  write(join(dir, id, "credentials.json"), JSON.stringify({ claudeAiOauth }));
+  let old: string | undefined;
+  try {
+    old = readFileSync(join(dir, id, "credentials.json"), "utf8");
+  } catch {}
+  if (old !== undefined && old !== text) write(join(dir, id, "credentials.prev.json"), old);
+  write(join(dir, id, "credentials.json"), text);
   if (account !== undefined) write(join(dir, id, "account.json"), JSON.stringify(account));
 }
 

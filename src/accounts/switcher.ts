@@ -12,14 +12,15 @@ import { apnsFor } from "../push/watch";
 import { readCreds, readDevices } from "../push/store";
 import { blimpDir, claudeDir, isSafeName, listSessionsLite, type Session, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
 import { typeInto } from "../typing";
-import { FILE_AFTER_MS, filing, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, SETTLE_MS } from "./rules";
-import { accountsDir, accountsOn, hasLogin, listSaved, liveFile, liveMtime, putLive, type Rec, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
+import { filing, LOGIN_RECORD_MS, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, SETTLE_MS } from "./rules";
+import { accountsDir, accountsOn, hasLogin, listSaved, liveFile, liveMtime, putLive, type Rec, readLoginNote, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
 
 export type Stop = { session: string; at: number; error: string; details?: string; message?: string };
 export type SwitcherDeps = {
   dir: string; // the accounts folder
   live: string; // the live login file
   record: () => Rec | undefined; // oauthAccount now
+  loginSeen: () => number | undefined; // when Claude Code last said a /login succeeded (hooks.ts)
   stops: () => Promise<Stop[]>; // running Claude sessions whose latest hook event is a StopFailure
   menu: (session: string) => boolean; // its screen shows a list of choices
   type: (session: string) => Promise<void>; // types "continue" and Enter; throws if it couldn't
@@ -31,11 +32,11 @@ export type SwitcherDeps = {
 
 export const CONTINUE_AFTER_MS = 3000; // a session that just stopped gets a moment before "continue"
 const ERROR_AGAIN_MS = 600_000; // the same error is logged again after this long, so one that comes back leaves a line
+const RECENT_MS = 60_000; // with no switch in the tick, only a stop this recent gets "continue": an older one is one a restart forgot
 
 const plural = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
 
 export class Switcher {
-  private seen?: number; // when an unfiled change to the live file was first seen
   // A stop is a session and its `at`. Each is logged once, goes through "Switch?" once (else a session
   // left stopped while every account is out would mark the account out again every second), and gets
   // "continue" at most once.
@@ -62,14 +63,15 @@ export class Switcher {
       const now = this.deps.now();
       const state = readState(this.deps.dir);
 
-      // A swap whose state write was lost is unmistakable, so it's adopted at once: a renewal in the
-      // next two minutes would hide it. On the first tick whatever the mtime (a crash can come between
-      // the swap and its state write); after that on any change not yet filed.
+      // A swap whose state write was lost is unmistakable, so it's adopted at once: a renewal would
+      // hide it. On the first tick whatever the mtime (a crash can come between the swap and its state
+      // write); after that on any change not yet filed. Any other change is filed once it is
+      // SETTLE_MS old: a /login's notice and account record land a moment after its login file.
       const m = liveMtime(this.deps.live);
-      if (m !== undefined && (!this.looked || m !== state.filed?.mtime)) this.adopt(state, m);
+      if (m !== undefined && (!this.looked || m !== state.filed?.mtime)) this.adopt(state, m, now);
       this.looked = true;
-      if (m === undefined || m === state.filed?.mtime) this.seen = undefined;
-      else if (now - (this.seen ??= now) >= FILE_AFTER_MS) this.file(state);
+      const unfiled = () => m !== undefined && m !== state.filed?.mtime;
+      if (unfiled() && now - m! >= SETTLE_MS) this.file(state, now);
 
       for (const s of stops)
         if (this.logged.get(s.session) !== s.at) {
@@ -78,16 +80,12 @@ export class Switcher {
         }
       const out = stops.filter((s) => OUT_ERRORS.includes(s.error));
 
-      // A limit stop in the quiet time after a switch left before it, and one from before blimpd
-      // started is a stale status file: neither asks for a switch. The live file is filed first, so the
-      // copy put back later has the newest refresh token; a login filed then moves switchedAt to the
-      // login, so the stops are asked again after it (a request that left on the old account is quiet).
-      // A change seconds old and not yet filed may be a /login whose account record hasn't landed:
-      // filed now it would pass for a renewal. Nothing switches this tick; the stops ask again next tick.
-      const settling = m !== undefined && m !== state.filed?.mtime && now - m < SETTLE_MS;
-      const asks = (s: Stop) => !settling && this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started;
-      if (out.some(asks)) this.file(state);
-      const asking = out.filter(asks);
+      // A limit stop in the quiet time after a switch (or a login filed just above) left before it, and
+      // one from before blimpd started is a stale status file: neither asks for a switch. Nothing
+      // switches over a change not yet filed (seconds old, or a /login waiting for its record), so the
+      // copy put back later has the newest refresh token; the stops ask again next tick.
+      const asks = (s: Stop) => this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started;
+      const asking = unfiled() ? [] : out.filter(asks);
       let switched: { from: string; to: string } | undefined;
       if (asking.length) {
         const from = state.active;
@@ -98,7 +96,7 @@ export class Switcher {
           const mtime = putLive(next.id, this.deps.live, this.deps.dir);
           state.active = next.id;
           state.switchedAt = now;
-          state.filed = { mtime, record: state.filed?.record ?? "" };
+          state.filed = { mtime, at: now };
         }
         writeState(state, this.deps.dir);
         for (const s of asking) this.asked.set(s.session, s.at);
@@ -113,9 +111,10 @@ export class Switcher {
         switched = { from: saved.find((a) => a.id === from)?.email || from || "The last account", to: next.email || next.id };
       }
 
-      // After a switch, every limit stop; otherwise only one that came in the quiet time after the last.
+      // After a switch, every limit stop; otherwise only a recent one that came in the quiet time after the last.
       const sw = state.switchedAt;
-      const due = out.filter((s) => this.continued.get(s.session) !== s.at && (switched || (sw !== undefined && sw < s.at && s.at <= sw + QUIET_MS)));
+      const quiet = (s: Stop) => sw !== undefined && sw < s.at && s.at <= sw + QUIET_MS && now - s.at < RECENT_MS;
+      const due = out.filter((s) => this.continued.get(s.session) !== s.at && (switched || quiet(s)));
       let done = 0;
       let left = 0;
       let unread = false;
@@ -180,55 +179,59 @@ export class Switcher {
     const to = listSaved(this.deps.dir, state).find((a) => a.id === id);
     if (!to) throw new Error("no saved login for that account");
     if ((to.expires ?? Infinity) <= now) throw new Error("that account's login has expired; log in to it again with /login");
-    this.file(state);
+    if (!this.file(state, now)) throw new Error("a login made a moment ago isn't saved yet; try again in a minute");
     const from = state.active;
     const mtime = putLive(id, this.deps.live, this.deps.dir);
     state.active = id;
     state.switchedAt = now;
-    state.filed = { mtime, record: state.filed?.record ?? "" };
+    state.filed = { mtime, at: now };
     writeState(state, this.deps.dir);
     this.deps.log({ event: "switch", from, to: id, byHand: true });
     await this.deps.tell(`Now on ${to.email || to.id}`, "Switched by hand.");
   }
 
   // Saves the live file under whoever it belongs to (rules.ts `filing`), so the copy put back later has
-  // the newest refresh token. Writes state.json; changes `s` in place.
-  private file(s: State) {
+  // the newest refresh token. Writes state.json; changes `s` in place. False while a /login waits for
+  // its account record: nothing is filed yet.
+  private file(s: State, now: number): boolean {
     const mtime = liveMtime(this.deps.live);
-    if (mtime === undefined || mtime === s.filed?.mtime) return;
-    this.seen = undefined;
-    if (this.adopt(s, mtime)) return;
+    if (mtime === undefined || mtime === s.filed?.mtime) return true;
+    if (this.adopt(s, mtime, now)) return true;
     const rec = this.deps.record();
-    const who = filing(s, rec);
-    const text = readFileSync(this.deps.live, "utf8");
-    // Nobody to file it under, or no login in it (after /logout, say): noted as filed, so it isn't tried
-    // again every second. Any other failure to save is thrown, and tried again next tick.
-    if (!who || !hasLogin(text)) {
-      s.filed = { mtime, record: s.filed?.record ?? "" };
+    const who = filing(s, rec, this.deps.loginSeen());
+    // Nobody to file it under, no login in it (after /logout, say), or a /login whose record never
+    // came: noted as filed, so it isn't tried again every second. Any other failure to save is
+    // thrown, and tried again next tick.
+    const unfiled = (why?: string) => {
+      s.filed = { mtime, at: now };
       writeState(s, this.deps.dir);
-      this.deps.log({ event: "unfiled" });
-      return;
-    }
+      this.deps.log({ event: "unfiled", ...(why && { why }) });
+      return true;
+    };
+    if (who === "wait") return now - mtime >= LOGIN_RECORD_MS && unfiled("login without a record");
+    const text = readFileSync(this.deps.live, "utf8");
+    if (!who || !hasLogin(text)) return unfiled();
     saveLogin(who.id, text, who.login ? rec!.account : undefined, this.deps.dir);
     if (!s.order.includes(who.id)) s.order.push(who.id);
     s.active = who.id;
-    s.filed = { mtime, record: rec?.raw ?? s.filed?.record ?? "" };
+    s.filed = { mtime, at: now };
     // A login by hand is a switch too: a limit stop from a request that left on the old account gets
     // the quiet time.
     if (who.login) s.switchedAt = mtime;
     writeState(s, this.deps.dir);
     this.deps.log({ event: who.login ? "login" : "renewal", account: who.id });
+    return true;
   }
 
   // The live login is exactly another saved account's than the active one: a swap whose state write
   // was lost (a throw, a crash, or `account use` in another process). That account is in use, from
   // the swap's time; filing would put its login over the active one's.
-  private adopt(s: State, mtime: number): boolean {
+  private adopt(s: State, mtime: number, now: number): boolean {
     const owner = savedWith(readFileSync(this.deps.live, "utf8"), this.deps.dir);
     if (!owner || owner === s.active) return false;
     s.active = owner;
     s.switchedAt = mtime;
-    s.filed = { mtime, record: s.filed?.record ?? "" };
+    s.filed = { mtime, at: now };
     writeState(s, this.deps.dir);
     this.deps.log({ event: "adopted", account: owner });
     return true;
@@ -271,6 +274,7 @@ function liveDeps(): SwitcherDeps {
     dir,
     live: liveFile(),
     record: () => readRecord(),
+    loginSeen: () => readLoginNote(),
     stops: async () => readStops(listSessionsLite(claudeDir(), await zmxListAsync()), status),
     // Read the way sessions.ts reads a permission prompt's screen, 5 s at most. Unread: no text.
     menu: (name) => {
@@ -286,18 +290,24 @@ function liveDeps(): SwitcherDeps {
     },
     now: Date.now,
     wait: (ms) => Bun.sleep(ms),
-    log: (entry) => {
-      const file = join(dir, "log.jsonl");
+    log: accountsLog(dir),
+  };
+}
+
+// The writer of <accounts dir>/log.jsonl (600), one JSON line per entry with its time; past 1 MB the
+// file becomes log.1.jsonl. Never throws: a log it can't write is said on the console.
+export function accountsLog(dir: string): (entry: Record<string, unknown>) => void {
+  const file = join(dir, "log.jsonl");
+  return (entry) => {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       try {
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-        try {
-          if (statSync(file).size > 1_000_000) renameSync(file, join(dir, "log.1.jsonl"));
-        } catch {}
-        appendFileSync(file, `${JSON.stringify({ at: Date.now(), ...entry })}\n`, { mode: 0o600 });
-      } catch (e) {
-        console.log(`accounts: couldn't write the log (${(e as Error).message})`);
-      }
-    },
+        if (statSync(file).size > 1_000_000) renameSync(file, join(dir, "log.1.jsonl"));
+      } catch {}
+      appendFileSync(file, `${JSON.stringify({ at: Date.now(), ...entry })}\n`, { mode: 0o600 });
+    } catch (e) {
+      console.log(`accounts: couldn't write the log (${(e as Error).message})`);
+    }
   };
 }
 

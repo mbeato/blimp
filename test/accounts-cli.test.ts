@@ -2,7 +2,7 @@
 // switcher's test is. Tokens are made up.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAccount, runAccounts } from "../src/accounts/cli";
@@ -39,7 +39,7 @@ function setup(on = false) {
   saveLogin("id-c", creds("tok-C", EXPIRED), acct("id-c", "c@x.com"), dir);
   const mtime = putLive("id-a", live, dir);
   writeState(
-    { active: "id-a", order: ["id-a", "id-b", "id-c"], out: { "id-b": { at: T, until: T + 3600_000 } }, filed: { mtime, record: JSON.stringify(acct("id-a", "a@x.com")) } },
+    { active: "id-a", order: ["id-a", "id-b", "id-c"], out: { "id-b": { at: T, until: T + 3600_000 } }, filed: { mtime, at: 0 } },
     dir,
   );
   if (on) writeFileSync(join(top, "config.json"), JSON.stringify({ accounts: true }));
@@ -127,6 +127,30 @@ test("account use: files a renewed live login under the account in use first", a
   utimesSync(live, 1_000_000, 1_000_000);
   expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err))).code).toBe(0);
   expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toContain("tok-A2");
+  expect(liveToken(live)).toBe("tok-B");
+});
+
+test("account use: the switch goes into log.jsonl, 600, with no token", async () => {
+  const { dir, live } = setup();
+  expect((await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err))).code).toBe(0);
+  const file = join(dir, "log.jsonl");
+  const text = readFileSync(file, "utf8");
+  const lines = text.trim().split("\n").map((l) => JSON.parse(l));
+  expect(lines.filter((l) => l.event === "switch")).toEqual([{ at: expect.any(Number), event: "switch", from: "id-a", to: "id-b", byHand: true }]);
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  expect(text).not.toContain("tok-");
+});
+
+test("account use: a /login not yet filed goes under the account it was made to, not the one in use", async () => {
+  const { top, dir, live } = setup();
+  mkdirSync(join(root, "config"), { recursive: true });
+  writeFileSync(join(root, "config", ".claude.json"), JSON.stringify({ oauthAccount: { ...acct("id-d", "d@x.com"), profileFetchedAt: Date.now() } }));
+  writeFileSync(join(top, "auth-success.json"), JSON.stringify({ at: Date.now() }));
+  writeFileSync(live, creds("tok-D"));
+  utimesSync(live, 1_000_000, 1_000_000);
+  expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err))).code).toBe(0);
+  expect(readFileSync(join(dir, "id-d", "credentials.json"), "utf8")).toContain("tok-D");
+  expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toContain("tok-A");
   expect(liveToken(live)).toBe("tok-B");
 });
 

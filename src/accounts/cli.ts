@@ -7,8 +7,8 @@
 
 import { dirname, join } from "node:path";
 import { isOut } from "./rules";
-import { accountsDir, accountsOn, forgetLogin, listSaved, liveFile, readRecord, readState, type Saved, writeState } from "./store";
-import { Switcher } from "./switcher";
+import { accountsDir, accountsOn, forgetLogin, listSaved, liveFile, loginNoteFile, readLoginNote, readRecord, readState, type Saved, writeState } from "./store";
+import { accountsLog, Switcher } from "./switcher";
 
 const USAGE = "usage: blimpd account use|forget <email>";
 
@@ -71,13 +71,14 @@ export async function runAccount(
     dir,
     live,
     record: () => readRecord(),
+    loginSeen: () => readLoginNote(loginNoteFile(dirname(dir))),
     stops: async () => [],
     menu: () => false,
     type: async () => {},
     tell: async () => out(`now on ${name(a)}`),
     now: Date.now,
     wait: async () => {},
-    log: () => {},
+    log: accountsLog(dir),
   });
   try {
     await switcher.use(a.id);

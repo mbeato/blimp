@@ -40,33 +40,34 @@ describe("nextAccount", () => {
 });
 
 describe("filing", () => {
-  const rec = (id: string): Rec => {
-    const account = { accountUuid: id, emailAddress: `${id}@x.com` };
-    return { id, email: account.emailAddress, raw: JSON.stringify(account), account };
-  };
+  const rec = (id: string, fetchedAt?: number): Rec => ({ id, email: `${id}@x.com`, ...(fetchedAt !== undefined && { fetchedAt }), account: { accountUuid: id } });
+  const settled = (o: Partial<State> = {}) => state({ active: "id-b", filed: { mtime: 1, at: 1000 }, ...o });
 
-  test("nothing filed yet and a record: a login for that account", () => {
-    expect(filing(state(), rec("id-a"))).toEqual({ id: "id-a", login: true });
+  test("no login notice since the last settle: a renewal for the active account, whatever the record says or when it was fetched", () => {
+    expect(filing(settled(), rec("id-a", 5000), undefined)).toEqual({ id: "id-b", login: false });
+    expect(filing(settled(), rec("id-a", 5000), 900)).toEqual({ id: "id-b", login: false });
+    expect(filing(settled(), rec("id-a", 5000), 1000)).toEqual({ id: "id-b", login: false });
+    expect(filing(settled(), undefined, undefined)).toEqual({ id: "id-b", login: false });
   });
 
-  test("the record unchanged since the last filing: a renewal for the active account, even when the record names another", () => {
-    const r = rec("id-a");
-    expect(filing(state({ active: "id-b", filed: { mtime: 1, record: r.raw } }), r)).toEqual({ id: "id-b", login: false });
+  test("a login notice since the last settle and a record fetched after it: a login for the account the record names", () => {
+    expect(filing(settled(), rec("id-a", 1001), 1500)).toEqual({ id: "id-a", login: true });
+    expect(filing(settled(), rec("id-b", 2000), 1500)).toEqual({ id: "id-b", login: true });
   });
 
-  test("the record changed since the last filing: a login for the account it names", () => {
-    const r = rec("id-c");
-    expect(filing(state({ active: "id-b", filed: { mtime: 1, record: rec("id-a").raw } }), r)).toEqual({ id: "id-c", login: true });
+  test("a login notice but a record not fetched since the settle, or none: wait", () => {
+    expect(filing(settled(), rec("id-a", 1000), 1500)).toBe("wait");
+    expect(filing(settled(), rec("id-a"), 1500)).toBe("wait");
+    expect(filing(settled(), undefined, 1500)).toBe("wait");
   });
 
-  test("no record: the active account's renewal, or unknown with none active", () => {
-    expect(filing(state({ active: "id-b" }), undefined)).toEqual({ id: "id-b", login: false });
-    expect(filing(state(), undefined)).toBeUndefined();
+  test("never settled and no active account: the record's account as a login; no record: unknown", () => {
+    expect(filing(state(), rec("id-c"), undefined)).toEqual({ id: "id-c", login: true });
+    expect(filing(state(), undefined, undefined)).toBeUndefined();
   });
 
-  test("the record unchanged and none active: unknown", () => {
-    const r = rec("id-a");
-    expect(filing(state({ filed: { mtime: 1, record: r.raw } }), r)).toBeUndefined();
+  test("a state from before `at` (settled at 0): a notice counts, and any stamped record is fresh", () => {
+    expect(filing(state({ active: "id-b", filed: { mtime: 1, at: 0 } }), rec("id-a", 5), 10)).toEqual({ id: "id-a", login: true });
   });
 });
 

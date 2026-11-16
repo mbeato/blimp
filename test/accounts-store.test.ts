@@ -5,7 +5,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { forgetLogin, hasLogin, listSaved, putLive, readRecord, readState, savedWith, saveLogin, writeState } from "../src/accounts/store";
+import { forgetLogin, hasLogin, listSaved, putLive, readLoginNote, readRecord, readState, savedWith, saveLogin, writeState } from "../src/accounts/store";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-accounts-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -33,7 +33,7 @@ describe("saveLogin", () => {
     saveLogin("id-a", creds("tok-A2"), undefined, dir);
     expect(readFileSync(join(sub, "credentials.json"), "utf8")).toBe(creds("tok-A2"));
     expect(JSON.parse(readFileSync(join(sub, "account.json"), "utf8"))).toEqual(acct("id-a", "a@x.com"));
-    expect(readdirSync(sub).sort()).toEqual(["account.json", "credentials.json"]);
+    expect(readdirSync(sub).sort()).toEqual(["account.json", "credentials.json", "credentials.prev.json"]);
   });
 
   test("folders that were opened up are made 700 again", () => {
@@ -110,13 +110,15 @@ describe("listSaved", () => {
 });
 
 describe("putLive", () => {
-  test("puts a saved login in place byte for byte as a 600 regular file, replacing what was there", () => {
+  test("puts a saved login in place byte for byte as a new 600 regular file (a rename), replacing what was there", () => {
     const top = join(root, "live");
     const dir = join(top, "accounts");
     const live = join(top, ".credentials.json");
     saveLogin("id-a", creds("tok-A"), undefined, dir);
-    writeFileSync(live, creds("tok-OTHER"), { mode: 0o600 });
+    writeFileSync(live, creds("tok-OTHER"), { mode: 0o644 });
+    const inode = statSync(live).ino;
     const mtime = putLive("id-a", live, dir);
+    expect(statSync(live).ino).not.toBe(inode);
     expect(readFileSync(live, "utf8")).toBe(creds("tok-A"));
     expect(mode(live)).toBe(0o600);
     expect(lstatSync(live).isSymbolicLink()).toBe(false);
@@ -174,23 +176,35 @@ describe("state", () => {
     chmodSync(dir, 0o755);
     writeFileSync(join(dir, "state.json"), "not json");
     expect(readState(dir)).toEqual({ order: [], out: {} });
-    const s = { active: "id-a", order: ["id-a", "id-b"], out: { "id-b": { at: 1, until: 2 } }, switchedAt: 3, filed: { mtime: 4, record: "{}" } };
+    const s = { active: "id-a", order: ["id-a", "id-b"], out: { "id-b": { at: 1, until: 2 } }, switchedAt: 3, filed: { mtime: 4, at: 5 } };
     writeState(s, dir);
     expect(readState(dir)).toEqual(s);
     expect(mode(join(dir, "state.json"))).toBe(0o600);
     expect(mode(dir)).toBe(0o700);
     expect(readdirSync(dir)).toEqual(["state.json"]);
   });
+
+  test("a filed entry written before `at` existed reads as settled at 0, its old record dropped", () => {
+    const dir = fresh();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ active: "id-a", order: ["id-a"], out: {}, filed: { mtime: 4, record: "{}" } }));
+    expect(readState(dir).filed).toEqual({ mtime: 4, at: 0 });
+  });
 });
 
 describe("readRecord", () => {
-  test("oauthAccount's id, email and JSON; no file, bad JSON or no accountUuid is undefined", () => {
+  test("oauthAccount's id, email, profileFetchedAt and object; no file, bad JSON or no accountUuid is undefined", () => {
     const top = join(root, "record");
     mkdirSync(top);
     const file = join(top, ".claude.json");
     const oauthAccount = { accountUuid: "id-a", emailAddress: "a@x.com", organizationName: "x" };
     writeFileSync(file, JSON.stringify({ numStartups: 3, oauthAccount }));
-    expect(readRecord(file)).toEqual({ id: "id-a", email: "a@x.com", raw: JSON.stringify(oauthAccount), account: oauthAccount });
+    expect(readRecord(file)).toEqual({ id: "id-a", email: "a@x.com", account: oauthAccount });
+    const stamped = { ...oauthAccount, profileFetchedAt: 1234 };
+    writeFileSync(file, JSON.stringify({ oauthAccount: stamped }));
+    expect(readRecord(file)).toEqual({ id: "id-a", email: "a@x.com", fetchedAt: 1234, account: stamped });
+    writeFileSync(file, JSON.stringify({ oauthAccount: { ...oauthAccount, profileFetchedAt: "1234" } }));
+    expect(readRecord(file)?.fetchedAt).toBeUndefined();
     expect(readRecord(join(top, "none.json"))).toBeUndefined();
     writeFileSync(file, "{ not json");
     expect(readRecord(file)).toBeUndefined();
@@ -233,5 +247,41 @@ describe("hasLogin", () => {
     expect(hasLogin(JSON.stringify({ mcpOAuth: {} }))).toBe(false);
     expect(hasLogin(JSON.stringify({ claudeAiOauth: "x" }))).toBe(false);
     expect(hasLogin("not json")).toBe(false);
+  });
+});
+
+describe("credentials.prev.json", () => {
+  test("a save of a different login keeps the one it replaced, once, 600 and only its login; the same login again changes nothing", () => {
+    const dir = fresh();
+    const prev = join(dir, "id-a", "credentials.prev.json");
+    const withMcp = (tok: string) => JSON.stringify({ mcpOAuth: { s: { accessToken: "mcp-x" } }, ...JSON.parse(creds(tok)) });
+    saveLogin("id-a", withMcp("tok-A1"), acct("id-a", "a@x.com"), dir);
+    expect(existsSync(prev)).toBe(false);
+    saveLogin("id-a", withMcp("tok-A2"), undefined, dir);
+    expect(readFileSync(prev, "utf8")).toBe(creds("tok-A1"));
+    expect(mode(prev)).toBe(0o600);
+    saveLogin("id-a", withMcp("tok-A2"), undefined, dir);
+    expect(readFileSync(prev, "utf8")).toBe(creds("tok-A1"));
+    saveLogin("id-a", creds("tok-A3"), undefined, dir);
+    expect(readFileSync(prev, "utf8")).toBe(creds("tok-A2"));
+    expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toBe(creds("tok-A3"));
+    expect(listSaved(dir).map((a) => a.id)).toEqual(["id-a"]);
+    forgetLogin("id-a", dir);
+    expect(existsSync(prev)).toBe(false);
+  });
+});
+
+describe("readLoginNote", () => {
+  test("the note's time; no file, bad JSON or no numeric at is undefined", () => {
+    const top = join(root, "note");
+    mkdirSync(top);
+    const file = join(top, "auth-success.json");
+    expect(readLoginNote(file)).toBeUndefined();
+    writeFileSync(file, JSON.stringify({ at: 42 }));
+    expect(readLoginNote(file)).toBe(42);
+    writeFileSync(file, JSON.stringify({ at: "42" }));
+    expect(readLoginNote(file)).toBeUndefined();
+    writeFileSync(file, "nope");
+    expect(readLoginNote(file)).toBeUndefined();
   });
 });

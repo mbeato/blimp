@@ -211,6 +211,25 @@ describe("writeHookStatus", () => {
     }
   });
 
+  test("a /login's auth_success notice leaves a note with its time, with or without a session; no other notice, and not Codex", () => {
+    const notes = join(tmp, "notes");
+    mkdirSync(notes);
+    const note = join(notes, "auth-success.json");
+    const dir = join(tmp, "notes-status");
+    const before = Date.now();
+    writeHookStatus(ev("Notification", "auth_success"), undefined, dir, false, note);
+    expect(JSON.parse(readFileSync(note, "utf8")).at).toBeGreaterThanOrEqual(before);
+    rmSync(note);
+    writeHookStatus(ev("Notification", "auth_success"), "web-9", dir, false, note);
+    expect(typeof JSON.parse(readFileSync(note, "utf8")).at).toBe("number");
+    expect(existsSync(join(dir, "web-9.json"))).toBe(false);
+    rmSync(note);
+    for (const type of ["permission_prompt", "idle_prompt"]) writeHookStatus(ev("Notification", type), "web-9", dir, false, note);
+    writeHookStatus(ev("Stop"), "web-9", dir, false, note);
+    writeHookStatus(ev("Notification", "auth_success"), "cx-9", dir, true, note);
+    expect(readdirSync(notes)).toEqual([]);
+  });
+
   test("ignores unknown events, bad JSON, and no ZMX_SESSION", () => {
     writeHookStatus(ev("SessionStart"), "other", dir);
     writeHookStatus("nope", "other", dir);
@@ -372,6 +391,14 @@ describe("`blimpd hook`", () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout.toString() + r.stderr.toString()).toBe("");
     expect(JSON.parse(readFileSync(join(tmp, "s", "status", "web-2.json"), "utf8")).state).toBe("waiting");
+  });
+
+  test("a /login's notice with no session writes <socket dir>/auth-success.json and prints nothing", () => {
+    mkdirSync(join(tmp, "s"), { recursive: true });
+    const r = run(JSON.stringify({ hook_event_name: "Notification", notification_type: "auth_success", session_id: "abc" }), "");
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.toString() + r.stderr.toString()).toBe("");
+    expect(typeof JSON.parse(readFileSync(join(tmp, "s", "auth-success.json"), "utf8")).at).toBe("number");
   });
 
   test("exits 0 quietly with garbage on stdin and a hostile session name", () => {

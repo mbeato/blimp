@@ -3,7 +3,8 @@
 // Codex takes hooks in the same format in ~/.codex/hooks.json and sends the same JSON, so the same
 // install adds blimp's there too (`blimpd hook codex`): for Codex they are the only source of state.
 // A Claude turn that ends on an API error (StopFailure) also records the error, so blimpd can tell
-// when the account in use has run out.
+// when the account in use has run out. A /login that succeeded (the auth_success notice) leaves a note
+// with its time beside the status folder, so blimpd knows a changed login file is a login, not a renewal.
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -125,15 +126,28 @@ function writeSettings(settingsPath: string, settings: unknown) {
 
 // Runs inside Claude or Codex (which zmx started, so ZMX_SESSION names the session). Never fails their
 // turn: any problem is swallowed, and nothing is printed.
-export function writeHookStatus(input: string, session: string | undefined, statusDir = join(blimpDir(), "status"), codex = false) {
-  // The name becomes a file name: "../x" or "a/b" must not write anywhere else.
-  if (!session || !isSafeName(session)) return;
+export function writeHookStatus(
+  input: string,
+  session: string | undefined,
+  statusDir = join(blimpDir(), "status"),
+  codex = false,
+  loginNote = join(dirname(statusDir), "auth-success.json"), // read by accounts/store.ts readLoginNote
+) {
   let ev: any;
   try {
     ev = JSON.parse(input);
   } catch {
     return;
   }
+  // Whatever the session: a /login in a session blimp didn't start counts too. It holds no secret.
+  if (!codex && ev?.hook_event_name === "Notification" && ev.notification_type === "auth_success")
+    try {
+      const tmp = `${loginNote}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ at: Date.now() }));
+      renameSync(tmp, loginNote);
+    } catch {}
+  // The name becomes a file name: "../x" or "a/b" must not write anywhere else.
+  if (!session || !isSafeName(session)) return;
   const state = (codex ? CODEX_STATES : STATES)[ev?.hook_event_name];
   if (!state) return;
   // Codex has no Notification event or question tool to tell apart.
