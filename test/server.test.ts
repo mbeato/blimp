@@ -1262,6 +1262,34 @@ describe("starting sessions", () => {
     expect((await post({ dir, shell: true, prompt: "hi" })).status).toBe(400);
   }, 15000);
 
+  test("a model and an effort go to Claude Code before the -- and its first message; only for a new claude session", async () => {
+    const dir = join(homeDir, tag);
+    mkdirSync(dir, { recursive: true });
+    const post = (body: object) => api("/sessions", { method: "POST", body: JSON.stringify(body) });
+    const r = await post({ dir, name: "model", prompt: "fix it", model: "opus", effort: "high" });
+    expect(r.status).toBe(201);
+    const { name } = await r.json();
+    made.push(name);
+    const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+    await until(() => s.text.includes("--model opus --effort high -- fix it]"), "the model and effort in Claude's arguments");
+    s.ws.close();
+    const refused = async (body: object) => {
+      const r = await post({ dir, ...body });
+      return [r.status, ((await r.json()) as any).error];
+    };
+    const badModel = [400, "model must be 1 to 60 letters, digits and . _ - [ ], not starting with -"];
+    for (const model of ["claude opus", "x".repeat(61), "opus;", "", 5, "--dangerously-skip-permissions"]) expect(await refused({ model })).toEqual(badModel);
+    for (const effort of ["extreme", "HIGH", "", 3]) expect(await refused({ effort })).toEqual([400, "effort must be low, medium, high, xhigh or max"]);
+    for (const kind of ["claude-glm", "codex", "shell"]) {
+      expect(await refused({ kind, model: "opus" })).toEqual([400, "only Claude Code takes a model"]);
+      expect(await refused({ kind, effort: "low" })).toEqual([400, "only Claude Code takes an effort"]);
+    }
+    expect(await refused({ shell: true, model: "opus" })).toEqual([400, "only Claude Code takes a model"]);
+    const resume = "0123abcd-0123-0123-0123-0123456789ab";
+    expect(await refused({ kind: "claude", resume, model: "opus" })).toEqual([400, "a resumed conversation keeps its model"]);
+    expect(await refused({ kind: "claude", resume, effort: "max" })).toEqual([400, "a resumed conversation keeps its model"]);
+  }, 15000);
+
   test("blimpd start starts a Claude session in a folder with its first message", async () => {
     const dir = join(homeDir, tag);
     mkdirSync(dir, { recursive: true });
@@ -1274,9 +1302,33 @@ describe("starting sessions", () => {
     await until(() => s.text.includes("-- look at the logs]"), "the first message in Claude's arguments");
     s.ws.close();
     expect(((await (await api("/sessions")).json()) as any[]).find((x) => x.name === name).job).toMatchObject({ reason: "the logs" });
-    expect(await cli(["start", dir])).toMatchObject({ code: 1, err: "blimpd start: usage: blimpd start <folder> <first message> [--job <reason>]" });
+    const usage = "blimpd start: usage: blimpd start <folder> <first message> [--model <m>] [--effort <e>] [--job <reason>]";
+    expect(await cli(["start", dir])).toMatchObject({ code: 1, err: usage });
     expect((await cli(["start", join(tmp, "elsewhere"), "hi"])).code).toBe(1);
   }, 15000);
+
+  test("blimpd start takes --model and --effort anywhere after the folder and passes them on", async () => {
+    const dir = join(homeDir, tag);
+    mkdirSync(dir, { recursive: true });
+    for (const [args, seen] of [
+      [["--model", "haiku", "look", "--effort", "low", "around"], "--model haiku --effort low -- look around]"],
+      [["read", "it", "--effort", "max", "--model", "opus"], "--model opus --effort max -- read it]"],
+      [["only", "--effort", "medium", "this"], "--effort medium -- only this]"],
+    ] as [string[], string][]) {
+      const r = await cli(["start", dir, ...args]);
+      expect(r.code).toBe(0);
+      const name = r.out.match(/^started (\S+) in /)![1];
+      made.push(name);
+      const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
+      await until(() => s.text.includes(seen), `${seen} in Claude's arguments`);
+      s.ws.close();
+    }
+    // A flag with no value is a usage error; a value blimpd refuses is its error.
+    const usage = "blimpd start: usage: blimpd start <folder> <first message> [--model <m>] [--effort <e>] [--job <reason>]";
+    expect(await cli(["start", dir, "hi", "--model"])).toMatchObject({ code: 1, err: usage });
+    expect(await cli(["start", dir, "hi", "--effort"])).toMatchObject({ code: 1, err: usage });
+    expect(await cli(["start", dir, "hi", "--effort", "extreme"])).toMatchObject({ code: 1, err: "blimpd start: effort must be low, medium, high, xhigh or max" });
+  }, 20000);
 
   test("a viewer that attaches at once sees what the session printed, while `zmx list` asks all the time", async () => {
     // zmx counts a list asking at the same moment as a client, so blimpd once let its own client go before

@@ -139,7 +139,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 
 - The list next to the terminal shows the sessions in this folder only, as `claude --resume` shows only this folder's conversations. A session started in a subfolder shows when you open that subfolder.
 - Each running session shows its title and a mark: a spinning ring means **working**, an amber dot means **waiting for you**, an empty ring means **idle**. A plain shell shows `>_` and its session name. The title is your `/rename` title, else blimp's own name for it, else Claude's title, else the first prompt. Codex sessions get the same marks (from blimp's Codex hooks) and show their session name.
-- A session of another kind has a small label after its title: **GLM** (Claude Code on GLM), **Codex**, **Codex sign-in**, or the label of one of your own kinds.
+- A session of another kind has a small label after its title: **GLM** (Claude Code on GLM), **Codex**, **Codex sign-in**, or the label of one of your own kinds. A Claude Code session's label is its model, like **Opus** or **Haiku**, once Claude has replied.
 - Click a session to show its terminal. When you open a folder, blimp shows the session that waits longest for you, else the newest.
 - **Drag a session onto the terminal** to see it side by side with the one there. Drop it on the left or right half; drag again (its row, or the name on top of its split) to move it. **×** on a split closes the split (the session keeps running). Esc cancels a drag.
 - **Drag a session out of the window** to move it: let go over another blimp window and it goes into that window's tab for its folder, where you let go; let go anywhere else and it opens in a new window there. Drag it back the same way.

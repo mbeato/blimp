@@ -169,14 +169,17 @@ export function listKinds(have: Set<string>, home = homedir(), file = kindsFile(
 // Claude Code and Codex always get blimp's MCP (the show tool, visuals/mcp.ts), and the server browser's too when
 // there's a Chrome to run and npx to run that MCP with (browser: whether the first holds; a parameter for tests):
 // Claude Code gets the config file with both then (browser/mcp.json), else the one with blimp's only.
-export async function launchFor(id: string, resume?: string, home = homedir(), file = kindsFile(), browser = browserReady): Promise<Launch> {
+// opts: a model and an effort for a new Claude Code session (POST /sessions checked them). Not on a resume:
+// whether they beat the conversation's own model wasn't checked.
+export async function launchFor(id: string, resume?: string, home = homedir(), file = kindsFile(), browser = browserReady, opts: { model?: string; effort?: string } = {}): Promise<Launch> {
   const have = await installed(file);
   const resumeArgs = resume ? ["--resume", resume] : [];
+  const picked = id === "claude" && !resume ? [...(opts.model ? ["--model", opts.model] : []), ...(opts.effort ? ["--effort", opts.effort] : [])] : [];
   const browserMcp = have.has("npx") && browser();
-  const claudeArgs = ["claude", "--mcp-config", browserMcp ? browserMcpConfigPath() : mcpConfigPath(), ...resumeArgs];
+  const claudeArgs = ["claude", "--mcp-config", browserMcp ? browserMcpConfigPath() : mcpConfigPath(), ...picked, ...resumeArgs];
   // The login shell found nothing at all, so it couldn't tell: Claude Code is tried anyway, as
   // before kinds. A missing claude then shows in the session itself.
-  if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", "--mcp-config", mcpConfigPath(), ...resumeArgs] };
+  if (id === "claude" && !have.size) return { script: 'exec claude "$@"', args: ["claude", "--mcp-config", mcpConfigPath(), ...picked, ...resumeArgs] };
   // Settings' Codex sign-in: the user finishes it in the terminal (a code to type in a browser).
   if (id === "codex-login") {
     if (!have.has("codex")) throw new HttpError(400, "codex isn't installed");

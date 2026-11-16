@@ -151,6 +151,28 @@ test("no npx: blimp's MCP still, no browser", async () => {
   expect((await launchFor("claude", undefined, home, kindsWith("no-npx-tool"), () => true)).args).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
 });
 
+test("a model and an effort go to Claude Code after its MCP config; not on a resume", async () => {
+  const bin = join(home, "bin-model");
+  process.env.SHELL = loginShellWith(bin);
+  program(bin, "claude");
+  const f = kindsWith("model-tool");
+  const no = () => false;
+  const args = async (opts: { model?: string; effort?: string }, resume?: string) => (await launchFor("claude", resume, home, f, no, opts)).args;
+  expect(await args({ model: "opus", effort: "high" })).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--model", "opus", "--effort", "high"]);
+  expect(await args({ model: "haiku" })).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--model", "haiku"]);
+  expect(await args({ effort: "low" })).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--effort", "low"]);
+  expect(await args({})).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
+  // Whether they'd beat a resumed conversation's own model wasn't checked, so they aren't passed.
+  expect(await args({ model: "opus", effort: "high" }, "abc")).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--resume", "abc"]);
+  // The login shell found nothing: Claude Code still gets them.
+  process.env.SHELL = loginShellWith(join(home, "bin-model-none"));
+  expect(await launchFor("claude", undefined, home, kindsWith("model-none-tool"), no, { model: "opus", effort: "max" })).toEqual({
+    script: 'exec claude "$@"',
+    args: ["claude", "--mcp-config", mcpConfigPath(), "--model", "opus", "--effort", "max"],
+  });
+  expect((await launchFor("claude", "abc", home, kindsWith("model-none-tool-2"), no, { model: "opus" })).args).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--resume", "abc"]);
+});
+
 test("mcp.json: blimp's server always, the browser's when asked", () => {
   const self = ["/usr/local/bin/blimpd"];
   expect(JSON.parse(mcpConfig(self, false))).toEqual({ mcpServers: { blimp: { command: "/usr/local/bin/blimpd", args: ["visuals-mcp"] } } });
