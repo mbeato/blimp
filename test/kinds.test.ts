@@ -120,6 +120,8 @@ test("GLM: the settings are set by the script, after the profile; the key only i
     env: { PATH: bin, ...run.env, ANTHROPIC_BASE_URL: "https://elsewhere.example", ANTHROPIC_API_KEY: "theirs" },
   }).stdout.toString();
   expect(out).toBe(`https://api.z.ai/api/anthropic|it's $(x) \`y\`|zai-unit-key-0123456789|unset|unset|--mcp-config ${mcpConfigPath()} --resume abc\n`);
+  // GLM sets its own model, so a model or an effort asked for isn't passed.
+  expect((await launchFor("claude-glm", undefined, home, f, undefined, { model: "opus", effort: "high" })).args).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
 });
 
 test("Claude Code and Codex always get blimp's MCP (the show tool), and the server browser's when there's a Chrome and npx", async () => {

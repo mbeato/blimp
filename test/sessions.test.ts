@@ -189,6 +189,12 @@ test("listSessions adds a Claude session's background jobs, context and git fold
   // The latest reply's model; Claude Code's row is labelled with its short name, GLM's keeps its kind's.
   expect([t.model, t.label]).toEqual(["claude-opus-5-5", "Opus"]);
   expect([s.model, s.label]).toEqual(["GLM-5.3", "GLM"]);
+  // A later reply on another model: the row follows the latest one.
+  const later = JSON.parse(real.bashCall);
+  later.message = { ...later.message, model: "claude-haiku-4-5", id: "msg_later", content: [{ type: "text", text: "done" }] };
+  appendFileSync(join(home, "projects", "-home-u-web", "s2.jsonl"), JSON.stringify({ ...later, uuid: "later", timestamp: "2026-10-19T16:40:00.000Z" }) + "\n");
+  const [, t2] = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} });
+  expect([t2.model, t2.label]).toEqual(["claude-haiku-4-5", "Haiku"]);
   // `blimpd sessions` without --json shows none of it, so it doesn't read it.
   const bare = listSessions(home, zmxOut, join(home, "status"), memo, {}, { since: 0, seen: {} }, {}, false);
   for (const k of ["jobs", "context", "git", "model"]) expect(bare[0]).not.toHaveProperty(k);

@@ -40,8 +40,9 @@ Use these whenever a question is about the user's sessions or projects, rather t
 These change another session, so each one shows the user a permission prompt first:
 
 - \`${cmd} start <folder> <message> [--job <a few words>]\`: a new Claude session in that folder (give its full
-  path), with that first message. Start research and lookups with \`--model haiku\`, and building from an agreed
-  plan with \`--model opus\`. Give no model for planning or when unsure, so the user's own default applies.
+  path), with that first message. Start research and lookups with \`${cmd} start <folder> --model haiku <message>\`,
+  and building from an agreed plan with \`--model opus\` in the same place, right after the folder. Give no model
+  for planning or when unsure, so the user's own default applies.
 - \`${cmd} send <session> <message> [--job <a few words>]\`: type a message into a running session.
 - \`${cmd} answer <session> <option number> [--job <a few words>]\`: pick one of a session's options, numbered as
   overview shows them.

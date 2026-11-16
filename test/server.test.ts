@@ -1266,12 +1266,14 @@ describe("starting sessions", () => {
     const dir = join(homeDir, tag);
     mkdirSync(dir, { recursive: true });
     const post = (body: object) => api("/sessions", { method: "POST", body: JSON.stringify(body) });
-    const r = await post({ dir, name: "model", prompt: "fix it", model: "opus", effort: "high" });
+    // Every kind of character a model may have, reaching Claude as one argument.
+    const r = await post({ dir, name: "model", prompt: "fix it", model: "claude-opus-5.5_x[1m]", effort: "high" });
     expect(r.status).toBe(201);
     const { name } = await r.json();
     made.push(name);
     const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
-    await until(() => s.text.includes("--model opus --effort high -- fix it]"), "the model and effort in Claude's arguments");
+    // Wrapped rows joined again: with the browser MCP's arguments the arguments line is longer than the terminal is wide.
+    await until(() => s.text.replace(/\r\n/g, "").includes("--model claude-opus-5.5_x[1m] --effort high -- fix it]"), "the model and effort in Claude's arguments");
     s.ws.close();
     const refused = async (body: object) => {
       const r = await post({ dir, ...body });
@@ -1279,6 +1281,8 @@ describe("starting sessions", () => {
     };
     const badModel = [400, "model must be 1 to 60 letters, digits and . _ - [ ], not starting with -"];
     for (const model of ["claude opus", "x".repeat(61), "opus;", "", 5, "--dangerously-skip-permissions"]) expect(await refused({ model })).toEqual(badModel);
+    // 60 characters is not too long: what's refused is the kind, and no session starts.
+    expect(await refused({ kind: "shell", model: "m".repeat(60) })).toEqual([400, "only Claude Code takes a model"]);
     for (const effort of ["extreme", "HIGH", "", 3]) expect(await refused({ effort })).toEqual([400, "effort must be low, medium, high, xhigh or max"]);
     for (const kind of ["claude-glm", "codex", "shell"]) {
       expect(await refused({ kind, model: "opus" })).toEqual([400, "only Claude Code takes a model"]);
@@ -1302,32 +1306,36 @@ describe("starting sessions", () => {
     await until(() => s.text.includes("-- look at the logs]"), "the first message in Claude's arguments");
     s.ws.close();
     expect(((await (await api("/sessions")).json()) as any[]).find((x) => x.name === name).job).toMatchObject({ reason: "the logs" });
-    const usage = "blimpd start: usage: blimpd start <folder> <first message> [--model <m>] [--effort <e>] [--job <reason>]";
+    const usage = "blimpd start: usage: blimpd start <folder> [--model <m>] [--effort <e>] <first message> [--job <reason>]";
     expect(await cli(["start", dir])).toMatchObject({ code: 1, err: usage });
     expect((await cli(["start", join(tmp, "elsewhere"), "hi"])).code).toBe(1);
   }, 15000);
 
-  test("blimpd start takes --model and --effort anywhere after the folder and passes them on", async () => {
+  test("blimpd start reads --model and --effort only right after the folder, so the message can say them", async () => {
     const dir = join(homeDir, tag);
     mkdirSync(dir, { recursive: true });
     for (const [args, seen] of [
-      [["--model", "haiku", "look", "--effort", "low", "around"], "--model haiku --effort low -- look around]"],
-      [["read", "it", "--effort", "max", "--model", "opus"], "--model opus --effort max -- read it]"],
-      [["only", "--effort", "medium", "this"], "--effort medium -- only this]"],
+      [["--model", "opus", "--effort", "high", "hi", "there"], "--model opus --effort high -- hi there]"],
+      [["--effort", "high", "--model", "opus", "hi", "there"], "--model opus --effort high -- hi there]"],
+      // After the message's first word, --model is the message's: no model, nothing between the MCP config and the --.
+      [["explain", "the", "--model", "flag"], "mcp.json -- explain the --model flag]"],
     ] as [string[], string][]) {
       const r = await cli(["start", dir, ...args]);
       expect(r.code).toBe(0);
       const name = r.out.match(/^started (\S+) in /)![1];
       made.push(name);
       const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
-      await until(() => s.text.includes(seen), `${seen} in Claude's arguments`);
+      // Wrapped rows joined again: with the browser MCP's arguments the arguments line is longer than the terminal is wide.
+      await until(() => s.text.replace(/\r\n/g, "").includes(seen), `${seen} in Claude's arguments`);
       s.ws.close();
     }
-    // A flag with no value is a usage error; a value blimpd refuses is its error.
-    const usage = "blimpd start: usage: blimpd start <folder> <first message> [--model <m>] [--effort <e>] [--job <reason>]";
-    expect(await cli(["start", dir, "hi", "--model"])).toMatchObject({ code: 1, err: usage });
-    expect(await cli(["start", dir, "hi", "--effort"])).toMatchObject({ code: 1, err: usage });
-    expect(await cli(["start", dir, "hi", "--effort", "extreme"])).toMatchObject({ code: 1, err: "blimpd start: effort must be low, medium, high, xhigh or max" });
+    // A missing value, a value that looks like a flag, or a flag twice is a usage error, and nothing starts.
+    const usage = "blimpd start: usage: blimpd start <folder> [--model <m>] [--effort <e>] <first message> [--job <reason>]";
+    const before = zmxNames().length;
+    for (const args of [["--model", "--effort", "high", "hi"], ["--model"], ["--model", "opus", "--model", "haiku", "hi"], ["--model", "-x", "hi"]])
+      expect(await cli(["start", dir, ...args])).toMatchObject({ code: 1, err: usage });
+    expect(zmxNames().length).toBe(before);
+    expect(await cli(["start", dir, "--effort", "extreme", "hi"])).toMatchObject({ code: 1, err: "blimpd start: effort must be low, medium, high, xhigh or max" });
   }, 20000);
 
   test("a viewer that attaches at once sees what the session printed, while `zmx list` asks all the time", async () => {

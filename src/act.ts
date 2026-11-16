@@ -30,27 +30,26 @@ export async function recordJob(command: string, session: string, reason: string
   }
 }
 
-// `<flag> <value>` from anywhere in args, as --job is: its value ("" when the flag is last), and the other args.
-function takeFlag(args: string[], flag: string): { args: string[]; value?: string } {
-  const i = args.indexOf(flag);
-  if (i < 0) return { args };
-  return { args: [...args.slice(0, i), ...args.slice(i + 2)], value: args[i + 1] ?? "" };
-}
-
-// blimpd start <folder> <first message…> [--model <m>] [--effort <e>] [--job <reason>]: a new Claude session there.
-// The running blimpd checks the model and the effort, so a bad one is its error.
+// blimpd start <folder> [--model <m>] [--effort <e>] <first message…> [--job <reason>]: a new Claude session there.
+// Only the words right after the folder are read as the two flags, so the message can say --model. The running
+// blimpd checks their values, so a bad one is its error.
 export async function runStart(argv: string[]): Promise<number> {
   const fail = (m: string) => (console.error(`blimpd start: ${m}`), 1);
-  const { args: rest, job } = takeJob(argv);
-  const model = takeFlag(rest, "--model");
-  const effort = takeFlag(model.args, "--effort");
-  const [folder, ...words] = effort.args;
+  const usage = "usage: blimpd start <folder> [--model <m>] [--effort <e>] <first message> [--job <reason>]";
+  const { args, job } = takeJob(argv);
+  const [folder, ...words] = args;
+  const picked: { model?: string; effort?: string } = {};
+  while (words[0] === "--model" || words[0] === "--effort") {
+    const [flag, value] = words.splice(0, 2);
+    const key = flag === "--model" ? "model" : "effort";
+    if (value === undefined || value.startsWith("-") || picked[key] !== undefined) return fail(usage);
+    picked[key] = value;
+  }
   const text = words.join(" ");
-  if (!folder || !text.trim() || model.value === "" || effort.value === "")
-    return fail("usage: blimpd start <folder> <first message> [--model <m>] [--effort <e>] [--job <reason>]");
+  if (!folder || !text.trim()) return fail(usage);
   const dir = resolve(folder);
   try {
-    const r = await callBlimpd("/sessions", { method: "POST", body: JSON.stringify({ dir, prompt: text, model: model.value, effort: effort.value }) });
+    const r = await callBlimpd("/sessions", { method: "POST", body: JSON.stringify({ dir, prompt: text, ...picked }) });
     if (!r.ok) return fail(await errorOf(r));
     const { name } = (await r.json()) as { name: string };
     console.log(`started ${name} in ${dir}`);

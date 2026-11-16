@@ -21,11 +21,11 @@ Ground rule: blimp never changes the model of a running conversation. A typed `/
 
 ## 2. A model and an effort when blimp starts a session
 
-- `POST /sessions` takes two more optional fields: `model` (1 to 60 characters of `A-Z a-z 0-9 . _ - [ ]`) and `effort` (`low`, `medium`, `high`, `xhigh` or `max`). 400 with a plain message for anything else.
+- `POST /sessions` takes two more optional fields: `model` (1 to 60 characters of `A-Z a-z 0-9 . _ - [ ]`, not starting with `-`) and `effort` (`low`, `medium`, `high`, `xhigh` or `max`). 400 with a plain message for anything else.
 - Only for kind `claude`. 400 for another kind ("only Claude Code takes a model" / "… an effort"): GLM sets its own model, Codex and a shell have none.
 - Not with `resume`: 400 ("a resumed conversation keeps its model"). See "Not checked" above.
 - `launchFor` gets an options argument `{ model?, effort? }` and, for `claude` without a resume, adds `--model <m>` and `--effort <e>` after `--mcp-config <file>`. Both places that build the claude arguments get them (the normal one and the "login shell found nothing" one). The first message still goes last, after `--`.
-- `blimpd start <folder> <first message> [--model <m>] [--effort <e>] [--job <reason>]`: passes them in the POST body. The flags may come anywhere after the folder; a flag with no value is a usage error. The usage text and the header comment in `main.ts` say so.
+- `blimpd start <folder> [--model <m>] [--effort <e>] <first message> [--job <reason>]`: passes them in the POST body. Only the words right after the folder are read as the two flags, in either order, each at most once; from the first other word on it's all message, even a `--model`. A flag with no value, a value starting with `-`, or a flag twice is a usage error. The usage text and the header comment in `main.ts` say so.
 - The assistant's instructions (the text blimpd gives it about `blimpd start`) get two sentences: start research and lookups with `--model haiku`; start building from an agreed plan with `--model opus`; give no model for planning or when unsure, so the user's own default applies.
 - The apps send neither field. Sessions started from the Mac or the iPhone start on the user's default, as today.
 
@@ -46,4 +46,4 @@ DESIGN.md: `POST /sessions` gets the two fields and their rules; the Session fie
 - `test/server.test.ts`, beside the existing `POST /sessions` cases (the fake shell there prints what it runs): a start with `model` and `effort` runs claude with both flags before the `--` and the first message; a bad `model` (a space, 61 characters, a `;`) and a bad `effort` are 400; either with `kind: "claude-glm"`, `"codex"` or `"shell"` is 400; either with `resume` is 400.
 - The short-name function: each of the four names from a real-looking id, mixed case, a `[1m]` id, an unknown id, a 40-character unknown id (cut to 24).
 - `test/activity.test.ts` or `test/sessions.test.ts`, whichever already builds a session from a transcript fixture: a `claude` session whose transcript's last reply is `claude-opus-5-5` has `model: "claude-opus-5-5"` and `label: "Opus"`; a GLM session keeps its kind label and still gets `model`; a session with no reply yet has neither; the lite list (no activity) is unchanged.
-- `blimpd start`'s argument parsing: `--model` and `--effort` in different positions, a missing value, and that the POST body carries them. Follow how `--job` is tested.
+- `blimpd start`'s argument parsing: `--model` and `--effort` right after the folder in either order, a message that says `--model` (no model, the whole message), a missing value, a value starting with `-`, a flag twice, and that the POST body carries them. Follow how `--job` is tested.
