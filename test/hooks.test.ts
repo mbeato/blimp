@@ -21,7 +21,7 @@ describe("installHooks", () => {
     mkdirSync(dir);
     writeFileSync(settings, JSON.stringify(original), { mode: 0o600 });
 
-    expect(installHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"]);
+    expect(installHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation", "StopFailure"]);
     const s = JSON.parse(readFileSync(settings, "utf8"));
     const ours = { hooks: [{ type: "command", command: `'/opt/it'\\''s/blimpd' hook`, timeout: 5 }] };
     expect(s.model).toBe("opus");
@@ -48,18 +48,18 @@ describe("installHooks", () => {
     const settings = join(tmp, "plain.json");
     const hook = { hooks: [{ type: "command", command: "/home/u/.local/bin/blimpd hook" }] };
     writeFileSync(settings, JSON.stringify({ hooks: { Notification: [hook] } }));
-    expect(installHooks("/x/blimpd", settings)).toEqual(["Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"]);
+    expect(installHooks("/x/blimpd", settings)).toEqual(["Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation", "StopFailure"]);
   });
 
   test("idempotent even when the binary isn't called blimpd", () => {
     const settings = join(tmp, "renamed.json");
-    expect(installHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(7);
+    expect(installHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(8);
     expect(installHooks("/x/dist/blimpd-linux-x64", settings)).toEqual([]);
   });
 
   test("no settings.json yet: creates it, nothing to back up", () => {
     const settings = join(tmp, "fresh", "settings.json");
-    expect(installHooks("/x/blimpd", settings)).toHaveLength(7);
+    expect(installHooks("/x/blimpd", settings)).toHaveLength(8);
     expect(existsSync(settings + ".blimp-backup")).toBe(false);
   });
 
@@ -70,11 +70,11 @@ describe("installHooks", () => {
     writeFileSync(join(tmp, "dotfiles", "s.json"), JSON.stringify({ a: 1 }));
     const settings = join(tmp, "linked", "settings.json");
     symlinkSync("../dotfiles/s.json", settings);
-    expect(installHooks("/x/blimpd", settings)).toHaveLength(7);
+    expect(installHooks("/x/blimpd", settings)).toHaveLength(8);
     expect(lstatSync(settings).isSymbolicLink()).toBe(true);
     const s = JSON.parse(readFileSync(join(tmp, "dotfiles", "s.json"), "utf8"));
     expect(s.a).toBe(1);
-    expect(Object.keys(s.hooks)).toHaveLength(7);
+    expect(Object.keys(s.hooks)).toHaveLength(8);
     expect(readdirSync(join(tmp, "dotfiles"))).toEqual(["s.json"]); // no temp files left
   });
 
@@ -99,7 +99,7 @@ describe("uninstallHooks", () => {
     const settings = join(tmp, "un.json");
     writeFileSync(settings, JSON.stringify(original), { mode: 0o640 });
     installHooks("/opt/it's/blimpd", settings);
-    expect(uninstallHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"]);
+    expect(uninstallHooks("/opt/it's/blimpd", settings)).toEqual(["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation", "StopFailure"]);
     expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual(original);
     expect(statSync(settings).mode & 0o777).toBe(0o640);
 
@@ -113,7 +113,7 @@ describe("uninstallHooks", () => {
     const settings = join(tmp, "un-bare.json");
     writeFileSync(settings, JSON.stringify({ model: "opus" }));
     installHooks("/x/dist/blimpd-linux-x64", settings);
-    expect(uninstallHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(7);
+    expect(uninstallHooks("/x/dist/blimpd-linux-x64", settings)).toHaveLength(8);
     expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ model: "opus" });
   });
 
@@ -147,7 +147,7 @@ describe("uninstallHooks", () => {
     const settings = join(tmp, "linked2", "settings.json");
     symlinkSync("../dotfiles2/s.json", settings);
     installHooks("/x/blimpd", settings);
-    expect(uninstallHooks("/x/blimpd", settings)).toHaveLength(7);
+    expect(uninstallHooks("/x/blimpd", settings)).toHaveLength(8);
     expect(lstatSync(settings).isSymbolicLink()).toBe(true);
     expect(JSON.parse(readFileSync(join(tmp, "dotfiles2", "s.json"), "utf8"))).toEqual({ a: 1 });
     expect(readdirSync(join(tmp, "dotfiles2"))).toEqual(["s.json"]); // no temp files left
@@ -339,6 +339,25 @@ describe("writeHookStatus", () => {
     writeHookStatus(ev("PostToolUse"), "old1", dir);
     expect(read("old1").since).toBe(1000);
   });
+
+  test("a turn that ends on an API error records the error, and the next event drops it", () => {
+    const fail = (o: object) => writeHookStatus(JSON.stringify({ hook_event_name: "StopFailure", session_id: "s1", ...o }), "sess", dir);
+    fail({ error: "rate_limit", error_details: "429 Too Many Requests", last_assistant_message: "API Error: Rate limit reached" });
+    expect(read("sess")).toMatchObject({ state: "done", event: "StopFailure", failure: "rate_limit", details: "429 Too Many Requests", message: "API Error: Rate limit reached" });
+
+    fail({});
+    const s = read("sess");
+    expect(s).toMatchObject({ state: "done", event: "StopFailure", failure: "unknown" });
+    expect("details" in s || "message" in s).toBe(false);
+
+    fail({ error: "overloaded", last_assistant_message: "x".repeat(1000) });
+    expect(read("sess").message).toBe("x".repeat(300));
+
+    writeHookStatus(JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "s1" }), "sess", dir);
+    const next = read("sess");
+    expect(next.state).toBe("working");
+    expect("failure" in next || "details" in next || "message" in next).toBe(false);
+  });
 });
 
 describe("`blimpd hook`", () => {
@@ -435,5 +454,11 @@ describe("Codex hooks", () => {
     }
     writeHookStatus(ev("SessionStart"), "cx-1", dir, true);
     expect(read()).toBe("working");
+  });
+
+  test("StopFailure writes nothing (Codex has no such event)", () => {
+    const dir = join(tmp, "codex-status");
+    writeHookStatus(JSON.stringify({ hook_event_name: "StopFailure", session_id: "t1", error: "rate_limit" }), "cx-2", dir, true);
+    expect(existsSync(join(dir, "cx-2.json"))).toBe(false);
   });
 });

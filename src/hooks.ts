@@ -2,6 +2,8 @@
 // Claude's internal status files. `blimpd install-hooks` adds them; Claude runs `blimpd hook`.
 // Codex takes hooks in the same format in ~/.codex/hooks.json and sends the same JSON, so the same
 // install adds blimp's there too (`blimpd hook codex`): for Codex they are the only source of state.
+// A Claude turn that ends on an API error (StopFailure) also records the error, so blimpd can tell
+// when the account in use has run out.
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,7 +11,7 @@ import { dirname, join } from "node:path";
 import { promptFromHook } from "./prompt";
 import { blimpDir, claudeDir, isSafeName } from "./sessions";
 
-const EVENTS = ["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"];
+const EVENTS = ["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation", "StopFailure"];
 
 // PreToolUse only for the question tool: it fires the moment Claude asks, and a hook on every tool call would
 // add a process start to each one.
@@ -25,6 +27,8 @@ const STATES: Record<string, string> = {
   UserPromptSubmit: "working",
   PostToolUse: "working",
   Stop: "done",
+  // A turn that ended on an API error. accounts/switcher.ts reads the error from the file.
+  StopFailure: "done",
 };
 
 // Claude also sends Notification for things that aren't a question, like idle_prompt (about 60 s after a
@@ -173,8 +177,14 @@ export function writeHookStatus(input: string, session: string | undefined, stat
     const t = prev.since ?? prev.at;
     if (typeof t === "number") since = t;
   }
+  // Why the turn failed, for the account switcher. Only this event writes it, so the next one clears it.
+  const cut = (v: unknown) => (typeof v === "string" ? v.slice(0, 300) : undefined);
+  const failure =
+    ev.hook_event_name === "StopFailure"
+      ? { failure: typeof ev.error === "string" ? ev.error : "unknown", details: cut(ev.error_details), message: cut(ev.last_assistant_message) }
+      : undefined;
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }), ...(waitAgent && { agent: waitAgent }), ...(waitCall && { call: waitCall }) }));
+  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }), ...(waitAgent && { agent: waitAgent }), ...(waitCall && { call: waitCall }), ...failure }));
   renameSync(tmp, file); // the server never reads half a file
 }
 
