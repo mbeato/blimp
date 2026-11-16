@@ -136,6 +136,23 @@ export function listSaved(dir = accountsDir(), state = readState(dir)): Saved[] 
   return list;
 }
 
+// Which saved account's login a credentials file's text holds (its claudeAiOauth, compared as JSON). Only
+// an id comes back, never any of the login. Undefined: none, or no login in the text.
+export function savedWith(credentials: string, dir = accountsDir()): string | undefined {
+  let login: string;
+  let names: string[];
+  try {
+    login = JSON.stringify(loginIn(credentials));
+    names = readdirSync(dir).filter((n) => ID.test(n));
+  } catch {
+    return;
+  }
+  for (const id of names)
+    try {
+      if (JSON.stringify(loginIn(readFileSync(join(dir, id, "credentials.json"), "utf8"))) === login) return id;
+    } catch {}
+}
+
 // Puts a saved login in place of the live one: only claudeAiOauth changes, every other key stays. A live
 // file that is missing or isn't a JSON object becomes the saved login alone. Returns the live file's new
 // mtimeMs, so the change can be told apart from one blimpd didn't make. Throws, with the live file

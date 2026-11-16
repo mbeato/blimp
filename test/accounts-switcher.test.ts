@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FILE_AFTER_MS, OUT_MS, QUIET_MS } from "../src/accounts/rules";
 import { liveMtime, putLive, type Rec, readState, saveLogin, writeState } from "../src/accounts/store";
-import { type Stop, Switcher, type SwitcherDeps } from "../src/accounts/switcher";
+import { menuOn, readStops, type Stop, Switcher, type SwitcherDeps } from "../src/accounts/switcher";
+import { writeHookStatus } from "../src/hooks";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-switcher-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -68,6 +69,13 @@ function rewrite(live: string, text: string) {
   stamp += 10;
   utimesSync(live, stamp, stamp);
 }
+// A swap made outside this switcher (state.json not written), with an mtime of its own likewise.
+function swapped(live: string, dir: string, id: string) {
+  putLive(id, live, dir);
+  stamp += 10;
+  utimesSync(live, stamp, stamp);
+  return liveMtime(live)!;
+}
 const saved = (dir: string, id: string) => readFileSync(join(dir, id, "credentials.json"), "utf8");
 
 // Case 1, reused by the cases that start after a switch.
@@ -126,7 +134,7 @@ test("a limit stop in the quiet time is continued without a switch; one after it
   expect(s.out["id-b"].until).toBe(T + QUIET_MS + 2000 + OUT_MS);
   expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B"));
   expect(t.told.length).toBe(2);
-  expect(t.told[1]).toEqual({ title: "Every Claude account is out", body: "blimp will switch when one is back." });
+  expect(t.told[1]).toEqual({ title: "Every Claude account is out", body: "Claude Code carries on by itself when a limit resets." });
 
   // The same stop asks once: the out time doesn't slide forward while it stays stopped.
   t.clock = T + QUIET_MS + 3000;
@@ -152,12 +160,18 @@ test("a stop with another error is logged and does nothing else", async () => {
   expect(t.logs).toEqual([{ event: "stop", session: "s1", error: "overloaded", details: undefined, message: undefined, account: "id-a" }]);
 });
 
-test("a stop from before blimpd started doesn't switch", async () => {
-  const { t, sw } = setup(1000);
-  t.stops = [limit("s1", 500)];
+test("a stop from before blimpd started doesn't switch; one at the start does", async () => {
+  const { t, sw } = setup(T);
+  t.stops = [limit("s1", T - 1)];
   await sw.tick();
-  expect(readState(t.dir).active).toBe("id-a");
+  const s = readState(t.dir);
+  expect(s.active).toBe("id-a");
+  expect(s.out).toEqual({});
   expect(t.typed).toEqual([]);
+  expect(t.told).toEqual([]);
+  t.stops = [limit("s1", T)];
+  await sw.tick();
+  expect(readState(t.dir).active).toBe("id-b");
 });
 
 test("a session showing a menu is left alone, one that refuses is counted as left", async () => {
@@ -301,4 +315,148 @@ test("a swap made by another process counts as filed, and the next limit starts 
   expect(s.active).toBe("id-a");
   expect(s.out["id-b"]).toBeDefined();
   expect(readFileSync(t.live, "utf8")).toBe(creds("tok-A"));
+});
+
+test("readStops keeps a stop only from the Claude session that wrote it", () => {
+  const status = join(root, "status-stops");
+  const now = Date.now();
+  const created = Math.floor(now / 1000) - 60;
+  const fail = (name: string) =>
+    writeHookStatus(JSON.stringify({ hook_event_name: "StopFailure", session_id: `sid-${name}`, error: "rate_limit", error_details: "429", last_assistant_message: "API Error" }), name, status);
+  for (const name of ["cur", "old", "glm", "noid", "later"]) fail(name);
+  writeHookStatus(JSON.stringify({ hook_event_name: "Stop", session_id: "sid-later" }), "later", status);
+  writeFileSync(join(status, "noat.json"), JSON.stringify({ state: "done", event: "StopFailure", failure: "rate_limit", sessionId: "sid-noat" }));
+  writeFileSync(join(status, "textat.json"), JSON.stringify({ state: "done", at: String(now), event: "StopFailure", failure: "rate_limit", sessionId: "sid-textat" }));
+  const sess = (name: string, o: object = {}) => ({ name, kind: "claude", created, sessionId: `sid-${name}`, ...o });
+  const stops = readStops(
+    [sess("cur"), sess("old", { created: Math.floor(now / 1000) + 3600 }), sess("glm", { kind: "claude-glm" }), sess("noid", { sessionId: undefined }), sess("later"), sess("noat"), sess("textat"), sess("none")],
+    status,
+  );
+  expect(stops.length).toBe(1);
+  expect(stops[0]).toEqual({ session: "cur", at: expect.any(Number), error: "rate_limit", details: "429", message: "API Error" });
+  expect(stops[0].at).toBeGreaterThanOrEqual(created * 1000);
+});
+
+test("menuOn: a cursor on a numbered row or a confirm footer is a menu; Claude's prompt isn't; an unread screen counts as one", () => {
+  const prompt = ["⏺ Done. Two things changed:", "", "  1. The tests", "  2. The docs", "", "─────────────", "❯ ", "─────────────", "  ? for shortcuts"].join("\n");
+  const limitMenu = [" What do you want to do?", "", " ❯ 1. Stop and wait for limit to reset", "   2. Switch to extra usage", "   3. Upgrade your plan"].join("\n");
+  const confirm = [" Switch model?", " Opus 5.5 is now the default.", "", " Enter to confirm · Esc to cancel"].join("\n");
+  expect(menuOn(prompt)).toBe(false);
+  expect(menuOn(limitMenu)).toBe(true);
+  expect(menuOn(confirm)).toBe(true);
+  expect(menuOn("")).toBe(true);
+  expect(menuOn("\n\n")).toBe(true);
+  // Only the last 40 lines count: a menu scrolled further up is gone.
+  expect(menuOn([limitMenu, ...Array(40).fill("⏺ later output"), prompt].join("\n"))).toBe(false);
+});
+
+test("a swap whose state write was lost is adopted, not filed over the old account", async () => {
+  const { t, sw } = setup();
+  swapped(t.live, t.dir, "id-b");
+  await sw.tick();
+  t.clock = T + FILE_AFTER_MS;
+  await sw.tick();
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  const s = readState(t.dir);
+  expect(s.active).toBe("id-b");
+  expect(s.filed?.mtime).toBe(liveMtime(t.live)!);
+  expect(t.logs).toContainEqual({ event: "adopted", account: "id-b" });
+  expect(t.logs.some((e) => e.event === "renewal" || e.event === "login")).toBe(false);
+});
+
+test("the stop behind a lost state write doesn't switch back once the swap is adopted", async () => {
+  const { t, sw } = setup();
+  const mtime = swapped(t.live, t.dir, "id-b");
+  t.stops = [limit("s1", mtime - 1000)];
+  await sw.tick();
+  const s = readState(t.dir);
+  expect(s.active).toBe("id-b");
+  expect(s.out).toEqual({});
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B"));
+});
+
+test("a live file with no login in it is noted as unfiled once, and nothing throws", async () => {
+  const { t, sw } = setup();
+  rewrite(t.live, JSON.stringify({ mcpOAuth: {} }));
+  for (const c of [T, T + FILE_AFTER_MS, T + 2 * FILE_AFTER_MS]) {
+    t.clock = c;
+    await sw.tick();
+  }
+  expect(t.logs.filter((e) => e.event === "unfiled").length).toBe(1);
+  expect(t.logs.filter((e) => e.event === "error")).toEqual([]);
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+});
+
+test("a session that leaves the stop list during the wait, or stops again, isn't typed into", async () => {
+  const { t, sw } = setup();
+  let reads = 0;
+  t.stops = async () => (++reads === 1 ? [limit("s1", T), limit("s2", T), limit("s3", T)] : [limit("s1", T), limit("s3", T + 500)]);
+  await sw.tick();
+  expect(reads).toBe(2);
+  expect(t.typed).toEqual(["s1"]);
+  expect(t.told[0].body).toBe("a@x.com ran out. 1 session continued.");
+});
+
+test("a login made by hand gets the quiet time: a limit stop 5 s after it doesn't switch, one 31 s after does", async () => {
+  const { t, sw } = setup();
+  rewrite(t.live, creds("tok-C"));
+  const mtime = liveMtime(t.live)!;
+  t.rec = rec("id-c", "c@x.com");
+  t.stops = [limit("s1", mtime + 5000)];
+  await sw.tick();
+  let s = readState(t.dir);
+  expect(s.active).toBe("id-c");
+  expect(s.out).toEqual({});
+  expect(saved(t.dir, "id-c")).toBe(creds("tok-C"));
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-C"));
+
+  t.stops = [limit("s1", mtime + 5000), limit("s2", mtime + 31_000)];
+  t.clock = T + 1000;
+  await sw.tick();
+  s = readState(t.dir);
+  expect(Object.keys(s.out)).toEqual(["id-c"]);
+  expect(s.active).toBe("id-a");
+});
+
+test("a throw from menu for one session doesn't stop the others or the notification", async () => {
+  const { t, deps } = setup();
+  const sw = new Switcher(
+    {
+      ...deps,
+      menu: (s) => {
+        if (s === "s1") throw new Error("zmx went away");
+        return false;
+      },
+    },
+    0,
+  );
+  t.stops = [limit("s1", T), limit("s2", T)];
+  await sw.tick();
+  expect(t.typed).toEqual(["s2"]);
+  expect(t.told[0].body).toBe("a@x.com ran out. 1 session continued. 1 left as they were.");
+});
+
+test("an account with no email is named by its id", async () => {
+  const { t, sw } = setup();
+  rmSync(join(t.dir, "id-a", "account.json"));
+  rmSync(join(t.dir, "id-b", "account.json"));
+  t.stops = [limit("s1", T)];
+  await sw.tick();
+  expect(t.told[0]).toEqual({ title: "Now on id-b", body: "id-a ran out. 1 session continued." });
+  await sw.use("id-a");
+  expect(t.told[1]).toEqual({ title: "Now on id-a", body: "Switched by hand." });
+});
+
+test("an error that keeps coming back is logged once, a different one again", async () => {
+  const { t, sw } = setup();
+  let msg = "zmx went away";
+  t.stops = () => Promise.reject(new Error(msg));
+  for (let i = 0; i < 3; i++) await sw.tick();
+  msg = "something else";
+  await sw.tick();
+  expect(t.logs).toEqual([
+    { event: "error", error: "zmx went away" },
+    { event: "error", error: "something else" },
+  ]);
 });

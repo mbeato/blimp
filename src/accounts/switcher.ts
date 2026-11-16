@@ -8,14 +8,12 @@
 
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { CLAUDE_KINDS } from "../kinds";
-import { parseScreenOptions } from "../prompt";
 import { apnsFor } from "../push/watch";
 import { readCreds, readDevices } from "../push/store";
-import { blimpDir, claudeDir, isSafeName, listSessionsLite, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
+import { blimpDir, claudeDir, isSafeName, listSessionsLite, type Session, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
 import { typeInto } from "../typing";
 import { FILE_AFTER_MS, filing, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS } from "./rules";
-import { accountsDir, accountsOn, listSaved, liveFile, liveMtime, putLive, type Rec, readRecord, readState, saveLogin, type State, writeState } from "./store";
+import { accountsDir, accountsOn, listSaved, liveFile, liveMtime, putLive, type Rec, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
 
 export type Stop = { session: string; at: number; error: string; details?: string; message?: string };
 export type SwitcherDeps = {
@@ -44,6 +42,7 @@ export class Switcher {
   private asked = new Map<string, number>();
   private continued = new Map<string, number>();
   private toldOutFor?: number; // switchedAt when "every account is out" was last told
+  private lastError?: string;
   private busy = false;
 
   constructor(
@@ -73,11 +72,14 @@ export class Switcher {
       const out = stops.filter((s) => OUT_ERRORS.includes(s.error));
 
       // A limit stop in the quiet time after a switch left before it, and one from before blimpd
-      // started is a stale status file: neither asks for a switch.
-      const asking = out.filter((s) => this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started);
+      // started is a stale status file: neither asks for a switch. The live file is filed first, so the
+      // copy put back later has the newest refresh token; a login filed then moves switchedAt to the
+      // login, so the stops are asked again after it (a request that left on the old account is quiet).
+      const asks = (s: Stop) => this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started;
+      if (out.some(asks)) this.file(state);
+      const asking = out.filter(asks);
       let switched: { from: string; to: string } | undefined;
       if (asking.length) {
-        this.file(state);
         const from = state.active;
         if (from) state.out[from] = { at: now, until: now + OUT_MS };
         const saved = listSaved(this.deps.dir, state);
@@ -93,12 +95,12 @@ export class Switcher {
         if (!next) {
           if (this.toldOutFor !== (state.switchedAt ?? 0)) {
             this.toldOutFor = state.switchedAt ?? 0;
-            await this.deps.tell("Every Claude account is out", "blimp will switch when one is back.");
+            await this.deps.tell("Every Claude account is out", "Claude Code carries on by itself when a limit resets.");
           }
           return;
         }
         this.deps.log({ event: "switch", from, to: next.id });
-        switched = { from: saved.find((a) => a.id === from)?.email || "The last account", to: next.email };
+        switched = { from: saved.find((a) => a.id === from)?.email || from || "The last account", to: next.email || next.id };
       }
 
       // After a switch, every limit stop; otherwise only one that came in the quiet time after the last.
@@ -108,15 +110,21 @@ export class Switcher {
       let left = 0;
       if (due.length) {
         await this.deps.wait(CONTINUE_AFTER_MS);
+        // Only into a session still stopped on that same limit: one that moved on during the wait is
+        // dropped, counted neither way. A list that can't be read types into nobody.
+        const still = await this.deps.stops().catch((e) => {
+          this.error(e);
+          return [] as Stop[];
+        });
         for (const s of due) {
+          if (!still.some((x) => x.session === s.session && x.at === s.at && OUT_ERRORS.includes(x.error))) continue;
           this.continued.set(s.session, s.at); // tried once, whatever happens
-          if (this.deps.menu(s.session)) {
-            left++;
-            continue;
-          }
           try {
-            await this.deps.type(s.session);
-            done++;
+            if (this.deps.menu(s.session)) left++;
+            else {
+              await this.deps.type(s.session);
+              done++;
+            }
           } catch (e) {
             left++;
             this.deps.log({ event: "not continued", session: s.session, error: (e as Error).message });
@@ -129,10 +137,19 @@ export class Switcher {
         await this.deps.tell(`Now on ${switched.to}`, `${switched.from} ran out. ${body}`);
       }
     } catch (e) {
-      this.deps.log({ event: "error", error: (e as Error).message });
+      this.error(e);
     } finally {
       this.busy = false;
     }
+  }
+
+  // A step that keeps failing would write the same line every second: an error is logged only when it
+  // differs from the last one logged.
+  private error(e: unknown) {
+    const error = (e as Error).message;
+    if (error === this.lastError) return;
+    this.lastError = error;
+    this.deps.log({ event: "error", error });
   }
 
   // By hand (`blimpd account use`): file, swap, tell. Nothing is marked out and nobody gets "continue".
@@ -150,7 +167,7 @@ export class Switcher {
     state.filed = { mtime, record: state.filed?.record ?? "" };
     writeState(state, this.deps.dir);
     this.deps.log({ event: "switch", from, to: id, byHand: true });
-    await this.deps.tell(`Now on ${to.email}`, "Switched by hand.");
+    await this.deps.tell(`Now on ${to.email || to.id}`, "Switched by hand.");
   }
 
   // Saves the live file under whoever it belongs to (rules.ts `filing`), so the copy put back later has
@@ -161,20 +178,69 @@ export class Switcher {
     this.seen = undefined;
     const rec = this.deps.record();
     const who = filing(s, rec);
-    if (!who) {
-      // Nobody to file it under. Noted as filed, so it isn't tried again every second.
+    const text = readFileSync(this.deps.live, "utf8");
+    // Exactly another saved account's login: a swap whose state write was lost (a throw, a crash, or
+    // `account use` in another process). That account is in use, from the swap's time; saving would put
+    // its login over this one's.
+    const owner = savedWith(text, this.deps.dir);
+    if (owner && owner !== who?.id) {
+      s.active = owner;
+      s.switchedAt = mtime;
+      s.filed = { mtime, record: s.filed?.record ?? "" };
+      writeState(s, this.deps.dir);
+      this.deps.log({ event: "adopted", account: owner });
+      return;
+    }
+    // Nobody to file it under, or no login in it (after /logout, say): noted as filed, so it isn't tried
+    // again every second.
+    const unfiled = () => {
       s.filed = { mtime, record: s.filed?.record ?? "" };
       writeState(s, this.deps.dir);
       this.deps.log({ event: "unfiled" });
-      return;
+    };
+    if (!who) return unfiled();
+    try {
+      saveLogin(who.id, text, who.login ? rec!.account : undefined, this.deps.dir);
+    } catch {
+      return unfiled();
     }
-    saveLogin(who.id, readFileSync(this.deps.live, "utf8"), who.login ? rec!.account : undefined, this.deps.dir);
     if (!s.order.includes(who.id)) s.order.push(who.id);
     s.active = who.id;
     s.filed = { mtime, record: rec?.raw ?? s.filed?.record ?? "" };
+    // A login by hand is a switch too: a limit stop from a request that left on the old account gets
+    // the quiet time.
+    if (who.login) s.switchedAt = mtime;
     writeState(s, this.deps.dir);
     this.deps.log({ event: who.login ? "login" : "renewal", account: who.id });
   }
+}
+
+// The Claude sessions whose latest hook event is a StopFailure. Only a status file the session wrote
+// itself counts: one older than the session was left by an earlier session of the same name (the rule
+// deriveState in sessions.ts uses), and a session with no sessionId isn't running Claude. Only the
+// Claude kind: a GLM session talks to another provider, so its limit says nothing about the account.
+export function readStops(sessions: Pick<Session, "name" | "kind" | "created" | "sessionId">[], statusDir: string): Stop[] {
+  const stops: Stop[] = [];
+  for (const s of sessions) {
+    if (s.kind !== "claude" || !s.sessionId || !isSafeName(s.name)) continue;
+    try {
+      const j = JSON.parse(readFileSync(join(statusDir, `${s.name}.json`), "utf8"));
+      if (j?.event === "StopFailure" && typeof j.at === "number" && j.at >= s.created * 1000)
+        stops.push({ session: s.name, at: j.at, error: j.failure || "unknown", details: j.details, message: j.message });
+    } catch {}
+  }
+  return stops;
+}
+
+// Whether a session's screen shows a list of choices, from its last 40 lines: a cursor on a numbered
+// row, or a dialog's "Enter to confirm" / "Esc to cancel". Typing "continue" and Enter there would pick
+// whatever is highlighted. A screen that couldn't be read (no text) counts as one, so it's left alone.
+export function menuOn(screen: string): boolean {
+  if (!screen.trim()) return true;
+  return screen
+    .split("\n")
+    .slice(-40)
+    .some((l) => /^\s*❯\s*\d+\.\s+\S/.test(l) || l.includes("Enter to confirm") || l.includes("Esc to cancel"));
 }
 
 // The live deps. Paths are worked out when blimpd starts the loop, not when this file is imported.
@@ -185,21 +251,11 @@ function liveDeps(): SwitcherDeps {
     dir,
     live: liveFile(),
     record: () => readRecord(),
-    stops: async () => {
-      const stops: Stop[] = [];
-      for (const s of listSessionsLite(claudeDir(), await zmxListAsync())) {
-        if (!CLAUDE_KINDS.includes(s.kind) || !isSafeName(s.name)) continue;
-        try {
-          const j = JSON.parse(readFileSync(join(status, `${s.name}.json`), "utf8"));
-          if (j?.event === "StopFailure") stops.push({ session: s.name, at: j.at, error: j.failure || "unknown", details: j.details, message: j.message });
-        } catch {}
-      }
-      return stops;
-    },
-    // Read the way sessions.ts reads a permission prompt's screen: the last 40 lines, 5 s at most.
+    stops: async () => readStops(listSessionsLite(claudeDir(), await zmxListAsync()), status),
+    // Read the way sessions.ts reads a permission prompt's screen, 5 s at most. Unread: no text.
     menu: (name) => {
       const r = Bun.spawnSync([zmxPath(), "history", name], { env: zmxEnv(), stdout: "pipe", stderr: "ignore", timeout: 5000, killSignal: "SIGKILL" });
-      return parseScreenOptions(r.exitedDueToTimeout ? "" : r.stdout.toString().split("\n").slice(-40).join("\n")).length > 0;
+      return menuOn(r.exitedDueToTimeout || r.exitCode !== 0 ? "" : r.stdout.toString());
     },
     type: (name) => typeInto(name, "continue", { enter: true }),
     tell: async (title, body) => {

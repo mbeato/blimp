@@ -5,7 +5,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { forgetLogin, listSaved, putLive, readRecord, readState, saveLogin, writeState } from "../src/accounts/store";
+import { forgetLogin, listSaved, putLive, readRecord, readState, savedWith, saveLogin, writeState } from "../src/accounts/store";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-accounts-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -208,5 +208,20 @@ describe("forgetLogin", () => {
     expect(readdirSync(dir)).toEqual(["id-b"]);
     forgetLogin("id-a", dir);
     expect(readdirSync(dir)).toEqual(["id-b"]);
+  });
+});
+
+describe("savedWith", () => {
+  test("names the saved account whose login a credentials text holds, whatever else the text keeps; none gives undefined", () => {
+    const dir = fresh();
+    saveLogin("id-a", creds("tok-A"), acct("id-a", "a@x.com"), dir);
+    saveLogin("id-b", creds("tok-B"), acct("id-b", "b@x.com"), dir);
+    const withMcp = (tok: string) => JSON.stringify({ mcpOAuth: { s: { accessToken: "mcp-x" } }, ...JSON.parse(creds(tok)) });
+    expect(savedWith(withMcp("tok-B"), dir)).toBe("id-b");
+    expect(savedWith(creds("tok-A"), dir)).toBe("id-a");
+    expect(savedWith(creds("tok-Z"), dir)).toBeUndefined();
+    expect(savedWith(JSON.stringify({ mcpOAuth: {} }), dir)).toBeUndefined();
+    expect(savedWith("not json", dir)).toBeUndefined();
+    expect(savedWith(creds("tok-A"), join(dir, "nowhere"))).toBeUndefined();
   });
 });
