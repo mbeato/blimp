@@ -15,7 +15,7 @@ import { readCreds, readDevices } from "../push/store";
 import { blimpDir, claudeDir, isSafeName, listSessionsLite, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
 import { typeInto } from "../typing";
 import { FILE_AFTER_MS, filing, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS } from "./rules";
-import { accountsDir, listSaved, liveFile, liveMtime, putLive, type Rec, readRecord, readState, saveLogin, type State, writeState } from "./store";
+import { accountsDir, accountsOn, listSaved, liveFile, liveMtime, putLive, type Rec, readRecord, readState, saveLogin, type State, writeState } from "./store";
 
 export type Stop = { session: string; at: number; error: string; details?: string; message?: string };
 export type SwitcherDeps = {
@@ -227,5 +227,8 @@ function liveDeps(): SwitcherDeps {
 
 export function startAccounts(every = 1000): void {
   const s = new Switcher(liveDeps());
-  setInterval(() => void s.tick(), every);
+  // Off unless config.json says so (store.ts accountsOn), checked every tick: no restart to turn it on.
+  setInterval(() => {
+    if (accountsOn()) void s.tick();
+  }, every);
 }

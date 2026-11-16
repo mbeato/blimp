@@ -142,6 +142,17 @@ describe("guardFile", () => {
     expect(guardFile(join(blimp, "secrets-notes.txt"), home, blimp)).toBe(join(blimp, "secrets-notes.txt"));
   });
 
+  test("the saved logins' folder, anything in it, and the folder that holds it are refused", () => {
+    mkdirSync(join(blimp, "accounts", "id-a"), { recursive: true });
+    writeFileSync(join(blimp, "accounts", "id-a", "credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "tok-A" } }));
+    expect(secretPaths(home, blimp)).toContain(join(blimp, "accounts"));
+    for (const p of [join(blimp, "accounts"), join(blimp, "accounts", "id-a", "credentials.json"), blimp]) {
+      expect(status(() => guardFile(p, home, blimp))).toBe(403);
+      expect(status(() => guardEntry(p, home, blimp))).toBe(403);
+    }
+    expect(guardFile(join(blimp, "accounts-notes.txt"), home, blimp)).toBe(join(blimp, "accounts-notes.txt"));
+  });
+
   test("the folder routes don't list the secrets folder or one in it; the folder that holds it still lists", () => {
     mkdirSync(join(blimp, "secrets", "sub"), { recursive: true });
     for (const p of [join(blimp, "secrets"), join(blimp, "secrets", "sub")]) expect(status(() => guardList(p, home, blimp))).toBe(403);

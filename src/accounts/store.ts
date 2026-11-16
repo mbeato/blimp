@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { readConfig } from "../names";
 import { blimpDir, claudeDir } from "../sessions";
 
 export type Saved = { id: string; email: string; expires?: number }; // expires: the refresh token's, ms
@@ -22,6 +23,10 @@ export type Rec = { id: string; email: string; raw: string; account: unknown }; 
 export const accountsDir = (dir = blimpDir()) => join(dir, "accounts");
 export const liveFile = (claude = claudeDir()) => join(claude, ".credentials.json");
 export const recordFile = () => join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json");
+
+// Switching is off unless <socket dir>/config.json has "accounts": true, so no copy of a login is made
+// until the user asks. dir is the socket dir.
+export const accountsOn = (dir = blimpDir()) => (readConfig(join(dir, "config.json")) as { accounts?: unknown }).accounts === true;
 
 // An account id is oauthAccount.accountUuid. One that isn't letters, digits and dashes is refused, so
 // no path can leave the folder.
