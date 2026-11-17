@@ -93,11 +93,13 @@ export function gapOf(id: string, dir: string): Gap | undefined {
 // through the login shell, so it is the same claude on the same PATH; in blimpd's own environment, so a
 // CLAUDE_CONFIG_DIR it runs with applies. In the temp folder, stdin closed, stdout kept. Undefined on a
 // non-zero exit, no such shell, or a kill after the time limit: a hung profile or claude, or a child
-// still holding stdout, can't keep a reading running for ever.
+// still holding stdout, can't keep a reading running for ever. The child carries the limit too (coreutils
+// timeout): blimpd restarting doesn't kill it (KillMode=process), and the timer here dies with blimpd.
 export async function mcpList(shell = loginShell(), limit = CONNECTORS_TIMEOUT_MS): Promise<string | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const secs = Math.max(1, Math.ceil(limit / 1000));
   try {
-    const p = Bun.spawn([shell, "-l", "-i", "-c", 'exec claude "$@"', "claude", "mcp", "list"], { cwd: tmpdir(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const p = Bun.spawn([shell, "-l", "-i", "-c", `exec timeout -s KILL ${secs} claude "$@"`, "claude", "mcp", "list"], { cwd: tmpdir(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const killed = new Promise<undefined>((r) => {
       timer = setTimeout(() => {
         p.kill("SIGKILL");
