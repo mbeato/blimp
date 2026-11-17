@@ -8,7 +8,7 @@ Open blimp and see every live session on your server: what it's doing, and which
 
 **v1 is done when:**
 - Max uses it instead of `claude1 ls` / `claude1 -a` / `code1` for a full working week without falling back.
-- A stranger can go from a fresh Linux server to a working blimp by following the README.
+- A stranger can go from a fresh Linux server to a working blimp by following the README. (Since v1, the server can also be a Mac with an Apple chip.)
 
 ## What v1 does
 
@@ -51,7 +51,7 @@ your server: blimpd (small TypeScript service, listens only on localhost)
 - **Sessions live in zmx** on the server, the same as `claude1` today. blimp is another way to attach, so the terminal, `claude1` and blimp all work side by side, and nothing is lost if the app crashes.
 - **Status:** v1 reads Claude Code's per-session status files. These are undocumented and may change, so blimpd also installs Claude Code hooks (Notification / Stop) that write blimp's own status as a backup.
 - **Server setup:** one command, `curl … | sh`. It:
-  - installs blimpd and zmx as a user service, with no root needed;
+  - installs blimpd and zmx as a user service (systemd on Linux, launchd on a Mac), with no root needed;
   - checks that Claude Code is installed;
   - prints what to enter in the app (host, user).
 - **Nothing hardcoded:** you can add more than one server in the app, and nothing assumes `claude1`, Max's paths, or recense.
@@ -89,4 +89,5 @@ your server: blimpd (small TypeScript service, listens only on localhost)
 - **License:** MIT.
 - **Repo:** GitHub `mbeato/blimp`, private until the milestone 5 release. The code lives on the claude1 server, and the Mac app is built on the Pro or the Air.
 - **Connection:** plain SSH. Tailscale is optional.
+- **Server:** Linux, or a Mac with an Apple chip (added after v1). Not an Intel Mac.
 - **Editing in v1:** Monaco. Embedding the full VS Code is decided after v1.

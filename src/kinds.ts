@@ -192,8 +192,17 @@ export async function launchFor(id: string, resume?: string, home = homedir(), f
   if (id === "claude") return { script: 'exec claude "$@"', args: claudeArgs };
   if (id === "codex") {
     // Codex takes MCP servers as config overrides; values are TOML, which JSON strings and arrays are.
+    // env_vars: Codex gives an MCP server only a few variables of its own (HOME, PATH…) plus the ones
+    // named here, and blimp's servers need these two to find their session and blimpd.
     const [cmd, ...rest] = selfCommand();
-    const server = (name: string, sub: string) => ["-c", `mcp_servers.${name}.command=${JSON.stringify(cmd)}`, "-c", `mcp_servers.${name}.args=${JSON.stringify([...rest, sub])}`];
+    const server = (name: string, sub: string) => [
+      "-c",
+      `mcp_servers.${name}.command=${JSON.stringify(cmd)}`,
+      "-c",
+      `mcp_servers.${name}.args=${JSON.stringify([...rest, sub])}`,
+      "-c",
+      `mcp_servers.${name}.env_vars=["ZMX_SESSION","BLIMPD_SOCKET"]`,
+    ];
     return { script: 'exec codex "$@"', args: ["codex", ...server("blimp", "visuals-mcp"), ...(browserMcp ? server("blimp-browser", "browser-mcp") : [])] };
   }
   if (id === "claude-glm") {

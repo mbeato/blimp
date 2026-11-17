@@ -30,7 +30,7 @@ import { dirname } from "node:path";
 import { runAccount, runAccounts } from "./accounts/cli";
 import { runAnswer, runStart } from "./act";
 import { runAssistant } from "./assistant";
-import { findChrome } from "./browser/chrome";
+import { chromeHint, findChrome } from "./browser/chrome";
 import { runBrowserMcp } from "./browser/mcp";
 import { CODEX_HOOKS, codexHooksFile, installHooks, runHook, uninstallHooks } from "./hooks";
 import { runMessages } from "./messages/cli";
@@ -100,7 +100,7 @@ if (cmd === "sessions") {
 } else if (cmd === "reddit-key") {
   process.exit(runRedditKey(args));
 } else if (cmd === "browser") {
-  console.log(findChrome() ?? "no Chrome or Chromium found; install one: npx playwright install chromium");
+  console.log(findChrome() ?? `no Chrome or Chromium found; install one: ${chromeHint()}`);
 } else if (cmd === "browser-mcp") {
   process.exit(await runBrowserMcp());
 } else if (cmd === "visuals-mcp") {

@@ -85,6 +85,8 @@ function socket(path: string) {
   return opened;
 }
 const type = (ws: WebSocket, keys: string) => ws.send(new TextEncoder().encode(keys));
+// A screen's text with its line ends taken out: a long line (macOS has a long temp folder path) wraps on the screen.
+const flat = (text: string) => text.replace(/\r?\n/g, "");
 // A busy session can be listed as unreachable, with no pid or client count: that's not 0 clients.
 const clients = (name: string) => parseZmxList(zmx("list").stdout.toString()).find((s) => s.name === name && s.pid > 0)?.clients;
 
@@ -1255,7 +1257,7 @@ describe("starting sessions", () => {
     const { name } = await r.json();
     made.push(name);
     const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
-    await until(() => s.text.includes("-- -fix the tests]"), "the first message in Claude's arguments");
+    await until(() => flat(s.text).includes("-- -fix the tests]"), "the first message in Claude's arguments");
     s.ws.close();
     expect((await post({ dir, prompt: " \x1b " })).status).toBe(400);
     expect((await post({ dir, prompt: 5 })).status).toBe(400);
@@ -1303,7 +1305,7 @@ describe("starting sessions", () => {
     made.push(name);
     expect(r.out).toBe(`started ${name} in ${dir}`);
     const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
-    await until(() => s.text.includes("-- look at the logs]"), "the first message in Claude's arguments");
+    await until(() => flat(s.text).includes("-- look at the logs]"), "the first message in Claude's arguments");
     s.ws.close();
     expect(((await (await api("/sessions")).json()) as any[]).find((x) => x.name === name).job).toMatchObject({ reason: "the logs" });
     const usage = "blimpd start: usage: blimpd start <folder> [--model <m>] [--effort <e>] <first message> [--job <reason>]";
@@ -1352,7 +1354,7 @@ describe("starting sessions", () => {
         const { name } = await r.json();
         made.push(name);
         const s = await socket(`/sessions/${name}/attach?cols=100&rows=30`);
-        await until(() => s.text.includes(`-- go ${i}]`), `the first output of start ${i + 1}`);
+        await until(() => flat(s.text).includes(`-- go ${i}]`), `the first output of start ${i + 1}`);
         s.ws.close();
       }
     } finally {
@@ -1771,8 +1773,10 @@ describe("kinds and keys", () => {
   // Claude and Codex always get blimp's MCP (the show tool), and the browser's too when this blimpd finds a Chrome
   // (in kHome or on PATH) and npx (browser/mcp.ts): what's added to their arguments (Claude: the file with both then).
   const claudeMcp = `--mcp-config ${browserOn ? join(kTmp, "browser", "mcp.json") : join(kTmp, "mcp.json")}`;
-  const blimpCodex = String.raw`-c mcp_servers\.blimp\.command="[^"]+" -c mcp_servers\.blimp\.args=\[[^\]]*"visuals-mcp"\]`;
-  const browserCodex = String.raw` -c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]`;
+  // env_vars: the two variables Codex passes on to each server (kinds.ts).
+  const codexEnv = (name: string) => String.raw` -c mcp_servers\.${name}\.env_vars=\["ZMX_SESSION","BLIMPD_SOCKET"\]`;
+  const blimpCodex = String.raw`-c mcp_servers\.blimp\.command="[^"]+" -c mcp_servers\.blimp\.args=\[[^\]]*"visuals-mcp"\]` + codexEnv("blimp");
+  const browserCodex = String.raw` -c mcp_servers\.blimp-browser\.command="[^"]+" -c mcp_servers\.blimp-browser\.args=\[[^\]]*"browser-mcp"\]` + codexEnv("blimp-browser");
   const codexMcp = new RegExp(`^${blimpCodex}${browserOn ? browserCodex : ""}$`);
   const withMcp = (rest: string) => [claudeMcp, rest].filter(Boolean).join(" ");
 
@@ -2404,7 +2408,7 @@ describe("secrets", () => {
 
 describe("assistant", () => {
   const dir = join(tmp, "assistant");
-  const screen = () => zmx("history", "assistant").stdout.toString();
+  const screen = () => flat(zmx("history", "assistant").stdout.toString());
 
   test("on: blimpd starts a session named assistant in its folder, in default mode; killed, it's back, continuing once there's a conversation; off ends it", async () => {
     made.push("assistant");

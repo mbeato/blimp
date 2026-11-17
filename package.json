@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test --parallel",
-    "build": "bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/blimpd-linux-x64 && bun build src/main.ts --compile --target=bun-linux-arm64 --outfile dist/blimpd-linux-arm64",
+    "build": "bun build src/main.ts --compile --target=bun-linux-x64 --outfile dist/blimpd-linux-x64 && bun build src/main.ts --compile --target=bun-linux-arm64 --outfile dist/blimpd-linux-arm64 && bun build src/main.ts --compile --target=bun-darwin-arm64 --outfile dist/blimpd-darwin-arm64",
     "relay": "bun build relay/main.ts --compile --target=bun-darwin-arm64 --outfile dist/blimp-relay"
   },
   "devDependencies": {

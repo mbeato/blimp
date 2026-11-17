@@ -1,11 +1,12 @@
 import { afterAll, describe, expect, spyOn, test } from "bun:test";
-import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   checkZmxDir,
   deriveState,
   formatList,
+  maxNameLength,
   newSessionName,
   parseZmxList,
   rememberKind,
@@ -13,6 +14,7 @@ import {
   transcriptTitle,
   transcriptTitles,
   zmxDir,
+  zmxEnv,
 } from "../src/sessions";
 
 describe("zmx's socket folder", () => {
@@ -20,8 +22,30 @@ describe("zmx's socket folder", () => {
     const uid = process.getuid!();
     expect(zmxDir({ ZMX_DIR: "/z", XDG_RUNTIME_DIR: "/run/user/1" })).toBe("/z");
     expect(zmxDir({ XDG_RUNTIME_DIR: "/run/user/1" })).toBe("/run/user/1/zmx");
-    expect(zmxDir({ TMPDIR: "/var/t" })).toBe(`/var/t/zmx-${uid}`);
-    expect(zmxDir({})).toBe(`/tmp/zmx-${uid}`);
+    expect(zmxDir({ TMPDIR: "/var/t" }, "linux")).toBe(`/var/t/zmx-${uid}`);
+    expect(zmxDir({}, "linux")).toBe(`/tmp/zmx-${uid}`);
+  });
+
+  test("on a Mac it's ~/.zmx when none is set: zmx's own choice there is a long temp folder", () => {
+    expect(zmxDir({ TMPDIR: "/var/folders/24/x/T/" }, "darwin")).toBe(join(homedir(), ".zmx"));
+    expect(zmxDir({ ZMX_DIR: "/z", XDG_RUNTIME_DIR: "/run/user/1" }, "darwin")).toBe("/z");
+    expect(zmxDir({ XDG_RUNTIME_DIR: "/run/user/1" }, "darwin")).toBe("/run/user/1/zmx");
+  });
+
+  test("on a Mac every zmx call is told the folder; on Linux zmx finds it itself, as before", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "bz"));
+    const old = { ZMX_DIR: process.env.ZMX_DIR, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR };
+    delete process.env.ZMX_DIR;
+    process.env.XDG_RUNTIME_DIR = tmp;
+    try {
+      expect(zmxEnv("darwin").ZMX_DIR).toBe(join(tmp, "zmx"));
+      expect(zmxEnv("linux").ZMX_DIR).toBeUndefined();
+    } finally {
+      for (const [k, v] of Object.entries(old))
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   test("made private when missing; refused when others can write it or it's a link", () => {
@@ -118,6 +142,24 @@ describe("newSessionName", () => {
   test("never reuses a running name", () => {
     expect(newSessionName("/home/u/web", at, ["web-090507", "web-090507-2"])).toBe("web-090507-3");
   });
+
+  test("a long folder name is cut so the whole name fits", () => {
+    const long = "/Users/u/" + "a".repeat(60);
+    expect(newSessionName(long, at, [], undefined, 46)).toBe(`${"a".repeat(39)}-090507`);
+    expect(newSessionName(long, at, [], "review", 46)).toBe(`${"a".repeat(39)}-review`);
+    expect(newSessionName(long, at, [`${"a".repeat(39)}-090507`], undefined, 46)).toBe(`${"a".repeat(37)}-090507-2`);
+    expect(newSessionName("/Users/u/web", at, [], undefined, 46)).toBe("web-090507");
+    expect(newSessionName(long, at, [])).toBe(`${"a".repeat(60)}-090507`);
+    // A Mac's disk ignores letter case, so there web-fix is taken while web-Fix runs.
+    expect(newSessionName("/Users/u/web", at, ["web-Fix"], "fix", 84, "darwin")).toBe("web-fix-2");
+    expect(newSessionName("/Users/u/web", at, ["web-Fix"], "fix", Infinity, "linux")).toBe("web-fix");
+  });
+
+  test("how long: what macOS's 103-byte socket path leaves after zmx's folder; Linux as before", () => {
+    expect(maxNameLength("/var/folders/24/hf4413_n78j55z9wzgfz049m0000gn/T/zmx-501", "darwin")).toBe(46);
+    expect(maxNameLength("/Users/mbeato/.zmx", "darwin")).toBe(84);
+    expect(maxNameLength("/run/user/1000/zmx", "linux")).toBe(Infinity);
+  });
 });
 
 describe("formatList", () => {
@@ -150,7 +192,7 @@ test("listSessions joins zmx with Claude's session file, transcript and blimp's 
   const zmxOut = "  name=web-1\tpid=42\tclients=1\tcreated=5\tcwd=/home/u/web\tcmd=claude\n  name=sh-2\tpid=43\tclients=0\tcreated=6\tcwd=/tmp\tcmd=";
   expect(listSessions(home, zmxOut, join(home, "status"), undefined, {}, { since: 0, seen: {} })).toEqual([
     { name: "web-1", pid: 42, clients: 1, created: 5, kind: "claude", dir: "/home/u/web/src", cmd: "claude", sessionId: "s1", transcript: join(home, "projects", "-home-u-web", "s1.jsonl"), title: "Web work", status: "busy", waitingFor: undefined, updatedAt: 123, state: "working", stateSince: 123, unread: false },
-    { name: "sh-2", pid: 43, clients: 0, created: 6, kind: "shell", dir: "/tmp", cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000, unread: false },
+    { name: "sh-2", pid: 43, clients: 0, created: 6, kind: "shell", dir: realpathSync("/tmp"), cmd: "", sessionId: undefined, title: "(new session)", status: "", waitingFor: undefined, updatedAt: undefined, state: "waiting", stateSince: 7000, unread: false },
   ]);
   // No reply yet: no model, so no label.
   const [fresh] = listSessions(home, zmxOut, join(home, "status"), undefined, {}, { since: 0, seen: {} });

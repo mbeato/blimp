@@ -264,3 +264,23 @@ Each item says what to do, and what should happen. If the result is different, w
 - [ ] **Two devices on one session.**
   Do: open a session in blimp. On the server in Terminal, run `zmx attach <name>` (the name is in `zmx list`). If you have a second Mac with blimp, open the same session there too. Type in each one.
   Expect: what you type in one shows in all of them. When you detach the Terminal client with `ctrl+\`, blimp keeps working.
+
+## A Mac as the server
+
+These need a Mac with an Apple chip that runs blimpd (a Mac mini, say), logged in at its desktop, and a second computer with SSH to it.
+
+- [ ] **The installer works from an SSH login, also a second time.**
+  Do: from the second computer, in an SSH login to the Mac, run the installer (`curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh | sh`). Then run `launchctl print gui/$(id -u)/dev.blimp.blimpd | grep state`. Start a session from blimp. Run the installer again, and the `launchctl` line again.
+  Expect: both times the installer ends with "Done." and no "launchctl couldn't load", and the line says `state = running`. The session is still there after the second run (`ZMX_DIR=~/.zmx ~/.local/bin/zmx list`). (Checked by hand on macOS 27.2.1 with the desktop logged in: launchd takes `bootout` and `bootstrap gui/<uid>` from an SSH login.)
+
+- [ ] **Update server on a Mac server.**
+  Do: when the app is newer than blimpd on the Mac server, click Update server in the bar under the tabs.
+  Expect: as on a Linux server: the bar goes, blimp reconnects, and the sessions are still running. (Update server runs the same installer over SSH.)
+
+- [ ] **Nobody logged in at the desktop.**
+  Do: restart the Mac and do not log in at its screen. From the second computer, run the installer over SSH.
+  Expect: it says nobody is logged in at this Mac's desktop and that blimpd starts at the next desktop login. After you log in at the screen, the `launchctl` line says `state = running`.
+
+- [ ] **A folder with a socket in it downloads.**
+  Do: on the Mac server, make a folder with a file and a unix socket in it (a folder that holds a running dev server's `.sock`, say). In blimp, download that folder.
+  Expect: the download finishes, and the archive has the file. (A Mac's tar leaves the socket out and still exits 0; checked by hand.)

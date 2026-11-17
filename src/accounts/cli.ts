@@ -4,7 +4,8 @@
 // `blimpd account forget <email>`: removes a saved login, never the one in use.
 // (docs/superpowers/specs/2026-11-16-account-switching-design.md, "By hand".) An account with no
 // account.json goes by its id. Never prints a token. Switching itself is off unless config.json turns it
-// on (store.ts accountsOn); use and forget work either way, being the user's own act.
+// on (store.ts accountsOn); use and forget work either way, being the user's own act. None of it works
+// on a Mac, where Claude Code keeps its login in the Keychain: each says so instead.
 
 import { dirname, join } from "node:path";
 import { gapLine, gapOf } from "./connectors";
@@ -13,6 +14,7 @@ import { accountsDir, accountsOn, forgetLogin, listSaved, liveFile, loginNoteFil
 import { accountsLog, Switcher } from "./switcher";
 
 const USAGE = "usage: blimpd account use|forget <email>";
+const MAC = "account switching does not work on a Mac yet, because Claude Code keeps its login in the macOS Keychain";
 
 const name = (a: Saved) => a.email || a.id;
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -20,7 +22,11 @@ const clock = (t: number) => `${pad(new Date(t).getHours())}:${pad(new Date(t).g
 const date = (t: number) => `${new Date(t).getFullYear()}-${pad(new Date(t).getMonth() + 1)}-${pad(new Date(t).getDate())}`;
 
 // dir is the accounts folder; config.json is in the folder that holds it.
-export function runAccounts(dir = accountsDir(), now = Date.now(), out: (s: string) => void = console.log): number {
+export function runAccounts(dir = accountsDir(), now = Date.now(), out: (s: string) => void = console.log, platform: string = process.platform): number {
+  if (platform === "darwin") {
+    out(MAC);
+    return 0;
+  }
   const state = readState(dir);
   const saved = listSaved(dir, state);
   if (!saved.length) out("no saved logins yet. Log in with /login in a session and blimp keeps a copy.");
@@ -36,7 +42,7 @@ export function runAccounts(dir = accountsDir(), now = Date.now(), out: (s: stri
   }
   if (state.unknown) out("blimp can't tell which account is logged in. Say which with: blimpd account use <email>, or log in again with /login in a session.");
   const top = dirname(dir);
-  if (!accountsOn(top)) out(`account switching is off. To turn it on, add "accounts": true to ${join(top, "config.json")}`);
+  if (!accountsOn(top, platform)) out(`account switching is off. To turn it on, add "accounts": true to ${join(top, "config.json")}`);
   return 0;
 }
 
@@ -46,10 +52,15 @@ export async function runAccount(
   live = liveFile(),
   out: (s: string) => void = console.log,
   err: (s: string) => void = console.error,
+  platform: string = process.platform,
 ): Promise<number> {
   const [verb, who, ...rest] = args;
   if ((verb !== "use" && verb !== "forget") || !who || rest.length) {
     err(USAGE);
+    return 1;
+  }
+  if (platform === "darwin") {
+    err(`blimpd: ${MAC}`);
     return 1;
   }
   const state = readState(dir);

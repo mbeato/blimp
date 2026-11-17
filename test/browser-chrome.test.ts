@@ -4,14 +4,16 @@
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { chromeArgs, findChrome, launchChrome, phoneUserAgentFor, userAgentFor, type Chrome } from "../src/browser/chrome";
+import { dirname, join } from "node:path";
+import { chromeArgs, chromeHint, findChrome, launchChrome, phoneUserAgentFor, userAgentFor, type Chrome } from "../src/browser/chrome";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-chrome-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 test("sites see a normal Chrome of the same version", () => {
-  expect(userAgentFor("Chromium 156.0.8078.4")).toBe("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36");
+  expect(userAgentFor("Chromium 156.0.8078.4", "linux")).toBe("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36");
+  // On a Mac, a Mac's: the rest of what Chrome tells a site says macOS.
+  expect(userAgentFor("Google Chrome 157.0.8103.79", "darwin")).toBe("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36");
   expect(userAgentFor("Google Chrome 141.0.7390.54 \n")).toContain(" Chrome/141.0.0.0 ");
   expect(userAgentFor("nonsense")).toContain(" Chrome/140.0.0.0 ");
 });
@@ -37,10 +39,36 @@ test("which Chrome: one on PATH first, else Playwright's newest, else none", () 
     writeFileSync(join(d, "chrome"), "");
   }
   expect(findChrome(home, (n) => (n === "chromium" ? "/usr/bin/chromium" : null), "")).toBe("/usr/bin/chromium");
-  expect(findChrome(home, () => null, "")).toBe(join(home, ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome"));
-  expect(findChrome(join(tmp, "empty"), () => null, "")).toBeNull();
+  expect(findChrome(home, () => null, "", "linux")).toBe(join(home, ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome"));
+  expect(findChrome(join(tmp, "empty"), () => null, "", "linux")).toBeNull();
   // Where PLAYWRIGHT_BROWSERS_PATH says.
-  expect(findChrome(join(tmp, "empty"), () => null, join(home, ".cache", "ms-playwright"))).toBe(join(home, ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome"));
+  expect(findChrome(join(tmp, "empty"), () => null, join(home, ".cache", "ms-playwright"), "linux")).toBe(join(home, ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome"));
+});
+
+test("which Chrome on a Mac: one on PATH, else Google Chrome's app (everyone's, then yours), else Playwright's newest", () => {
+  const home = join(tmp, "mac");
+  const apps = join(tmp, "Applications");
+  const make = (p: string) => (mkdirSync(dirname(p), { recursive: true }), writeFileSync(p, ""), p);
+  const find = (which: (n: string) => string | null = () => null, browsers = "") => findChrome(home, which, browsers, "darwin", apps);
+  expect(find()).toBeNull();
+  const cache = join(home, "Library", "Caches", "ms-playwright");
+  const build = (v: string) => join(cache, `chromium-${v}`, "chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+  make(build("1200"));
+  make(build("1248"));
+  expect(find()).toBe(build("1248"));
+  expect(findChrome(join(tmp, "empty"), () => null, cache, "darwin", apps)).toBe(build("1248"));
+  const yours = make(join(home, "Applications", "Google Chrome.app", "Contents", "MacOS", "Google Chrome"));
+  expect(find()).toBe(yours);
+  const everyones = make(join(apps, "Google Chrome.app", "Contents", "MacOS", "Google Chrome"));
+  expect(find()).toBe(everyones);
+  expect(find((n) => (n === "chromium" ? "/opt/homebrew/bin/chromium" : null))).toBe("/opt/homebrew/bin/chromium");
+  // None of these is looked for on Linux.
+  expect(findChrome(home, () => null, "", "linux", apps)).toBeNull();
+});
+
+test("what to install when there's none", () => {
+  expect(chromeHint("linux")).toBe("npx playwright install chromium");
+  expect(chromeHint("darwin")).toBe("Google Chrome in /Applications, or npx playwright install chromium");
 });
 
 const path = findChrome();

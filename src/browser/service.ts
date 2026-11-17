@@ -10,12 +10,12 @@ import { join } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { HttpError } from "../files";
 import { isSafeName, parseZmxList, realDir, zmxListAsync } from "../sessions";
-import { findChrome, launchChrome, type Chrome } from "./chrome";
+import { chromeHint, findChrome, launchChrome, type Chrome } from "./chrome";
 import { Gate, type Tab } from "./gate";
 import { timingSafeEqual } from "node:crypto";
 import { browserDir, gateKey, portFile, writeMcpConfig } from "./mcp";
 import { keepPasskeyDialogsOff } from "./passkeys";
-import { peerUid } from "./peer";
+import { macPeerUid, peerUid } from "./peer";
 import { openView, type ViewSocket } from "./view";
 
 export type { Tab };
@@ -75,7 +75,7 @@ export function chromePath(): string | null {
 }
 export const browserAvailable = () => chromePath() !== null;
 
-const NO_CHROME = "No Chrome or Chromium on the server. Install one: npx playwright install chromium";
+const NO_CHROME = `No Chrome or Chromium on the server. Install one: ${chromeHint()}`;
 
 // Chrome, and the gate on it. One that can't start (a missing library, say) exits at once; so
 // does one started while the Chrome of a blimpd that just quit still holds the profile (it quits
@@ -180,13 +180,16 @@ export async function startBrowserGate(): Promise<number> {
     hostname: "127.0.0.1",
     async fetch(req: Request, srv: Server) {
       // Your own process (the uid), not a web page (pages send Origin; DNS rebinding changes
-      // Host), and one that could read the key file.
+      // Host), and one that could read the key file. On macOS the uid check runs lsof, so it comes
+      // last there: a page, or a caller without the key, can't make blimpd start one.
       const ip = srv.requestIP(req);
-      if (!ip || peerUid(ip.address, ip.port) !== process.getuid!()) return new Response("not yours", { status: 403 });
+      const mac = process.platform === "darwin";
+      if (!mac && (!ip || peerUid(ip.address, ip.port) !== process.getuid!())) return new Response("not yours", { status: 403 });
       if (req.headers.has("origin") || req.headers.get("host") !== `127.0.0.1:${srv.port}`) return new Response("not from a page", { status: 403 });
       const url = new URL(req.url);
       const given = Buffer.from(url.searchParams.get("key") ?? "");
       if (given.length !== key.length || !timingSafeEqual(given, key)) return new Response("wrong key", { status: 403 });
+      if (mac && (!ip || (await macPeerUid(ip.address, ip.port, srv.port!)) !== process.getuid!())) return new Response("not yours", { status: 403 });
       const m = url.pathname.match(/^\/s\/([^/]+)$/);
       let session = "";
       try {

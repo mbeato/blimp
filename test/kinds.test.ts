@@ -134,16 +134,20 @@ test("Claude Code and Codex always get blimp's MCP (the show tool), and the serv
   expect(claude.args).toEqual(["claude", "--mcp-config", browserMcpConfigPath(), "--resume", "abc"]);
   const codex = await launchFor("codex", undefined, home, f, yes);
   expect(codex.args[0]).toBe("codex");
-  expect(codex.args.filter((a) => a === "-c")).toHaveLength(4);
+  expect(codex.args.filter((a) => a === "-c")).toHaveLength(6);
   expect(codex.args[2]).toMatch(/^mcp_servers\.blimp\.command=".+"$/);
   expect(codex.args[4]).toMatch(/^mcp_servers\.blimp\.args=\[.*"visuals-mcp"\]$/);
-  expect(codex.args[6]).toMatch(/^mcp_servers\.blimp-browser\.command=".+"$/);
-  expect(codex.args[8]).toMatch(/^mcp_servers\.blimp-browser\.args=\[.*"browser-mcp"\]$/);
+  // Codex gives an MCP server only a few variables of its own; these two are how blimp's find their session and blimpd.
+  expect(codex.args[6]).toBe('mcp_servers.blimp.env_vars=["ZMX_SESSION","BLIMPD_SOCKET"]');
+  expect(codex.args[8]).toMatch(/^mcp_servers\.blimp-browser\.command=".+"$/);
+  expect(codex.args[10]).toMatch(/^mcp_servers\.blimp-browser\.args=\[.*"browser-mcp"\]$/);
+  expect(codex.args[12]).toBe('mcp_servers.blimp-browser.env_vars=["ZMX_SESSION","BLIMPD_SOCKET"]');
   // No Chrome: blimp's own only.
   expect((await launchFor("claude", undefined, home, f, () => false)).args).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
   const plain = (await launchFor("codex", undefined, home, f, () => false)).args;
-  expect(plain).toHaveLength(5);
+  expect(plain).toHaveLength(7);
   expect(plain[4]).toMatch(/^mcp_servers\.blimp\.args=\[.*"visuals-mcp"\]$/);
+  expect(plain[6]).toBe('mcp_servers.blimp.env_vars=["ZMX_SESSION","BLIMPD_SOCKET"]');
 });
 
 test("no npx: blimp's MCP still, no browser", async () => {

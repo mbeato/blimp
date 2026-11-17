@@ -1,9 +1,11 @@
 // Who is on the other end of a local TCP connection: the gate (gate.ts) listens on 127.0.0.1,
 // which every account on the server can reach, so it lets in only connections whose socket
 // belongs to blimpd's own uid. The kernel's connection tables say so: the row whose local address
-// is the peer's, and its uid column.
+// is the peer's, and its uid column. macOS has no such tables: there lsof, run as blimpd's user,
+// lists that user's connected sockets only, and the connection's client end must be among them.
 
 import { readFileSync } from "node:fs";
+import { lsof } from "../ports";
 
 // An address as /proc/net/tcp(6) writes it: the bytes of each 32-bit word in host (little-endian)
 // order, in hex. null: not an address.
@@ -57,3 +59,24 @@ const read = (p: string) => {
 
 export const peerUid = (address: string, port: number): number | null =>
   tcpOwner(read("/proc/net/tcp"), address, port) ?? tcpOwner(read("/proc/net/tcp6"), address, port);
+
+// The uid of the process holding the socket lsof names `name` (local->remote), in the output of
+// `lsof -F pun`: p starts a process (u: its uid), n is a socket of it. lsof lists both ends of a
+// local connection, and the gate's end is blimpd's own: only the exact name counts.
+export function lsofOwner(out: string, name: string): number | null {
+  let uid: number | null = null;
+  for (const line of out.split("\n")) {
+    if (line[0] === "p") uid = null;
+    else if (/^u\d+$/.test(line)) uid = Number(line.slice(1));
+    else if (line === `n${name}`) return uid;
+  }
+  return null;
+}
+
+// macOS's peerUid, for a connection to the gate on 127.0.0.1:gatePort. null (not let in) for
+// another user's socket, which lsof doesn't list, and when lsof can't run or takes too long.
+export async function macPeerUid(address: string, port: number, gatePort: number): Promise<number | null> {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  const out = await lsof(`-iTCP:${port}`, "-sTCP:ESTABLISHED", "-F", "pun");
+  return out === null ? null : lsofOwner(out, `${address}:${port}->127.0.0.1:${gatePort}`);
+}

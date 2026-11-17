@@ -66,6 +66,13 @@ test("Yes and No answer the same way on the hook's prompt and on the screen's", 
   }
 });
 
+test("the sign-in tool's permission says which site, with Yes and No", () => {
+  const prompt = promptFromHook({ hook_event_name: "PermissionRequest", tool_name: "mcp__signin__fill_login", tool_input: { site: "github" }, cwd: "/w" })!;
+  const p = pushPayload({ ...base, prompt: { ...prompt, at: 5 } } as Shown, ask) as any;
+  expect(p.aps.alert).toEqual({ title: "Fix the drawer is waiting", body: "Sign in to github" });
+  expect(p.aps.category).toBe(PERMISSION_CATEGORY);
+});
+
 test("a question: its first question, no buttons", () => {
   const s = { ...base, prompt: { kind: "question", questions: [{ question: "Which one?", multiSelect: false, options: [{ label: "A" }] }], answerable: true, at: 5 } } as Shown;
   expect(pushPayload(s, ask)).toEqual({ aps: { alert: { title: "Fix the drawer is waiting", body: "Which one?" }, sound: "default", "thread-id": "blimp-1" }, session: "blimp-1", kind: "ask" });

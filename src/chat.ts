@@ -92,6 +92,9 @@ export function toolSummary(name: string, input: any, dir: string): string {
       return `Agent: ${str(input?.description)}`;
     case "mcp__blimp__show":
       return `Showing ${cut(str(input?.title), 80)}`;
+    // The sign-in tool (a separate program): its only input is a saved login's name, never a secret.
+    case "mcp__signin__fill_login":
+      return `Sign in to ${cut(str(input?.site), 80)}`;
     default:
       return name;
   }

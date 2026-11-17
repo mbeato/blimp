@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conversations, projectFolderName } from "../src/folders";
@@ -80,7 +80,7 @@ const prompt = line({ type: "user", message: { role: "user", content: "release i
 const reply = line({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Released." }] } });
 
 test("the session list and the Earlier list carry each one's note, without its turn", () => {
-  const home = mkdtempSync(join(tmpdir(), "blimp-notes-"));
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "blimp-notes-")));
   const cwd = join(home, "work");
   mkdirSync(cwd);
   const proj = join(home, "projects", projectFolderName(cwd));

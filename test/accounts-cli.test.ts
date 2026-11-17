@@ -67,16 +67,38 @@ const off = (top: string) => `account switching is off. To turn it on, add "acco
 test("accountsOn: only with \"accounts\": true in config.json", () => {
   const top = join(root, `t${++n}`);
   mkdirSync(top);
-  expect(accountsOn(top)).toBe(false);
+  expect(accountsOn(top, "linux")).toBe(false);
   for (const [text, on] of [["{}", false], ['{"accounts": false}', false], ['{"accounts": true}', true], ["not json", false]] as const) {
     writeFileSync(join(top, "config.json"), text);
-    expect(accountsOn(top)).toBe(on);
+    expect(accountsOn(top, "linux")).toBe(on);
   }
+});
+
+// On a Mac, Claude Code keeps its login in the Keychain, so swapping .credentials.json would switch nothing.
+const mac = "account switching does not work on a Mac yet, because Claude Code keeps its login in the macOS Keychain";
+
+test("accountsOn: never on a Mac, whatever config.json says", () => {
+  const { top } = setup(true);
+  expect(accountsOn(top, "linux")).toBe(true);
+  expect(accountsOn(top, "darwin")).toBe(false);
+});
+
+test("accounts, account use and forget: on a Mac, one line saying switching doesn't work there, and nothing changes", async () => {
+  const { dir, live } = setup(true);
+  const before = readFileSync(live, "utf8");
+  expect(await printed((out) => runAccounts(dir, T, out, "darwin"))).toEqual({ code: 0, out: mac, err: "" });
+  const none = join(root, `t${++n}`, "accounts");
+  expect(await printed((out) => runAccounts(none, T, out, "darwin"))).toEqual({ code: 0, out: mac, err: "" });
+  for (const verb of ["use", "forget"])
+    expect(await printed((out, err) => runAccount([verb, "b@x.com"], dir, live, out, err, "darwin"))).toEqual({ code: 1, out: "", err: `blimpd: ${mac}` });
+  expect(readFileSync(live, "utf8")).toBe(before);
+  expect(existsSync(join(dir, "id-b"))).toBe(true);
+  expect(readState(dir).active).toBe("id-a");
 });
 
 test("accounts: one line each, with which is in use, out until when, and when the login expires; never a token", async () => {
   const { dir } = setup(true);
-  const r = await printed((out) => runAccounts(dir, T, out));
+  const r = await printed((out) => runAccounts(dir, T, out, "linux"));
   expect(r.code).toBe(0);
   expect(r.out.split("\n")).toEqual([
     `a@x.com (in use), login expires ${day(LATER)}`,
@@ -89,13 +111,13 @@ test("accounts: one line each, with which is in use, out until when, and when th
 test("accounts: an out that has ended isn't shown, and one with no account.json shows its id", async () => {
   const { dir } = setup(true);
   rmSync(join(dir, "id-c", "account.json"));
-  const r = await printed((out) => runAccounts(dir, T + 2 * 3600_000, out));
+  const r = await printed((out) => runAccounts(dir, T + 2 * 3600_000, out, "linux"));
   expect(r.out.split("\n").slice(1)).toEqual([`b@x.com, login expires ${day(LATER)}`, "id-c, login expired: log in to it again with /login"]);
 });
 
 test("accounts: with switching off, the list and then how to turn it on", async () => {
   const { top, dir } = setup();
-  const r = await printed((out) => runAccounts(dir, T, out));
+  const r = await printed((out) => runAccounts(dir, T, out, "linux"));
   expect(r.code).toBe(0);
   expect(r.out.split("\n")).toHaveLength(4);
   expect(r.out.split("\n").at(-1)).toBe(off(top));
@@ -105,18 +127,18 @@ test("accounts: none saved, with switching on and off", async () => {
   const top = join(root, `t${++n}`);
   mkdirSync(top);
   const none = "no saved logins yet. Log in with /login in a session and blimp keeps a copy.";
-  const r = await printed((out) => runAccounts(join(top, "accounts"), T, out));
+  const r = await printed((out) => runAccounts(join(top, "accounts"), T, out, "linux"));
   expect(r.code).toBe(0);
   expect(r.out.split("\n")).toEqual([none, off(top)]);
   writeFileSync(join(top, "config.json"), JSON.stringify({ accounts: true }));
-  expect((await printed((out) => runAccounts(join(top, "accounts"), T, out))).out).toBe(none);
+  expect((await printed((out) => runAccounts(join(top, "accounts"), T, out, "linux"))).out).toBe(none);
 });
 
 test("accounts: when blimp can't tell which account is logged in, none is in use and a line after the list says so", async () => {
   const { dir } = setup(true);
   const { active, ...s } = readState(dir);
   writeState({ ...s, unknown: true }, dir);
-  const r = await printed((out) => runAccounts(dir, T, out));
+  const r = await printed((out) => runAccounts(dir, T, out, "linux"));
   expect(r.out.split("\n")).toEqual([
     `a@x.com, login expires ${day(LATER)}`,
     `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
@@ -134,7 +156,7 @@ test("accounts: under an account whose reading lacks connectors another has, one
   reading(dir, "id-a", [ok("Slack"), { name: "Gmail", state: "signin" }]);
   reading(dir, "id-b", [ok("Slack"), ok("Gmail"), ok("Zapier"), ok("Google Calendar")]);
   reading(dir, "id-c", [{ name: "Slack", state: "signin" }, ok("Gmail"), ok("Zapier"), ok("Google Calendar")]);
-  const r = await printed((out) => runAccounts(dir, T, out));
+  const r = await printed((out) => runAccounts(dir, T, out, "linux"));
   expect(r.out.split("\n")).toEqual([
     `a@x.com (in use), login expires ${day(LATER)}`,
     "  no Google Calendar, Zapier; Gmail needs a sign-in",
@@ -145,14 +167,14 @@ test("accounts: under an account whose reading lacks connectors another has, one
   reading(dir, "id-a", [ok("Slack")]);
   reading(dir, "id-b", [ok("Slack"), ok("Zapier")]);
   reading(dir, "id-c", [ok("Slack"), ok("Zapier")]);
-  expect((await printed((out) => runAccounts(dir, T, out))).out.split("\n")[1]).toBe("  no Zapier");
+  expect((await printed((out) => runAccounts(dir, T, out, "linux"))).out.split("\n")[1]).toBe("  no Zapier");
 });
 
 test("accounts: no extra line for an account with no reading, nor with an empty gap", async () => {
   const { dir } = setup(true);
   reading(dir, "id-a", [ok("Slack"), { name: "Zapier", state: "down" }]);
   reading(dir, "id-b", [ok("Slack"), ok("Zapier")]);
-  const r = await printed((out) => runAccounts(dir, T, out));
+  const r = await printed((out) => runAccounts(dir, T, out, "linux"));
   expect(r.out.split("\n")).toEqual([
     `a@x.com (in use), login expires ${day(LATER)}`,
     `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
@@ -162,7 +184,7 @@ test("accounts: no extra line for an account with no reading, nor with an empty 
 
 test("account use: puts the login in place and says so", async () => {
   const { dir, live } = setup();
-  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err));
+  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err, "linux"));
   expect(r).toEqual({ code: 0, out: "now on b@x.com", err: "" });
   expect(liveToken(live)).toBe("tok-B");
   expect(readState(dir).active).toBe("id-b");
@@ -174,14 +196,14 @@ test("account use: files a renewed live login under the account in use first", a
   writeFileSync(join(root, "config", ".claude.json"), JSON.stringify({ oauthAccount: acct("id-a", "a@x.com") }));
   writeFileSync(live, creds("tok-A2"));
   utimesSync(live, 1_000_000, 1_000_000);
-  expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err))).code).toBe(0);
+  expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err, "linux"))).code).toBe(0);
   expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toContain("tok-A2");
   expect(liveToken(live)).toBe("tok-B");
 });
 
 test("account use: the switch goes into log.jsonl, 600, with no token", async () => {
   const { dir, live } = setup();
-  expect((await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err))).code).toBe(0);
+  expect((await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err, "linux"))).code).toBe(0);
   const file = join(dir, "log.jsonl");
   const text = readFileSync(file, "utf8");
   const lines = text.trim().split("\n").map((l) => JSON.parse(l));
@@ -197,7 +219,7 @@ test("account use: a /login not yet filed goes under the account it was made to,
   writeFileSync(join(top, "auth-success.json"), JSON.stringify({ at: Date.now(), dir: join(root, "config") }));
   writeFileSync(live, creds("tok-D"));
   utimesSync(live, 1_000_000, 1_000_000);
-  expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err))).code).toBe(0);
+  expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err, "linux"))).code).toBe(0);
   expect(readFileSync(join(dir, "id-d", "credentials.json"), "utf8")).toContain("tok-D");
   expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toContain("tok-A");
   expect(liveToken(live)).toBe("tok-B");
@@ -212,7 +234,7 @@ test("account use: a login note from another Claude folder, or with no folder, i
     writeFileSync(join(top, "auth-success.json"), JSON.stringify(note));
     writeFileSync(live, creds("tok-A2"));
     utimesSync(live, 1_000_000, 1_000_000);
-    expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err))).code).toBe(0);
+    expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err, "linux"))).code).toBe(0);
     expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toContain("tok-A2");
     expect(existsSync(join(dir, "id-d"))).toBe(false);
   }
@@ -224,7 +246,7 @@ test("account use: while blimp can't tell whose login is in place, says it wasn'
   writeState({ ...s, unknown: true, filed: { mtime: 1, at: 2 } }, dir);
   writeFileSync(live, creds("tok-X"));
   utimesSync(live, 1_000_000, 1_000_000);
-  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err));
+  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err, "linux"));
   expect(r).toEqual({ code: 0, out: "the login that was in place was not saved, because blimp could not tell whose it was\nnow on b@x.com", err: "" });
   expect(liveToken(live)).toBe("tok-B");
   const after = readState(dir);
@@ -238,24 +260,24 @@ test("account use: refuses while a change to the live login is settling, and wor
   const { dir, live } = setup();
   writeFileSync(live, creds("tok-A2"));
   utimesSync(live, (Date.now() - 2000) / 1000, (Date.now() - 2000) / 1000);
-  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err));
+  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err, "linux"));
   expect(r.code).toBe(1);
   expect(r.out).toBe("");
   expect(r.err).toMatch(/^blimpd: a login is still settling; try again in 2[78] seconds$/);
   expect(liveToken(live)).toBe("tok-A2");
   expect(readState(dir).active).toBe("id-a");
   utimesSync(live, 1_000_000, 1_000_000);
-  expect((await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err))).code).toBe(0);
+  expect((await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err, "linux"))).code).toBe(0);
   expect(liveToken(live)).toBe("tok-B");
 });
 
 test("account use: an unknown email or an expired login changes nothing", async () => {
   const { dir, live } = setup();
   const before = readFileSync(live, "utf8");
-  const r = await printed((out, err) => runAccount(["use", "z@x.com"], dir, live, out, err));
+  const r = await printed((out, err) => runAccount(["use", "z@x.com"], dir, live, out, err, "linux"));
   expect(r.code).toBe(1);
   expect(r.err).toContain("no saved login for z@x.com");
-  const c = await printed((out, err) => runAccount(["use", "c@x.com"], dir, live, out, err));
+  const c = await printed((out, err) => runAccount(["use", "c@x.com"], dir, live, out, err, "linux"));
   expect(c.code).toBe(1);
   expect(c.err).toBe("blimpd: that account's login has expired; log in to it again with /login");
   expect(readFileSync(live, "utf8")).toBe(before);
@@ -264,7 +286,7 @@ test("account use: an unknown email or an expired login changes nothing", async 
 
 test("account forget: not the one in use", async () => {
   const { dir, live } = setup();
-  const r = await printed((out, err) => runAccount(["forget", "a@x.com"], dir, live, out, err));
+  const r = await printed((out, err) => runAccount(["forget", "a@x.com"], dir, live, out, err, "linux"));
   expect(r.code).toBe(1);
   expect(r.err).toContain("that's the account in use");
   expect(existsSync(join(dir, "id-a"))).toBe(true);
@@ -272,7 +294,7 @@ test("account forget: not the one in use", async () => {
 
 test("account forget: another one goes from the folder, the order and the outs", async () => {
   const { dir, live } = setup();
-  const r = await printed((out, err) => runAccount(["forget", "b@x.com"], dir, live, out, err));
+  const r = await printed((out, err) => runAccount(["forget", "b@x.com"], dir, live, out, err, "linux"));
   expect(r.code).toBe(0);
   expect(existsSync(join(dir, "id-b"))).toBe(false);
   const s = readState(dir);
@@ -284,7 +306,7 @@ test("account forget: another one goes from the folder, the order and the outs",
 test("account: bad arguments get the usage", async () => {
   const { dir, live } = setup();
   for (const args of [[], ["use"], ["switch", "b@x.com"], ["use", "b@x.com", "extra"]]) {
-    const r = await printed((out, err) => runAccount(args, dir, live, out, err));
+    const r = await printed((out, err) => runAccount(args, dir, live, out, err, "linux"));
     expect(r.code).toBe(1);
     expect(r.err).toContain("usage: blimpd account use|forget <email>");
   }

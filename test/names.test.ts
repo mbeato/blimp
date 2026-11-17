@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conversations, projectFolderName } from "../src/folders";
@@ -116,7 +116,7 @@ describe("title order", () => {
   });
 
   test("the session list and the Earlier list use the stored name", () => {
-    const home = mkdtempSync(join(tmpdir(), "blimp-names-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "blimp-names-")));
     const cwd = join(home, "work");
     mkdirSync(cwd);
     const proj = join(home, "projects", projectFolderName(cwd));
