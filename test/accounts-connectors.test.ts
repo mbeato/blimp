@@ -549,26 +549,29 @@ describe("mcpList", () => {
     return file;
   }
 
-  test("runs claude mcp list through the login shell in the temp folder with stdin closed, and gives what it printed", async () => {
+  test("runs claude mcp list through the login shell in the folder given with stdin closed, and gives what it printed", async () => {
     const sh = shell('echo "args: $*"; echo "cwd: $(pwd)"; read x && echo "stdin: $x"; echo "Checking MCP server health…"');
-    const out = await mcpList(sh);
+    const here = join(root, `t${++n}`);
+    mkdirSync(here, { mode: 0o700 });
+    const out = await mcpList(here, sh);
     expect(out).toContain('args: -l -i -c exec timeout -s KILL 60 claude "$@" claude mcp list');
-    expect(out).toContain(`cwd: ${realpathSync(tmpdir())}`);
+    expect(out).toContain(`cwd: ${here}\n`);
     expect(out).not.toContain("stdin:");
     expect(out).toContain("Checking MCP server health…");
   });
 
   test("the child carries the time limit too, in whole seconds, at least 1", async () => {
     const sh = shell('echo "args: $*"');
-    expect(await mcpList(sh, 1500)).toContain("exec timeout -s KILL 2 claude");
-    expect(await mcpList(sh, 300)).toContain("exec timeout -s KILL 1 claude");
+    expect(await mcpList(root, sh, 1500)).toContain("exec timeout -s KILL 2 claude");
+    expect(await mcpList(root, sh, 300)).toContain("exec timeout -s KILL 1 claude");
   });
 
-  test("a non-zero exit, a kill after the time limit, or no such shell gives undefined", async () => {
-    expect(await mcpList(shell('echo "Checking MCP server health…"; exit 1'))).toBeUndefined();
+  test("a non-zero exit, a kill after the time limit, no such shell, or no such folder gives undefined", async () => {
+    expect(await mcpList(root, shell('echo "Checking MCP server health…"; exit 1'))).toBeUndefined();
     const started = Date.now();
-    expect(await mcpList(shell('echo "Checking MCP server health…"; exec sleep 30'), 300)).toBeUndefined();
+    expect(await mcpList(root, shell('echo "Checking MCP server health…"; exec sleep 30'), 300)).toBeUndefined();
     expect(Date.now() - started).toBeLessThan(5000);
-    expect(await mcpList(join(root, "no-such-shell"))).toBeUndefined();
+    expect(await mcpList(root, join(root, "no-such-shell"))).toBeUndefined();
+    expect(await mcpList(join(root, "no-such-folder"), shell('echo "Checking MCP server health…"'))).toBeUndefined();
   });
 });

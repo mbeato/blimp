@@ -367,7 +367,7 @@ export function startAccounts(every = 1000): void {
   const deps = liveDeps();
   const s = new Switcher(deps);
   // Beside it, the connector readings (connectors.ts), told and logged the switcher's way.
-  const c = new Connectors({ dir: deps.dir, live: deps.live, list: () => mcpList(), tell: deps.tell, log: deps.log, now: deps.now });
+  const c = new Connectors({ dir: deps.dir, live: deps.live, list: () => mcpList(deps.dir), tell: deps.tell, log: deps.log, now: deps.now });
   // Off unless config.json says so (store.ts accountsOn), checked every tick: no restart to turn it on.
   // A reading runs on its own after the tick: the loop doesn't wait for it.
   setInterval(() => {

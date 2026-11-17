@@ -5,7 +5,6 @@
 // another saved account has. Never a URL, never a token.
 
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loginShell } from "../sessions";
 import { CONNECTORS_AFTER_SWITCH_MS, CONNECTORS_EVERY_MS, CONNECTORS_RETRY_MS, CONNECTORS_TIMEOUT_MS, CONNECTORS_ZERO_AGAIN_MS } from "./rules";
@@ -91,15 +90,16 @@ export function gapOf(id: string, dir: string): Gap | undefined {
 
 // The live list: `claude mcp list` run the way sessions start Claude Code (sessions.ts start, kinds.ts),
 // through the login shell, so it is the same claude on the same PATH; in blimpd's own environment, so a
-// CLAUDE_CONFIG_DIR it runs with applies. In the temp folder, stdin closed, stdout kept. Undefined on a
-// non-zero exit, no such shell, or a kill after the time limit: a hung profile or claude, or a child
+// CLAUDE_CONFIG_DIR it runs with applies. In cwd (the accounts folder: one other users can't write to, so
+// nobody can plant project config for claude there), stdin closed, stdout kept. Undefined on a non-zero
+// exit, no such shell or folder, or a kill after the time limit: a hung profile or claude, or a child
 // still holding stdout, can't keep a reading running for ever. The child carries the limit too (coreutils
 // timeout): blimpd restarting doesn't kill it (KillMode=process), and the timer here dies with blimpd.
-export async function mcpList(shell = loginShell(), limit = CONNECTORS_TIMEOUT_MS): Promise<string | undefined> {
+export async function mcpList(cwd: string, shell = loginShell(), limit = CONNECTORS_TIMEOUT_MS): Promise<string | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const secs = Math.max(1, Math.ceil(limit / 1000));
   try {
-    const p = Bun.spawn([shell, "-l", "-i", "-c", `exec timeout -s KILL ${secs} claude "$@"`, "claude", "mcp", "list"], { cwd: tmpdir(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const p = Bun.spawn([shell, "-l", "-i", "-c", `exec timeout -s KILL ${secs} claude "$@"`, "claude", "mcp", "list"], { cwd, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const killed = new Promise<undefined>((r) => {
       timer = setTimeout(() => {
         p.kill("SIGKILL");
@@ -110,7 +110,7 @@ export async function mcpList(shell = loginShell(), limit = CONNECTORS_TIMEOUT_M
     const code = await Promise.race([p.exited, killed]);
     return text !== undefined && code === 0 ? text : undefined;
   } catch {
-    return undefined; // no such shell
+    return undefined; // no such shell or folder
   } finally {
     clearTimeout(timer);
   }
