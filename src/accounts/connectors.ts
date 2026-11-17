@@ -167,7 +167,7 @@ export class Connectors {
     if (!readingDue({ state, saved, mtime: liveMtime(live), reading, running: this.running, until: this.until }, at)) return;
     this.running = true;
     try {
-      await this.take(id!, at);
+      await this.take(id!, at, state.switchedAt);
     } catch (e) {
       this.failed(id!, (e as Error)?.message ?? String(e));
     } finally {
@@ -180,13 +180,15 @@ export class Connectors {
     this.deps.log({ event: "connectors-failed", account: id, ...(error && { error }) });
   }
 
-  private async take(id: string, at: number) {
+  private async take(id: string, at: number, sw: number | undefined) {
     const { dir, live } = this.deps;
     const text = await this.deps.list();
-    // The account may have changed while the command ran: then the reading may be of either one.
+    // The account may have changed while the command ran: then the reading may be of either one. A
+    // switch away and back leaves the same account in use, but not the same switchedAt; a renewal
+    // changes only filed, so it keeps the reading.
     const after = readState(dir);
     const m = liveMtime(live);
-    if (after.active !== id || after.unknown || m === undefined || m !== after.filed?.mtime) return;
+    if (after.active !== id || after.switchedAt !== sw || after.unknown || m === undefined || m !== after.filed?.mtime) return;
     if (text === undefined || !text.includes("Checking MCP server health")) return this.failed(id);
     this.until = undefined;
     const connectors = parseMcpList(text);

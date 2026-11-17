@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Connector, Connectors, type ConnectorsDeps, type Due, gap, gapKey, gapOf, mcpList, parseMcpList, readConnectors, readingDue, writeConnectors } from "../src/accounts/connectors";
 import { CONNECTORS_AFTER_SWITCH_MS, CONNECTORS_EVERY_MS, CONNECTORS_RETRY_MS, CONNECTORS_TIMEOUT_MS, CONNECTORS_ZERO_AGAIN_MS } from "../src/accounts/rules";
-import { putLive, readState, type Saved, type State, saveLogin, writeState } from "../src/accounts/store";
+import { liveMtime, putLive, readState, type Saved, type State, saveLogin, writeState } from "../src/accounts/store";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-connectors-")));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -379,6 +379,40 @@ describe("Connectors", () => {
     expect(stored(t.dir, "id-a")).toBeUndefined();
     expect(stored(t.dir, "id-b")).toBeUndefined();
     expect(t.logs).toEqual([]);
+  });
+
+  test("a switch away and back during the run throws the reading away, and asks for no wait", async () => {
+    const { t, c } = watch();
+    writeConnectors("id-b", { at: T - H, connectors: [ok("Slack"), ok("Zapier")], told: [] }, t.dir);
+    t.out = async () => {
+      for (const id of ["id-b", "id-a"]) {
+        const mtime = putLive(id, t.live, t.dir);
+        writeState({ ...readState(t.dir), active: id, switchedAt: t.clock, filed: { mtime, at: t.clock } }, t.dir);
+      }
+      return listing(line("Slack"));
+    };
+    await c.tick();
+    expect(stored(t.dir, "id-a")).toBeUndefined();
+    expect(t.told).toEqual([]);
+    expect(t.logs).toEqual([]);
+    // No wait: 30 seconds after the switch back, it is asked again.
+    t.clock = T + CONNECTORS_AFTER_SWITCH_MS;
+    t.out = listing(line("Slack"), line("Zapier"));
+    await c.tick();
+    expect(t.lists).toBe(2);
+    expect(stored(t.dir, "id-a")?.connectors).toEqual([ok("Slack"), ok("Zapier")]);
+  });
+
+  test("a renewal filed during the run keeps the reading", async () => {
+    const { t, c } = watch();
+    t.out = async () => {
+      writeFileSync(t.live, creds("tok-A2"));
+      const mtime = liveMtime(t.live)!;
+      writeState({ ...readState(t.dir), filed: { mtime, at: t.clock }, renewed: { id: "id-a", at: mtime } }, t.dir);
+      return listing(line("Slack"));
+    };
+    await c.tick();
+    expect(stored(t.dir)?.connectors).toEqual([ok("Slack")]);
   });
 
   test("the live login changing, or blimp losing track of it, during the run throws the reading away", async () => {
