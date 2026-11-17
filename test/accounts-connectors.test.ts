@@ -307,6 +307,36 @@ describe("Connectors", () => {
     }
   });
 
+  test("the wait after a failed run is the account's own: the next account in use is read 30 seconds after the switch", async () => {
+    const { t, c } = watch();
+    const use = (id: string) => {
+      const mtime = putLive(id, t.live, t.dir);
+      writeState({ ...readState(t.dir), active: id, switchedAt: t.clock, filed: { mtime, at: t.clock } }, t.dir);
+    };
+    t.out = undefined;
+    await c.tick();
+    expect(t.logs).toEqual([{ event: "connectors-failed", account: "id-a" }]);
+    t.clock = T + 5000;
+    use("id-b");
+    t.out = listing(line("Slack"));
+    t.clock = T + 5000 + CONNECTORS_AFTER_SWITCH_MS;
+    await c.tick();
+    expect(t.lists).toBe(2);
+    expect(stored(t.dir, "id-b")?.connectors).toEqual([ok("Slack")]);
+    // id-a is still held for its 10 minutes.
+    t.clock = T + 40_000;
+    use("id-a");
+    t.clock = T + 40_000 + CONNECTORS_AFTER_SWITCH_MS;
+    await c.tick();
+    t.clock = T + CONNECTORS_RETRY_MS - 1000;
+    await c.tick();
+    expect(t.lists).toBe(2);
+    t.clock = T + CONNECTORS_RETRY_MS;
+    await c.tick();
+    expect(t.lists).toBe(3);
+    expect(stored(t.dir, "id-a")?.connectors).toEqual([ok("Slack")]);
+  });
+
   test("a list that throws is a failed run too", async () => {
     const { t, c } = watch();
     t.out = async () => {

@@ -121,7 +121,8 @@ const gapText = (g: Gap) =>
 export const gapLine = (g: Gap) =>
   [g.missing.length && `no ${g.missing.join(", ")}`, g.signin.length && `${g.signin.join(", ")} needs a sign-in`].filter(Boolean).join("; ");
 
-// running: a reading is under way. until: a failed reading, or a first zero, asks to wait till then.
+// running: a reading is under way. until: a failed reading, or a first zero, of this account asks to
+// wait till then.
 export type Due = { state: State; saved: Saved[]; mtime: number | undefined; reading: Reading | undefined; running: boolean; until?: number };
 
 // Whether to ask now about the account in use. Only about a login blimp knows is that account's (filed,
@@ -150,7 +151,7 @@ export type ConnectorsDeps = {
 // What only this process has seen stays in memory: a reading running, a wait asked for, a first zero.
 export class Connectors {
   private running = false;
-  private until?: number;
+  private until?: { id: string; at: number }; // the wait a failed reading or a first zero asks, for that account only
   private zero?: { id: string; at: number }; // a reading with no connector, not yet believed
 
   constructor(private deps: ConnectorsDeps) {}
@@ -164,7 +165,7 @@ export class Connectors {
     const saved = listSaved(dir, state);
     const id = state.active;
     const reading = id && saved.some((a) => a.id === id) ? readConnectors(id, dir) : undefined;
-    if (!readingDue({ state, saved, mtime: liveMtime(live), reading, running: this.running, until: this.until }, at)) return;
+    if (!readingDue({ state, saved, mtime: liveMtime(live), reading, running: this.running, until: this.until?.id === id ? this.until.at : undefined }, at)) return;
     this.running = true;
     try {
       await this.take(id!, at, state.switchedAt);
@@ -176,7 +177,7 @@ export class Connectors {
   }
 
   private failed(id: string, error?: string) {
-    this.until = this.deps.now() + CONNECTORS_RETRY_MS;
+    this.until = { id, at: this.deps.now() + CONNECTORS_RETRY_MS };
     this.deps.log({ event: "connectors-failed", account: id, ...(error && { error }) });
   }
 
@@ -190,7 +191,7 @@ export class Connectors {
     const m = liveMtime(live);
     if (after.active !== id || after.switchedAt !== sw || after.unknown || m === undefined || m !== after.filed?.mtime) return;
     if (text === undefined || !text.includes("Checking MCP server health")) return this.failed(id);
-    this.until = undefined;
+    if (this.until?.id === id) this.until = undefined;
     const connectors = parseMcpList(text);
     // claude.ai not answering might print no connector at all, so a zero is believed only when
     // another one at least a minute later, and within ten, says the same.
@@ -198,7 +199,7 @@ export class Connectors {
       const z = this.zero;
       if (!z || z.id !== id || at - z.at < CONNECTORS_ZERO_AGAIN_MS || at - z.at > CONNECTORS_RETRY_MS) {
         this.zero = { id, at };
-        this.until = this.deps.now() + CONNECTORS_ZERO_AGAIN_MS;
+        this.until = { id, at: this.deps.now() + CONNECTORS_ZERO_AGAIN_MS };
         return;
       }
     }
