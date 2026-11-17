@@ -1,4 +1,4 @@
-// The server switcher at the left of the top bar, its menu, Add server and Manage servers.
+// The Home tab's server and the server list on its chevron, Add server and Manage servers.
 // The browser build reaches only the blimpd in its URL, so every server saved here is that one:
 // enough for the list, its names and its states.
 
@@ -9,25 +9,42 @@ const session = `blimpe2e-servers-${process.pid}`;
 test.beforeAll(() => startSession(session, fixtureDir("servers")));
 test.afterAll(() => killSession(session));
 
-const switcher = (page: Page) => page.getByRole("button", { name: /^Server: / });
+const switcher = (page: Page) => page.getByRole("button", { name: "Servers", exact: true });
+const homeServer = (page: Page) => page.locator(".ptab.home .ptab-home-server");
+// Home's server and its state (the dot's shape) as one string, e.g. "localhost, connected".
+const shown = (page: Page) =>
+  page.locator(".ptab.home").evaluate((t) => `${t.querySelector(".ptab-home-server")!.textContent}, ${t.querySelector(".srv-dot")!.className.replace(/.*srv-/, "")}`);
 const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("blimp.servers") ?? "null"));
 
 // The saved list before the app loads; kept over a reload once the app has saved its own.
 const seed = (page: Page, list: object[]) =>
   page.addInitScript((l) => localStorage.getItem("blimp.servers") ?? localStorage.setItem("blimp.servers", JSON.stringify(l)), list);
 
-test("the switcher shows the front tab's server; its menu lists it with its sessions, and Add server refuses one already saved", async ({ page }) => {
+test("the Home tab shows its server; its chevron's menu lists it with its sessions, and Add server refuses one already saved", async ({ page }) => {
   const dir = fixtureDir("servers");
   await openSessionTab(page, dir);
-  await expect(switcher(page)).toHaveAccessibleName("Server: localhost, connected");
+  await expect.poll(() => shown(page)).toBe("localhost, connected");
+  const home = page.locator(".ptabs").getByRole("tab", { name: "Home", exact: true });
 
+  // The chevron opens the list and leaves the project tab in front.
   await switcher(page).click();
+  await expect(switcher(page)).toHaveAttribute("aria-expanded", "true");
+  await expect(home).toHaveAttribute("aria-selected", "false");
   const menu = page.getByRole("menu", { name: "Servers" });
   const row = menu.getByRole("menuitem", { name: /localhost/ });
   await expect(row).toHaveAttribute("aria-current", "true");
   await expect(row).toContainText(/\d+ sessions?$/);
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
+  await expect(switcher(page)).toBeFocused();
+
+  // A click outside closes it too, and doesn't go to the tab under it.
+  await switcher(page).click();
+  const box = (await home.boundingBox())!;
+  await page.mouse.click(box.x + 4, box.y + 4);
+  await expect(menu).toHaveCount(0);
+  await expect(switcher(page)).toBeFocused();
+  await expect(home).toHaveAttribute("aria-selected", "false");
 
   await switcher(page).click();
   await menu.getByRole("menuitem", { name: "Add server…" }).click();
@@ -41,7 +58,7 @@ test("the switcher shows the front tab's server; its menu lists it with its sess
 
 test("a new server is tried first, then saved under its name, and its Home comes forward", async ({ page }) => {
   await openApp(page);
-  await expect(switcher(page)).toHaveAccessibleName("Server: localhost, connected");
+  await expect.poll(() => shown(page)).toBe("localhost, connected");
   await switcher(page).click();
   await page.getByRole("menuitem", { name: "Add server…" }).click();
   const dialog = page.getByRole("dialog");
@@ -49,12 +66,11 @@ test("a new server is tried first, then saved under its name, and its Home comes
   await dialog.getByLabel("Name").fill("Second box");
   await dialog.getByRole("button", { name: "Add server", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(switcher(page)).toHaveAccessibleName("Server: Second box, connected");
-  await expect(page.locator(".ptab.home .ptab-server")).toHaveText("Second box");
+  await expect.poll(() => shown(page)).toBe("Second box, connected");
   expect(await saved(page)).toEqual([{ host: "localhost" }, { host: "second", name: "Second box" }]);
 });
 
-test("Manage servers: a new name shows in the switcher and on the tabs, the address stays; Remove asks first", async ({ page }) => {
+test("Manage servers: a new name shows on Home and on the tabs, the address stays; Remove asks first", async ({ page }) => {
   await seed(page, [{ host: "localhost" }, { host: "other" }]);
   const dir = fixtureDir("servers");
   await openSessionTab(page, dir);
@@ -67,7 +83,7 @@ test("Manage servers: a new name shows in the switcher and on the tabs, the addr
   const first = dialog.locator(".srv-block").first();
   await first.getByLabel("Name").fill("Lab");
   await first.getByLabel("Name").press("Enter");
-  await expect(switcher(page)).toHaveAccessibleName("Server: Lab, connected");
+  await expect.poll(() => shown(page)).toBe("Lab, connected");
   await expect(page.locator(".ptab.active .ptab-server")).toHaveText("Lab");
   await expect(first.locator(".srv-address")).toHaveText("localhost");
   await expect(first.locator(".srv-state")).toContainText(/^connected · blimpd \S+ · \d+ sessions?$/);
@@ -82,17 +98,18 @@ test("Manage servers: a new name shows in the switcher and on the tabs, the addr
   await expect(dialog.locator(".srv-block")).toHaveCount(1);
   expect(await saved(page)).toEqual([{ host: "localhost", name: "Lab" }]);
   await page.keyboard.press("Escape");
-  // One server left: the tabs no longer name it, but the switcher does.
+  // One server left: the project tabs no longer name it, but Home does.
   await expect(page.locator(".ptab-server")).toHaveCount(0);
+  await expect(homeServer(page)).toHaveText("Lab");
 
   await page.reload();
-  await expect(switcher(page)).toHaveAccessibleName("Server: Lab, connected");
+  await expect.poll(() => shown(page)).toBe("Lab, connected");
 });
 
 test("Manage servers: a name typed and then left with Esc or a click outside is saved", async ({ page }) => {
   await seed(page, [{ host: "localhost" }]);
   await openApp(page);
-  await expect(switcher(page)).toHaveAccessibleName("Server: localhost, connected");
+  await expect.poll(() => shown(page)).toBe("localhost, connected");
   const dialog = page.locator(".dialog.servers");
   const name = dialog.locator(".srv-block").first().getByLabel("Name");
 
@@ -101,7 +118,7 @@ test("Manage servers: a name typed and then left with Esc or a click outside is 
   await name.fill("Lab");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  await expect(switcher(page)).toHaveAccessibleName("Server: Lab, connected");
+  await expect(homeServer(page)).toHaveText("Lab");
   expect(await saved(page)).toEqual([{ host: "localhost", name: "Lab" }]);
 
   await switcher(page).click();
@@ -111,7 +128,7 @@ test("Manage servers: a name typed and then left with Esc or a click outside is 
   // The dimmed area around the sheet.
   await page.mouse.click(8, 450);
   await expect(dialog).toHaveCount(0);
-  await expect(switcher(page)).toHaveAccessibleName("Server: Lab two, connected");
+  await expect(homeServer(page)).toHaveText("Lab two");
   expect(await saved(page)).toEqual([{ host: "localhost", name: "Lab two" }]);
 });
 

@@ -116,8 +116,10 @@ h2 {
   color: var(--fg-dim);
 }
 
+/* Home and its server list's chevron (.srv-anchor, just after it) read as one tab. */
 .ptab.home {
-  padding-right: 12px;
+  padding-right: 2px;
+  border-right: 0;
 }
 
 .ptab:hover {
@@ -165,6 +167,19 @@ h2 {
   color: var(--fg-faint);
 }
 
+/* Home's house keeps its size when a long server name fills the tab. */
+.ptab.home > svg {
+  flex: none;
+}
+
+/* Home's server, the tab's only words: cut short like a project's name. */
+.ptab-home-server {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .ptab:hover .tab-close,
 .ptab.active .tab-close {
   visibility: visible;
@@ -190,22 +205,30 @@ h2 {
   align-self: center;
 }
 
-/* ---- the server switcher (left of the project tabs) and Manage servers ---- */
+/* ---- the server list (the chevron on the Home tab) and Manage servers ---- */
 
 .srv-anchor {
   flex: none;
-  margin-left: 6px;
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+  border-right: 1px solid var(--line);
+}
+
+.ptab.home.active + .srv-anchor {
+  background: var(--bg);
+  margin-bottom: -1px;
+  box-shadow: inset 0 1px 0 var(--fg-faint);
 }
 
 .srv-switch {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 6px;
-  border-radius: 5px;
-  font-size: 12px;
-  color: var(--fg-dim);
+  justify-content: center;
+  width: 18px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--fg-faint);
 }
 
 .srv-switch:hover,
@@ -242,8 +265,9 @@ h2 {
   background: var(--danger);
 }
 
+/* Placed by the chevron under the Home tab, out of the tab strip, which scrolls and would clip it. */
 .menu.srv-menu {
-  left: 0;
+  position: fixed;
   right: auto;
   min-width: 260px;
   max-width: 380px;
@@ -260,7 +284,7 @@ h2 {
   gap: 8px;
 }
 
-/* The front tab's server: a tick, not a color. */
+/* Home's server: a tick, not a color. */
 .srv-check {
   flex: none;
   width: 10px;

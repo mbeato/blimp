@@ -36,7 +36,7 @@ export type MenuState = {
   action: (id: string) => Action | undefined;
   // The saved servers, in order, with their display names. The status is not shown: a server
   // that can't be reached flips between offline and connecting every few seconds, and each
-  // redraw would shut a menu that's open (the top bar and the switcher show it).
+  // redraw would shut a menu that's open (the top bar and the Home tab show it).
   servers: { name: string; status: LinkStatus }[];
   // Which of them the front tab is on.
   front: number;

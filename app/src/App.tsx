@@ -1,9 +1,9 @@
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { AddServerDialog } from "./components/AddServerDialog";
 import { ManageServersDialog } from "./components/ManageServersDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
-import { ServerSwitcher } from "./components/ServerSwitcher";
+import { ServerDot, ServerSwitcher } from "./components/ServerSwitcher";
 import { DragGhost, noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
@@ -743,7 +743,6 @@ export function App() {
   return (
     <div className={"app" + (hoverWindow ? " drop-window" : "")}>
       <header className="topbar">
-        <ServerSwitcher links={linkList} current={link} onPick={(l) => open(l.key, null)} onAdd={() => setDialog("add")} onManage={() => setDialog("manage")} />
         <div className="ptabs" role="tablist" aria-label="Projects">
           {layout.tabs.map((t, i) => {
             const l = links.get(t.server);
@@ -754,40 +753,46 @@ export function App() {
             // The tooltip has the address too, when the name isn't it.
             const server = !l ? t.server : l.name === l.key ? l.key : `${l.name} (${l.key})`;
             return (
-              <div
-                key={tabKey(t)}
-                role="tab"
-                aria-selected={i === layout.active}
-                aria-label={name}
-                className={"ptab" + (i === layout.active ? " active" : "") + (i === 0 ? " home" : "")}
-                title={linkList.length > 1 ? `${server} · ${where}` : where}
-                onMouseDown={(e) => e.button === 0 && select(i)}
-                onPointerDown={(e) => {
-                  if (i === 0) return;
-                  const strip = e.currentTarget.parentElement!;
-                  startReorder(e, () => [...strip.querySelectorAll<HTMLElement>(".ptab:not(.home)")], (from, to) => setLayout((l) => l && moveTab(l, from + 1, to + 1)));
-                }}
-                onAuxClick={(e) => e.button === 1 && close(i)}
-              >
-                {i === 0 && (
-                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-                    <path d="M2.5 7.5L8 2.5l5.5 5M4 6.5v7h3v-4h2v4h3v-7" fill="none" stroke="currentColor" />
-                  </svg>
-                )}
-                {linkList.length > 1 && <span className="ptab-server">{l?.name ?? t.server}</span>}
-                {i > 0 && <span className="ptab-title">{name}</span>}
-                {t.panes.length > 1 && (
-                  <span className="ptab-count" title={`${t.panes.length} sessions side by side`}>
-                    {t.panes.length}
-                  </span>
-                )}
-                {waiting && <span className="dot" aria-label="A session is waiting for you" />}
-                {i > 0 && (
-                  <button className="tab-close" aria-label={`Close ${name}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => close(i)}>
-                    ×
-                  </button>
-                )}
-              </div>
+              <Fragment key={tabKey(t)}>
+                <div
+                  role="tab"
+                  aria-selected={i === layout.active}
+                  aria-label={name}
+                  className={"ptab" + (i === layout.active ? " active" : "") + (i === 0 ? " home" : "")}
+                  title={i === 0 ? server : linkList.length > 1 ? `${server} · ${where}` : where}
+                  onMouseDown={(e) => e.button === 0 && select(i)}
+                  onPointerDown={(e) => {
+                    if (i === 0) return;
+                    const strip = e.currentTarget.parentElement!;
+                    startReorder(e, () => [...strip.querySelectorAll<HTMLElement>(".ptab:not(.home)")], (from, to) => setLayout((l) => l && moveTab(l, from + 1, to + 1)));
+                  }}
+                  onAuxClick={(e) => e.button === 1 && close(i)}
+                >
+                  {i === 0 && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+                      <path d="M2.5 7.5L8 2.5l5.5 5M4 6.5v7h3v-4h2v4h3v-7" fill="none" stroke="currentColor" />
+                    </svg>
+                  )}
+                  {/* Home names its server, also when there is one: the server list hangs off it. */}
+                  {i === 0 && <ServerDot status={homeLink.status} />}
+                  {i === 0 && <span className="ptab-home-server">{homeLink.name}</span>}
+                  {i > 0 && linkList.length > 1 && <span className="ptab-server">{l?.name ?? t.server}</span>}
+                  {i > 0 && <span className="ptab-title">{name}</span>}
+                  {t.panes.length > 1 && (
+                    <span className="ptab-count" title={`${t.panes.length} sessions side by side`}>
+                      {t.panes.length}
+                    </span>
+                  )}
+                  {waiting && <span className="dot" aria-label="A session is waiting for you" />}
+                  {i > 0 && (
+                    <button className="tab-close" aria-label={`Close ${name}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => close(i)}>
+                      ×
+                    </button>
+                  )}
+                </div>
+                {/* Home's server list: a button of its own beside the tab, so it never selects or drags it. */}
+                {i === 0 && <ServerSwitcher links={linkList} current={homeLink} onPick={(l) => open(l.key, null)} onAdd={() => setDialog("add")} onManage={() => setDialog("manage")} />}
+              </Fragment>
             );
           })}
           <button className="icon-button small ptabs-add" title="Open Folder… (⌘O)" aria-label="Open Folder" disabled={!connected.length} onClick={() => setDialog("open")}>

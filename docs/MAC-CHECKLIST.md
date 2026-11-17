@@ -150,12 +150,12 @@ The page describes the menu and Rust draws it, so none of this runs in the Linux
 
 ## Servers
 
-- [ ] Add server… (from the switcher at the far left of the top bar) offers the `Host` names from your `~/.ssh/config` as you type.
+- [ ] Add server… (from the chevron on the Home tab, the first tab in the top bar) offers the `Host` names from your `~/.ssh/config` as you type.
 - [ ] Add a host that doesn't exist: the dialog says "Connecting to …", then shows the error and a hint, and stays open with your fields. Cancel while it connects: `ps aux | grep '[s]sh -T'` shows no tunnel for that host.
 - [ ] Add a server where blimpd isn't installed (a fresh VM or account): the error says blimpd isn't set up, and Install blimpd installs it and connects.
 - [ ] Install blimpd (in Add server and in Manage servers…) first shows a Mac dialog, "Install blimpd on <user@host:port>?" (only the parts typed: with a user and port 2222, "max@box:2222"), with Install and Cancel. Install is the blue default button; Esc cancels. Cancel: nothing is installed, no error or notice shows, and the dialog is as it was before the click. Install: it installs.
 - [ ] Add a host whose key isn't in `~/.ssh/known_hosts`: the hint shows the exact `ssh` command to run once from Terminal.
-- [ ] With two windows open, rename a server in Manage servers… in one: the other window's switcher and tabs show the new name at once.
+- [ ] With two windows open, rename a server in Manage servers… in one: the other window's Home tab, server list and tabs show the new name at once.
 
 ## Look
 

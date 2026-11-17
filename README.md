@@ -122,12 +122,12 @@ See [Troubleshooting](#troubleshooting).
 ![Home: the Welcome page with recent projects, the home folder on the left, and the terminal below](docs/screenshots/home.png)
 
 **More servers.** The app keeps your server list on the Mac. Add a server from any of these places:
-- the **server switcher** at the far left of the top bar: click it, then **Add server…**;
+- the **Home tab**, the first tab in the top bar: click the chevron after the server's name, then **Add server…**;
 - **Server > Add Server…** in the menu bar;
-- **Manage servers…** (in the switcher, or **Server > Manage Servers…**), then **Add server…**;
+- **Manage servers…** (in the Home tab's list, or **Server > Manage Servers…**), then **Add server…**;
 - **Add server** on the Welcome page.
 
-The switcher shows the front tab's server: a dot and its name. A solid dot means connected, a ring means connecting, and a red dot means offline. Click it to see every server, with how many sessions it has (and an amber count of the ones waiting for you), or "offline". Click a server to go to its Home. The **Server** menu lists your servers too.
+The Home tab shows its server: a dot and its name. A solid dot means connected, a ring means connecting, and a red dot means offline. Click the chevron after the name to see every server, with how many sessions it has (and an amber count of the ones waiting for you), or "offline". Click a server to show it at Home. The **Server** menu lists your servers too.
 
 **Manage servers** shows each server's name, address and state. Type a new **Name** to rename a server; blimp keeps its tabs and recent folders. **Remove…** asks first, then closes the server's tabs; its sessions keep running on the server. A server that isn't connected has **Try again**, and **Install blimpd** when blimpd isn't set up there. When blimpd is older than the app, there is **Update server**.
 
