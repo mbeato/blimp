@@ -29,6 +29,7 @@ export function runAccounts(dir = accountsDir(), now = Date.now(), out: (s: stri
     if (a.expires !== undefined) line += a.expires > now ? `, login expires ${date(a.expires)}` : ", login expired: log in to it again with /login";
     out(line);
   }
+  if (state.unknown) out("blimp can't tell which account is logged in. Say which with: blimpd account use <email>, or log in again with /login in a session.");
   const top = dirname(dir);
   if (!accountsOn(top)) out(`account switching is off. To turn it on, add "accounts": true to ${join(top, "config.json")}`);
   return 0;
@@ -75,16 +76,19 @@ export async function runAccount(
     stops: async () => [],
     menu: () => false,
     type: async () => {},
-    tell: async () => out(`now on ${name(a)}`),
+    tell: async () => {},
     now: Date.now,
     wait: async () => {},
     log: accountsLog(dir),
   });
+  let unsaved: boolean;
   try {
-    await switcher.use(a.id);
+    unsaved = await switcher.use(a.id);
   } catch (e) {
     err(`blimpd: ${(e as Error).message}`);
     return 1;
   }
+  if (unsaved) out("the login that was in place was not saved, because blimp could not tell whose it was");
+  out(`now on ${name(a)}`);
   return 0;
 }

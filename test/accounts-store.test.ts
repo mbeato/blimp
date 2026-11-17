@@ -2,7 +2,7 @@
 // rename, state.json and the oauthAccount record. Everything happens in temp folders with made-up tokens.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { forgetLogin, hasLogin, listSaved, putLive, readLoginNote, readRecord, readState, savedWith, saveLogin, writeState } from "../src/accounts/store";
@@ -190,6 +190,15 @@ describe("state", () => {
     writeFileSync(join(dir, "state.json"), JSON.stringify({ active: "id-a", order: ["id-a"], out: {}, filed: { mtime: 4, record: "{}" } }));
     expect(readState(dir).filed).toEqual({ mtime: 4, at: 0 });
   });
+
+  test("a state.json from before `unknown` existed reads as not unknown; one with it reads it back", () => {
+    const dir = fresh();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ active: "id-a", order: ["id-a"], out: {}, filed: { mtime: 4, at: 5 } }));
+    expect(readState(dir).unknown).toBeUndefined();
+    writeState({ order: ["id-a"], out: {}, unknown: true }, dir);
+    expect(readState(dir).unknown).toBe(true);
+  });
 });
 
 describe("readRecord", () => {
@@ -274,14 +283,34 @@ describe("credentials.prev.json", () => {
 describe("readLoginNote", () => {
   test("the note's time; no file, bad JSON or no numeric at is undefined", () => {
     const top = join(root, "note");
-    mkdirSync(top);
+    const claude = join(top, "claude");
+    mkdirSync(claude, { recursive: true });
     const file = join(top, "auth-success.json");
-    expect(readLoginNote(file)).toBeUndefined();
-    writeFileSync(file, JSON.stringify({ at: 42 }));
-    expect(readLoginNote(file)).toBe(42);
-    writeFileSync(file, JSON.stringify({ at: "42" }));
-    expect(readLoginNote(file)).toBeUndefined();
+    expect(readLoginNote(file, claude)).toBeUndefined();
+    writeFileSync(file, JSON.stringify({ at: 42, dir: claude }));
+    expect(readLoginNote(file, claude)).toBe(42);
+    writeFileSync(file, JSON.stringify({ at: "42", dir: claude }));
+    expect(readLoginNote(file, claude)).toBeUndefined();
     writeFileSync(file, "nope");
-    expect(readLoginNote(file)).toBeUndefined();
+    expect(readLoginNote(file, claude)).toBeUndefined();
+  });
+
+  test("only a note from blimpd's own Claude folder counts, by its real path; one from another folder, or with no folder, doesn't", () => {
+    const top = join(root, "note-dir");
+    const claude = join(top, "claude");
+    const other = join(top, "claude2");
+    mkdirSync(claude, { recursive: true });
+    mkdirSync(other);
+    symlinkSync(claude, join(top, "link"));
+    const file = join(top, "auth-success.json");
+    writeFileSync(file, JSON.stringify({ at: 42, dir: join(top, "link") }));
+    expect(readLoginNote(file, claude)).toBe(42);
+    expect(readLoginNote(file, join(top, "link"))).toBe(42);
+    writeFileSync(file, JSON.stringify({ at: 42, dir: other }));
+    expect(readLoginNote(file, claude)).toBeUndefined();
+    writeFileSync(file, JSON.stringify({ at: 42 }));
+    expect(readLoginNote(file, claude)).toBeUndefined();
+    writeFileSync(file, JSON.stringify({ at: 42, dir: join(top, "gone") }));
+    expect(readLoginNote(file, claude)).toBeUndefined();
   });
 });

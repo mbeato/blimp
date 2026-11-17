@@ -69,6 +69,16 @@ describe("filing", () => {
   test("a state from before `at` (settled at 0): a notice counts, and any stamped record is fresh", () => {
     expect(filing(state({ active: "id-b", filed: { mtime: 1, at: 0 } }), rec("id-a", 5), 10)).toEqual({ id: "id-a", login: true });
   });
+
+  test("owner unknown: only a login notice with a fresh record files; a renewal or a record alone is held", () => {
+    const unknown = (o: Partial<State> = {}) => state({ unknown: true, filed: { mtime: 1, at: 1000 }, ...o });
+    expect(filing(unknown(), rec("id-c", 2000), 1500)).toEqual({ id: "id-c", login: true });
+    expect(filing(unknown(), rec("id-c"), 1500)).toBe("wait");
+    expect(filing(unknown(), rec("id-c", 2000), 900)).toBe("held");
+    expect(filing(unknown(), rec("id-c", 2000), undefined)).toBe("held");
+    expect(filing(unknown(), undefined, undefined)).toBe("held");
+    expect(filing(unknown({ active: "id-b" }), rec("id-c"), undefined)).toBe("held");
+  });
 });
 
 describe("isOut", () => {

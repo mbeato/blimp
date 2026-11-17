@@ -4,7 +4,8 @@
 // install adds blimp's there too (`blimpd hook codex`): for Codex they are the only source of state.
 // A Claude turn that ends on an API error (StopFailure) also records the error, so blimpd can tell
 // when the account in use has run out. A /login that succeeded (the auth_success notice) leaves a note
-// with its time beside the status folder, so blimpd knows a changed login file is a login, not a renewal.
+// with its time and Claude folder beside the status folder, so blimpd knows a changed login file is a
+// login, not a renewal.
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -139,11 +140,12 @@ export function writeHookStatus(
   } catch {
     return;
   }
-  // Whatever the session: a /login in a session blimp didn't start counts too. It holds no secret.
+  // Whatever the session: a /login in a session blimp didn't start counts too. It holds no secret. It
+  // names the Claude folder, because a session with another (CLAUDE_CONFIG_DIR) runs this hook too.
   if (!codex && ev?.hook_event_name === "Notification" && ev.notification_type === "auth_success")
     try {
       const tmp = `${loginNote}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ at: Date.now() }));
+      writeFileSync(tmp, JSON.stringify({ at: Date.now(), dir: claudeDir() }));
       renameSync(tmp, loginNote);
     } catch {}
   // The name becomes a file name: "../x" or "a/b" must not write anywhere else.

@@ -2,7 +2,9 @@ import { afterAll, describe, expect, setSystemTime, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readLoginNote } from "../src/accounts/store";
 import { CODEX_HOOKS, installHooks, uninstallHooks, writeHookStatus } from "../src/hooks";
+import { claudeDir } from "../src/sessions";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-hooks-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
@@ -219,6 +221,7 @@ describe("writeHookStatus", () => {
     const before = Date.now();
     writeHookStatus(ev("Notification", "auth_success"), undefined, dir, false, note);
     expect(JSON.parse(readFileSync(note, "utf8")).at).toBeGreaterThanOrEqual(before);
+    expect(JSON.parse(readFileSync(note, "utf8")).dir).toBe(claudeDir());
     rmSync(note);
     writeHookStatus(ev("Notification", "auth_success"), "web-9", dir, false, note);
     expect(typeof JSON.parse(readFileSync(note, "utf8")).at).toBe("number");
@@ -380,10 +383,10 @@ describe("writeHookStatus", () => {
 });
 
 describe("`blimpd hook`", () => {
-  const run = (stdin: string, session: string) =>
+  const run = (stdin: string, session: string, env: Record<string, string> = {}) =>
     Bun.spawnSync(["bun", join(import.meta.dir, "..", "src", "main.ts"), "hook"], {
       stdin: new TextEncoder().encode(stdin),
-      env: { ...process.env, ZMX_SESSION: session, BLIMPD_SOCKET: join(tmp, "s", "blimpd.sock") },
+      env: { ...process.env, ZMX_SESSION: session, BLIMPD_SOCKET: join(tmp, "s", "blimpd.sock"), ...env },
     });
 
   test("writes <socket dir>/status/<session>.json and prints nothing", () => {
@@ -399,6 +402,21 @@ describe("`blimpd hook`", () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout.toString() + r.stderr.toString()).toBe("");
     expect(typeof JSON.parse(readFileSync(join(tmp, "s", "auth-success.json"), "utf8")).at).toBe("number");
+  });
+
+  test("the note names the Claude folder the hook ran for: blimpd counts it for that folder only", () => {
+    const claude = join(tmp, "s-claude");
+    const other = join(tmp, "s-claude2");
+    mkdirSync(claude, { recursive: true });
+    mkdirSync(other, { recursive: true });
+    const note = join(tmp, "s", "auth-success.json");
+    const r = run(JSON.stringify({ hook_event_name: "Notification", notification_type: "auth_success", session_id: "abc" }), "", { CLAUDE_CONFIG_DIR: other });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(note, "utf8")).dir).toBe(other);
+    expect(readLoginNote(note, claude)).toBeUndefined();
+    expect(readLoginNote(note, other)).toBe(JSON.parse(readFileSync(note, "utf8")).at);
+    writeFileSync(note, JSON.stringify({ at: Date.now() }));
+    expect(readLoginNote(note, claude)).toBeUndefined();
   });
 
   test("exits 0 quietly with garbage on stdin and a hostile session name", () => {

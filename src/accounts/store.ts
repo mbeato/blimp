@@ -8,7 +8,7 @@
 // and no error message carries one. .claude.json is only read, never written.
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { readConfig } from "../names";
@@ -17,7 +17,10 @@ import { blimpDir, claudeDir } from "../sessions";
 export type Saved = { id: string; email: string; expires?: number }; // expires: the refresh token's, ms
 export type Out = { at: number; until: number };
 export type Filed = { mtime: number; at: number }; // the live file's mtimeMs when last settled, and when blimp settled it
-export type State = { active?: string; order: string[]; out: Record<string, Out>; switchedAt?: number; filed?: Filed };
+// unknown: blimp can't tell whose login is in place, so it saves nothing and switches nothing (switcher.ts).
+// renewed: the last change filed as a renewal: the account it was saved under, and the live file's
+// mtime then (at). No login in it.
+export type State = { active?: string; order: string[]; out: Record<string, Out>; switchedAt?: number; filed?: Filed; unknown?: true; renewed?: { id: string; at: number } };
 export type Rec = { id: string; email: string; fetchedAt?: number; account: unknown }; // oauthAccount; fetchedAt is its profileFetchedAt
 
 export const accountsDir = (dir = blimpDir()) => join(dir, "accounts");
@@ -67,11 +70,13 @@ export function readRecord(file = recordFile()): Rec | undefined {
   } catch {}
 }
 
-// When Claude Code last said a /login succeeded (ms). Undefined: no note, or one that can't be read.
-export function readLoginNote(file = loginNoteFile()): number | undefined {
+// When Claude Code last said a /login succeeded (ms), in the Claude folder claude. A session with
+// another config folder (CLAUDE_CONFIG_DIR) runs the same hook, and its /login changes no login here.
+// Undefined: no note, one that can't be read, or one from another folder or that names none.
+export function readLoginNote(file = loginNoteFile(), claude = claudeDir()): number | undefined {
   try {
-    const at = JSON.parse(readFileSync(file, "utf8"))?.at;
-    if (typeof at === "number") return at;
+    const { at, dir } = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof at === "number" && typeof dir === "string" && realpathSync(dir) === realpathSync(claude)) return at;
   } catch {}
 }
 

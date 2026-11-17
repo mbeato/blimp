@@ -12,7 +12,7 @@ import { apnsFor } from "../push/watch";
 import { readCreds, readDevices } from "../push/store";
 import { blimpDir, claudeDir, isSafeName, listSessionsLite, type Session, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
 import { typeInto } from "../typing";
-import { filing, LOGIN_RECORD_MS, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, SETTLE_MS } from "./rules";
+import { filing, LATE_NOTICE_MS, LOGIN_RECORD_MS, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, SETTLE_MS } from "./rules";
 import { accountsDir, accountsOn, hasLogin, listSaved, liveFile, liveMtime, putLive, type Rec, readLoginNote, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
 
 export type Stop = { session: string; at: number; error: string; details?: string; message?: string };
@@ -20,7 +20,7 @@ export type SwitcherDeps = {
   dir: string; // the accounts folder
   live: string; // the live login file
   record: () => Rec | undefined; // oauthAccount now
-  loginSeen: () => number | undefined; // when Claude Code last said a /login succeeded (hooks.ts)
+  loginSeen: () => number | undefined; // when Claude Code last said a /login succeeded in this Claude folder (hooks.ts)
   stops: () => Promise<Stop[]>; // running Claude sessions whose latest hook event is a StopFailure
   menu: (session: string) => boolean; // its screen shows a list of choices
   type: (session: string) => Promise<void>; // types "continue" and Enter; throws if it couldn't
@@ -62,16 +62,24 @@ export class Switcher {
       const stops = await this.deps.stops();
       const now = this.deps.now();
       const state = readState(this.deps.dir);
+      const wasUnknown = state.unknown;
 
       // A swap whose state write was lost is unmistakable, so it's adopted at once: a renewal would
       // hide it. On the first tick whatever the mtime (a crash can come between the swap and its state
       // write); after that on any change not yet filed. Any other change is filed once it is
-      // SETTLE_MS old: a /login's notice and account record land a moment after its login file.
+      // SETTLE_MS old: a /login writes its account record, then its login file, and its notice last,
+      // after network calls. A notice newer than the last settle with no change left to file came
+      // after its change was filed, as a renewal.
       const m = liveMtime(this.deps.live);
       if (m !== undefined && (!this.looked || m !== state.filed?.mtime)) this.adopt(state, m, now);
       this.looked = true;
       const unfiled = () => m !== undefined && m !== state.filed?.mtime;
+      const note = this.deps.loginSeen() ?? 0;
+      let wrong: string | undefined;
       if (unfiled() && now - m! >= SETTLE_MS) this.file(state, now);
+      else if (m !== undefined && !unfiled() && note > (state.filed?.at ?? 0)) wrong = this.late(state, m, note, now);
+      // Told after the state is written, also when every account is out.
+      const tellWrong = () => wrong && this.deps.tell("A /login may have been saved under the wrong account", `Log in to ${wrong} again with /login in a session.`);
 
       for (const s of stops)
         if (this.logged.get(s.session) !== s.at) {
@@ -83,9 +91,10 @@ export class Switcher {
       // A limit stop in the quiet time after a switch (or a login filed just above) left before it, and
       // one from before blimpd started is a stale status file: neither asks for a switch. Nothing
       // switches over a change not yet filed (seconds old, or a /login waiting for its record), so the
-      // copy put back later has the newest refresh token; the stops ask again next tick.
+      // copy put back later has the newest refresh token; the stops ask again next tick. Nor while blimp
+      // can't tell whose login is in place: no account to mark out, and a stop asks once that is known.
       const asks = (s: Stop) => this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started;
-      const asking = unfiled() ? [] : out.filter(asks);
+      const asking = unfiled() || state.unknown ? [] : out.filter(asks);
       let switched: { from: string; to: string } | undefined;
       if (asking.length) {
         const from = state.active;
@@ -105,16 +114,18 @@ export class Switcher {
             this.toldOutFor = state.switchedAt ?? 0;
             await this.deps.tell("Every Claude account is out", "Claude Code carries on by itself when a limit resets.");
           }
+          await tellWrong();
           return;
         }
         this.deps.log({ event: "switch", from, to: next.id });
         switched = { from: saved.find((a) => a.id === from)?.email || from || "The last account", to: next.email || next.id };
       }
 
-      // After a switch, every limit stop; otherwise only a recent one that came in the quiet time after the last.
+      // After a switch, every limit stop; otherwise only a recent one that came in the quiet time after
+      // the last. None while blimp can't tell whose login is in place.
       const sw = state.switchedAt;
       const quiet = (s: Stop) => sw !== undefined && sw < s.at && s.at <= sw + QUIET_MS && now - s.at < RECENT_MS;
-      const due = out.filter((s) => this.continued.get(s.session) !== s.at && (switched || quiet(s)));
+      const due = state.unknown ? [] : out.filter((s) => this.continued.get(s.session) !== s.at && (switched || quiet(s)));
       let done = 0;
       let left = 0;
       let unread = false;
@@ -154,6 +165,9 @@ export class Switcher {
             : "No session was waiting on it.";
         await this.deps.tell(`Now on ${switched.to}`, `${switched.from} ran out. ${body}`);
       }
+      await tellWrong();
+      if (state.unknown && !wasUnknown)
+        await this.deps.tell("blimp can't tell which account is logged in", "The last /login was not saved. Run blimpd account use <email>, or /login again in a session.");
     } catch (e) {
       this.error(e);
     } finally {
@@ -173,21 +187,32 @@ export class Switcher {
   }
 
   // By hand (`blimpd account use`): file, swap, tell. Nothing is marked out and nobody gets "continue".
-  async use(id: string): Promise<void> {
+  // True when the login that was in place wasn't saved, because blimp couldn't tell whose it was.
+  async use(id: string): Promise<boolean> {
     const now = this.deps.now();
     const state = readState(this.deps.dir);
     const to = listSaved(this.deps.dir, state).find((a) => a.id === id);
     if (!to) throw new Error("no saved login for that account");
     if ((to.expires ?? Infinity) <= now) throw new Error("that account's login has expired; log in to it again with /login");
+    // A change seconds old may be a /login whose notice hasn't come yet: filed now, it would go under
+    // the account in use.
+    const m = liveMtime(this.deps.live);
+    if (m !== undefined && m !== state.filed?.mtime && now - m < SETTLE_MS) {
+      const n = Math.ceil((SETTLE_MS - (now - m)) / 1000);
+      throw new Error(`a login is still settling; try again in ${n} second${n === 1 ? "" : "s"}`);
+    }
     if (!this.file(state, now)) throw new Error("a login made a moment ago isn't saved yet; try again in a minute");
+    const unsaved = state.unknown === true;
     const from = state.active;
     const mtime = putLive(id, this.deps.live, this.deps.dir);
     state.active = id;
+    delete state.unknown;
     state.switchedAt = now;
     state.filed = { mtime, at: now };
     writeState(state, this.deps.dir);
     this.deps.log({ event: "switch", from, to: id, byHand: true });
     await this.deps.tell(`Now on ${to.email || to.id}`, "Switched by hand.");
+    return unsaved;
   }
 
   // Saves the live file under whoever it belongs to (rules.ts `filing`), so the copy put back later has
@@ -199,25 +224,36 @@ export class Switcher {
     if (this.adopt(s, mtime, now)) return true;
     const rec = this.deps.record();
     const who = filing(s, rec, this.deps.loginSeen());
-    // Nobody to file it under, no login in it (after /logout, say), or a /login whose record never
-    // came: noted as filed, so it isn't tried again every second. Any other failure to save is
-    // thrown, and tried again next tick.
-    const unfiled = (why?: string) => {
+    // Nobody to file it under, no login in it (after /logout, say), a /login whose record never came,
+    // or a change held while blimp can't tell whose login is in place: noted as filed, so it isn't
+    // tried again every second. Any other failure to save is thrown, and tried again next tick.
+    const unfiled = (event: string, why?: string) => {
       s.filed = { mtime, at: now };
       writeState(s, this.deps.dir);
-      this.deps.log({ event: "unfiled", ...(why && { why }) });
+      this.deps.log({ event, ...(why && { why }) });
       return true;
     };
-    if (who === "wait") return now - mtime >= LOGIN_RECORD_MS && unfiled("login without a record");
+    // A /login whose record never came: blimp knows a login happened and not whose, so from here
+    // nothing is saved under the account that was in use.
+    if (who === "wait") {
+      if (now - mtime < LOGIN_RECORD_MS) return false;
+      s.unknown = true;
+      delete s.active;
+      return unfiled("unknown", "login without a record");
+    }
+    if (who === "held") return unfiled("held");
     const text = readFileSync(this.deps.live, "utf8");
-    if (!who || !hasLogin(text)) return unfiled();
+    if (!who || !hasLogin(text)) return unfiled("unfiled");
     saveLogin(who.id, text, who.login ? rec!.account : undefined, this.deps.dir);
     if (!s.order.includes(who.id)) s.order.push(who.id);
     s.active = who.id;
+    delete s.unknown;
     s.filed = { mtime, at: now };
     // A login by hand is a switch too: a limit stop from a request that left on the old account gets
-    // the quiet time.
+    // the quiet time. A renewal may be a /login whose notice is late: noted, so `late` can name the
+    // account it went under.
     if (who.login) s.switchedAt = mtime;
+    else s.renewed = { id: who.id, at: mtime };
     writeState(s, this.deps.dir);
     this.deps.log({ event: who.login ? "login" : "renewal", account: who.id });
     return true;
@@ -230,11 +266,26 @@ export class Switcher {
     const owner = savedWith(readFileSync(this.deps.live, "utf8"), this.deps.dir);
     if (!owner || owner === s.active) return false;
     s.active = owner;
+    delete s.unknown;
     s.switchedAt = mtime;
     s.filed = { mtime, at: now };
     writeState(s, this.deps.dir);
     this.deps.log({ event: "adopted", account: owner });
     return true;
+  }
+
+  // A /login's notice that came after its change was filed: that change may have been a renewal saved
+  // under state.renewed's account. blimp moves no saved login on a guess, so nothing else changes: the
+  // notice is used up, and if a renewal was filed in the LATE_NOTICE_MS before it, the phone is told to
+  // log in to that account again. Returns that account's email (or id) then.
+  private late(s: State, m: number, note: number, now: number): string | undefined {
+    const r = s.renewed;
+    s.filed = { mtime: m, at: now };
+    delete s.renewed;
+    writeState(s, this.deps.dir);
+    const told = r !== undefined && note >= r.at && note - r.at < LATE_NOTICE_MS;
+    this.deps.log({ event: "late login notice", ...(r && { account: r.id }), told });
+    if (told) return listSaved(this.deps.dir, s).find((a) => a.id === r.id)?.email || r.id;
   }
 }
 

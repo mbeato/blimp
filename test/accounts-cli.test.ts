@@ -111,6 +111,19 @@ test("accounts: none saved, with switching on and off", async () => {
   expect((await printed((out) => runAccounts(join(top, "accounts"), T, out))).out).toBe(none);
 });
 
+test("accounts: when blimp can't tell which account is logged in, none is in use and a line after the list says so", async () => {
+  const { dir } = setup(true);
+  const { active, ...s } = readState(dir);
+  writeState({ ...s, unknown: true }, dir);
+  const r = await printed((out) => runAccounts(dir, T, out));
+  expect(r.out.split("\n")).toEqual([
+    `a@x.com, login expires ${day(LATER)}`,
+    `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
+    "c@x.com, login expired: log in to it again with /login",
+    "blimp can't tell which account is logged in. Say which with: blimpd account use <email>, or log in again with /login in a session.",
+  ]);
+});
+
 test("account use: puts the login in place and says so", async () => {
   const { dir, live } = setup();
   const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err));
@@ -145,12 +158,58 @@ test("account use: a /login not yet filed goes under the account it was made to,
   const { top, dir, live } = setup();
   mkdirSync(join(root, "config"), { recursive: true });
   writeFileSync(join(root, "config", ".claude.json"), JSON.stringify({ oauthAccount: { ...acct("id-d", "d@x.com"), profileFetchedAt: Date.now() } }));
-  writeFileSync(join(top, "auth-success.json"), JSON.stringify({ at: Date.now() }));
+  writeFileSync(join(top, "auth-success.json"), JSON.stringify({ at: Date.now(), dir: join(root, "config") }));
   writeFileSync(live, creds("tok-D"));
   utimesSync(live, 1_000_000, 1_000_000);
   expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err))).code).toBe(0);
   expect(readFileSync(join(dir, "id-d", "credentials.json"), "utf8")).toContain("tok-D");
   expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toContain("tok-A");
+  expect(liveToken(live)).toBe("tok-B");
+});
+
+test("account use: a login note from another Claude folder, or with no folder, isn't a /login here: the change is a renewal", async () => {
+  for (const note of [{ at: Date.now(), dir: join(root, "elsewhere") }, { at: Date.now() }]) {
+    const { top, dir, live } = setup();
+    mkdirSync(join(root, "config"), { recursive: true });
+    mkdirSync(join(root, "elsewhere"), { recursive: true });
+    writeFileSync(join(root, "config", ".claude.json"), JSON.stringify({ oauthAccount: { ...acct("id-d", "d@x.com"), profileFetchedAt: Date.now() } }));
+    writeFileSync(join(top, "auth-success.json"), JSON.stringify(note));
+    writeFileSync(live, creds("tok-A2"));
+    utimesSync(live, 1_000_000, 1_000_000);
+    expect((await printed((out, err) => runAccount(["use", "id-b"], dir, live, out, err))).code).toBe(0);
+    expect(readFileSync(join(dir, "id-a", "credentials.json"), "utf8")).toContain("tok-A2");
+    expect(existsSync(join(dir, "id-d"))).toBe(false);
+  }
+});
+
+test("account use: while blimp can't tell whose login is in place, says it wasn't saved, saves it nowhere, and clears that", async () => {
+  const { dir, live } = setup();
+  const { active, ...s } = readState(dir);
+  writeState({ ...s, unknown: true, filed: { mtime: 1, at: 2 } }, dir);
+  writeFileSync(live, creds("tok-X"));
+  utimesSync(live, 1_000_000, 1_000_000);
+  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err));
+  expect(r).toEqual({ code: 0, out: "the login that was in place was not saved, because blimp could not tell whose it was\nnow on b@x.com", err: "" });
+  expect(liveToken(live)).toBe("tok-B");
+  const after = readState(dir);
+  expect(after.active).toBe("id-b");
+  expect(after.unknown).toBeUndefined();
+  for (const id of ["id-a", "id-b", "id-c"]) expect(readFileSync(join(dir, id, "credentials.json"), "utf8")).not.toContain("tok-X");
+  expect(existsSync(join(dir, "id-a", "credentials.prev.json"))).toBe(false);
+});
+
+test("account use: refuses while a change to the live login is settling, and works once it has settled", async () => {
+  const { dir, live } = setup();
+  writeFileSync(live, creds("tok-A2"));
+  utimesSync(live, (Date.now() - 2000) / 1000, (Date.now() - 2000) / 1000);
+  const r = await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err));
+  expect(r.code).toBe(1);
+  expect(r.out).toBe("");
+  expect(r.err).toMatch(/^blimpd: a login is still settling; try again in 2[78] seconds$/);
+  expect(liveToken(live)).toBe("tok-A2");
+  expect(readState(dir).active).toBe("id-a");
+  utimesSync(live, 1_000_000, 1_000_000);
+  expect((await printed((out, err) => runAccount(["use", "b@x.com"], dir, live, out, err))).code).toBe(0);
   expect(liveToken(live)).toBe("tok-B");
 });
 

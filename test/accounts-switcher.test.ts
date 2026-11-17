@@ -2,7 +2,7 @@
 // settable clock, and fakes for the sessions, the typist and the phone. Tokens are made up.
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LOGIN_RECORD_MS, OUT_MS, QUIET_MS, SETTLE_MS } from "../src/accounts/rules";
@@ -191,7 +191,7 @@ test("a session showing a menu is left alone, one that refuses is counted as lef
   expect(t.logs).toContainEqual({ event: "not continued", session: "s2", error: "the session is asking something" });
 });
 
-test("case 6: a /login to a new account is filed under it once the change is 10 seconds old", async () => {
+test("case 6: a /login to a new account is filed under it once the change is 30 seconds old", async () => {
   const { t, sw } = setup();
   rewrite(t.live, creds("tok-C"), T);
   t.note = T + 100;
@@ -228,7 +228,7 @@ test("after a switch, a renewal is filed under the active account, not the one t
 
 test("a swap files the live login first", async () => {
   const { t, sw } = setup();
-  rewrite(t.live, creds("tok-A2"), T - 20_000);
+  rewrite(t.live, creds("tok-A2"), T - 40_000);
   t.stops = [limit("s1", T)];
   await sw.tick();
   expect(saved(t.dir, "id-a")).toBe(creds("tok-A2"));
@@ -237,7 +237,7 @@ test("a swap files the live login first", async () => {
 
 test("use switches by hand: nothing marked out, no continue; an unknown or expired account throws first", async () => {
   const { t, sw } = setup();
-  await sw.use("id-b");
+  expect(await sw.use("id-b")).toBe(false);
   expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B"));
   const s = readState(t.dir);
   expect(s.active).toBe("id-b");
@@ -413,10 +413,10 @@ test("a session that leaves the stop list during the wait, or stops again, isn't
 
 test("a login made by hand gets the quiet time: a limit stop 5 s after it doesn't switch, one 31 s after does", async () => {
   const { t, sw } = setup();
-  rewrite(t.live, creds("tok-C"), T - 20_000);
+  rewrite(t.live, creds("tok-C"), T - 40_000);
   const mtime = liveMtime(t.live)!;
-  t.note = T - 19_900;
-  t.rec = rec("id-c", "c@x.com", T - 19_800);
+  t.note = T - 39_900;
+  t.rec = rec("id-c", "c@x.com", T - 39_800);
   t.stops = [limit("s1", mtime + 5000)];
   await sw.tick();
   let s = readState(t.dir);
@@ -487,7 +487,7 @@ test("a fresh switcher adopts on its first tick a live login that is another acc
 
 test("a save that fails for another reason is retried, and nothing switches until it works", async () => {
   const { t, sw } = setup();
-  rewrite(t.live, creds("tok-A2"), T - 20_000);
+  rewrite(t.live, creds("tok-A2"), T - 40_000);
   const before = readState(t.dir).filed;
   renameSync(join(t.dir, "id-a"), join(t.dir, "id-a.away"));
   writeFileSync(join(t.dir, "id-a"), "not a folder");
@@ -521,7 +521,7 @@ test("a login seconds old isn't filed or switched on; once its record lands it i
   expect(readFileSync(t.live, "utf8")).toBe(creds("tok-C"));
 
   t.rec = rec("id-c", "c@x.com", T + 5000);
-  t.clock = T + 11_000;
+  t.clock = T + 29_000;
   await sw.tick();
   expect(saved(t.dir, "id-c")).toBe(creds("tok-C"));
   expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
@@ -648,7 +648,7 @@ test("case 4: no state.json, the live login equal to id-a's copy: adopted, then 
 test("case 5: no state.json and a live login no copy holds: filed as a login under the account the record names", async () => {
   const { t, sw } = setup();
   rmSync(join(t.dir, "state.json"));
-  rewrite(t.live, creds("tok-C"), T - 20_000);
+  rewrite(t.live, creds("tok-C"), T - 40_000);
   t.rec = rec("id-c", "c@x.com", OLD);
   await sw.tick();
   expect(saved(t.dir, "id-c")).toBe(creds("tok-C"));
@@ -656,7 +656,7 @@ test("case 5: no state.json and a live login no copy holds: filed as a login und
   expect(t.logs).toContainEqual({ event: "login", account: "id-c" });
 });
 
-test("case 7: a /login whose record isn't rewritten is left unfiled after 60 seconds, once, and nothing is saved", async () => {
+test("case 7: a /login whose record isn't rewritten is given up after 60 seconds, once: nothing is saved and the owner is unknown", async () => {
   const { t, sw } = setup();
   rewrite(t.live, creds("tok-X"), T);
   t.note = T + 100;
@@ -670,26 +670,27 @@ test("case 7: a /login whose record isn't rewritten is left unfiled after 60 sec
     t.clock = c;
     await sw.tick();
   }
-  expect(t.logs).toEqual([{ event: "unfiled", why: "login without a record" }]);
+  expect(t.logs).toEqual([{ event: "unknown", why: "login without a record" }]);
   expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
   expect(saved(t.dir, "id-b")).toBe(creds("tok-B"));
-  expect(readState(t.dir).active).toBe("id-a");
-  // That notice is used up: the next change is a renewal again.
-  rewrite(t.live, creds("tok-A2"), T + 70_000);
+  expect(readState(t.dir).active).toBeUndefined();
+  // That notice is used up, and the next change isn't saved under id-a: blimp can't tell whose it is.
+  rewrite(t.live, creds("tok-X2"), T + 70_000);
   t.clock = T + 70_000 + SETTLE_MS;
   await sw.tick();
-  expect(saved(t.dir, "id-a")).toBe(creds("tok-A2"));
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(t.logs.at(-1)).toEqual({ event: "held" });
 });
 
-test("case 8: a /login whose record turns fresh 20 seconds after the change is filed then, under the account it names", async () => {
+test("case 8: a /login whose record turns fresh 40 seconds after the change is filed then, under the account it names", async () => {
   const { t, sw } = setup();
   rewrite(t.live, creds("tok-B9"), T);
   t.note = T + 100;
   t.clock = T + SETTLE_MS;
   await sw.tick();
   expect(saved(t.dir, "id-b")).toBe(creds("tok-B"));
-  t.rec = rec("id-b", "b@x.com", T + 20_000);
-  t.clock = T + 20_000;
+  t.rec = rec("id-b", "b@x.com", T + 40_000);
+  t.clock = T + 40_000;
   await sw.tick();
   expect(saved(t.dir, "id-b")).toBe(creds("tok-B9"));
   expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
@@ -712,13 +713,14 @@ test("case 9: a login note older than the last settle isn't a login: a renewal g
 
 test("a login note from before a switch isn't a login after it: the renewal goes under the account switched to", async () => {
   const { t, sw } = setup();
-  t.note = T + 500;
   t.clock = T + 1000;
   t.stops = [limit("s1", T + 1000)];
   rewrite(t.live, readFileSync(t.live, "utf8"), T - 60_000);
   writeState({ ...readState(t.dir), filed: { mtime: liveMtime(t.live)!, at: T - 3600_000 } }, t.dir);
   await sw.tick();
   expect(readState(t.dir).active).toBe("id-b");
+  // The note is first seen after the switch. One seen before it, with nothing to file, is a late notice.
+  t.note = T + 500;
   t.stops = [];
   t.rec = rec("id-a", "a@x.com", T + 2000);
   rewrite(t.live, creds("tok-B2"), T + 2000);
@@ -731,7 +733,7 @@ test("a login note from before a switch isn't a login after it: the renewal goes
 
 test("use doesn't swap over a live login it couldn't save first", async () => {
   const { t, sw } = setup();
-  rewrite(t.live, creds("tok-A2"), T - 20_000);
+  rewrite(t.live, creds("tok-A2"), T - 40_000);
   renameSync(join(t.dir, "id-a"), join(t.dir, "id-a.away"));
   writeFileSync(join(t.dir, "id-a"), "not a folder");
   await expect(sw.use("id-b")).rejects.toThrow();
@@ -741,8 +743,8 @@ test("use doesn't swap over a live login it couldn't save first", async () => {
 
 test("use doesn't swap over a /login still waiting for its record", async () => {
   const { t, sw } = setup();
-  rewrite(t.live, creds("tok-C"), T - 1000);
-  t.note = T - 900;
+  rewrite(t.live, creds("tok-C"), T - 40_000);
+  t.note = T - 39_900;
   await expect(sw.use("id-b")).rejects.toThrow("a login made a moment ago isn't saved yet; try again in a minute");
   expect(readFileSync(t.live, "utf8")).toBe(creds("tok-C"));
   expect(readState(t.dir).active).toBe("id-a");
@@ -755,4 +757,326 @@ test("after a restart, an old stop in the last switch's quiet time isn't typed i
   await new Switcher(deps, T).tick();
   expect(t.typed).toEqual([]);
   expect(t.told).toEqual([]);
+});
+
+// When blimp can't tell whose login is in place (last-round.md).
+
+const TITLE = "blimp can't tell which account is logged in";
+const BODY = "The last /login was not saved. Run blimpd account use <email>, or /login again in a session.";
+const prev = (dir: string, id: string) => join(dir, id, "credentials.prev.json");
+// Whether any file in the accounts folder holds this text.
+const anywhere = (dir: string, text: string) =>
+  readdirSync(dir, { recursive: true, encoding: "utf8" }).some((f) => statSync(join(dir, f)).isFile() && readFileSync(join(dir, f), "utf8").includes(text));
+
+// Row A: a /login to id-c whose record never gets a profileFetchedAt, its notice a second after the
+// change; given up at 60 s. Then two renewals of that login, and a limit stop.
+async function rowA() {
+  const r = setup();
+  const { t, sw } = r;
+  rewrite(t.live, creds("tok-C1"), T);
+  t.rec = rec("id-c", "c@x.com");
+  t.note = T + 1000;
+  for (const c of [T + SETTLE_MS, T + LOGIN_RECORD_MS, T + LOGIN_RECORD_MS + 1000]) {
+    t.clock = c;
+    await sw.tick();
+  }
+  for (const [tok, at] of [
+    ["tok-C2", T + 100_000],
+    ["tok-C3", T + 200_000],
+  ] as const) {
+    rewrite(t.live, creds(tok), at);
+    for (const c of [at + SETTLE_MS, at + SETTLE_MS + 1000]) {
+      t.clock = c;
+      await sw.tick();
+    }
+  }
+  t.stops = [limit("s1", T + 300_000)];
+  t.clock = T + 300_000;
+  await sw.tick();
+  t.stops = [];
+  return r;
+}
+
+test("row A: a /login with no profileFetchedAt is given up: owner unknown, nothing saved; its renewals are held, a limit stop does nothing", async () => {
+  const { t } = await rowA();
+  const s = readState(t.dir);
+  expect(s.unknown).toBe(true);
+  expect(s.active).toBeUndefined();
+  expect(s.out).toEqual({});
+  expect(t.logs.map((e) => e.event)).toEqual(["unknown", "held", "held", "stop"]);
+  expect(t.logs[0]).toEqual({ event: "unknown", why: "login without a record" });
+  expect(t.told).toEqual([{ title: TITLE, body: BODY }]);
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(saved(t.dir, "id-b")).toBe(creds("tok-B"));
+  expect(existsSync(prev(t.dir, "id-a"))).toBe(false);
+  expect(existsSync(prev(t.dir, "id-b"))).toBe(false);
+  expect(existsSync(join(t.dir, "id-c"))).toBe(false);
+  expect(anywhere(t.dir, "tok-C")).toBe(false);
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-C3"));
+  expect(t.typed).toEqual([]);
+});
+
+test("row B: while the owner is unknown, a /login with a fresh record and a new notice is filed as its login", async () => {
+  const { t, sw } = await rowA();
+  rewrite(t.live, creds("tok-C9"), T + 400_000);
+  t.rec = rec("id-c", "c@x.com", T + 399_900);
+  t.note = T + 420_000;
+  t.clock = T + 400_000 + SETTLE_MS;
+  await sw.tick();
+  expect(saved(t.dir, "id-c")).toBe(creds("tok-C9"));
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  const s = readState(t.dir);
+  expect(s.unknown).toBeUndefined();
+  expect(s.active).toBe("id-c");
+  expect(t.logs.at(-1)).toEqual({ event: "login", account: "id-c" });
+});
+
+test("row C: while the owner is unknown, use puts the login in place, clears it, says the login in place wasn't saved, and saves it nowhere", async () => {
+  const { t, sw } = await rowA();
+  expect(await sw.use("id-b")).toBe(true);
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B"));
+  const s = readState(t.dir);
+  expect(s.unknown).toBeUndefined();
+  expect(s.active).toBe("id-b");
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(saved(t.dir, "id-b")).toBe(creds("tok-B"));
+  expect(existsSync(join(t.dir, "id-c"))).toBe(false);
+  expect(anywhere(t.dir, "tok-C")).toBe(false);
+  expect(t.logs.at(-1)).toEqual({ event: "switch", from: undefined, to: "id-b", byHand: true });
+});
+
+test("row D: while the owner is unknown, a live login equal to a saved one is adopted", async () => {
+  const { t, sw } = await rowA();
+  swapped(t.live, t.dir, "id-a");
+  await sw.tick();
+  const s = readState(t.dir);
+  expect(s.unknown).toBeUndefined();
+  expect(s.active).toBe("id-a");
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(t.logs.at(-1)).toEqual({ event: "adopted", account: "id-a" });
+});
+
+// A late notice (last-round.md, amendment 2): blimp tells and changes no file.
+
+const WRONG = "A /login may have been saved under the wrong account";
+// Every file under the accounts folder but state.json, with its text.
+const files = (dir: string) =>
+  Object.fromEntries(
+    readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((f) => f !== "state.json" && statSync(join(dir, f)).isFile())
+      .map((f) => [f, readFileSync(join(dir, f), "utf8")]),
+  );
+
+// A /login to id-c whose notice is slow: its change is filed at 30 s as a renewal of id-a.
+async function filedAsRenewal() {
+  const r = setup();
+  const { t, sw } = r;
+  t.rec = rec("id-c", "c@x.com", T - 100);
+  rewrite(t.live, creds("tok-C1"), T);
+  t.clock = T + SETTLE_MS;
+  await sw.tick();
+  return r;
+}
+
+test("row E: a /login's notice after its change was filed as a renewal is told once, naming that account; no file changes", async () => {
+  const { t, sw } = await filedAsRenewal();
+  const mtime = liveMtime(t.live)!;
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-C1"));
+  expect(readFileSync(prev(t.dir, "id-a"), "utf8")).toBe(creds("tok-A"));
+  expect(readState(t.dir).renewed).toEqual({ id: "id-a", at: mtime });
+  const before = files(t.dir);
+
+  t.note = T + SETTLE_MS + 5000;
+  t.clock = T + SETTLE_MS + 5000;
+  await sw.tick();
+  expect(files(t.dir)).toEqual(before);
+  const s = readState(t.dir);
+  expect(s.active).toBe("id-a");
+  expect(s.unknown).toBeUndefined();
+  expect(s.renewed).toBeUndefined();
+  expect(s.filed).toEqual({ mtime, at: T + SETTLE_MS + 5000 });
+  expect(t.told).toEqual([{ title: WRONG, body: "Log in to a@x.com again with /login in a session." }]);
+  expect(t.logs.at(-1)).toEqual({ event: "late login notice", account: "id-a", told: true });
+
+  t.clock = T + SETTLE_MS + 6000;
+  await sw.tick();
+  expect(t.told.length).toBe(1);
+  expect(t.logs.filter((e) => e.event === "late login notice").length).toBe(1);
+});
+
+test("a note used up by a late notice doesn't hold up the next renewal: it is filed at 30 seconds under the account in use", async () => {
+  const { t, sw } = await filedAsRenewal();
+  t.note = T + SETTLE_MS + 5000;
+  t.clock = T + SETTLE_MS + 5000;
+  await sw.tick();
+  rewrite(t.live, creds("tok-C2"), T + 100_000);
+  t.clock = T + 100_000 + SETTLE_MS;
+  await sw.tick();
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-C2"));
+  expect(readState(t.dir).active).toBe("id-a");
+  expect(t.logs.at(-1)).toEqual({ event: "renewal", account: "id-a" });
+});
+
+test("row E2: a late notice after a switch in the filing's tick is told the same way; no saved file changes and the account switched to stays", async () => {
+  const { t, sw } = setup();
+  saveLogin("id-b", creds("tok-B1"), undefined, t.dir);
+  t.rec = rec("id-c", "c@x.com", T - 100);
+  rewrite(t.live, creds("tok-C1"), T);
+  t.stops = [limit("s1", T + 1000)];
+  t.clock = T + 1000;
+  await sw.tick();
+  expect(readState(t.dir).active).toBe("id-a");
+  t.clock = T + SETTLE_MS;
+  await sw.tick();
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-C1"));
+  expect(readFileSync(prev(t.dir, "id-a"), "utf8")).toBe(creds("tok-A"));
+  expect(saved(t.dir, "id-b")).toBe(creds("tok-B1"));
+  expect(readFileSync(prev(t.dir, "id-b"), "utf8")).toBe(creds("tok-B"));
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B1"));
+  expect(readState(t.dir).active).toBe("id-b");
+  const before = files(t.dir);
+
+  t.stops = [];
+  t.note = T + SETTLE_MS + 5000;
+  t.clock = T + SETTLE_MS + 5000;
+  await sw.tick();
+  expect(files(t.dir)).toEqual(before);
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B1"));
+  const s = readState(t.dir);
+  expect(s.active).toBe("id-b");
+  expect(s.unknown).toBeUndefined();
+  expect(s.renewed).toBeUndefined();
+  expect(t.told.map((x) => x.title)).toEqual(["Now on b@x.com", WRONG]);
+  expect(t.told[1].body).toBe("Log in to a@x.com again with /login in a session.");
+  expect(t.logs.at(-1)).toEqual({ event: "late login notice", account: "id-a", told: true });
+});
+
+test("a late notice is still told when the same tick finds every account out", async () => {
+  const { t, sw } = setup();
+  t.rec = rec("id-c", "c@x.com", T - 100);
+  rewrite(t.live, creds("tok-C1"), T);
+  t.stops = [limit("s1", T + 1000)];
+  t.clock = T + SETTLE_MS;
+  await sw.tick();
+  expect(readState(t.dir).active).toBe("id-b");
+  t.stops = [limit("s1", T + 1000), limit("s2", T + SETTLE_MS + QUIET_MS + 1000)];
+  t.note = T + SETTLE_MS + QUIET_MS + 2000;
+  t.clock = T + SETTLE_MS + QUIET_MS + 2000;
+  await sw.tick();
+  expect(t.told.map((x) => x.title)).toEqual(["Now on b@x.com", "Every Claude account is out", WRONG]);
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-C1"));
+  expect(readState(t.dir).active).toBe("id-b");
+});
+
+test("row F: a late notice 10 minutes after the last renewal-filing tells nothing; the note is used up and no file changes", async () => {
+  const { t, sw } = await filedAsRenewal();
+  const mtime = liveMtime(t.live)!;
+  const before = files(t.dir);
+  t.note = mtime + 600_000;
+  t.clock = mtime + 600_000;
+  await sw.tick();
+  expect(files(t.dir)).toEqual(before);
+  const s = readState(t.dir);
+  expect(s.active).toBe("id-a");
+  expect(s.unknown).toBeUndefined();
+  expect(s.renewed).toBeUndefined();
+  expect(s.filed).toEqual({ mtime, at: mtime + 600_000 });
+  expect(t.told).toEqual([]);
+  expect(t.logs.at(-1)).toEqual({ event: "late login notice", account: "id-a", told: false });
+});
+
+test("row F2: a late notice with no renewal noted (a state.json from before): nothing told, the note is used up, one log entry with no account", async () => {
+  const { t, sw } = setup();
+  const live = readFileSync(t.live, "utf8");
+  const before = readState(t.dir);
+  const saves = files(t.dir);
+  t.note = T;
+  t.clock = T + 1000;
+  await sw.tick();
+  expect(readState(t.dir)).toEqual({ ...before, filed: { mtime: before.filed!.mtime, at: T + 1000 } });
+  expect(t.logs).toEqual([{ event: "late login notice", told: false }]);
+  expect(t.told).toEqual([]);
+  expect(files(t.dir)).toEqual(saves);
+  expect(readFileSync(t.live, "utf8")).toBe(live);
+});
+
+test("row G: a late notice while the owner is unknown, over 5 minutes after a real renewal: that renewal's save stays and nothing is told about it", async () => {
+  const { t, sw } = setup();
+  rewrite(t.live, creds("tok-A2"), T);
+  t.clock = T + SETTLE_MS;
+  await sw.tick();
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A2"));
+  expect(readState(t.dir).renewed).toEqual({ id: "id-a", at: liveMtime(t.live)! });
+
+  // A /login to id-c whose record never gets a profileFetchedAt: given up at 60 s.
+  rewrite(t.live, creds("tok-C1"), T + 400_000);
+  t.rec = rec("id-c", "c@x.com");
+  t.note = T + 401_000;
+  for (const c of [T + 400_000 + SETTLE_MS, T + 400_000 + LOGIN_RECORD_MS]) {
+    t.clock = c;
+    await sw.tick();
+  }
+  expect(readState(t.dir).unknown).toBe(true);
+
+  // The user logs in again; this notice is slow too: the change is held at 30 s, then the note comes.
+  rewrite(t.live, creds("tok-C2"), T + 500_000);
+  t.rec = rec("id-c", "c@x.com", T + 499_900);
+  t.clock = T + 500_000 + SETTLE_MS;
+  await sw.tick();
+  expect(t.logs.at(-1)).toEqual({ event: "held" });
+  t.note = T + 540_000;
+  t.clock = T + 540_000;
+  await sw.tick();
+
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A2"));
+  expect(readFileSync(prev(t.dir, "id-a"), "utf8")).toBe(creds("tok-A"));
+  expect(existsSync(join(t.dir, "id-c"))).toBe(false);
+  expect(t.told).toEqual([{ title: TITLE, body: BODY }]);
+  const s = readState(t.dir);
+  expect(s.unknown).toBe(true);
+  expect(s.active).toBeUndefined();
+  expect(s.filed?.at).toBe(T + 540_000);
+  expect(t.logs.at(-1)).toEqual({ event: "late login notice", account: "id-a", told: false });
+});
+
+test("a change is filed, and a switch waits, until it is 30 seconds old: not at 29", async () => {
+  const { t, sw } = setup();
+  rewrite(t.live, creds("tok-A2"), T);
+  t.stops = [limit("s1", T + 1000)];
+  t.clock = T + 29_000;
+  await sw.tick();
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(readState(t.dir).active).toBe("id-a");
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-A2"));
+  t.clock = T + 30_000;
+  await sw.tick();
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A2"));
+  expect(readState(t.dir).active).toBe("id-b");
+  expect(t.logs).toContainEqual({ event: "renewal", account: "id-a" });
+});
+
+test("use refuses while a change is settling, and works once it is 30 seconds old", async () => {
+  const { t, sw } = setup();
+  rewrite(t.live, creds("tok-A2"), T - 1500);
+  await expect(sw.use("id-b")).rejects.toThrow(/^a login is still settling; try again in 29 seconds$/);
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-A2"));
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A"));
+  expect(readState(t.dir).active).toBe("id-a");
+  t.clock = T + 28_000;
+  await expect(sw.use("id-b")).rejects.toThrow(/^a login is still settling; try again in 1 second$/);
+  t.clock = T + 28_500;
+  await sw.use("id-b");
+  expect(saved(t.dir, "id-a")).toBe(creds("tok-A2"));
+  expect(readFileSync(t.live, "utf8")).toBe(creds("tok-B"));
+  expect(readState(t.dir).active).toBe("id-b");
+});
+
+test("while the owner is unknown, a limit stop in the quiet time after the last switch isn't continued", async () => {
+  const { t, sw } = await switched();
+  const { active, ...s } = readState(t.dir);
+  writeState({ ...s, unknown: true }, t.dir);
+  t.stops = [limit("s1", T), limit("s2", T + 6000)];
+  t.clock = T + 7000;
+  await sw.tick();
+  expect(t.typed).toEqual(["s1"]);
 });
