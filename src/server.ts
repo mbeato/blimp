@@ -137,7 +137,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
 
   if (path === "/sessions" && get) return Response.json(listSessions(claudeDir(), await zmxListAsync()));
   if (path === "/sessions" && req.method === "POST") {
-    const { dir, name, resume, shell, kind, prompt } = (await req.json()) as Record<string, unknown>;
+    const { dir, name, resume, shell, kind, prompt, model, effort } = (await req.json()) as Record<string, unknown>;
     if (typeof dir !== "string") throw new HttpError(400, "dir is required");
     if (name !== undefined && typeof name !== "string") throw new HttpError(400, "name must be a string");
     if (resume !== undefined && (typeof resume !== "string" || !/^[0-9a-f-]{36}$/.test(resume)))
@@ -147,13 +147,22 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (shell && kind !== undefined && kind !== "shell") throw new HttpError(400, "shell: true and a kind other than shell");
     if (prompt !== undefined && (typeof prompt !== "string" || prompt.length > 100_000 || !cleanText(prompt).trim()))
       throw new HttpError(400, "prompt must be text of at most 100 000 characters");
+    // Claude's --model and --effort (kinds.ts). A model can't start with "-", so it's never read as another option.
+    if (model !== undefined && (typeof model !== "string" || !/^[A-Za-z0-9._[\]][A-Za-z0-9._[\]-]{0,59}$/.test(model)))
+      throw new HttpError(400, "model must be 1 to 60 letters, digits and . _ - [ ], not starting with -");
+    if (effort !== undefined && (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max"].includes(effort)))
+      throw new HttpError(400, "effort must be low, medium, high, xhigh or max");
     const real = guard(dir);
     if (!isDir(real)) throw new HttpError(400, `not a folder: ${dir}`);
     // shell: true is what the app sent before kinds. A resume without a kind goes on in the one it ran in.
     const k = shell ? "shell" : (kind ?? (resume ? resumedKind(real, resume, claudeDir(), readKindsFile().glm) : "claude"));
     if (resume && !CLAUDE_KINDS.includes(k)) throw new HttpError(400, "only Claude Code can resume a conversation");
     if (prompt !== undefined && !CLAUDE_KINDS.includes(k)) throw new HttpError(400, "only Claude Code takes a first message");
-    const run = await launchFor(k, resume);
+    // GLM sets its own model; Codex and a shell have none.
+    if (model !== undefined && k !== "claude") throw new HttpError(400, "only Claude Code takes a model");
+    if (effort !== undefined && k !== "claude") throw new HttpError(400, "only Claude Code takes an effort");
+    if (resume && (model !== undefined || effort !== undefined)) throw new HttpError(400, "a resumed conversation keeps its model");
+    const run = await launchFor(k, resume, undefined, undefined, undefined, { model, effort });
     // Claude's first message, as an argument after "--", so one that starts with "-" isn't taken for an option.
     if (typeof prompt === "string") run.args.push("--", cleanText(prompt));
     const started = await startSession(real, { name: name || undefined, kind: k, run });

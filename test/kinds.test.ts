@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { browserMcpConfigPath, mcpConfig, mcpConfigPath } from "../src/browser/mcp";
-import { installed, kindLabel, launchFor, listKinds, readKindsFile } from "../src/kinds";
+import { installed, kindLabel, launchFor, listKinds, modelLabel, readKindsFile } from "../src/kinds";
 
 // A temp home with nothing in it: no Z.ai key, no ~/.codex, no kinds.json.
 const home = mkdtempSync(join(tmpdir(), "blimp-kinds-"));
@@ -38,6 +38,15 @@ test("labels for session rows: none for Claude Code and a shell; a custom kind's
   expect(kindLabel("aider", custom)).toBe("Aider");
   expect(kindLabel("gone-from-the-file", custom)).toBe("gone-from-the-file");
   rmSync(file);
+});
+
+test("a Claude Code row's label is its model's short name; an unknown id as it is, cut to 24 characters", () => {
+  expect(["claude-fable-6", "claude-opus-5-5", "claude-sonnet-4-5-20250929", "claude-haiku-4-5"].map(modelLabel)).toEqual(["Fable", "Opus", "Sonnet", "Haiku"]);
+  expect(modelLabel("Claude-OPUS-5-5")).toBe("Opus");
+  expect(modelLabel("claude-sonnet-4-5[1m]")).toBe("Sonnet");
+  expect(modelLabel("gpt-9[1m]")).toBe("gpt-9");
+  expect(modelLabel("gpt-9")).toBe("gpt-9");
+  expect(modelLabel("some-model-nobody-has-heard-of-yet-12345")).toBe("some-model-nobody-has-he");
 });
 
 test("a custom kind whose command the login shell doesn't find is greyed, saying so", () => {
@@ -111,6 +120,8 @@ test("GLM: the settings are set by the script, after the profile; the key only i
     env: { PATH: bin, ...run.env, ANTHROPIC_BASE_URL: "https://elsewhere.example", ANTHROPIC_API_KEY: "theirs" },
   }).stdout.toString();
   expect(out).toBe(`https://api.z.ai/api/anthropic|it's $(x) \`y\`|zai-unit-key-0123456789|unset|unset|--mcp-config ${mcpConfigPath()} --resume abc\n`);
+  // GLM sets its own model, so a model or an effort asked for isn't passed.
+  expect((await launchFor("claude-glm", undefined, home, f, undefined, { model: "opus", effort: "high" })).args).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
 });
 
 test("Claude Code and Codex always get blimp's MCP (the show tool), and the server browser's when there's a Chrome and npx", async () => {
@@ -140,6 +151,28 @@ test("no npx: blimp's MCP still, no browser", async () => {
   process.env.SHELL = loginShellWith(bin);
   program(bin, "claude");
   expect((await launchFor("claude", undefined, home, kindsWith("no-npx-tool"), () => true)).args).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
+});
+
+test("a model and an effort go to Claude Code after its MCP config; not on a resume", async () => {
+  const bin = join(home, "bin-model");
+  process.env.SHELL = loginShellWith(bin);
+  program(bin, "claude");
+  const f = kindsWith("model-tool");
+  const no = () => false;
+  const args = async (opts: { model?: string; effort?: string }, resume?: string) => (await launchFor("claude", resume, home, f, no, opts)).args;
+  expect(await args({ model: "opus", effort: "high" })).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--model", "opus", "--effort", "high"]);
+  expect(await args({ model: "haiku" })).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--model", "haiku"]);
+  expect(await args({ effort: "low" })).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--effort", "low"]);
+  expect(await args({})).toEqual(["claude", "--mcp-config", mcpConfigPath()]);
+  // Whether they'd beat a resumed conversation's own model wasn't checked, so they aren't passed.
+  expect(await args({ model: "opus", effort: "high" }, "abc")).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--resume", "abc"]);
+  // The login shell found nothing: Claude Code still gets them.
+  process.env.SHELL = loginShellWith(join(home, "bin-model-none"));
+  expect(await launchFor("claude", undefined, home, kindsWith("model-none-tool"), no, { model: "opus", effort: "max" })).toEqual({
+    script: 'exec claude "$@"',
+    args: ["claude", "--mcp-config", mcpConfigPath(), "--model", "opus", "--effort", "max"],
+  });
+  expect((await launchFor("claude", "abc", home, kindsWith("model-none-tool-2"), no, { model: "opus" })).args).toEqual(["claude", "--mcp-config", mcpConfigPath(), "--resume", "abc"]);
 });
 
 test("mcp.json: blimp's server always, the browser's when asked", () => {

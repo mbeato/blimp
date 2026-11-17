@@ -30,16 +30,26 @@ export async function recordJob(command: string, session: string, reason: string
   }
 }
 
-// blimpd start <folder> <first message…> [--job <reason>]: a new Claude session there.
+// blimpd start <folder> [--model <m>] [--effort <e>] <first message…> [--job <reason>]: a new Claude session there.
+// Only the words right after the folder are read as the two flags, so the message can say --model. The running
+// blimpd checks their values, so a bad one is its error.
 export async function runStart(argv: string[]): Promise<number> {
   const fail = (m: string) => (console.error(`blimpd start: ${m}`), 1);
+  const usage = "usage: blimpd start <folder> [--model <m>] [--effort <e>] <first message> [--job <reason>]";
   const { args, job } = takeJob(argv);
   const [folder, ...words] = args;
+  const picked: { model?: string; effort?: string } = {};
+  while (words[0] === "--model" || words[0] === "--effort") {
+    const [flag, value] = words.splice(0, 2);
+    const key = flag === "--model" ? "model" : "effort";
+    if (value === undefined || value.startsWith("-") || picked[key] !== undefined) return fail(usage);
+    picked[key] = value;
+  }
   const text = words.join(" ");
-  if (!folder || !text.trim()) return fail("usage: blimpd start <folder> <first message> [--job <reason>]");
+  if (!folder || !text.trim()) return fail(usage);
   const dir = resolve(folder);
   try {
-    const r = await callBlimpd("/sessions", { method: "POST", body: JSON.stringify({ dir, prompt: text }) });
+    const r = await callBlimpd("/sessions", { method: "POST", body: JSON.stringify({ dir, prompt: text, ...picked }) });
     if (!r.ok) return fail(await errorOf(r));
     const { name } = (await r.json()) as { name: string };
     console.log(`started ${name} in ${dir}`);

@@ -18,7 +18,7 @@
 //   blimpd messages on|off|status|revoke  texting the assistant through a relay on a Mac (messages/cli.ts)
 //   blimpd overview            every project's sessions and unread past conversations, for the assistant (overview.ts)
 //   blimpd read <session or conversation id> [--last N]  its latest messages (overview.ts)
-//   blimpd start <folder> <message>  a new Claude session there with that first message (act.ts)
+//   blimpd start <folder> [--model <m>] [--effort <e>] <message>  a new Claude session there with that first message (act.ts)
 //   blimpd answer <session> <n>      pick option n of what a session asks (act.ts)
 //   blimpd accounts            the saved Claude logins: which is in use, which is out (accounts/cli.ts)
 //   blimpd account use|forget <email>  put a saved login in place now, or remove one (accounts/cli.ts)
@@ -126,6 +126,6 @@ if (cmd === "sessions") {
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | visuals-mcp | send <session> <message> | assistant on|off|status | messages on|off|status|revoke | overview | read <session or conversation id> [--last N] | start <folder> <message> | answer <session> <option number> | accounts | account use|forget <email> | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | visuals-mcp | send <session> <message> | assistant on|off|status | messages on|off|status|revoke | overview | read <session or conversation id> [--last N] | start <folder> [--model <m>] [--effort <e>] <message> | answer <session> <option number> | accounts | account use|forget <email> | --version");
   process.exit(cmd ? 1 : 0);
 }

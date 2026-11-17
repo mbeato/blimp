@@ -68,6 +68,8 @@ describe("blimpMd", () => {
     expect(flat).toContain("each one shows the user a permission prompt first");
     expect(flat).toContain("Before anything that buys, books, sends, posts, signs up or accepts terms, stop and ask in the chat");
     expect(md).toContain("`/opt/blimpd start <folder> <message> [--job <a few words>]`");
+    expect(flat).toContain("Start research and lookups with `/opt/blimpd start <folder> --model haiku <message>`, and building from an agreed plan with `--model opus` in the same place, right after the folder.");
+    expect(flat).toContain("Give no model for planning or when unsure, so the user's own default applies.");
     expect(flat).toContain('Give each one `--job "<a few words>"` saying what it\'s for');
     expect(md).toContain("## Job updates");
     expect(flat).toContain("Messages that start with `[blimp job update]` come from blimp, not the user");
