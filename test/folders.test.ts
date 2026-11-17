@@ -52,6 +52,28 @@ test("recentFolders: none you hid, left out before the list is cut to 30", () =>
   expect(recentFolders(claude, [], new Set([web]))).toEqual([{ dir: api, lastUsed: 2_000_000 }]);
 });
 
+test("recentFolders: none that only a script ran Claude in; a script's run doesn't move a folder up", () => {
+  const c = join(root, "claude-scripted");
+  const scripted = join(root, "work", "reviewer");
+  const both = join(root, "work", "both");
+  for (const d of [scripted, both]) mkdirSync(d, { recursive: true });
+  const t = (dir: string, id: string, mtimeSec: number, entrypoint: string) => {
+    const folder = join(c, "projects", projectFolderName(dir));
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, `${id}.jsonl`), line({ type: "user", entrypoint, cwd: dir }));
+    utimesSync(join(folder, `${id}.jsonl`), mtimeSec, mtimeSec);
+  };
+  t(scripted, "a", 5000, "sdk-cli"); // claude -p
+  t(both, "b", 1000, "cli");
+  t(both, "c", 4000, "sdk-cli");
+  expect(recentFolders(c, [])).toEqual([{ dir: both, lastUsed: 1_000_000 }]);
+  // You opened it: it's listed, from when you opened it.
+  expect(recentFolders(c, [], new Set(), [{ dir: scripted, at: 500 }])).toEqual([
+    { dir: both, lastUsed: 1_000_000 },
+    { dir: scripted, lastUsed: 500 },
+  ]);
+});
+
 test("recentFolders: a folder you opened counts from when you opened it, unless hidden or gone, even in a temporary folder", () => {
   const fresh = join(root, "work", "fresh");
   mkdirSync(fresh, { recursive: true });
