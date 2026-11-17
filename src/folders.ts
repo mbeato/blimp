@@ -1,5 +1,5 @@
-// For "New session in…": the folders Claude was used in (not scratch ones in a temporary folder), and the
-// conversations /resume would offer there.
+// For "New session in…": the folders you used Claude in (not scratch ones in a temporary folder, nor ones only a
+// script ran it in), and the conversations /resume would offer there.
 // Both read Claude's transcript folders, <claude dir>/projects/<folder name>/<sessionId>.jsonl.
 
 import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, statSync } from "node:fs";
@@ -55,18 +55,21 @@ function scanLines<T>(file: string, pick: (line: string) => T | undefined | "sto
   }
 }
 
-// The first "cwd" in a transcript's first lines.
-export function firstCwd(file: string, maxLines = 50): string | undefined {
+// The first "cwd" in a transcript's first lines, and whether a script started the conversation (claude -p, the
+// SDK: "entrypoint" is "sdk-cli" there, "cli" when a person did).
+function firstStart(file: string, maxLines = 50): { cwd: string; scripted: boolean } | undefined {
   let lines = 0;
   return scanLines(file, (line) => {
     if (++lines > maxLines) return "stop";
     if (!line.includes('"cwd"')) return;
     try {
-      const cwd = JSON.parse(line).cwd;
-      if (typeof cwd === "string" && cwd) return cwd;
+      const o = JSON.parse(line);
+      if (typeof o.cwd === "string" && o.cwd) return { cwd: o.cwd, scripted: typeof o.entrypoint === "string" && o.entrypoint.startsWith("sdk-") };
     } catch {}
   });
 }
+
+export const firstCwd = (file: string, maxLines = 50): string | undefined => firstStart(file, maxLines)?.cwd;
 
 // The system's temporary folders: a folder in one is scratch (a test's, a helper agent's), not a project.
 export function tempRoots(): string[] {
@@ -99,14 +102,21 @@ export function recentFolders(
   }
   const seen = new Map<string, number>();
   for (const f of folders) {
-    const [newest] = transcripts(join(projects, f));
-    if (!newest) continue;
-    let cwd: string | undefined;
-    try {
-      cwd = firstCwd(newest.file);
-    } catch {}
-    if (!cwd || hidden.has(cwd) || !existsSync(cwd) || temp.some((t) => under(cwd!, t))) continue;
-    seen.set(cwd, Math.max(seen.get(cwd) ?? 0, newest.mtime));
+    const all = transcripts(join(projects, f));
+    if (!all.length) continue;
+    const start = (file: string) => {
+      try {
+        return firstStart(file);
+      } catch {}
+    };
+    const newest = start(all[0].file);
+    const cwd = newest?.cwd;
+    if (!cwd || hidden.has(cwd) || !existsSync(cwd) || temp.some((t) => under(cwd, t))) continue;
+    // The newest conversation a person started. A folder where only scripts ran Claude (a benchmark's
+    // claude -p in a folder per run) isn't a project, and a script's run doesn't move a project up.
+    const mine = newest.scripted ? all.slice(1).find((t) => start(t.file)?.scripted === false) : all[0];
+    if (!mine) continue;
+    seen.set(cwd, Math.max(seen.get(cwd) ?? 0, mine.mtime));
   }
   for (const o of opened) {
     if (hidden.has(o.dir) || !existsSync(o.dir)) continue;
