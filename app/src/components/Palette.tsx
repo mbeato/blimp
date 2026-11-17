@@ -8,7 +8,8 @@ import { StateMark } from "./StateMark";
 
 type Item = { link: ServerLink; s: Session; folder: string };
 
-// ⌘K: jump to any session on any server by typing part of its title, folder or name.
+// ⌘K: jump to any session on any server by typing part of its title, folder or name. With more
+// than one server saved, each row also says which server.
 export function Palette(props: { links: ServerLink[]; onPick: (link: ServerLink, name: string) => void; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [sel, setSel] = useState(0);
@@ -17,6 +18,7 @@ export function Palette(props: { links: ServerLink[]; onPick: (link: ServerLink,
   );
   const items = rank(all, (i) => sessionScore(query, i.s.title, i.folder, i.s.name));
   const pick = (i: Item | undefined) => i && props.onPick(i.link, i.s.name);
+  const where = (i: Item) => (props.links.length > 1 ? `${i.link.name} · ${i.folder}` : i.folder);
 
   return (
     <Dialog onClose={props.onClose} className="palette">
@@ -50,7 +52,7 @@ export function Palette(props: { links: ServerLink[]; onPick: (link: ServerLink,
           >
             <span className="row-mark">{(i.s.state === "waiting" || i.s.unread) && <StateMark s={i.s} />}</span>
             <span className="list-main">{i.s.title}</span>
-            <span className="list-side">{i.s.work?.branch ? `${i.folder} · ${i.s.work.branch}` : i.folder}</span>
+            <span className="list-side">{i.s.work?.branch ? `${where(i)} · ${i.s.work.branch}` : where(i)}</span>
           </li>
         ))}
         {items.length === 0 && <li className="list-empty">{all.length ? "No session matches." : "No sessions running."}</li>}

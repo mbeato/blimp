@@ -8,13 +8,23 @@ import { listen } from "@tauri-apps/api/event";
 import { Api, type BrowserTab, type Conn, type Port, type Session, type Visual } from "./api";
 import { EventsSocket } from "./events";
 
-export type Server = { host: string; user?: string; port?: number };
+// name: what the app calls it (Manage servers); never part of the key.
+export type Server = { host: string; user?: string; port?: number; name?: string };
 
 export const inTauri = () => isTauri();
 
 // user@host:port, leaving out what the user left blank. The same as the id the Rust shell gives
 // the tunnel (Target::id in src-tauri/src/tunnel.rs), so it also names the tunnel to disconnect.
 export const serverKey = (s: Server) => `${s.user ? s.user + "@" : ""}${s.host}${s.port ? ":" + s.port : ""}`;
+
+const label = (s: Server) => s.name?.trim() || s.host;
+
+// The name a person reads: the one they gave it, else its host. Two servers in `all` that would
+// read the same (box and max@box) each show their key instead, so they can be told apart.
+export function serverName(s: Server, all: Server[]): string {
+  const l = label(s);
+  return all.some((o) => serverKey(o) !== serverKey(s) && label(o) === l) ? serverKey(s) : l;
+}
 
 const LS_KEY = "blimp.servers";
 
@@ -44,11 +54,42 @@ export async function saveServers(list: Server[]) {
     const store = await load("servers.json");
     await store.set("servers", list);
     await store.save();
+    // Every window keeps the list; each loads it again (onServersChanged).
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit("servers-changed");
     return;
   }
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(list));
   } catch {}
+}
+
+// Another window saved the server list. Only the Mac app has other windows.
+export async function onServersChanged(fn: () => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  return listen("servers-changed", () => fn());
+}
+
+// Add server's suggestions: the Host names in this Mac's ~/.ssh/config (none in a browser).
+export const sshHosts = async (): Promise<string[]> => (inTauri() ? invoke<string[]>("ssh_hosts").catch(() => []) : []);
+
+// Add server tries the server before saving it, the way its link will connect: the tunnel that
+// opens is the one the link then gets back from connect. Cancelled, the tunnel goes, also one
+// that only opens afterwards (the Rust side may not know of the connect yet when cancel runs).
+export function tryConnect(s: Server): { done: Promise<Conn>; cancel: () => void } {
+  let cancelled = false;
+  const drop = () => void (inTauri() && invoke("disconnect", { id: serverKey(s) }).catch(() => {}));
+  const done = connectServer(s).then((c) => {
+    if (cancelled) drop();
+    return c;
+  });
+  return {
+    done,
+    cancel: () => {
+      cancelled = true;
+      drop();
+    },
+  };
 }
 
 async function connectServer(s: Server): Promise<Conn> {
@@ -117,6 +158,8 @@ function watchForWake() {
 export class ServerLink {
   // A server removed and added again gets a new link with the same key; this tells them apart.
   readonly id = ++serial;
+  // serverName among the saved servers; App keeps it current.
+  name: string;
   status: LinkStatus = "connecting";
   error = "";
   sessions: Session[] | null = null; // null until the first list arrives
@@ -141,6 +184,7 @@ export class ServerLink {
     public server: Server,
     private onChange: (link: ServerLink) => void,
   ) {
+    this.name = serverName(server, [server]);
     links.add(this);
     listenForTunnels();
     watchForWake();

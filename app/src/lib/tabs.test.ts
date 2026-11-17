@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { closeTab, decodeLayout, dropHomeTabs, encodeLayout, keepServers, moveTab, newLayout, openTab, releaseSession, setPageOrder, type Layout } from "./tabs";
+import { closeTab, decodeLayout, dropHomeTabs, encodeLayout, keepServers, moveTab, newLayout, openTab, releaseSession, setPageOrder, stepTab, type Layout } from "./tabs";
 
 const two = (): Layout => openTab(newLayout("s1"), "s1", "/h/a");
 
@@ -139,5 +139,22 @@ describe("releaseSession", () => {
     expect(r.tabs[0].panes).toEqual([]);
     expect(releaseSession(l, "s2/x")).toBe(l);
     expect(releaseSession(l, "s1/none")).toBe(l);
+  });
+});
+
+describe("stepTab", () => {
+  test("⇧⌘] and ⇧⌘[ move through the tabs and wrap around at either end", () => {
+    const l = openTab(two(), "s1", "/h/b");
+    expect(l.active).toBe(2);
+    expect(stepTab(l, 1).active).toBe(0);
+    expect(stepTab(l, -1).active).toBe(1);
+    expect(stepTab({ ...l, active: 0 }, -1).active).toBe(2);
+    expect(stepTab({ ...l, active: 0 }, 1).active).toBe(1);
+    expect(stepTab(l, 1).tabs).toBe(l.tabs);
+  });
+  test("with only Home there is nowhere to go", () => {
+    const l = newLayout("s1");
+    expect(stepTab(l, 1)).toBe(l);
+    expect(stepTab(l, -1)).toBe(l);
   });
 });

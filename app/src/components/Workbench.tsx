@@ -32,6 +32,7 @@ import {
 import { HOME, hostOf, serverTabTarget } from "../lib/browser";
 import { galleryDir, galleryKey } from "../lib/gallery";
 import { isVisualTab, visualTab } from "../lib/visuals";
+import type { Action } from "../lib/commands";
 import { byOrder, moved, startReorder } from "../lib/reorder";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
@@ -173,6 +174,8 @@ export function Workbench(props: {
   opener: { current: Opener };
   onDrop: { current: FileDrop };
   pages: { current: PageOpener };
+  // What this tab's own commands do (lib/commands.ts), for App to run while it's in front.
+  commands: { current: Record<string, Action> };
   // The terminal pane's, for a browser tab's Send to session and the files' Send Path to Session.
   pane: { current: PaneActions };
   // Reveal in Files with the files hidden: show them.
@@ -1073,27 +1076,13 @@ export function Workbench(props: {
     [],
   );
 
-  // ⌘P quick open, ⌘S save now, ⌘W close the open file. Only in the tab in front. (⌘B and ⌘J,
-  // files and terminal, are the window's.)
-  const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
-  onKey.current = (e) => {
-    if (!props.front || !e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    const k = e.key.toLowerCase();
-    if (k === "p") setQuick(true);
-    else if (k === "s") {
-      if (activeDoc) void save(activeDoc, { explicit: true });
-    } else if (k === "w") {
-      if (quick) setQuick(false);
-      else if (active) closeTab(active);
-    } else return;
-    e.preventDefault();
+  // Quick Open (⌘P), Save now (⌘S), Close Tab (⌘W: the open file, or Quick Open). App runs them
+  // in the tab in front only. (Files and Terminal, ⌘B and ⌘J, are the window's.)
+  props.commands.current = {
+    "quick-open": { run: () => setQuick(true) },
+    save: { run: () => activeDoc && void save(activeDoc, { explicit: true }), enabled: !!activeDoc },
+    "close-tab": { run: () => (quick ? setQuick(false) : active && closeTab(active)), enabled: quick || !!active },
   };
-  useEffect(() => {
-    // Capture phase, so the keys work while the terminal or Monaco has focus.
-    const h = (e: KeyboardEvent) => onKey.current(e);
-    window.addEventListener("keydown", h, true);
-    return () => window.removeEventListener("keydown", h, true);
-  }, []);
 
   // ---- view ----
 

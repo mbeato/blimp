@@ -47,6 +47,12 @@ export function closeTab(l: Layout, i: number): Layout {
   return { ...l, tabs, active };
 }
 
+// Show Next Tab (by 1) and Show Previous Tab (by -1): round from the last tab to Home and back.
+export function stepTab(l: Layout, by: 1 | -1): Layout {
+  const n = l.tabs.length;
+  return n < 2 ? l : { ...l, active: (l.active + by + n) % n };
+}
+
 export const setPanes = (l: Layout, i: number, p: Panes): Layout => ({
   ...l,
   tabs: l.tabs.map((t, j) => (j === i ? { ...t, panes: p.panes, focus: p.focus, groups: p.groups, ...(p.order && { order: p.order }) } : t)),

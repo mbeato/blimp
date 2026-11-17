@@ -38,7 +38,7 @@ export function OpenFolderDialog(props: {
           >
             {props.links.map((l) => (
               <option key={l.key} value={l.key}>
-                {l.key}
+                {l.name}
               </option>
             ))}
           </select>

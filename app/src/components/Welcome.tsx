@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ServerLink } from "../lib/connection";
+import { connectHint } from "../lib/hints";
 import { recentProjects, type Recent } from "../lib/recent";
 import { tildify } from "../lib/sessions";
 import { relTime } from "../lib/time";
@@ -20,8 +21,10 @@ export function Welcome(props: {
   onAddServer: () => void;
   onRemoveServer: (link: ServerLink) => void;
   onForget: (dir: string) => void;
+  onShortcuts: () => void;
 }) {
   const { link } = props;
+  const hint = link.status === "offline" ? connectHint(link.error, link.server) : "";
   const [recent, setRecent] = useState<Recent[] | null>(null);
   useEffect(() => {
     let live = true;
@@ -42,12 +45,14 @@ export function Welcome(props: {
             <select value={link.key} aria-label="Server" onChange={(e) => props.onServer(props.links.find((l) => l.key === e.target.value) ?? link)}>
               {props.links.map((l) => (
                 <option key={l.key} value={l.key}>
-                  {l.key}
+                  {l.name}
                 </option>
               ))}
             </select>
           ) : (
-            <span className="welcome-host">{link.key}</span>
+            <span className="welcome-host" title={link.key}>
+              {link.name}
+            </span>
           )}
           <span className={"conn conn-" + link.status}>{link.status === "connected" ? "connected" : link.status === "offline" ? "offline" : "connecting…"}</span>
           <button className="link-button" onClick={props.onAddServer}>
@@ -57,6 +62,7 @@ export function Welcome(props: {
         {link.status === "offline" && (
           <div className="server-error">
             <p>{link.error}</p>
+            {hint && <p className="server-hint">{hint}</p>}
             <div className="server-error-actions">
               <button onClick={() => link.retryNow()}>Try again</button>
               <button onClick={() => props.onRemoveServer(link)}>Remove server</button>
@@ -117,6 +123,9 @@ export function Welcome(props: {
           <dt>Drag a session</dt>
           <dd>Onto the terminal, to split it</dd>
         </dl>
+        <button className="link-button welcome-all-keys" onClick={props.onShortcuts}>
+          All shortcuts
+        </button>
       </div>
     </div>
   );

@@ -10,6 +10,8 @@ fn main() {
                 "forward_port",
                 "unforward_port",
                 "update_server",
+                "install_server",
+                "ssh_hosts",
                 "open_window",
                 "focus_project",
                 "drop_session",
@@ -26,6 +28,7 @@ fn main() {
                 "set_window_projects",
                 "set_viewing",
                 "claim_notice",
+                "set_menu",
                 "relaunch",
             ])),
     )

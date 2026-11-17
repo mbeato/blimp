@@ -121,6 +121,42 @@ Each item says what to do, and what should happen. If the result is different, w
   Do: in a Claude prompt, type a few words. Try ⌥⌫, ⌘⌫, ⌥← and ⌥→, ⌘← and ⌘→. Select some output with the mouse and press ⌘C, then paste it in another app. Copy several lines from another app and press ⌘V in the terminal. Scroll back with the trackpad.
   Expect: ⌥⌫ deletes one word. ⌘⌫ deletes to the start of the line. ⌥ arrows move one word, ⌘ arrows go to the start or end of the line. ⌘C copies the selection. ⌘V pastes the lines as one paste; it does not send each line as a separate prompt. Scrolling is smooth.
 
+## Menu bar
+
+The page describes the menu and Rust draws it, so none of this runs in the Linux tests. Each item is one check. Write down any item that is missing, does nothing, or happens twice.
+
+- [ ] Every menu is there, in this order: blimp, File, Edit, View, Server, Window, Help. Each has the items in docs/DESIGN.md "macOS menu", with the keys shown there.
+- [ ] Each key works once, with the terminal focused: ⌘B hides Files and a second ⌘B shows them (one press never toggles twice), ⌘J, ⌥⌘B, ⌘W closes one file tab, ⌘, opens Settings, ⌘N starts one session, ⌘T opens one browser tab.
+- [ ] The same keys work once with the editor focused (a code file, cursor in it).
+- [ ] The same keys work once with a browser tab in front, clicked into its page.
+- [ ] With a dialog open (Settings, Open Folder…, Manage servers…): ⌘, closes Settings and opens nothing else; ⌘B and ⌘J act once.
+- [ ] Each menu item does what its key does, once: File > Save, File > Close Tab, View > Files, View > Terminal, View > Sessions.
+- [ ] In the editor, ⌘K then ⌘C comments the line (Monaco's chord) and the session search does not open; outside the editor ⌘K opens it. View > Jump to Session… shows no key and opens the search.
+- [ ] ⇧⌘[ and ⇧⌘] move to the previous and next project tab, wrapping round, and the Window menu shows them as ⇧⌘[ and ⇧⌘].
+- [ ] ⌘+ (the = key), ⌘- and ⌘0 make the terminal and editor text bigger, smaller and back to default, once per press. The menu shows Bigger Text as ⌘= (write down if it shows ⌘+).
+- [ ] With no file open, File > Save is greyed. Press ⌘S: nothing happens and nothing beeps more than once.
+- [ ] With no server connected (stop blimpd, or turn off Wi-Fi), File > Open Folder… is greyed. Press ⌘O: blimp says "No server is connected yet." (write down if the greyed item swallows the key and nothing shows).
+- [ ] View's check marks follow the panels: hide Files with the button at the top right, and View > Files loses its tick; show it with ⌘B, and the tick comes back. Browser Tabs is greyed in a folder with no browser tabs.
+- [ ] The Server menu follows the focused window: with two windows on two different servers, click each window and open Server; the tick is on that window's server. File > Open Recent lists that server's recent folders.
+- [ ] Server lists each server by its name only (no " — offline"). Clicking one goes to its Home. Server > Update Server… is greyed unless blimpd there is older than the app.
+- [ ] With a saved server you can't reach (it goes between offline and connecting every few seconds), open the Server menu and keep it open for 30 seconds: it stays open.
+- [ ] View > Enter Full Screen, then open View again: write down whether the item now says "Exit Full Screen" or still "Enter Full Screen".
+- [ ] The Window menu lists the open windows by folder name; clicking one brings it forward.
+- [ ] File > Close Window (⇧⌘W) closes this window only; its tabs don't come back at the next launch, as with the red button.
+- [ ] Close every window with the red button: the menu bar becomes the small one (blimp, File, Edit, Window, Help). File > New Window (⇧⌘N) opens a window, and the full menu comes back.
+- [ ] Help: type "shortcuts" in the Help menu's search box; it finds Help > Keyboard Shortcuts and points to it. Keyboard Shortcuts opens the dialog. blimp Help opens the README on GitHub in your browser; Report a Problem… opens a new issue page.
+- [ ] blimp > Check for Updates… checks once and says what it found; blimp > Settings… opens Settings.
+- [ ] Minimize every window. blimp > Settings… brings the main window back with Settings open (with main closed, another window); Help > blimp Help and Report a Problem… open their pages, and no window comes back.
+
+## Servers
+
+- [ ] Add server… (from the switcher at the far left of the top bar) offers the `Host` names from your `~/.ssh/config` as you type.
+- [ ] Add a host that doesn't exist: the dialog says "Connecting to …", then shows the error and a hint, and stays open with your fields. Cancel while it connects: `ps aux | grep '[s]sh -T'` shows no tunnel for that host.
+- [ ] Add a server where blimpd isn't installed (a fresh VM or account): the error says blimpd isn't set up, and Install blimpd installs it and connects.
+- [ ] Install blimpd (in Add server and in Manage servers…) first shows a Mac dialog, "Install blimpd on <user@host:port>?" (only the parts typed: with a user and port 2222, "max@box:2222"), with Install and Cancel. Install is the blue default button; Esc cancels. Cancel: nothing is installed, no error or notice shows, and the dialog is as it was before the click. Install: it installs.
+- [ ] Add a host whose key isn't in `~/.ssh/known_hosts`: the hint shows the exact `ssh` command to run once from Terminal.
+- [ ] With two windows open, rename a server in Manage servers… in one: the other window's switcher and tabs show the new name at once.
+
 ## Look
 
 - [ ] **Fonts look right.**

@@ -229,6 +229,43 @@ fn last_line(stderr: &str) -> &str {
         .unwrap_or("")
 }
 
+/// ssh reached the server, but reading blimpd's token there failed. The UI knows this error by
+/// these words and offers Install blimpd (isNotSetUp in app/src/lib/hints.ts).
+fn not_set_up(host: &str) -> String {
+    format!("blimpd isn't set up on {host}")
+}
+
+/// The `Host` names in an ssh config, for Add server's suggestions: patterns (`*`, `?`, `!`)
+/// left out, as are names ssh would read as an option; each name once, at most 200.
+fn config_hosts(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        // "Host a b", "host a", "Host=a" and "Host = a" all name hosts (keywords ignore case).
+        let Some(i) = line.find(|c: char| c.is_whitespace() || c == '=') else {
+            continue;
+        };
+        if !line[..i].eq_ignore_ascii_case("host") {
+            continue;
+        }
+        let rest = line[i..].trim_start();
+        let rest = rest.strip_prefix('=').unwrap_or(rest);
+        for name in rest.split_whitespace() {
+            if name.starts_with('#') {
+                break;
+            }
+            let pattern = name.contains(['*', '?', '!', '"']);
+            if pattern || name.starts_with('-') || name.chars().any(char::is_control) || out.iter().any(|n| n == name) {
+                continue;
+            }
+            if out.len() == 200 {
+                return out;
+            }
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
 fn with_detail(msg: String, detail: &str) -> String {
     if detail.is_empty() {
         format!("{msg}.")
@@ -480,23 +517,77 @@ pub async fn update_server(app: AppHandle, server: String) -> Result<String, Str
         return Err("Not in a test build.".into());
     }
     let target = app.state::<Tunnels>().inner.lock().unwrap().map.get(&server).map(|t| t.target.clone()).ok_or("Not connected.")?;
+    tauri::async_runtime::spawn_blocking(move || run_install(&target, "Updating"))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Install blimpd: the same install.sh as Update server, on a server with no tunnel yet (one
+/// where blimpd isn't set up, from Add server or Manage servers). It takes nothing but the
+/// server, checked the way connect checks it. That can be any host ssh reaches, so it asks
+/// first in a native dialog, which script in the page can't click; "Cancelled." if not.
+#[tauri::command]
+pub async fn install_server(app: AppHandle, host: String, user: Option<String>, port: Option<u16>) -> Result<String, String> {
+    // A debug build pointed at a test blimpd (BLIMP_REMOTE_DIR) must not install the real one.
+    if remote_dir().is_some() {
+        return Err("Not in a test build.".into());
+    }
+    let target = Target::new(host, user, port)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let out = ssh()
-            .args(target.update_args())
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("Couldn't run ssh: {e}"))?;
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-        let tail = tail[tail.len().saturating_sub(4)..].join("\n");
-        if out.status.success() {
-            Ok(tail)
-        } else {
-            Err(with_detail(format!("Updating blimpd on {} failed", target.host), &tail))
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
+        // Install goes first. The plugin hands back the second label for every answer that isn't a
+        // click on the first button: Esc, a close box, and also a dialog that couldn't show or was
+        // aborted (rfd's Cancel). So only a real click on Install, or Return, installs.
+        let buttons = MessageDialogButtons::OkCancelCustom("Install".into(), "Cancel".into());
+        // Blocks this thread until answered; the dialog itself runs on the main thread.
+        let answer = app
+            .dialog()
+            .message(install_question(&target))
+            .title("Install blimpd")
+            .buttons(buttons)
+            .blocking_show_with_result();
+        if answer != MessageDialogResult::Custom("Install".into()) {
+            return Err("Cancelled.".into());
         }
+        run_install(&target, "Installing")
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The install dialog's text. It names the server as ssh will reach it (user, host and port,
+/// those given), since that's the machine the script runs on.
+fn install_question(target: &Target) -> String {
+    format!("Install blimpd on {}? This runs the latest blimp release's install script there over SSH.", target.id())
+}
+
+/// Runs the release's install.sh on the server over ssh; resolves to the last lines it printed.
+fn run_install(target: &Target, doing: &str) -> Result<String, String> {
+    let out = ssh()
+        .args(target.update_args())
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Couldn't run ssh: {e}"))?;
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let tail = tail[tail.len().saturating_sub(4)..].join("\n");
+    if out.status.success() {
+        Ok(tail)
+    } else {
+        Err(with_detail(format!("{doing} blimpd on {} failed", target.host), &tail))
+    }
+}
+
+/// Add server's suggestions: the host names in this Mac's ~/.ssh/config. Reads that one file
+/// and hands back only names; no file, or one that can't be read, is no names.
+#[tauri::command]
+pub fn ssh_hosts() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(std::path::Path::new(&home).join(".ssh").join("config"))
+        .map(|text| config_hosts(&text))
+        .unwrap_or_default()
 }
 
 /// A browser tab that opened it closed: the forward goes with the last one.
@@ -539,7 +630,7 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
         }
         _ => {
             return Err(with_detail(
-                format!("blimpd isn't set up on {}", t.host),
+                not_set_up(&t.host),
                 last_line(&stderr),
             ))
         }
@@ -739,6 +830,13 @@ mod tests {
     }
 
     #[test]
+    fn install_question_names_user_host_and_port() {
+        assert!(install_question(&target("box", Some("max"), Some(2222)))
+            .starts_with("Install blimpd on max@box:2222? "));
+        assert!(install_question(&target("box", None, None)).starts_with("Install blimpd on box? "));
+    }
+
+    #[test]
     fn refuses_hosts_ssh_would_read_as_options() {
         assert!(Target::new("-oProxyCommand=touch /tmp/x".into(), None, None).is_err());
         assert!(Target::new("claude1".into(), Some("-lroot".into()), None).is_err());
@@ -760,6 +858,66 @@ mod tests {
         let a = target("claude1", None, Some(2222)).update_args();
         assert_eq!(a[a.len() - 5..], ["-p", "2222", "--", "claude1", UPDATE_CMD]);
         assert_eq!(a[..4], ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
+    }
+
+    #[test]
+    fn install_args_reach_only_the_server_given() {
+        // install_server builds its target from host, user and port alone, as connect does.
+        assert_eq!(
+            target("claude1", Some("max"), Some(2222)).update_args(),
+            [
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-p",
+                "2222",
+                "--",
+                "max@claude1",
+                UPDATE_CMD
+            ]
+        );
+        assert_eq!(
+            target("claude1", None, None).update_args(),
+            ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", "claude1", UPDATE_CMD]
+        );
+        assert!(Target::new("-oProxyCommand=sh".into(), None, None).is_err());
+    }
+
+    #[test]
+    fn not_set_up_keeps_the_words_the_ui_knows() {
+        // app/src/lib/hints.ts (isNotSetUp) looks for exactly this start.
+        assert_eq!(not_set_up("claude1"), "blimpd isn't set up on claude1");
+        assert_eq!(
+            with_detail(not_set_up("claude1"), "cat: /home/max/.blimp/token: No such file or directory"),
+            "blimpd isn't set up on claude1: cat: /home/max/.blimp/token: No such file or directory"
+        );
+    }
+
+    #[test]
+    fn config_hosts_are_plain_names_once() {
+        let config = "\
+# my servers
+Host claude1 claude1.lan
+  HostName 100.64.0.1
+  User max
+host lab
+Host=box
+Host = gpu # the big one
+Host *.example.com !bastion lab test?
+Host claude1
+Match host other
+  User x
+HostName notahost
+Hosts nothost
+Host -oProxyCommand=sh \"quoted name\"
+";
+        assert_eq!(config_hosts(config), ["claude1", "claude1.lan", "lab", "box", "gpu"]);
+        assert!(config_hosts("").is_empty());
+        let many: String = (0..300).map(|i| format!("Host h{i}\n")).collect();
+        let hosts = config_hosts(&many);
+        assert_eq!(hosts.len(), 200);
+        assert_eq!(hosts[199], "h199");
     }
 
     #[test]

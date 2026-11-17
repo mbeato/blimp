@@ -115,7 +115,7 @@ function Assistant(props: { link: ServerLink; named: boolean }) {
   };
   return (
     <div className="models" data-server={props.link.key}>
-      {props.named && <h4>{props.link.key}</h4>}
+      {props.named && <h4 title={props.link.key}>{props.link.name}</h4>}
       <Row label="Assistant" note="One Claude chat that isn't a project. It can look at every project and asks before it acts.">
         <input type="checkbox" aria-label="Assistant" checked={on} onChange={(e) => (e.target.checked ? turn(true) : setAsking(true))} />
       </Row>
@@ -171,7 +171,7 @@ function Models(props: { link: ServerLink; named: boolean; onCodexSignIn: () => 
   const codex = kinds?.find((k) => k.id === "codex");
   return (
     <div className="models" data-server={props.link.key}>
-      {props.named && <h4>{props.link.key}</h4>}
+      {props.named && <h4 title={props.link.key}>{props.link.name}</h4>}
       <Row div label="Z.ai key" note={`For Claude Code on GLM. ${zai === null ? "" : zai ? "Set" : "Not set"}`}>
         <input
           type="password"
