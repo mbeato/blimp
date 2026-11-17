@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAccount, runAccounts } from "../src/accounts/cli";
+import { type Connector, writeConnectors } from "../src/accounts/connectors";
 import { accountsOn, putLive, readState, saveLogin, writeState } from "../src/accounts/store";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-accounts-cli-")));
@@ -121,6 +122,41 @@ test("accounts: when blimp can't tell which account is logged in, none is in use
     `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
     "c@x.com, login expired: log in to it again with /login",
     "blimp can't tell which account is logged in. Say which with: blimpd account use <email>, or log in again with /login in a session.",
+  ]);
+});
+
+// A stored connector reading (connectors.ts) for an account.
+const reading = (dir: string, id: string, connectors: Connector[]) => writeConnectors(id, { at: T, connectors, told: [] }, dir);
+const ok = (name: string): Connector => ({ name, state: "ok" });
+
+test("accounts: under an account whose reading lacks connectors another has, one more line, in its three shapes", async () => {
+  const { dir } = setup(true);
+  reading(dir, "id-a", [ok("Slack"), { name: "Gmail", state: "signin" }]);
+  reading(dir, "id-b", [ok("Slack"), ok("Gmail"), ok("Zapier"), ok("Google Calendar")]);
+  reading(dir, "id-c", [{ name: "Slack", state: "signin" }, ok("Gmail"), ok("Zapier"), ok("Google Calendar")]);
+  const r = await printed((out) => runAccounts(dir, T, out));
+  expect(r.out.split("\n")).toEqual([
+    `a@x.com (in use), login expires ${day(LATER)}`,
+    "  no Google Calendar, Zapier; Gmail needs a sign-in",
+    `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
+    "c@x.com, login expired: log in to it again with /login",
+    "  Slack needs a sign-in",
+  ]);
+  reading(dir, "id-a", [ok("Slack")]);
+  reading(dir, "id-b", [ok("Slack"), ok("Zapier")]);
+  reading(dir, "id-c", [ok("Slack"), ok("Zapier")]);
+  expect((await printed((out) => runAccounts(dir, T, out))).out.split("\n")[1]).toBe("  no Zapier");
+});
+
+test("accounts: no extra line for an account with no reading, nor with an empty gap", async () => {
+  const { dir } = setup(true);
+  reading(dir, "id-a", [ok("Slack"), { name: "Zapier", state: "down" }]);
+  reading(dir, "id-b", [ok("Slack"), ok("Zapier")]);
+  const r = await printed((out) => runAccounts(dir, T, out));
+  expect(r.out.split("\n")).toEqual([
+    `a@x.com (in use), login expires ${day(LATER)}`,
+    `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
+    "c@x.com, login expired: log in to it again with /login",
   ]);
 });
 
