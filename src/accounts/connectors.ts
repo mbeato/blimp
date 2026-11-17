@@ -5,8 +5,10 @@
 // another saved account has. Never a URL, never a token.
 
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CONNECTORS_AFTER_SWITCH_MS, CONNECTORS_EVERY_MS, CONNECTORS_RETRY_MS, CONNECTORS_ZERO_AGAIN_MS } from "./rules";
+import { loginShell } from "../sessions";
+import { CONNECTORS_AFTER_SWITCH_MS, CONNECTORS_EVERY_MS, CONNECTORS_RETRY_MS, CONNECTORS_TIMEOUT_MS, CONNECTORS_ZERO_AGAIN_MS } from "./rules";
 import { checkId, listSaved, liveMtime, readState, type Saved, type State, write } from "./store";
 
 export type Connector = { name: string; state: "ok" | "signin" | "down" };
@@ -87,9 +89,37 @@ export function gapOf(id: string, dir: string): Gap | undefined {
   return gap(mine.connectors, others);
 }
 
+// The live list: `claude mcp list` run the way sessions start Claude Code (sessions.ts start, kinds.ts),
+// through the login shell, so it is the same claude on the same PATH; in blimpd's own environment, so a
+// CLAUDE_CONFIG_DIR it runs with applies. In the temp folder, stdin closed, stdout kept. Undefined on a
+// non-zero exit, no such shell, or a kill after the time limit: a hung profile or claude, or a child
+// still holding stdout, can't keep a reading running for ever.
+export async function mcpList(shell = loginShell(), limit = CONNECTORS_TIMEOUT_MS): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const p = Bun.spawn([shell, "-l", "-i", "-c", 'exec claude "$@"', "claude", "mcp", "list"], { cwd: tmpdir(), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const killed = new Promise<undefined>((r) => {
+      timer = setTimeout(() => {
+        p.kill("SIGKILL");
+        r(undefined);
+      }, limit);
+    });
+    const text = await Promise.race([new Response(p.stdout).text(), killed]);
+    const code = await Promise.race([p.exited, killed]);
+    return text !== undefined && code === 0 ? text : undefined;
+  } catch {
+    return undefined; // no such shell
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // What the phone is told: `No A, B.` for the missing ones, `C needs a sign-in.` for the others.
 const gapText = (g: Gap) =>
   [g.missing.length && `No ${g.missing.join(", ")}.`, g.signin.length && `${g.signin.join(", ")} needs a sign-in.`].filter(Boolean).join(" ");
+// The line under an account in `blimpd accounts`: either half alone when the other is empty.
+export const gapLine = (g: Gap) =>
+  [g.missing.length && `no ${g.missing.join(", ")}`, g.signin.length && `${g.signin.join(", ")} needs a sign-in`].filter(Boolean).join("; ");
 
 // running: a reading is under way. until: a failed reading, or a first zero, asks to wait till then.
 export type Due = { state: State; saved: Saved[]; mtime: number | undefined; reading: Reading | undefined; running: boolean; until?: number };

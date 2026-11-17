@@ -2,10 +2,10 @@
 // and the gap between accounts. Names, emails and tokens are made up; no test runs the real claude.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Connector, Connectors, type ConnectorsDeps, type Due, gap, gapKey, gapOf, parseMcpList, readConnectors, readingDue, writeConnectors } from "../src/accounts/connectors";
+import { type Connector, Connectors, type ConnectorsDeps, type Due, gap, gapKey, gapOf, mcpList, parseMcpList, readConnectors, readingDue, writeConnectors } from "../src/accounts/connectors";
 import { CONNECTORS_AFTER_SWITCH_MS, CONNECTORS_EVERY_MS, CONNECTORS_RETRY_MS, CONNECTORS_TIMEOUT_MS, CONNECTORS_ZERO_AGAIN_MS } from "../src/accounts/rules";
 import { putLive, readState, type Saved, type State, saveLogin, writeState } from "../src/accounts/store";
 
@@ -470,5 +470,35 @@ describe("Connectors", () => {
     writeConnectors("id-a", { at: T - 10_000, connectors: [ok("Slack")], told: [] }, t.dir);
     await c.tick();
     expect(t.lists).toBe(0);
+  });
+});
+
+// The live runner, on a fake login shell: a script that says what it was given and where, and prints
+// what a test asks for. It never runs claude.
+describe("mcpList", () => {
+  function shell(body: string) {
+    const dir = join(root, `t${++n}`);
+    mkdirSync(dir);
+    const file = join(dir, "fake-shell");
+    writeFileSync(file, `#!/bin/sh\n${body}\n`);
+    chmodSync(file, 0o700);
+    return file;
+  }
+
+  test("runs claude mcp list through the login shell in the temp folder with stdin closed, and gives what it printed", async () => {
+    const sh = shell('echo "args: $*"; echo "cwd: $(pwd)"; read x && echo "stdin: $x"; echo "Checking MCP server health…"');
+    const out = await mcpList(sh);
+    expect(out).toContain('args: -l -i -c exec claude "$@" claude mcp list');
+    expect(out).toContain(`cwd: ${realpathSync(tmpdir())}`);
+    expect(out).not.toContain("stdin:");
+    expect(out).toContain("Checking MCP server health…");
+  });
+
+  test("a non-zero exit, a kill after the time limit, or no such shell gives undefined", async () => {
+    expect(await mcpList(shell('echo "Checking MCP server health…"; exit 1'))).toBeUndefined();
+    const started = Date.now();
+    expect(await mcpList(shell('echo "Checking MCP server health…"; exec sleep 30'), 300)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(await mcpList(join(root, "no-such-shell"))).toBeUndefined();
   });
 });

@@ -12,6 +12,7 @@ import { apnsFor } from "../push/watch";
 import { readCreds, readDevices } from "../push/store";
 import { blimpDir, claudeDir, isSafeName, listSessionsLite, type Session, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
 import { typeInto } from "../typing";
+import { Connectors, mcpList } from "./connectors";
 import { filing, LATE_NOTICE_MS, LOGIN_RECORD_MS, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, SETTLE_MS } from "./rules";
 import { accountsDir, accountsOn, hasLogin, listSaved, liveFile, liveMtime, putLive, type Rec, readLoginNote, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
 
@@ -363,9 +364,13 @@ export function accountsLog(dir: string): (entry: Record<string, unknown>) => vo
 }
 
 export function startAccounts(every = 1000): void {
-  const s = new Switcher(liveDeps());
+  const deps = liveDeps();
+  const s = new Switcher(deps);
+  // Beside it, the connector readings (connectors.ts), told and logged the switcher's way.
+  const c = new Connectors({ dir: deps.dir, live: deps.live, list: () => mcpList(), tell: deps.tell, log: deps.log, now: deps.now });
   // Off unless config.json says so (store.ts accountsOn), checked every tick: no restart to turn it on.
+  // A reading runs on its own after the tick: the loop doesn't wait for it.
   setInterval(() => {
-    if (accountsOn()) void s.tick();
+    if (accountsOn()) void s.tick().then(() => c.tick());
   }, every);
 }

@@ -1,11 +1,13 @@
-// `blimpd accounts`: the saved logins, which is in use, which is out and until when, and when each login
-// expires. `blimpd account use <email>`: files the live login and puts that one in place, as a switch does,
-// without "continue". `blimpd account forget <email>`: removes a saved login, never the one in use.
+// `blimpd accounts`: the saved logins, which is in use, which is out and until when, when each login
+// expires, and under one, the connectors it lacks that another has (connectors.ts). `blimpd account use
+// <email>`: files the live login and puts that one in place, as a switch does, without "continue".
+// `blimpd account forget <email>`: removes a saved login, never the one in use.
 // (docs/superpowers/specs/2026-11-16-account-switching-design.md, "By hand".) An account with no
 // account.json goes by its id. Never prints a token. Switching itself is off unless config.json turns it
 // on (store.ts accountsOn); use and forget work either way, being the user's own act.
 
 import { dirname, join } from "node:path";
+import { gapLine, gapOf } from "./connectors";
 import { isOut } from "./rules";
 import { accountsDir, accountsOn, forgetLogin, listSaved, liveFile, loginNoteFile, readLoginNote, readRecord, readState, type Saved, writeState } from "./store";
 import { accountsLog, Switcher } from "./switcher";
@@ -28,6 +30,9 @@ export function runAccounts(dir = accountsDir(), now = Date.now(), out: (s: stri
     if (isOut(state, a.id, now)) line += `, out until ${clock(state.out[a.id].until)}`;
     if (a.expires !== undefined) line += a.expires > now ? `, login expires ${date(a.expires)}` : ", login expired: log in to it again with /login";
     out(line);
+    // What this account's stored connector reading lacks against the others' (connectors.ts).
+    const g = gapOf(a.id, dir);
+    if (g && (g.missing.length || g.signin.length)) out(`  ${gapLine(g)}`);
   }
   if (state.unknown) out("blimp can't tell which account is logged in. Say which with: blimpd account use <email>, or log in again with /login in a session.");
   const top = dirname(dir);
