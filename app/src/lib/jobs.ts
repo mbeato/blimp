@@ -35,11 +35,11 @@ const ended = (j: Job) => (j.exit !== undefined ? `${j.status} · exit ${j.exit}
 // A job's line in the popover: how long it has run, or how it ended.
 export const jobState = (j: Job, now = Date.now()) => (j.status === "running" ? duration(now - j.startedAt) : ended(j));
 
-// The notification for a job that finished.
-export function jobNotice(j: Job, s: Session, home: string): { title: string; body: string } {
+// The notification for a job that finished. name: its server's, when more than one is saved.
+export function jobNotice(j: Job, s: Session, home: string, name?: string): { title: string; body: string } {
   const what = j.label || KIND_WORD[j.kind];
   const title = j.status === "failed" ? `${what} failed${j.exit !== undefined ? `, exit ${j.exit}` : ""}` : `${what} finished`;
-  return { title, body: `${s.title} · ${tildify(s.dir, home)}` };
+  return { title, body: `${s.title} · ${name ? `${name} · ` : ""}${tildify(s.dir, home)}` };
 }
 
 // The session ("<server key>/<session name>") whose jobs popover this window has open, while it's open.
@@ -66,7 +66,7 @@ export class JobWatcher {
     private quiet: (session: string) => boolean,
   ) {}
 
-  update(server: string, home: string, sessions: Session[]) {
+  update(server: string, home: string, sessions: Session[], name?: string) {
     const prev = this.last.get(server);
     this.last.set(server, new Map(sessions.flatMap((s) => (s.jobs ?? []).map((j) => [`${s.name}/${j.id}`, j.status] as const))));
     if (!prev) return;
@@ -75,7 +75,7 @@ export class JobWatcher {
       for (const j of s.jobs ?? []) {
         if ((j.status !== "done" && j.status !== "failed") || prev.get(`${s.name}/${j.id}`) !== "running") continue;
         if (this.quiet(session)) continue;
-        const n = jobNotice(j, s, home);
+        const n = jobNotice(j, s, home, name);
         this.notify(n.title, n.body, { session: jobsMark(session), wait: `${session}/${j.id}/${j.endedAt ?? ""}` });
       }
     }

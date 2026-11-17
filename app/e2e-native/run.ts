@@ -130,6 +130,7 @@ async function openApp() {
     const F = w.fetch; w.fetch = function (u, o) { const url = String(u && u.url || u);
       if (!/^ipc:|ipc\\.localhost/.test(url)) return F.apply(this, arguments);
       const rec = { cmd: decodeURIComponent(url.split('/').pop()), ok: null }; w.__probe.invokes.push(rec);
+      if (rec.cmd === 'set_menu') w.__probe.menu = o && o.body;
       return F.apply(this, arguments).then(r => { rec.ok = r.headers.get('Tauri-Response') === 'ok'; if (!rec.ok) r.clone().text().then(t => rec.err = t); return r; },
         e => { rec.ok = false; rec.err = 'fetch failed: ' + e; throw e; }); };
     const W = w.Worker; w.Worker = function (url, opts) { const rec = { url: String(url), error: null }; w.__probe.workers.push(rec);
@@ -227,6 +228,20 @@ try {
   const md = await until(10_000, () => js("return document.querySelector('.md-view h1')?.textContent"));
   record("README.md renders", md === "Native heading", md ?? (await js("return document.querySelector('.viewer')?.innerText")));
   await shot("04-markdown");
+  // File > Save and Close Tab in the last menu the window sent (set_menu): they follow the open
+  // file with nothing else happening in the window, not only once App renders for another reason.
+  const fileMenu = async (): Promise<Record<string, boolean>> => {
+    const body: string | null = await js("return window.__probe.menu ?? null");
+    const file = body ? JSON.parse(body).spec.find((m: any) => m.title === "File") : null;
+    return Object.fromEntries((file?.items ?? []).filter((i: any) => i.kind === "command").map((i: any) => [i.id, i.enabled]));
+  };
+  const saveOn = await until(3000, async () => ((await fileMenu()).save === true ? await fileMenu() : undefined));
+  await click('.wb:not([hidden]) .ftabs .tab.active .tab-close');
+  const saveOff = await until(3000, async () => {
+    const m = await fileMenu();
+    return m.save === false && m["close-tab"] === false ? m : undefined;
+  });
+  record("File > Save and Close Tab go grey and back as a file is opened and closed", !!saveOn && !!saveOff, { opened: saveOn ?? (await fileMenu()), closed: saveOff ?? (await fileMenu()) });
   await openFile("main.ts");
   const mon = await until(20_000, () => js("return document.querySelector('.monaco-editor .view-lines')?.innerText"));
   await sleep(2000);

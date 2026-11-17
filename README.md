@@ -141,27 +141,40 @@ The release notes say whether the app is signed and notarized. If it is not, it 
 
 **Updates.** blimp checks for a new version when it opens and every few hours; **blimp > Check for Updates…** checks now. When one is ready, a bar says so: click **Restart to update**. The app downloads it, checks that it was signed by this repository's release build, and restarts into it. Your sessions keep running on the server meanwhile.
 
-When the app is newer than blimpd on a server, a bar offers **Update server**: it runs the latest release's install script on the server over SSH, the same as the install command above. Sessions keep running; blimp reconnects by itself.
+When the app is newer than blimpd on a server, a bar offers **Update server** (so do **Server > Update Server…** and Manage servers): it runs the latest release's install script on the server over SSH, the same as the install command above. Sessions keep running; blimp reconnects by itself.
 
 ## First run
 
 1. Open blimp. It shows **Add a server**.
-2. Enter the **Host**: the same name you type after `ssh`. A `Host` alias from `~/.ssh/config` works. This is not always the name that the installer printed.
-3. **User** and **Port** are optional. Leave them empty to use what your `~/.ssh/config` says, as `ssh` does.
+2. Enter the **Host**: the same name you type after `ssh`. A `Host` alias from `~/.ssh/config` works, and the field offers the ones it finds there. A Tailscale name or an address works too. This is not always the name that the installer printed.
+3. **User** and **Port** are optional. Leave them empty to use what your `~/.ssh/config` says, as `ssh` does. **Name** is optional too: it's what blimp calls the server. Without one, blimp shows the host.
 4. Click **Add server**.
 
-blimp opens on **Home**: your home folder on the server. The Welcome page shows "connecting…", then "connected". If the connection fails, it shows the error and two buttons: **Try again** and **Remove server**. See [Troubleshooting](#troubleshooting).
+blimp connects before it saves the server: it says "Connecting to *host*…". When that works, blimp opens on **Home**: your home folder on the server. When it fails, the form stays, with the error, and for the common errors a line that says what to do. Then you can:
+- click **Try again**, or change the fields and click **Add server**;
+- click **Install blimpd** when the error says blimpd isn't set up there. blimp asks you first; then it runs the same install script as above, over SSH, and tries again;
+- click **Add anyway** to save the server as it is.
+
+See [Troubleshooting](#troubleshooting).
 
 ![Home: the Welcome page with recent projects, the home folder on the left, and the terminal below](docs/screenshots/home.png)
 
-To add more servers, click **Add server** on the Welcome page. The app keeps your server list on the Mac.
+**More servers.** The app keeps your server list on the Mac. Add a server from any of these places:
+- the **Home tab**, the first tab in the top bar: click the chevron after the server's name, then **Add server…**;
+- **Server > Add Server…** in the menu bar;
+- **Manage servers…** (in the Home tab's list, or **Server > Manage Servers…**), then **Add server…**;
+- **Add server** on the Welcome page.
+
+The Home tab shows its server: a dot and its name. A solid dot means connected, a ring means connecting, and a red dot means offline. Click the chevron after the name to see every server, with how many sessions it has (and an amber count of the ones waiting for you), or "offline". Click a server to show it at Home. The **Server** menu lists your servers too.
+
+**Manage servers** shows each server's name, address and state. Type a new **Name** to rename a server; blimp keeps its tabs and recent folders. **Remove…** asks first, then closes the server's tabs; its sessions keep running on the server. A server that isn't connected has **Try again**, and **Install blimpd** when blimpd isn't set up there. When blimpd is older than the app, there is **Update server**.
 
 ## Using it
 
 **Projects and windows**
 
 - Each open folder is a **tab** along the top of the window. Below it is that folder's own row of file tabs. A tab keeps its open files and terminals while you look at another one.
-- **Home** is the first tab: your home folder on the server. Its Welcome page lists your recent projects. With more than one server, it has a server picker.
+- **Home** is the first tab: your home folder on the server. Its Welcome page lists your recent projects. With more than one server, it has a server picker. With more than one server, a project tab also shows its server's name, and so do the session search (⌘K) and the notifications.
 - **Open Folder…** (⌘O, or the **+** after the tabs) picks a folder: from the folders you used Claude in, by browsing the server, or by typing a path (like `~/projects/app`). While browsing, **New folder** makes a folder and goes into it. The folder opens in a new tab, or its tab comes to the front if it's already open.
 - Drag a tab to move it. Home stays first.
 - Close a tab with its **×** or a middle-click. Its sessions keep running. An amber dot on a tab means a session in that folder is waiting for you.
@@ -374,6 +387,8 @@ Sometimes Claude needs a key or a password, for example to call an API. Do not p
 | ⌘K | Jump to any session by its title, folder or name. In the editor, ⌘K goes to the editor (its ⌘K chords, as in VS Code). |
 | ⌘N | New Claude session in this folder. |
 | ⌘⇧N | New window. |
+| ⌘⇧W | Close the window. Its sessions keep running. |
+| ⌘⇧[ / ⌘⇧] | Show the previous / next project tab. After the last tab comes Home again. |
 | ⌘O | Open Folder…: pick a folder on the server, in a new tab. |
 | ⌘P | Open a file by name in this folder. |
 | ⌘S | Save the open file now (edits also save by themselves). |
@@ -385,10 +400,15 @@ Sometimes Claude needs a key or a password, for example to call an API. Do not p
 | Enter or F2 | On the focused row in the files: rename it. |
 | ⌘⌫ | On the focused row in the files: delete it (after asking). |
 | ⌘⌥B | Show or hide the session list. |
+| ⌘T | New browser tab in this folder. |
+| ⌘+ / ⌘- | Bigger or smaller text, in the terminal and the editor together. ⌘+ is the = key (the menu shows ⌘=). |
+| ⌘0 | Text back to the default sizes. |
 | ⌘-click | In the terminal: open a file path in a tab, or a web link in your browser. |
 | Esc | Close a dialog. |
 | ↑ ↓ Enter | Move and pick in the session search and the dialogs. |
 | ⌘Q | Quit blimp. Sessions keep running on the server. |
+
+**Help > Keyboard Shortcuts** (or **All shortcuts** on the Welcome page) lists the menu commands' keys and the keys of the files pane and the terminal. The tables here have the rest (for example ⌘Q). The menu bar has every command, also the ones with no key: for example **File > New Shell**, **File > Close Project**, **Window > Go to Home**, **Server > Reconnect**.
 
 In the terminal, keys work like the VS Code terminal on macOS:
 
@@ -431,7 +451,7 @@ On that link, blimp's median was 8 to 12 ms lower than the plain terminal across
 
 ## Troubleshooting
 
-Home's Welcome page shows the error from ssh or blimpd. Most problems show up there.
+Home's Welcome page, Add server and Manage servers show the error from ssh or blimpd, and for the common ones a line that says what to do. Most problems show up there.
 
 **"SSH to yourserver failed: Permission denied (publickey)."**
 ssh did not find a key that it can use without a prompt. blimp never shows a passphrase prompt.
@@ -444,7 +464,7 @@ ssh did not find a key that it can use without a prompt. blimp never shows a pas
 The server's key is not in `~/.ssh/known_hosts`, or it changed. Connect once from Terminal (`ssh yourserver`), check the key, and accept it. Then click **Try again**.
 
 **"blimpd isn't set up on yourserver: …No such file or directory"**
-The token file `~/.blimp/token` does not exist. blimpd makes it the first time it starts. Install the server part, or start blimpd.
+The token file `~/.blimp/token` does not exist. blimpd makes it the first time it starts. Install the server part (**Install blimpd** in Add server or Manage servers does it over SSH), or start blimpd.
 
 **"blimpd on yourserver didn't answer within 10 seconds"**
 SSH works, but the app cannot reach blimpd. Often the message ends with `channel 1: open failed: connect failed: open failed` (the number can differ). There are two causes.

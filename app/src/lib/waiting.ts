@@ -15,7 +15,8 @@ export type Focus = { focused: boolean; viewing: string[] };
 
 // Remembers each server's last states and notifies when a session becomes waiting.
 // The first list from a server only records states, so opening the app doesn't announce
-// every session that was already waiting.
+// every session that was already waiting. name: the server's name, given when more than one
+// server is saved, so the notification says which.
 export class WaitWatcher {
   private last = new Map<string, Map<string, string>>();
 
@@ -24,7 +25,7 @@ export class WaitWatcher {
     private focus: () => Focus,
   ) {}
 
-  update(server: string, home: string, sessions: Session[]) {
+  update(server: string, home: string, sessions: Session[], name?: string) {
     const prev = this.last.get(server);
     this.last.set(server, new Map(sessions.map((s) => [s.name, s.state])));
     if (!prev) return;
@@ -33,7 +34,8 @@ export class WaitWatcher {
       if (s.state !== "waiting" || prev.get(s.name) === "waiting") continue;
       const session = `${server}/${s.name}`;
       if (f.focused && f.viewing.includes(session)) continue;
-      this.notify(`${s.title} is waiting for you`, tildify(s.dir, home), { session, wait: `${session}/${s.stateSince ?? s.updatedAt ?? Date.now()}` });
+      const where = tildify(s.dir, home);
+      this.notify(`${s.title} is waiting for you`, name ? `${name} · ${where}` : where, { session, wait: `${session}/${s.stateSince ?? s.updatedAt ?? Date.now()}` });
     }
   }
 }

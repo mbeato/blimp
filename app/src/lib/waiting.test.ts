@@ -73,6 +73,13 @@ test("servers are tracked separately", () => {
   expect(calls).toHaveLength(1); // two/a is not the active tab
 });
 
+test("with more than one server saved, the notification says which server", () => {
+  const { w, calls } = setup();
+  w.update("max@box:2222", "/home/u", [s("a", "working")], "Lab");
+  w.update("max@box:2222", "/home/u", [s("a", "waiting")], "Lab");
+  expect(calls).toEqual([["Title a is waiting for you", "Lab · ~/proj"]]);
+});
+
 test("toMarkSeen: unread sessions on screen in a focused window, once until blimpd catches up", () => {
   const u = (name: string, id: string | undefined, unread: boolean): Session => ({ ...s(name, "done"), sessionId: id, unread });
   const list = [u("a", "c-a", true), u("b", "c-b", true), u("c", "c-c", false), u("d", undefined, true)];

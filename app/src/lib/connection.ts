@@ -8,13 +8,23 @@ import { listen } from "@tauri-apps/api/event";
 import { Api, type BrowserTab, type Conn, type Port, type Session, type Visual } from "./api";
 import { EventsSocket } from "./events";
 
-export type Server = { host: string; user?: string; port?: number };
+// name: what the app calls it (Manage servers); never part of the key.
+export type Server = { host: string; user?: string; port?: number; name?: string };
 
 export const inTauri = () => isTauri();
 
 // user@host:port, leaving out what the user left blank. The same as the id the Rust shell gives
 // the tunnel (Target::id in src-tauri/src/tunnel.rs), so it also names the tunnel to disconnect.
 export const serverKey = (s: Server) => `${s.user ? s.user + "@" : ""}${s.host}${s.port ? ":" + s.port : ""}`;
+
+const label = (s: Server) => s.name?.trim() || s.host;
+
+// The name a person reads: the one they gave it, else its host. Two servers in `all` that would
+// read the same (box and max@box) each show their key instead, so they can be told apart.
+export function serverName(s: Server, all: Server[]): string {
+  const l = label(s);
+  return all.some((o) => serverKey(o) !== serverKey(s) && label(o) === l) ? serverKey(s) : l;
+}
 
 const LS_KEY = "blimp.servers";
 
@@ -44,6 +54,9 @@ export async function saveServers(list: Server[]) {
     const store = await load("servers.json");
     await store.set("servers", list);
     await store.save();
+    // Every window keeps the list; each loads it again (onServersChanged).
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit("servers-changed");
     return;
   }
   try {
@@ -51,13 +64,37 @@ export async function saveServers(list: Server[]) {
   } catch {}
 }
 
-async function connectServer(s: Server): Promise<Conn> {
+// Another window saved the server list. Only the Mac app has other windows.
+export async function onServersChanged(fn: () => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  return listen("servers-changed", () => fn());
+}
+
+// Add server's suggestions: the Host names in this Mac's ~/.ssh/config (none in a browser).
+export const sshHosts = async (): Promise<string[]> => (inTauri() ? invoke<string[]>("ssh_hosts").catch(() => []) : []);
+
+// Add server tries the server before saving it, the way its link will connect: the tunnel that
+// opens is the one the link then gets back from connect. Each try has a random token of its own,
+// and cancel stops the connect with that token only: Rust ends it with an error before it opens
+// a tunnel, also when the cancel gets there before the connect does. A tunnel that was already
+// up when the cancel came stays, as the server's (it ends at quit); a cancel never stops a
+// tunnel by server id, which could be the next try's or a saved server's.
+export function tryConnect(s: Server): { done: Promise<Conn>; cancel: () => void } {
+  const attempt = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return {
+    done: connectServer(s, attempt),
+    cancel: () => void (inTauri() && invoke("disconnect", { id: serverKey(s), attempt }).catch(() => {})),
+  };
+}
+
+async function connectServer(s: Server, attempt?: string): Promise<Conn> {
   let conn: Conn;
   if (inTauri()) {
     const r = await invoke<{ id: string; port: number; token: string; home: string }>("connect", {
       host: s.host,
       user: s.user,
       port: s.port,
+      ...(attempt && { attempt }),
     });
     conn = { id: r.id, base: `http://127.0.0.1:${r.port}`, token: r.token, home: "" };
   } else {
@@ -117,6 +154,8 @@ function watchForWake() {
 export class ServerLink {
   // A server removed and added again gets a new link with the same key; this tells them apart.
   readonly id = ++serial;
+  // serverName among the saved servers; App keeps it current.
+  name: string;
   status: LinkStatus = "connecting";
   error = "";
   sessions: Session[] | null = null; // null until the first list arrives
@@ -141,6 +180,7 @@ export class ServerLink {
     public server: Server,
     private onChange: (link: ServerLink) => void,
   ) {
+    this.name = serverName(server, [server]);
     links.add(this);
     listenForTunnels();
     watchForWake();

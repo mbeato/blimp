@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { errorText, type ServerLink } from "../lib/connection";
-import { canUpdate, checkForUpdate, onCheckForUpdates, updateServer, type AppUpdate } from "../lib/updates";
+import { blimpdBehind, canUpdate, checkForUpdate, updateLink, type AppUpdate } from "../lib/updates";
 import { getSettings } from "../lib/settings";
-import { appVersion, compareVersions } from "../lib/version";
+import { appVersion } from "../lib/version";
 
 // How often the app looks for a new version, after the first look a few seconds after it opens.
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 // Bars under the tabs: a newer blimp is ready (Restart to update), and a server whose blimpd is
 // older than this app (Update server). Only in the Mac app. onNotice: for Check for Updates…
-// when there's nothing new, or a check that failed.
-export function UpdateBars(props: { links: ServerLink[]; onNotice: (msg: string) => void }) {
+// when there's nothing new, or a check that failed. check: filled in with Check for Updates…,
+// for the command of that name (lib/commands.ts).
+export function UpdateBars(props: { links: ServerLink[]; onNotice: (msg: string) => void; check: { current: () => void } }) {
   const [update, setUpdate] = useState<AppUpdate | null>(null);
   const [later, setLater] = useState(false);
   const [installing, setInstalling] = useState<{ done: number; total: number } | null>(null);
@@ -32,15 +33,15 @@ export function UpdateBars(props: { links: ServerLink[]; onNotice: (msg: string)
     }
   };
 
+  props.check.current = () => void look(true);
+
   useEffect(() => {
     if (!canUpdate()) return;
     // Settings > Check for updates automatically; Check for Updates… works either way.
     const auto = () => getSettings().autoUpdate && void look(false);
     const first = setTimeout(auto, 4000);
     const every = setInterval(auto, CHECK_EVERY_MS);
-    let off = () => {};
-    void onCheckForUpdates(() => void look(true)).then((f) => (off = f));
-    return () => (clearTimeout(first), clearInterval(every), off());
+    return () => (clearTimeout(first), clearInterval(every));
   }, []);
 
   if (!canUpdate()) return null;
@@ -57,16 +58,11 @@ export function UpdateBars(props: { links: ServerLink[]; onNotice: (msg: string)
     }
   };
 
-  const behind = props.links.filter((l) => l.status === "connected" && l.version && compareVersions(l.version, appVersion) < 0 && !skipped.has(l.key));
+  const behind = props.links.filter((l) => blimpdBehind(l) && !skipped.has(l.key));
   const updateOne = async (l: ServerLink) => {
     setUpdating((s) => new Set(s).add(l.key));
     try {
-      await updateServer(l.key);
-      notice.current(`blimpd on ${l.key} is updated.`);
-      // blimpd restarted; the link sees its events socket drop and reconnects to the new one.
-      l.retryNow();
-    } catch (e) {
-      notice.current(errorText(e));
+      await updateLink(l, notice.current);
     } finally {
       setUpdating((s) => {
         const n = new Set(s);
@@ -98,7 +94,7 @@ export function UpdateBars(props: { links: ServerLink[]; onNotice: (msg: string)
       {behind.map((l) => (
         <div key={l.key} className="update-bar" role="status">
           <span>
-            blimpd on {l.key} is {l.version}; this app is {appVersion}.{" "}
+            blimpd on {l.name} is {l.version}; this app is {appVersion}.{" "}
             {updating.has(l.key) ? "Updating…" : "Update it so the newest features work there. Sessions keep running."}
           </span>
           {!updating.has(l.key) && (

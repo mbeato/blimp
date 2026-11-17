@@ -1,17 +1,19 @@
 // The native half of the blimp app: it opens SSH tunnels to blimpd and hosts the UI.
 // Sessions, terminals and files all live in the UI, which talks to blimpd through the tunnel.
 
+mod menu;
 mod relaunch;
 mod transfer;
 mod tunnel;
 mod windows;
 
-use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 fn main() {
     let builder = tauri::Builder::default();
+    // A small menu until the first window describes the full one (menu.rs).
     #[cfg(target_os = "macos")]
-    let builder = builder.menu(menu);
+    let builder = builder.menu(|app| menu::build(app, &menu::fallback()));
     builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -33,6 +35,8 @@ fn main() {
             tunnel::forward_port,
             tunnel::unforward_port,
             tunnel::update_server,
+            tunnel::install_server,
+            tunnel::ssh_hosts,
             windows::open_window,
             windows::focus_project,
             windows::drop_session,
@@ -49,10 +53,18 @@ fn main() {
             windows::set_window_projects,
             windows::set_viewing,
             windows::claim_notice,
+            menu::set_menu,
             relaunch::relaunch
         ])
         .on_window_event(|window, event| match event {
-            WindowEvent::Destroyed => window.state::<windows::Windows>().forget(window.app_handle(), window.label()),
+            WindowEvent::Destroyed => {
+                window.state::<windows::Windows>().forget(window.app_handle(), window.label());
+                // The last window is gone, and with it the page that described the menu and
+                // would act on its items.
+                if window.app_handle().webview_windows().keys().all(|l| l == window.label()) {
+                    let _ = menu::show(window.app_handle(), &menu::fallback());
+                }
+            }
             WindowEvent::Focused(true) => window.state::<windows::Windows>().focused(window.label()),
             WindowEvent::Moved(_) | WindowEvent::Resized(_) => window.state::<windows::Windows>().moved(window),
             // Files let go on a window from Finder may be uploaded (the page gets the same event).
@@ -60,16 +72,8 @@ fn main() {
             WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => window.state::<transfer::Transfers>().allow(paths),
             _ => {}
         })
-        // blimp > Check for Updates…: the focused window checks and says what it found.
-        .on_menu_event(|app, event| {
-            let id = event.id().as_ref();
-            if id == "check-updates" || id == "open-settings" {
-                let w = app.windows().into_values().find(|w| w.is_focused().unwrap_or(false));
-                if let Some(w) = w.or_else(|| app.get_window("main")) {
-                    let _ = w.emit_to(w.label(), id, ());
-                }
-            }
-        })
+        // A click on one of the page's menu items (menu.rs).
+        .on_menu_event(|app, event| menu::clicked(app, event.id().as_ref()))
         .build(tauri::generate_context!())
         .expect("error while starting blimp")
         .run(|app, event| match event {
@@ -85,43 +89,4 @@ fn main() {
             }
             _ => {}
         });
-}
-
-/// The macOS menu bar. Tauri's default one binds ⌘W to Close Window, and a menu shortcut
-/// wins over the page, so the UI would never see ⌘W (close tab). This one keeps only what
-/// the app needs from the system and leaves ⌘W, ⌘N, ⌘P and ⌘K to the UI.
-#[cfg(target_os = "macos")]
-fn menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
-    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-
-    let updates = MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?;
-    let settings = MenuItemBuilder::with_id("open-settings", "Settings…").accelerator("CmdOrCtrl+,").build(app)?;
-    let app_menu = SubmenuBuilder::new(app, "blimp")
-        .about(None)
-        .item(&updates)
-        .separator()
-        .item(&settings)
-        .separator()
-        .hide()
-        .hide_others()
-        .show_all()
-        .separator()
-        .quit()
-        .build()?;
-    let edit = SubmenuBuilder::new(app, "Edit")
-        .undo()
-        .redo()
-        .separator()
-        .cut()
-        .copy()
-        .paste()
-        .select_all()
-        .build()?;
-    let window = SubmenuBuilder::new(app, "Window")
-        .minimize()
-        .maximize()
-        .build()?;
-    MenuBuilder::new(app)
-        .items(&[&app_menu, &edit, &window])
-        .build()
 }

@@ -3,7 +3,8 @@
 // blimpd on a server catching up with the app (update_server in src-tauri/src/tunnel.rs).
 
 import { invoke } from "@tauri-apps/api/core";
-import { inTauri } from "./connection";
+import { errorText, inTauri, type Server, type ServerLink } from "./connection";
+import { appVersion, compareVersions } from "./version";
 
 export type AppUpdate = { version: string; install: (progress: (done: number, total: number) => void) => Promise<void> };
 
@@ -29,14 +30,30 @@ export async function checkForUpdate(): Promise<AppUpdate | null> {
   };
 }
 
-// blimp > Check for Updates… in the menu bar.
-export async function onCheckForUpdates(fn: () => void): Promise<() => void> {
-  if (!inTauri()) return () => {};
-  const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-  return getCurrentWebviewWindow().listen("check-updates", () => fn());
-}
-
 // Runs the latest release's install.sh on the server. Resolves to its last lines.
 export const updateServer = (server: string) => invoke<string>("update_server", { server });
 
+// The same install.sh, on a server where blimpd isn't set up yet (it has no tunnel to update through).
+// Rust asks first in a native dialog; false: the person chose Cancel there, which isn't an error.
+export const installServer = (s: Server): Promise<boolean> =>
+  invoke<string>("install_server", { host: s.host, user: s.user, port: s.port }).then(
+    () => true,
+    (e) => (errorText(e) === "Cancelled." ? false : Promise.reject(e)),
+  );
+
 export const canUpdate = inTauri;
+
+// A connected server whose blimpd is older than this app.
+export const blimpdBehind = (l: ServerLink) => l.status === "connected" && !!l.version && compareVersions(l.version, appVersion) < 0;
+
+// Update server (the update bars, Manage servers): says how it went, and the link sees blimpd
+// restart and reconnects to the new one.
+export async function updateLink(l: ServerLink, notice: (msg: string) => void) {
+  try {
+    await updateServer(l.key);
+    notice(`blimpd on ${l.name} is updated.`);
+    l.retryNow();
+  } catch (e) {
+    notice(errorText(e));
+  }
+}

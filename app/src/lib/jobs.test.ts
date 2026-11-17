@@ -66,6 +66,15 @@ test("the notice for a finished job names it, says how it ended, and the session
   expect(jobNotice(j("x", { label: "Run the build", status: "failed" }), t, "/home/u").title).toBe("Run the build failed");
 });
 
+test("with more than one server saved, a job's notice says which server", () => {
+  expect(jobNotice(j("x", { label: "Run the build", status: "done", exit: 0 }), s("a"), "/home/u", "Lab")).toEqual({ title: "Run the build finished", body: "Title a · Lab · ~/proj" });
+  const calls: string[] = [];
+  const w = new JobWatcher((_t, body) => calls.push(body), () => false);
+  w.update("max@box", "/home/u", [s("a", [j("x")])], "Lab");
+  w.update("max@box", "/home/u", [s("a", [j("x", { status: "done", endedAt: NOW })])], "Lab");
+  expect(calls).toEqual(["Title a · Lab · ~/proj"]);
+});
+
 function setup(open: string | null = null) {
   const calls: { title: string; body: string; id: { session: string; wait: string } }[] = [];
   const w = new JobWatcher((title, body, id) => calls.push({ title, body, id }), (session) => session === open);

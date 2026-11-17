@@ -4,7 +4,7 @@
 // talks HTTP and WebSocket to that local port with the token; this file only starts, reuses
 // and stops the tunnels, and tells the UI when one dies so it can reconnect.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::{Child, ChildStderr, Command, Stdio};
@@ -150,7 +150,18 @@ impl Target {
 
 impl Target {
     fn update_args(&self) -> Vec<String> {
-        let mut args = strings(&["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
+        // ServerAlive: a server that stops answering mid-install ends the ssh within about a
+        // minute, so Update server and Install blimpd never wait forever.
+        let mut args = strings(&[
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
+        ]);
         args.extend(self.dest_args());
         args.push(UPDATE_CMD.into());
         args
@@ -229,6 +240,43 @@ fn last_line(stderr: &str) -> &str {
         .unwrap_or("")
 }
 
+/// ssh reached the server, but reading blimpd's token there failed. The UI knows this error by
+/// these words and offers Install blimpd (isNotSetUp in app/src/lib/hints.ts).
+fn not_set_up(host: &str) -> String {
+    format!("blimpd isn't set up on {host}")
+}
+
+/// The `Host` names in an ssh config, for Add server's suggestions: patterns (`*`, `?`, `!`)
+/// left out, as are names ssh would read as an option; each name once, at most 200.
+fn config_hosts(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        // "Host a b", "host a", "Host=a" and "Host = a" all name hosts (keywords ignore case).
+        let Some(i) = line.find(|c: char| c.is_whitespace() || c == '=') else {
+            continue;
+        };
+        if !line[..i].eq_ignore_ascii_case("host") {
+            continue;
+        }
+        let rest = line[i..].trim_start();
+        let rest = rest.strip_prefix('=').unwrap_or(rest);
+        for name in rest.split_whitespace() {
+            if name.starts_with('#') {
+                break;
+            }
+            let pattern = name.contains(['*', '?', '!', '"']);
+            if pattern || name.starts_with('-') || name.chars().any(char::is_control) || out.iter().any(|n| n == name) {
+                continue;
+            }
+            if out.len() == 200 {
+                return out;
+            }
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
 fn with_detail(msg: String, detail: &str) -> String {
     if detail.is_empty() {
         format!("{msg}.")
@@ -284,6 +332,62 @@ struct Inner {
     /// Port forwards: (server id, host, port on the server) -> the forward. Two
     /// tabs on one port share it; it closes when the last one does.
     forwards: HashMap<(String, String, u16), Forward>,
+    tries: Tries,
+}
+
+/// Cancels kept for tries whose connect hasn't started (or has already ended): enough for any
+/// real page, few enough that a page can't grow the list.
+const MAX_EARLY_CANCELS: usize = 32;
+/// The page's try tokens are short random strings; anything longer isn't one.
+const MAX_TRY_TOKEN: usize = 64;
+
+/// Add server's tries (tryConnect in app/src/lib/connection.ts): connects that carry a token
+/// the page made for that one try, so its Stop ends exactly that try. A cancel only ever stops
+/// its own connect before it opens a tunnel; it never touches a tunnel by server id, so it
+/// can't take another try's or a saved server's.
+#[derive(Default)]
+struct Tries {
+    /// Tries whose connect is under way, by token: true once cancelled.
+    running: HashMap<String, bool>,
+    /// Cancels for tokens no connect is running with, oldest first. A cancel can reach Rust
+    /// before its connect does, which then finds it here and stops at once.
+    early: VecDeque<String>,
+}
+
+impl Tries {
+    /// A connect with this token starts. false: it was cancelled already (or the token is bad).
+    fn begin(&mut self, token: &str) -> bool {
+        if token.len() > MAX_TRY_TOKEN {
+            return false;
+        }
+        if let Some(i) = self.early.iter().position(|t| t == token) {
+            self.early.remove(i);
+            return false;
+        }
+        self.running.insert(token.to_string(), false);
+        true
+    }
+
+    /// Whether a connect may go on; one without a token always may.
+    fn may_go_on(&self, token: Option<&str>) -> bool {
+        token.is_none_or(|t| self.running.get(t) == Some(&false))
+    }
+
+    fn cancel(&mut self, token: &str) {
+        if let Some(cancelled) = self.running.get_mut(token) {
+            *cancelled = true;
+        } else if token.len() <= MAX_TRY_TOKEN && !self.early.iter().any(|t| t == token) {
+            if self.early.len() == MAX_EARLY_CANCELS {
+                self.early.pop_front();
+            }
+            self.early.push_back(token.to_string());
+        }
+    }
+
+    /// The connect ended, whichever way.
+    fn end(&mut self, token: &str) {
+        self.running.remove(token);
+    }
 }
 
 impl Tunnels {
@@ -360,6 +464,16 @@ impl Tunnels {
         drop(inner);
         children.into_iter().for_each(stop);
     }
+
+    /// Stops the try with this token, whether its connect has started yet or not (see Tries).
+    fn cancel_try(&self, token: &str) {
+        self.inner.lock().unwrap().tries.cancel(token);
+    }
+
+    /// Whether the connect with this token (if any) still may open its tunnel.
+    fn wanted(&self, token: Option<&str>) -> bool {
+        self.inner.lock().unwrap().tries.may_go_on(token)
+    }
 }
 
 fn stop(mut child: Child) {
@@ -372,23 +486,45 @@ fn live(map: &mut HashMap<String, Tunnel>, id: &str) -> Option<Conn> {
     matches!(t.child.try_wait(), Ok(None)).then(|| t.conn.clone())
 }
 
+/// `attempt`: Add server's token for one try (see Tries); a server's link passes none.
 #[tauri::command]
 pub async fn connect(
     app: AppHandle,
     host: String,
     user: Option<String>,
     port: Option<u16>,
+    attempt: Option<String>,
 ) -> Result<Conn, String> {
     let target = Target::new(host, user, port)?;
     // ssh and the health wait take seconds; keep them off the UI thread.
-    tauri::async_runtime::spawn_blocking(move || open(&app, &target))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        let tunnels = app.state::<Tunnels>();
+        let Some(token) = attempt else {
+            return open(&app, &target, None);
+        };
+        if !tunnels.inner.lock().unwrap().tries.begin(&token) {
+            return Err(cancelled(&target));
+        }
+        let conn = open(&app, &target, Some(&token));
+        tunnels.inner.lock().unwrap().tries.end(&token);
+        conn
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
+/// With `attempt`, stops only that try of Add server's (even one whose connect hasn't reached
+/// Rust yet) and leaves `id`'s tunnel alone; without, stops `id`'s tunnel and its connects.
 #[tauri::command]
-pub fn disconnect(tunnels: State<'_, Tunnels>, id: String) {
-    tunnels.remove(&id);
+pub fn disconnect(tunnels: State<'_, Tunnels>, id: String, attempt: Option<String>) {
+    match attempt {
+        Some(token) => tunnels.cancel_try(&token),
+        None => tunnels.remove(&id),
+    }
+}
+
+fn cancelled(t: &Target) -> String {
+    format!("Connecting to {} was cancelled.", t.host)
 }
 
 /// The UI found the tunnel on `port` dead (no /health answer after the Mac woke or changed
@@ -480,23 +616,77 @@ pub async fn update_server(app: AppHandle, server: String) -> Result<String, Str
         return Err("Not in a test build.".into());
     }
     let target = app.state::<Tunnels>().inner.lock().unwrap().map.get(&server).map(|t| t.target.clone()).ok_or("Not connected.")?;
+    tauri::async_runtime::spawn_blocking(move || run_install(&target, "Updating"))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Install blimpd: the same install.sh as Update server, on a server with no tunnel yet (one
+/// where blimpd isn't set up, from Add server or Manage servers). It takes nothing but the
+/// server, checked the way connect checks it. That can be any host ssh reaches, so it asks
+/// first in a native dialog, which script in the page can't click; "Cancelled." if not.
+#[tauri::command]
+pub async fn install_server(app: AppHandle, host: String, user: Option<String>, port: Option<u16>) -> Result<String, String> {
+    // A debug build pointed at a test blimpd (BLIMP_REMOTE_DIR) must not install the real one.
+    if remote_dir().is_some() {
+        return Err("Not in a test build.".into());
+    }
+    let target = Target::new(host, user, port)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let out = ssh()
-            .args(target.update_args())
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("Couldn't run ssh: {e}"))?;
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-        let tail = tail[tail.len().saturating_sub(4)..].join("\n");
-        if out.status.success() {
-            Ok(tail)
-        } else {
-            Err(with_detail(format!("Updating blimpd on {} failed", target.host), &tail))
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
+        // Install goes first. The plugin hands back the second label for every answer that isn't a
+        // click on the first button: Esc, a close box, and also a dialog that couldn't show or was
+        // aborted (rfd's Cancel). So only a real click on Install, or Return, installs.
+        let buttons = MessageDialogButtons::OkCancelCustom("Install".into(), "Cancel".into());
+        // Blocks this thread until answered; the dialog itself runs on the main thread.
+        let answer = app
+            .dialog()
+            .message(install_question(&target))
+            .title("Install blimpd")
+            .buttons(buttons)
+            .blocking_show_with_result();
+        if answer != MessageDialogResult::Custom("Install".into()) {
+            return Err("Cancelled.".into());
         }
+        run_install(&target, "Installing")
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The install dialog's text. It names the server as ssh will reach it (user, host and port,
+/// those given), since that's the machine the script runs on.
+fn install_question(target: &Target) -> String {
+    format!("Install blimpd on {}? This runs the latest blimp release's install script there over SSH.", target.id())
+}
+
+/// Runs the release's install.sh on the server over ssh; resolves to the last lines it printed.
+fn run_install(target: &Target, doing: &str) -> Result<String, String> {
+    let out = ssh()
+        .args(target.update_args())
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Couldn't run ssh: {e}"))?;
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let tail = tail[tail.len().saturating_sub(4)..].join("\n");
+    if out.status.success() {
+        Ok(tail)
+    } else {
+        Err(with_detail(format!("{doing} blimpd on {} failed", target.host), &tail))
+    }
+}
+
+/// Add server's suggestions: the host names in this Mac's ~/.ssh/config. Reads that one file
+/// and hands back only names; no file, or one that can't be read, is no names.
+#[tauri::command]
+pub fn ssh_hosts() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(std::path::Path::new(&home).join(".ssh").join("config"))
+        .map(|text| config_hosts(&text))
+        .unwrap_or_default()
 }
 
 /// A browser tab that opened it closed: the forward goes with the last one.
@@ -515,7 +705,9 @@ pub fn unforward_port(tunnels: State<'_, Tunnels>, server: String, host: String,
     }
 }
 
-fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
+/// `attempt`: the try's token, checked before the tunnel is spawned, while it waits for /health
+/// and before it goes into the map, so a cancelled try leaves no tunnel and no ssh behind.
+fn open(app: &AppHandle, t: &Target, attempt: Option<&str>) -> Result<Conn, String> {
     let tunnels = app.state::<Tunnels>();
     let id = t.id();
     if let Some(conn) = live(&mut tunnels.inner.lock().unwrap().map, &id) {
@@ -539,7 +731,7 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
         }
         _ => {
             return Err(with_detail(
-                format!("blimpd isn't set up on {}", t.host),
+                not_set_up(&t.host),
                 last_line(&stderr),
             ))
         }
@@ -551,6 +743,10 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
         )
     })?;
 
+    // The info step isn't registered anywhere, so a cancel during it is only seen here.
+    if !tunnels.wanted(attempt) {
+        return Err(cancelled(t));
+    }
     let port = free_port().map_err(|e| format!("Couldn't find a free local port: {e}"))?;
     // ssh's stdin stays in `child` (never written) until the tunnel is stopped: see TUNNEL_CMD.
     let mut child = ssh()
@@ -577,13 +773,21 @@ fn open(app: &AppHandle, t: &Target) -> Result<Conn, String> {
         last.clone(),
     );
 
-    let healthy = wait_healthy(|| tunnels.starting_alive(serial), port, &token, &t.host);
+    // A cancelled try stops waiting at the next poll.
+    let healthy = wait_healthy(|| tunnels.starting_alive(serial) && tunnels.wanted(attempt), port, &token, &t.host);
 
     let mut inner = tunnels.inner.lock().unwrap();
     // disconnect or close_all already stopped it: nobody wants this tunnel any more.
     let Some((_, child)) = inner.starting.remove(&serial) else {
-        return Err(format!("Connecting to {} was cancelled.", t.host));
+        return Err(cancelled(t));
     };
+    // Under the same lock as the insert below, so a cancel either lands before this (and the
+    // tunnel goes) or after the connect is over.
+    if !inner.tries.may_go_on(attempt) {
+        drop(inner);
+        stop(child);
+        return Err(cancelled(t));
+    }
     if let Err(msg) = healthy {
         drop(inner);
         stop(child);
@@ -739,6 +943,13 @@ mod tests {
     }
 
     #[test]
+    fn install_question_names_user_host_and_port() {
+        assert!(install_question(&target("box", Some("max"), Some(2222)))
+            .starts_with("Install blimpd on max@box:2222? "));
+        assert!(install_question(&target("box", None, None)).starts_with("Install blimpd on box? "));
+    }
+
+    #[test]
     fn refuses_hosts_ssh_would_read_as_options() {
         assert!(Target::new("-oProxyCommand=touch /tmp/x".into(), None, None).is_err());
         assert!(Target::new("claude1".into(), Some("-lroot".into()), None).is_err());
@@ -759,7 +970,86 @@ mod tests {
     fn update_args() {
         let a = target("claude1", None, Some(2222)).update_args();
         assert_eq!(a[a.len() - 5..], ["-p", "2222", "--", "claude1", UPDATE_CMD]);
-        assert_eq!(a[..4], ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
+        assert_eq!(
+            a[..8],
+            ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"]
+        );
+    }
+
+    #[test]
+    fn install_args_reach_only_the_server_given() {
+        // install_server builds its target from host, user and port alone, as connect does.
+        assert_eq!(
+            target("claude1", Some("max"), Some(2222)).update_args(),
+            [
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
+                "-p",
+                "2222",
+                "--",
+                "max@claude1",
+                UPDATE_CMD
+            ]
+        );
+        assert_eq!(
+            target("claude1", None, None).update_args(),
+            [
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
+                "--",
+                "claude1",
+                UPDATE_CMD
+            ]
+        );
+        assert!(Target::new("-oProxyCommand=sh".into(), None, None).is_err());
+    }
+
+    #[test]
+    fn not_set_up_keeps_the_words_the_ui_knows() {
+        // app/src/lib/hints.ts (isNotSetUp) looks for exactly this start.
+        assert_eq!(not_set_up("claude1"), "blimpd isn't set up on claude1");
+        assert_eq!(
+            with_detail(not_set_up("claude1"), "cat: /home/max/.blimp/token: No such file or directory"),
+            "blimpd isn't set up on claude1: cat: /home/max/.blimp/token: No such file or directory"
+        );
+    }
+
+    #[test]
+    fn config_hosts_are_plain_names_once() {
+        let config = "\
+# my servers
+Host claude1 claude1.lan
+  HostName 100.64.0.1
+  User max
+host lab
+Host=box
+Host = gpu # the big one
+Host *.example.com !bastion lab test?
+Host claude1
+Match host other
+  User x
+HostName notahost
+Hosts nothost
+Host -oProxyCommand=sh \"quoted name\"
+";
+        assert_eq!(config_hosts(config), ["claude1", "claude1.lan", "lab", "box", "gpu"]);
+        assert!(config_hosts("").is_empty());
+        let many: String = (0..300).map(|i| format!("Host h{i}\n")).collect();
+        let hosts = config_hosts(&many);
+        assert_eq!(hosts.len(), 200);
+        assert_eq!(hosts[199], "h199");
     }
 
     #[test]
@@ -961,6 +1251,84 @@ mod tests {
 
         tunnels.close_all();
         assert!(!running(fwd_pid));
+    }
+
+    #[test]
+    fn a_try_cancelled_before_its_connect_never_starts() {
+        let mut tries = Tries::default();
+        tries.cancel("a");
+        assert!(!tries.begin("a"));
+        assert!(!tries.may_go_on(Some("a")));
+        // The cancel was used up by its connect.
+        assert!(tries.early.is_empty());
+    }
+
+    #[test]
+    fn a_try_cancelled_during_its_info_step_stops_before_the_tunnel() {
+        let mut tries = Tries::default();
+        assert!(tries.begin("a"));
+        assert!(tries.may_go_on(Some("a")));
+        tries.cancel("a");
+        // Checked before the tunnel is spawned, while it waits for /health and before the map.
+        assert!(!tries.may_go_on(Some("a")));
+        tries.end("a");
+        assert!(tries.running.is_empty() && tries.early.is_empty());
+    }
+
+    #[test]
+    fn a_second_try_after_a_stop_is_its_own() {
+        let mut tries = Tries::default();
+        assert!(tries.begin("a"));
+        tries.cancel("a");
+        assert!(tries.begin("b"));
+        assert!(!tries.may_go_on(Some("a")));
+        assert!(tries.may_go_on(Some("b")));
+        // The first try ending (with its error) changes nothing for the second.
+        tries.end("a");
+        assert!(tries.may_go_on(Some("b")));
+    }
+
+    #[test]
+    fn a_connect_without_a_token_is_never_cancelled() {
+        let mut tries = Tries::default();
+        tries.cancel("a");
+        assert!(tries.may_go_on(None));
+    }
+
+    #[test]
+    fn early_cancels_are_capped() {
+        let mut tries = Tries::default();
+        for i in 0..100 {
+            tries.cancel(&format!("t{i}"));
+        }
+        assert_eq!(tries.early.len(), MAX_EARLY_CANCELS);
+        // The newest are kept; the oldest were forgotten.
+        assert!(!tries.begin("t99"));
+        assert!(tries.begin("t0"));
+        // A token too long to be ours is refused, and its cancel is not kept.
+        let long = "x".repeat(MAX_TRY_TOKEN + 1);
+        assert!(!tries.begin(&long));
+        tries.cancel(&long);
+        assert!(!tries.early.contains(&long));
+    }
+
+    #[test]
+    fn a_cancel_with_a_token_leaves_every_tunnel_alone() {
+        let tunnels = Tunnels::default();
+        // A server's tunnel (its link's, or a try's that is over), and one still starting.
+        let pid = live_tunnel(&tunnels, "claude1", 4000);
+        let (child, starting_pid) = sleeper();
+        tunnels.start(1, "claude1", child).unwrap();
+        tunnels.inner.lock().unwrap().tries.begin("b");
+
+        // The try's tunnel was already up and its connect over: the cancel comes too late to stop it.
+        tunnels.cancel_try("a");
+        assert!(running(pid) && running(starting_pid));
+        assert!(tunnels.endpoint("claude1").is_some());
+        assert!(tunnels.wanted(Some("b")) && tunnels.wanted(None));
+        assert!(!tunnels.wanted(Some("a")));
+
+        tunnels.close_all();
     }
 
     #[test]

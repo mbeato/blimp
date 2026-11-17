@@ -10,13 +10,64 @@ mock.module("@tauri-apps/api/core", () => ({
 }));
 mock.module("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
-const { ServerLink, serverKey } = await import("./connection");
+const { ServerLink, serverKey, serverName, tryConnect } = await import("./connection");
 
 test("the server key is the Rust tunnel id: user@host:port without the blank parts", () => {
   expect(serverKey({ host: "h" })).toBe("h");
   expect(serverKey({ host: "h", user: "u" })).toBe("u@h");
   expect(serverKey({ host: "h", port: 2222 })).toBe("h:2222");
   expect(serverKey({ host: "h", user: "u", port: 2222 })).toBe("u@h:2222");
+});
+
+test("a server's name is the one it was given, else its host; never part of its key", () => {
+  const lab = { host: "100.64.0.7", user: "max", name: "  Lab  " };
+  expect(serverName(lab, [lab])).toBe("Lab");
+  expect(serverKey(lab)).toBe("max@100.64.0.7");
+  expect(serverName({ host: "box" }, [])).toBe("box");
+  expect(serverName({ host: "box", name: "   " }, [])).toBe("box");
+});
+
+test("two servers that would read the same each show their key instead", () => {
+  const a = { host: "box" };
+  const b = { host: "box", user: "max", port: 2222 };
+  const c = { host: "other", name: "box" };
+  const d = { host: "gpu" };
+  expect(serverName(a, [a, b, d])).toBe("box");
+  expect(serverName(b, [a, b, d])).toBe("max@box:2222");
+  expect(serverName(c, [a, c])).toBe("other");
+  expect(serverName(d, [a, b, d])).toBe("gpu");
+  // The server itself in the list doesn't clash with itself.
+  expect(serverName(d, [d])).toBe("gpu");
+});
+
+test("Add server's try keeps the tunnel it opened, for the link that follows", async () => {
+  connectReply = () => Promise.resolve({ id: "fresh", port: 1, token: "t", home: "/h" });
+  calls.length = 0;
+  const conn = await tryConnect({ host: "fresh" }).done;
+  expect(conn.home).toBe("/h");
+  expect(calls).toEqual([["connect", { host: "fresh", user: undefined, port: undefined, attempt: expect.any(String) }]]);
+});
+
+test("cancelling Add server's try stops that try only, by its own token, never the server's tunnel by id", async () => {
+  const opened: ((v: unknown) => void)[] = [];
+  connectReply = () => new Promise((r) => opened.push(r));
+  calls.length = 0;
+  const first = tryConnect({ host: "late", user: "u" });
+  first.cancel();
+  // Add server again for the same server: a try of its own.
+  const second = tryConnect({ host: "late", user: "u" });
+  const [a, b] = calls.filter(([c]) => c === "connect").map(([, args]) => args.attempt);
+  expect(a).toMatch(/^[0-9a-f]{32}$/);
+  expect(b).toMatch(/^[0-9a-f]{32}$/);
+  expect(a).not.toBe(b);
+  expect(calls).toContainEqual(["disconnect", { id: "u@late", attempt: a }]);
+  // The first try finishing late drops nothing: Rust already ended it (or it was over).
+  opened[0]({ id: "u@late", port: 1, token: "t", home: "/h" });
+  await first.done;
+  expect(calls.filter(([c]) => c === "disconnect")).toEqual([["disconnect", { id: "u@late", attempt: a }]]);
+  opened[1]({ id: "u@late", port: 2, token: "t", home: "/h" });
+  expect((await second.done).base).toBe("http://127.0.0.1:2");
+  connectReply = () => new Promise(() => {});
 });
 
 test("stop() during a connect still disconnects that tunnel", () => {

@@ -1,14 +1,19 @@
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { AddServerDialog } from "./components/AddServerDialog";
+import { ManageServersDialog } from "./components/ManageServersDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
+import { ServerDot, ServerSwitcher } from "./components/ServerSwitcher";
 import { DragGhost, noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { TransferList } from "./components/TransferList";
 import { UpdateBars } from "./components/UpdateBars";
 import { Welcome } from "./components/Welcome";
 import { Workbench, type FileDrop, type Opener, type PageOpener } from "./components/Workbench";
-import { errorText, inTauri, loadServers, saveServers, serverKey, ServerLink, type Server } from "./lib/connection";
+import { commandForKey, inChord, REPO, runner, type Action } from "./lib/commands";
+import { menuSpec, onMenu, setMenu } from "./lib/menu";
+import { errorText, inTauri, loadServers, onServersChanged, saveServers, serverKey, ServerLink, serverName, type Server } from "./lib/connection";
 import { baseName, parentDir } from "./lib/files";
 import { dropPoint, type Item } from "./lib/transfers";
 import type { Panes } from "./lib/panes";
@@ -37,23 +42,29 @@ import {
   writeLayout,
   type Place,
 } from "./lib/place";
-import { forgetProject, lastLayout, lastServer, rememberLayout, rememberProject } from "./lib/recent";
+import { openWebLink } from "./lib/links";
+import { forgetProject, lastLayout, lastServer, recentProjects, rememberLayout, rememberProject } from "./lib/recent";
 import { tildify } from "./lib/sessions";
-import { closeTab, dropHomeTabs, homeTab, keepServers, moveTab, newLayout, openTab, releaseSession, setPageOrder, setPanes, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
+import { closeTab, dropHomeTabs, homeTab, keepServers, moveTab, newLayout, openTab, releaseSession, setPageOrder, setPanes, stepTab, tabKey, type Layout, type Show, type Tab } from "./lib/tabs";
 import { startReorder } from "./lib/reorder";
-import { getSettings, startSettings, useSettings } from "./lib/settings";
+import { changeSettings, getSettings, startSettings, textSize, useSettings } from "./lib/settings";
+import { blimpdBehind, canUpdate, updateLink } from "./lib/updates";
 import { notify, setBadge, toMarkSeen, WaitWatcher } from "./lib/waiting";
 import { jobsOpen, JobWatcher, viewingList } from "./lib/jobs";
 import blimpSilver from "./assets/blimp-silver.svg";
 import blimpInk from "./assets/blimp-ink.svg";
 
-type DialogKind = "palette" | "open" | "add" | "settings" | null;
+type DialogKind = "palette" | "open" | "add" | "manage" | "settings" | "shortcuts" | null;
 
 // One window: project tabs along the top (Home, the server's home folder, first), each laid out
 // by its own Workbench. Every tab stays mounted while open, so its files and terminals survive
 // switching. Several windows each run their own App; Rust shares the SSH tunnels between them.
 export function App() {
   const [servers, setServers] = useState<Server[] | null>(null);
+  // The list as it is now, for a change that lands late (an Add server try that took a while, a
+  // name field's blur): its closure's servers may be from before another window changed them.
+  const serversNow = useRef(servers);
+  serversNow.current = servers;
   // null until the servers have loaded, when a new start reopens the last tabs.
   const [layout, setLayout] = useState<Layout | null>(() => readLayout());
   const [dialog, setDialog] = useState<DialogKind>(null);
@@ -66,6 +77,10 @@ export function App() {
   const actions = useRef(new Map<string, { current: PaneActions }>()).current;
   const fileDrops = useRef(new Map<string, { current: FileDrop }>()).current;
   const pageOpeners = useRef(new Map<string, { current: PageOpener }>()).current;
+  // Per tab: what its own commands do (Quick Open, Save, Close Tab), run while it's in front.
+  const wbCommands = useRef(new Map<string, { current: Record<string, Action> }>()).current;
+  // UpdateBars' Check for Updates….
+  const checkUpdates = useRef(() => {});
   const refFor = <T,>(m: Map<string, { current: T }>, k: string, init: T) => {
     if (!m.has(k)) m.set(k, { current: init });
     return m.get(k)!;
@@ -96,24 +111,15 @@ export function App() {
       void api.seen(id).catch(() => {});
   };
   const onLinkChange = useRef((l: ServerLink) => {
-    if (l.status === "connected" && l.sessions) watcher.current!.update(l.key, l.home, l.sessions);
-    if (l.status === "connected" && l.sessions) jobWatcher.current!.update(l.key, l.home, l.sessions);
+    // With several servers saved, a notification says which one.
+    const named = links.size > 1 ? l.name : undefined;
+    if (l.status === "connected" && l.sessions) watcher.current!.update(l.key, l.home, l.sessions, named);
+    if (l.status === "connected" && l.sessions) jobWatcher.current!.update(l.key, l.home, l.sessions, named);
     markSeen(l);
     rerender();
   }).current;
 
-  useEffect(() => {
-    void startSettings();
-    // blimp > Settings… in the menu bar.
-    let off = () => {};
-    if (inTauri())
-      void import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) =>
-        getCurrentWebviewWindow()
-          .listen("open-settings", () => setDialog("settings"))
-          .then((f) => (off = f)),
-      );
-    return () => off();
-  }, []);
+  useEffect(() => void startSettings(), []);
 
   useEffect(() => {
     loadServers().then(
@@ -133,20 +139,48 @@ export function App() {
     return () => links.forEach((l) => l.stop());
   }, []);
 
+  // A server added, renamed or removed in another window.
+  useEffect(() => {
+    let off = () => {};
+    void onServersChanged(() =>
+      loadServers().then(
+        (list) => {
+          if (JSON.stringify(serversNow.current) === JSON.stringify(list)) return;
+          // serversNow first: a change made here before the next render builds on this list.
+          serversNow.current = list;
+          setServers(list);
+        },
+        () => {},
+      ),
+    ).then((f) => (off = f));
+    return () => off();
+  }, []);
+
   // Start a link for every saved server, stop links for removed ones.
   useEffect(() => {
     if (!servers) return;
     const want = servers.map(serverKey);
     for (const [k, l] of links) if (!want.includes(k)) (l.stop(), links.delete(k));
     for (const s of servers) {
-      if (links.has(serverKey(s))) continue;
-      const l = new ServerLink(s, onLinkChange);
+      const had = links.get(serverKey(s));
+      // A rename keeps the link (and its tunnel): only the name changes.
+      const l = had ?? new ServerLink(s, onLinkChange);
+      l.server = s;
+      l.name = serverName(s, servers);
+      if (had) continue;
       links.set(l.key, l);
       l.start();
     }
     setLayout((l) => (l ? keepServers(l, want) : want.length ? newLayout(want[0]) : null));
     rerender();
   }, [servers]);
+
+  // No server saved: the window shows only the Add server form, Settings and Shortcuts. Another
+  // dialog left set (Manage servers, when its last server is removed) would pop up later, once
+  // a server is added.
+  useEffect(() => {
+    if (servers?.length === 0 && dialog !== "settings" && dialog !== "shortcuts") setDialog(null);
+  }, [servers, dialog]);
 
   useEffect(() => {
     if (!notice) return;
@@ -367,53 +401,69 @@ export function App() {
 
   const toggle = (k: keyof Show) => setLayout((l) => l && { ...l, show: { ...l.show, [k]: !l.show[k] } });
 
-  const addServer = (s: Server) => {
-    setDialog(null);
-    if (servers?.some((x) => serverKey(x) === serverKey(s))) return;
-    const next = [...(servers ?? []), s];
+  // Kept and saved; serversNow too, so a second change before the next render builds on this one.
+  const keep = (next: Server[]) => {
+    serversNow.current = next;
     setServers(next);
     void saveServers(next);
+  };
+
+  const addServer = (s: Server) => {
+    setDialog(null);
+    const cur = serversNow.current;
+    if (cur?.some((x) => serverKey(x) === serverKey(s))) return;
+    keep([...(cur ?? []), s]);
     setLayout((l) => (l ? openTab(l, serverKey(s), null) : newLayout(serverKey(s))));
   };
 
-  const removeServer = (l: ServerLink) => {
-    const next = (servers ?? []).filter((s) => serverKey(s) !== l.key);
-    setServers(next);
-    void saveServers(next);
-  };
+  // The name only: the key, the tunnel, the tabs and the recent folders stay as they are.
+  const renameServer = (l: ServerLink, name: string) =>
+    keep(
+      (serversNow.current ?? []).map((s) => {
+        if (serverKey(s) !== l.key) return s;
+        const renamed: Server = { ...s, name };
+        if (!name) delete renamed.name;
+        return renamed;
+      }),
+    );
 
-  // App shortcuts. Registered once; the ref always points at this render's handler. The
-  // workbench in front has its own (⌘P, ⌘S, ⌘W).
+  const removeServer = (l: ServerLink) => keep((serversNow.current ?? []).filter((s) => serverKey(s) !== l.key));
+
+  // Every command (lib/commands.ts) runs here, from its key or (on the Mac) its menu item. The
+  // actions are this render's; the runner and its memory of the last run stay.
+  const actionFor = useRef<(id: string) => Action | undefined>(() => undefined);
+  const run = useRef(runner((id) => actionFor.current(id))).current;
+
+  // The keys. Registered once; the ref always points at this render's handler.
   const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  // When ⌘K was the last key pressed in the editor: the next one, while Monaco still waits for it
+  // (inChord), finishes Monaco's chord.
+  const chordAt = useRef<number | null>(null);
   onKey.current = (e) => {
-    if (!e.metaKey || e.ctrlKey) return;
-    // e.code: with ⌥ held, a Mac's e.key for B is "∫".
-    if (e.altKey) {
-      if (e.code !== "KeyB" || e.shiftKey) return;
-      toggle("sessions");
-      return e.preventDefault();
-    }
-    const k = e.key.toLowerCase();
-    // Inside Monaco, ⌘K starts its chords (⌘K ⌘C and so on), as in VS Code.
-    if (k === "k" && (e.target as Element | null)?.closest?.(".monaco-editor")) return;
-    if (k === "k" && !e.shiftKey) setDialog((d) => (d === "palette" ? null : "palette"));
-    else if (k === "n" && e.shiftKey) newWindow();
-    else if (k === "n") frontActions?.current.newClaude();
-    else if (k === "b" && !e.shiftKey) toggle("files");
-    else if (k === "j" && !e.shiftKey) toggle("term");
-    else if (k === "," && !e.shiftKey) setDialog((d) => (d === "settings" ? null : "settings"));
-    else if (k === "t" && !e.shiftKey) newBrowserTab();
-    else if (k === "o" && !e.shiftKey) {
-      if (connected.length) setDialog("open");
-      else setNotice("No server is connected yet.");
-    } else return;
-    e.preventDefault();
+    // ⌘ or ⇧ going down between the chord's two keys doesn't end it.
+    if (["Meta", "Shift", "Alt", "Control"].includes(e.key)) return;
+    const chord = inChord(Date.now(), chordAt.current);
+    chordAt.current = null;
+    const inEditor = !!(e.target as Element | null)?.closest?.(".monaco-editor");
+    const id = commandForKey(e);
+    // Inside Monaco, ⌘K starts its chords (⌘K ⌘0 folds all, as in VS Code), and the chord's
+    // second key is Monaco's too, even one that is also an app command.
+    if (inEditor && chord) return;
+    if (!id) return;
+    if (inEditor && id === "palette") return void (chordAt.current = Date.now());
+    if (run(id, "key")) e.preventDefault();
   };
   useEffect(() => {
     // Capture phase, so the shortcuts work while the terminal or an input has focus.
     const h = (e: KeyboardEvent) => onKey.current(e);
+    // Monaco leaves the chord when the window loses focus, so the app does too.
+    const blur = () => (chordAt.current = null);
     window.addEventListener("keydown", h, true);
-    return () => window.removeEventListener("keydown", h, true);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", h, true);
+      window.removeEventListener("blur", blur);
+    };
   }, []);
 
   const wbKey = (l: ServerLink, r: string) => `${l.id}\n${r}`;
@@ -530,12 +580,135 @@ export function App() {
     };
   }, []);
   const frontActions = link && root ? refFor(actions, wbKey(link, root), noActions) : null;
+  const frontPages = !!root && !!link?.browserTabs.some((b) => b.folder === root);
+
+  // What each command does in this window now, whether it's on, and (for the panels) whether it's
+  // checked. A command missing here isn't offered in this window.
+  actionFor.current = (id) => {
+    const each = /^(server|recent):(\d+)$/.exec(id);
+    if (each) {
+      const n = Number(each[2]);
+      const s = each[1] === "server" ? servers?.[n] : undefined;
+      if (s) return { run: () => open(serverKey(s), null) };
+      // The front tab's server's recent folders, as Welcome lists them (it keeps ten at most). A
+      // click opens the folder the menu showed, not the n-th in the list now. On while the server
+      // reconnects (the menu isn't redrawn for that), and says so then.
+      if (each[1] === "recent" && link && n < 10)
+        return {
+          run: () => {
+            const m = menuRecent.current;
+            const l = links.get(m.server);
+            const dir = m.dirs[n];
+            if (!l || !dir) return;
+            if (l.status !== "connected") return setNotice(`${l.name} isn't connected yet.`);
+            void openProject(l, dir);
+          },
+        };
+      return undefined;
+    }
+    const show = layout?.show;
+    const tabs = layout?.tabs.length ?? 0;
+    const all: Record<string, Action | undefined> = {
+      settings: { run: (from) => setDialog((d) => (from === "key" && d === "settings" ? null : "settings")) },
+      "check-updates": canUpdate() ? { run: () => checkUpdates.current() } : undefined,
+      // No server saved: nothing to jump to, and the Add server form has no room for it.
+      palette: { run: () => setDialog((d) => (d === "palette" ? null : "palette")), enabled: !!servers?.length },
+      "new-claude": { run: () => frontActions?.current.newClaude(), enabled: !!frontActions },
+      "new-shell": { run: () => frontActions?.current.startKind("shell"), enabled: !!frontActions },
+      "new-browser-tab": { run: () => newBrowserTab(), enabled: !!frontKey },
+      "new-window": { run: () => newWindow() },
+      "open-folder": { run: () => setDialog("open"), enabled: connected.length > 0, off: () => setNotice("No server is connected yet.") },
+      "close-project": { run: () => setLayout((l) => l && closeTab(l, l.active)), enabled: !!layout && layout.active > 0 },
+      "toggle-files": { run: () => toggle("files"), checked: show?.files },
+      "toggle-terminal": { run: () => toggle("term"), checked: show?.term },
+      "toggle-sessions": { run: () => toggle("sessions"), checked: show?.sessions },
+      "toggle-browsers": { run: () => toggle("browsers"), enabled: frontPages, checked: show?.browsers },
+      "text-bigger": { run: () => void changeSettings(textSize(getSettings(), 1)) },
+      "text-smaller": { run: () => void changeSettings(textSize(getSettings(), -1)) },
+      "text-reset": { run: () => void changeSettings(textSize(getSettings(), 0)) },
+      // No server saved yet: the window is the Add server form already.
+      "add-server": { run: () => (servers?.length ? setDialog("add") : document.querySelector<HTMLInputElement>(".welcome .addserver input")?.focus()) },
+      "manage-servers": { run: () => setDialog("manage"), enabled: !!servers?.length },
+      reconnect: link ? { run: () => link.retryNow() } : undefined,
+      "update-server": canUpdate() && link ? { run: () => void updateLink(link, setNotice), enabled: blimpdBehind(link) } : undefined,
+      "prev-tab": { run: () => setLayout((l) => l && stepTab(l, -1)), enabled: tabs > 1 },
+      "next-tab": { run: () => setLayout((l) => l && stepTab(l, 1)), enabled: tabs > 1 },
+      home: { run: () => setLayout((l) => l && { ...l, active: 0 }) },
+      shortcuts: { run: () => setDialog("shortcuts") },
+      help: { run: () => openWebLink(`${REPO}#readme`) },
+      report: { run: () => openWebLink(`${REPO}/issues/new`) },
+      // close-window: Rust closes the window (the menu); not in a browser.
+    };
+    return all[id] ?? (frontKey ? wbCommands.get(frontKey)?.current[id] : undefined);
+  };
+
+  // The Mac menu bar (lib/menu.ts). This window describes it while it has focus: about 100 ms
+  // after a change, so a burst of changes is one call, and only when it differs from the last
+  // one sent. Again on focus (another window had the menu) and after a click (a check item
+  // ticks or unticks itself when clicked, whatever the page says).
+  const menuSent = useRef("");
+  const menuTimer = useRef(0);
+  // The recent folders the menu was last sent with, and their server: what recent:<n> opens.
+  const menuRecent = useRef<{ server: string; dirs: string[] }>({ server: "", dirs: [] });
+  const describeMenu = useRef(async () => {});
+  describeMenu.current = async () => {
+    const list = servers ?? [];
+    const dirs = link ? (await recentProjects(link.key)).map((r) => r.dir) : [];
+    const spec = menuSpec({
+      action: (id) => actionFor.current(id),
+      servers: list.map((s) => ({ name: serverName(s, list), status: links.get(serverKey(s))?.status ?? "connecting" })),
+      front: link ? list.findIndex((s) => serverKey(s) === link.key) : -1,
+      recent: dirs.map((d) => tildify(d, link!.home)),
+    });
+    const json = JSON.stringify(spec);
+    if (json === menuSent.current) return;
+    menuSent.current = json;
+    menuRecent.current = { server: link?.key ?? "", dirs };
+    setMenu(spec);
+  };
+  const menuSoon = useRef((fresh: boolean) => {
+    if (!inTauri() || !document.hasFocus()) return;
+    if (fresh) menuSent.current = "";
+    if (menuTimer.current) return;
+    menuTimer.current = window.setTimeout(() => {
+      menuTimer.current = 0;
+      void describeMenu.current();
+    }, 100);
+  }).current;
+  useEffect(() => menuSoon(false));
+  useEffect(() => {
+    const focus = () => menuSoon(true);
+    window.addEventListener("focus", focus);
+    let off = () => {};
+    void onMenu((id) => {
+      run(id, "menu");
+      menuSoon(true);
+    }).then((f) => (off = f));
+    return () => {
+      window.removeEventListener("focus", focus);
+      clearTimeout(menuTimer.current);
+      menuTimer.current = 0;
+      off();
+    };
+  }, []);
 
   if (!servers) return <div className="app" />;
   if (!servers.length)
     return (
       <div className="app">
-        <AddServerDialog onAdd={addServer} />
+        <AddServerDialog known={[]} onAdd={addServer} />
+        {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
+        {/* With no server, its Models and Assistant sections say to connect one first. */}
+        {dialog === "settings" && (
+          <SettingsDialog
+            links={[]}
+            onCodexSignIn={() => {}}
+            onClose={() => {
+              setDialog(null);
+              setSettingsAt(undefined);
+            }}
+          />
+        )}
       </div>
     );
   if (!layout || !link) return <div className="app" />;
@@ -553,11 +726,11 @@ export function App() {
       onNewWindow={() => newWindow()}
       onAddServer={() => setDialog("add")}
       onRemoveServer={removeServer}
-      onForget={(d) => void forgetProject(homeLink.key, d)}
+      onForget={(d) => void forgetProject(homeLink.key, d).then(() => menuSoon(false))}
+      onShortcuts={() => setDialog("shortcuts")}
     />
   );
   const show = layout.show;
-  const frontPages = !!root && !!link?.browserTabs.some((b) => b.folder === root);
   const globe = !frontPages ? "New browser tab (⌘T)" : show.browsers ? "Hide browser tabs" : "Show browser tabs";
   const select = (i: number) => setLayout((l) => l && { ...l, active: i });
   const close = (i: number) => setLayout((l) => l && closeTab(l, i));
@@ -577,41 +750,49 @@ export function App() {
             const name = t.dir ? baseName(t.dir) || t.dir : "Home";
             const waiting = !!r && l?.status === "connected" && !!l.sessions?.some((s) => s.dir === r && s.state === "waiting");
             const where = r && l ? tildify(r, l.home) : "";
+            // The tooltip has the address too, when the name isn't it.
+            const server = !l ? t.server : l.name === l.key ? l.key : `${l.name} (${l.key})`;
             return (
-              <div
-                key={tabKey(t)}
-                role="tab"
-                aria-selected={i === layout.active}
-                aria-label={name}
-                className={"ptab" + (i === layout.active ? " active" : "") + (i === 0 ? " home" : "")}
-                title={linkList.length > 1 ? `${t.server} · ${where}` : where}
-                onMouseDown={(e) => e.button === 0 && select(i)}
-                onPointerDown={(e) => {
-                  if (i === 0) return;
-                  const strip = e.currentTarget.parentElement!;
-                  startReorder(e, () => [...strip.querySelectorAll<HTMLElement>(".ptab:not(.home)")], (from, to) => setLayout((l) => l && moveTab(l, from + 1, to + 1)));
-                }}
-                onAuxClick={(e) => e.button === 1 && close(i)}
-              >
-                {i === 0 && (
-                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-                    <path d="M2.5 7.5L8 2.5l5.5 5M4 6.5v7h3v-4h2v4h3v-7" fill="none" stroke="currentColor" />
-                  </svg>
-                )}
-                {linkList.length > 1 && <span className="ptab-server">{t.server}</span>}
-                {i > 0 && <span className="ptab-title">{name}</span>}
-                {t.panes.length > 1 && (
-                  <span className="ptab-count" title={`${t.panes.length} sessions side by side`}>
-                    {t.panes.length}
-                  </span>
-                )}
-                {waiting && <span className="dot" aria-label="A session is waiting for you" />}
-                {i > 0 && (
-                  <button className="tab-close" aria-label={`Close ${name}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => close(i)}>
-                    ×
-                  </button>
-                )}
-              </div>
+              <Fragment key={tabKey(t)}>
+                <div
+                  role="tab"
+                  aria-selected={i === layout.active}
+                  aria-label={name}
+                  className={"ptab" + (i === layout.active ? " active" : "") + (i === 0 ? " home" : "")}
+                  title={i === 0 ? server : linkList.length > 1 ? `${server} · ${where}` : where}
+                  onMouseDown={(e) => e.button === 0 && select(i)}
+                  onPointerDown={(e) => {
+                    if (i === 0) return;
+                    const strip = e.currentTarget.parentElement!;
+                    startReorder(e, () => [...strip.querySelectorAll<HTMLElement>(".ptab:not(.home)")], (from, to) => setLayout((l) => l && moveTab(l, from + 1, to + 1)));
+                  }}
+                  onAuxClick={(e) => e.button === 1 && close(i)}
+                >
+                  {i === 0 && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+                      <path d="M2.5 7.5L8 2.5l5.5 5M4 6.5v7h3v-4h2v4h3v-7" fill="none" stroke="currentColor" />
+                    </svg>
+                  )}
+                  {/* Home names its server, also when there is one: the server list hangs off it. */}
+                  {i === 0 && <ServerDot status={homeLink.status} />}
+                  {i === 0 && <span className="ptab-home-server">{homeLink.name}</span>}
+                  {i > 0 && linkList.length > 1 && <span className="ptab-server">{l?.name ?? t.server}</span>}
+                  {i > 0 && <span className="ptab-title">{name}</span>}
+                  {t.panes.length > 1 && (
+                    <span className="ptab-count" title={`${t.panes.length} sessions side by side`}>
+                      {t.panes.length}
+                    </span>
+                  )}
+                  {waiting && <span className="dot" aria-label="A session is waiting for you" />}
+                  {i > 0 && (
+                    <button className="tab-close" aria-label={`Close ${name}`} onMouseDown={(e) => e.stopPropagation()} onClick={() => close(i)}>
+                      ×
+                    </button>
+                  )}
+                </div>
+                {/* Home's server list: a button of its own beside the tab, so it never selects or drags it. */}
+                {i === 0 && <ServerSwitcher links={linkList} current={homeLink} onPick={(l) => open(l.key, null)} onAdd={() => setDialog("add")} onManage={() => setDialog("manage")} />}
+              </Fragment>
             );
           })}
           <button className="icon-button small ptabs-add" title="Open Folder… (⌘O)" aria-label="Open Folder" disabled={!connected.length} onClick={() => setDialog("open")}>
@@ -649,7 +830,7 @@ export function App() {
           </button>
         </div>
       </header>
-      <UpdateBars links={linkList} onNotice={setNotice} />
+      <UpdateBars links={linkList} onNotice={setNotice} check={checkUpdates} />
 
       {layout.tabs.map((t, i) => {
         const l = links.get(t.server);
@@ -675,6 +856,8 @@ export function App() {
             opener={opener}
             onDrop={refFor(fileDrops, key, () => {})}
             pages={refFor(pageOpeners, key, () => {})}
+            commands={refFor(wbCommands, key, {})}
+            onCommands={() => menuSoon(false)}
             pane={refFor(actions, key, noActions)}
             onShowFiles={() => setLayout((l) => l && { ...l, show: { ...l.show, files: true } })}
             onNotice={setNotice}
@@ -715,7 +898,11 @@ export function App() {
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === "add" && <AddServerDialog onAdd={addServer} onClose={() => setDialog(null)} />}
+      {dialog === "add" && <AddServerDialog known={servers.map(serverKey)} onAdd={addServer} onClose={() => setDialog(null)} />}
+      {dialog === "manage" && (
+        <ManageServersDialog links={linkList} onRename={renameServer} onRemove={removeServer} onAdd={() => setDialog("add")} onNotice={setNotice} onClose={() => setDialog(null)} />
+      )}
+      {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
       {dialog === "settings" && (
         <SettingsDialog
           at={settingsAt}
