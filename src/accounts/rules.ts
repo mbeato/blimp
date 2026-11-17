@@ -10,6 +10,12 @@ export const QUIET_MS = 30_000; // a limit stop this soon after a switch left be
 export const SETTLE_MS = 30_000; // a change to the live file is filed, and a switch waits, until it is this old: a /login writes its account record, then its login file, then, after network calls that can take 20 s, its notice
 export const LOGIN_RECORD_MS = 60_000; // a /login whose account record isn't rewritten within this long of the change is given up: blimp can't tell whose login is in place
 export const LATE_NOTICE_MS = 5 * 60_000; // a /login's notice can't come later than this after its login file
+// The connector gap (docs/superpowers/specs/2026-11-17-connector-gap-design.md, connectors.ts).
+export const CONNECTORS_EVERY_MS = 24 * 3600_000; // the account that stays in use gets a new reading this often
+export const CONNECTORS_AFTER_SWITCH_MS = 30_000; // a reading waits this long after a switch
+export const CONNECTORS_RETRY_MS = 10 * 60_000; // after a failed reading, the next try waits this long
+export const CONNECTORS_ZERO_AGAIN_MS = 60_000; // a reading with no connector is believed when another this much later says the same
+export const CONNECTORS_TIMEOUT_MS = 60_000; // claude mcp list is killed after this long
 
 export const isOut = (s: State, id: string, now: number) => (s.out[id]?.until ?? 0) > now;
 

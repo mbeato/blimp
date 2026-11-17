@@ -36,7 +36,7 @@ export const accountsOn = (dir = blimpDir()) => (readConfig(join(dir, "config.js
 // An account id is oauthAccount.accountUuid. One that isn't letters, digits and dashes is refused, so
 // no path can leave the folder.
 const ID = /^[A-Za-z0-9-]{1,64}$/;
-function checkId(id: string) {
+export function checkId(id: string) {
   if (!ID.test(id)) throw new Error("an account id is 1 to 64 letters, digits or dashes");
 }
 
@@ -47,7 +47,7 @@ function privateDir(dir: string) {
 
 // Through a temp file beside it (600, never there before) and a rename; the temp file is taken away
 // if either fails, so a failed write leaves no copy of a login behind.
-function write(file: string, text: string) {
+export function write(file: string, text: string) {
   const tmp = join(dirname(file), `.tmp-${randomBytes(6).toString("hex")}`);
   try {
     writeFileSync(tmp, text, { mode: 0o600, flag: "wx" });
