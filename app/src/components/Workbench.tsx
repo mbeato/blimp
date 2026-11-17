@@ -176,6 +176,9 @@ export function Workbench(props: {
   pages: { current: PageOpener };
   // What this tab's own commands do (lib/commands.ts), for App to run while it's in front.
   commands: { current: Record<string, Action> };
+  // Whether those commands are enabled changed (a file opened or closed, Quick Open shown or
+  // hidden): App describes the Mac menu again. Only this tab's state changed, so App didn't render.
+  onCommands: () => void;
   // The terminal pane's, for a browser tab's Send to session and the files' Send Path to Session.
   pane: { current: PaneActions };
   // Reveal in Files with the files hidden: show them.
@@ -1083,6 +1086,7 @@ export function Workbench(props: {
     save: { run: () => activeDoc && void save(activeDoc, { explicit: true }), enabled: !!activeDoc },
     "close-tab": { run: () => (quick ? setQuick(false) : active && closeTab(active)), enabled: quick || !!active },
   };
+  useEffect(() => props.onCommands(), [active, quick, !!activeDoc]);
 
   // ---- view ----
 

@@ -74,31 +74,27 @@ export async function onServersChanged(fn: () => void): Promise<() => void> {
 export const sshHosts = async (): Promise<string[]> => (inTauri() ? invoke<string[]>("ssh_hosts").catch(() => []) : []);
 
 // Add server tries the server before saving it, the way its link will connect: the tunnel that
-// opens is the one the link then gets back from connect. Cancelled, the tunnel goes, also one
-// that only opens afterwards (the Rust side may not know of the connect yet when cancel runs).
+// opens is the one the link then gets back from connect. Each try has a random token of its own,
+// and cancel stops the connect with that token only: Rust ends it with an error before it opens
+// a tunnel, also when the cancel gets there before the connect does. A tunnel that was already
+// up when the cancel came stays, as the server's (it ends at quit); a cancel never stops a
+// tunnel by server id, which could be the next try's or a saved server's.
 export function tryConnect(s: Server): { done: Promise<Conn>; cancel: () => void } {
-  let cancelled = false;
-  const drop = () => void (inTauri() && invoke("disconnect", { id: serverKey(s) }).catch(() => {}));
-  const done = connectServer(s).then((c) => {
-    if (cancelled) drop();
-    return c;
-  });
+  const attempt = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
   return {
-    done,
-    cancel: () => {
-      cancelled = true;
-      drop();
-    },
+    done: connectServer(s, attempt),
+    cancel: () => void (inTauri() && invoke("disconnect", { id: serverKey(s), attempt }).catch(() => {})),
   };
 }
 
-async function connectServer(s: Server): Promise<Conn> {
+async function connectServer(s: Server, attempt?: string): Promise<Conn> {
   let conn: Conn;
   if (inTauri()) {
     const r = await invoke<{ id: string; port: number; token: string; home: string }>("connect", {
       host: s.host,
       user: s.user,
       port: s.port,
+      ...(attempt && { attempt }),
     });
     conn = { id: r.id, base: `http://127.0.0.1:${r.port}`, token: r.token, home: "" };
   } else {

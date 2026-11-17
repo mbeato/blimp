@@ -135,6 +135,7 @@ The page describes the menu and Rust draws it, so none of this runs in the Linux
 - [ ] ⇧⌘[ and ⇧⌘] move to the previous and next project tab, wrapping round, and the Window menu shows them as ⇧⌘[ and ⇧⌘].
 - [ ] ⌘+ (the = key), ⌘- and ⌘0 make the terminal and editor text bigger, smaller and back to default, once per press. The menu shows Bigger Text as ⌘= (write down if it shows ⌘+).
 - [ ] With no file open, File > Save is greyed. Press ⌘S: nothing happens and nothing beeps more than once.
+- [ ] File > Save and Close Tab go grey and back as a file is opened and closed, with nothing else happening in the window. Also: with no file open, ⌘P shows Quick Open and File > Close Tab is on until it closes.
 - [ ] With no server connected (stop blimpd, or turn off Wi-Fi), File > Open Folder… is greyed. Press ⌘O: blimp says "No server is connected yet." (write down if the greyed item swallows the key and nothing shows).
 - [ ] View's check marks follow the panels: hide Files with the button at the top right, and View > Files loses its tick; show it with ⌘B, and the tick comes back. Browser Tabs is greyed in a folder with no browser tabs.
 - [ ] The Server menu follows the focused window: with two windows on two different servers, click each window and open Server; the tick is on that window's server. File > Open Recent lists that server's recent folders.
@@ -152,6 +153,8 @@ The page describes the menu and Rust draws it, so none of this runs in the Linux
 
 - [ ] Add server… (from the chevron on the Home tab, the first tab in the top bar) offers the `Host` names from your `~/.ssh/config` as you type.
 - [ ] Add a host that doesn't exist: the dialog says "Connecting to …", then shows the error and a hint, and stays open with your fields. Cancel while it connects: `ps aux | grep '[s]sh -T'` shows no tunnel for that host.
+- [ ] Add server, Stop, Add server again: the second try connects. (Stop is Cancel while it connects: the first-run form stays; from the chevron, open Add server… again.) Best with a server that takes a few seconds to answer. `ps aux | grep '[s]sh -T'` then shows one tunnel for that host.
+- [ ] On the first-run form (no server saved yet), press Install blimpd and then Install: a Cancel shows while it installs, and puts the form back as it was before the click.
 - [ ] Add a server where blimpd isn't installed (a fresh VM or account): the error says blimpd isn't set up, and Install blimpd installs it and connects.
 - [ ] Install blimpd (in Add server and in Manage servers…) first shows a Mac dialog, "Install blimpd on <user@host:port>?" (only the parts typed: with a user and port 2222, "max@box:2222"), with Install and Cancel. Install is the blue default button; Esc cancels. Cancel: nothing is installed, no error or notice shows, and the dialog is as it was before the click. Install: it installs.
 - [ ] Add a host whose key isn't in `~/.ssh/known_hosts`: the hint shows the exact `ssh` command to run once from Terminal.

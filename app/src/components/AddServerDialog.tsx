@@ -15,7 +15,8 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
   const [error, setError] = useState("");
   const [hosts, setHosts] = useState<string[]>([]);
   // What's going on: trying the server, installing blimpd there, or the try failed (error says why).
-  const [busy, setBusy] = useState<{ what: "connect" | "install"; host: string } | null>(null);
+  // was: an install's error from before it was pressed, for Cancel to put back.
+  const [busy, setBusy] = useState<{ what: "connect" | "install"; host: string; was?: string } | null>(null);
   const [failed, setFailed] = useState<Server | null>(null);
   // The try under way; a newer one, a cancel or closing makes the old one's answer moot.
   const trying = useRef<{ cancel: () => void } | null>(null);
@@ -85,11 +86,14 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
     if (s) props.onAdd(s);
   };
 
-  // Stops a try (its tunnel goes too); an install can't be stopped and finishes on its own.
+  // Stops a try (its tunnel goes too), or stops waiting for an install: the form goes back to how
+  // it was before Install blimpd was pressed. The install's ssh can't be stopped from here; it runs
+  // on in the background until it ends, or ssh gives up on a server gone quiet (about a minute).
   const stop = () => {
     turn.current++;
     trying.current?.cancel();
     trying.current = null;
+    if (busy?.what === "install") setError(busy.was ?? "");
     setBusy(null);
   };
 
@@ -97,7 +101,7 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
     const me = ++turn.current;
     const was = error;
     setError("");
-    setBusy({ what: "install", host: s.host });
+    setBusy({ what: "install", host: s.host, was });
     try {
       const done = await installServer(s);
       if (me !== turn.current) return;
@@ -177,7 +181,8 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
         </p>
       )}
       <div className="dialog-actions">
-        {(props.onClose || busy?.what === "connect") && (
+        {/* On the first-run form (no onClose) it shows only while something runs, and stops that. */}
+        {(props.onClose || busy) && (
           <button type="button" onClick={props.onClose ? close : stop}>
             Cancel
           </button>

@@ -857,6 +857,7 @@ export function App() {
             onDrop={refFor(fileDrops, key, () => {})}
             pages={refFor(pageOpeners, key, () => {})}
             commands={refFor(wbCommands, key, {})}
+            onCommands={() => menuSoon(false)}
             pane={refFor(actions, key, noActions)}
             onShowFiles={() => setLayout((l) => l && { ...l, show: { ...l.show, files: true } })}
             onNotice={setNotice}

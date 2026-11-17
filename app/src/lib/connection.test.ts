@@ -45,22 +45,28 @@ test("Add server's try keeps the tunnel it opened, for the link that follows", a
   calls.length = 0;
   const conn = await tryConnect({ host: "fresh" }).done;
   expect(conn.home).toBe("/h");
-  expect(calls).toEqual([["connect", { host: "fresh", user: undefined, port: undefined }]]);
+  expect(calls).toEqual([["connect", { host: "fresh", user: undefined, port: undefined, attempt: expect.any(String) }]]);
 });
 
-test("cancelling Add server's try stops its tunnel, also one that opens after the cancel", async () => {
-  let opened!: (v: unknown) => void;
-  connectReply = () => new Promise((r) => (opened = r));
+test("cancelling Add server's try stops that try only, by its own token, never the server's tunnel by id", async () => {
+  const opened: ((v: unknown) => void)[] = [];
+  connectReply = () => new Promise((r) => opened.push(r));
   calls.length = 0;
-  const t = tryConnect({ host: "late", user: "u" });
-  t.cancel();
-  expect(calls).toContainEqual(["disconnect", { id: "u@late" }]);
-  opened({ id: "u@late", port: 1, token: "t", home: "/h" });
-  await t.done;
-  expect(calls.filter(([c]) => c === "disconnect")).toEqual([
-    ["disconnect", { id: "u@late" }],
-    ["disconnect", { id: "u@late" }],
-  ]);
+  const first = tryConnect({ host: "late", user: "u" });
+  first.cancel();
+  // Add server again for the same server: a try of its own.
+  const second = tryConnect({ host: "late", user: "u" });
+  const [a, b] = calls.filter(([c]) => c === "connect").map(([, args]) => args.attempt);
+  expect(a).toMatch(/^[0-9a-f]{32}$/);
+  expect(b).toMatch(/^[0-9a-f]{32}$/);
+  expect(a).not.toBe(b);
+  expect(calls).toContainEqual(["disconnect", { id: "u@late", attempt: a }]);
+  // The first try finishing late drops nothing: Rust already ended it (or it was over).
+  opened[0]({ id: "u@late", port: 1, token: "t", home: "/h" });
+  await first.done;
+  expect(calls.filter(([c]) => c === "disconnect")).toEqual([["disconnect", { id: "u@late", attempt: a }]]);
+  opened[1]({ id: "u@late", port: 2, token: "t", home: "/h" });
+  expect((await second.done).base).toBe("http://127.0.0.1:2");
   connectReply = () => new Promise(() => {});
 });
 
