@@ -1,0 +1,214 @@
+// Saved logins (docs/superpowers/specs/2026-11-16-account-switching-design.md, "Saved accounts"):
+// <socket dir>/accounts/ (700), one folder per account named by its accountUuid, holding
+// credentials.json (the live login file as it was), credentials.prev.json (the one it replaced, kept
+// once), account.json (the oauthAccount object), and state.json beside them. Every file is 600 and written through a temp file and a rename, so never
+// half written. The live login file is put in place the same way: it stays a regular file, never a
+// symlink, because Claude Code opens it with O_NOFOLLOW. That file also keeps other sign-ins (MCP
+// servers' under mcpOAuth), so only its claudeAiOauth key is saved and only that key is swapped. A login is a secret: nothing here logs one,
+// and no error message carries one. .claude.json is only read, never written.
+
+import { randomBytes } from "node:crypto";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { readConfig } from "../names";
+import { blimpDir, claudeDir } from "../sessions";
+
+export type Saved = { id: string; email: string; expires?: number }; // expires: the refresh token's, ms
+export type Out = { at: number; until: number };
+export type Filed = { mtime: number; at: number }; // the live file's mtimeMs when last settled, and when blimp settled it
+// unknown: blimp can't tell whose login is in place, so it saves nothing and switches nothing (switcher.ts).
+// renewed: the last change filed as a renewal: the account it was saved under, and the live file's
+// mtime then (at). No login in it.
+export type State = { active?: string; order: string[]; out: Record<string, Out>; switchedAt?: number; filed?: Filed; unknown?: true; renewed?: { id: string; at: number } };
+export type Rec = { id: string; email: string; fetchedAt?: number; account: unknown }; // oauthAccount; fetchedAt is its profileFetchedAt
+
+export const accountsDir = (dir = blimpDir()) => join(dir, "accounts");
+export const liveFile = (claude = claudeDir()) => join(claude, ".credentials.json");
+export const recordFile = () => join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json");
+// Written by `blimpd hook` (hooks.ts) when Claude Code says a /login succeeded. dir is the socket dir.
+export const loginNoteFile = (dir = blimpDir()) => join(dir, "auth-success.json");
+
+// Switching is off unless <socket dir>/config.json has "accounts": true, so no copy of a login is made
+// until the user asks. dir is the socket dir.
+export const accountsOn = (dir = blimpDir()) => (readConfig(join(dir, "config.json")) as { accounts?: unknown }).accounts === true;
+
+// An account id is oauthAccount.accountUuid. One that isn't letters, digits and dashes is refused, so
+// no path can leave the folder.
+const ID = /^[A-Za-z0-9-]{1,64}$/;
+function checkId(id: string) {
+  if (!ID.test(id)) throw new Error("an account id is 1 to 64 letters, digits or dashes");
+}
+
+function privateDir(dir: string) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700); // mode only applies to a new folder
+}
+
+// Through a temp file beside it (600, never there before) and a rename; the temp file is taken away
+// if either fails, so a failed write leaves no copy of a login behind.
+function write(file: string, text: string) {
+  const tmp = join(dirname(file), `.tmp-${randomBytes(6).toString("hex")}`);
+  try {
+    writeFileSync(tmp, text, { mode: 0o600, flag: "wx" });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+// The account .claude.json names. Undefined: no file, bad JSON, or no accountUuid.
+export function readRecord(file = recordFile()): Rec | undefined {
+  try {
+    const account = JSON.parse(readFileSync(file, "utf8"))?.oauthAccount;
+    if (typeof account?.accountUuid !== "string") return;
+    const email = typeof account.emailAddress === "string" ? account.emailAddress : "";
+    const rec: Rec = { id: account.accountUuid, email, account };
+    if (typeof account.profileFetchedAt === "number") rec.fetchedAt = account.profileFetchedAt;
+    return rec;
+  } catch {}
+}
+
+// When Claude Code last said a /login succeeded (ms), in the Claude folder claude. A session with
+// another config folder (CLAUDE_CONFIG_DIR) runs the same hook, and its /login changes no login here.
+// Undefined: no note, one that can't be read, or one from another folder or that names none.
+export function readLoginNote(file = loginNoteFile(), claude = claudeDir()): number | undefined {
+  try {
+    const { at, dir } = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof at === "number" && typeof dir === "string" && realpathSync(dir) === realpathSync(claude)) return at;
+  } catch {}
+}
+
+export function liveMtime(live = liveFile()): number | undefined {
+  try {
+    return statSync(live).mtimeMs;
+  } catch {}
+}
+
+// Missing or broken: no accounts yet. A filed entry from before `at` existed reads as settled at 0.
+export function readState(dir = accountsDir()): State {
+  try {
+    const j = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
+    if (j && typeof j === "object") {
+      const s: State = { ...j, order: Array.isArray(j.order) ? j.order : [], out: j.out && typeof j.out === "object" ? j.out : {} };
+      const f = j.filed;
+      s.filed = typeof f?.mtime === "number" ? { mtime: f.mtime, at: typeof f.at === "number" ? f.at : 0 } : undefined;
+      return s;
+    }
+  } catch {}
+  return { order: [], out: {} };
+}
+
+export function writeState(s: State, dir = accountsDir()) {
+  privateDir(dir);
+  write(join(dir, "state.json"), JSON.stringify(s));
+}
+
+// The account's login in a credentials file's text. Throws, with nothing from the text, when there is none.
+function loginIn(text: string): object {
+  let login: unknown;
+  try {
+    login = JSON.parse(text)?.claudeAiOauth;
+  } catch {}
+  if (!login || typeof login !== "object") throw new Error("the credentials file has no account login (claudeAiOauth)");
+  return login;
+}
+
+// credentials is the live file's text; only its claudeAiOauth is kept. account, when given, replaces account.json.
+// A different login already saved there is kept once as credentials.prev.json, so a wrong filing can be undone.
+export function saveLogin(id: string, credentials: string, account: unknown | undefined, dir = accountsDir()) {
+  checkId(id);
+  const text = JSON.stringify({ claudeAiOauth: loginIn(credentials) });
+  privateDir(dir);
+  privateDir(join(dir, id));
+  let old: string | undefined;
+  try {
+    old = readFileSync(join(dir, id, "credentials.json"), "utf8");
+  } catch {}
+  if (old !== undefined && old !== text) write(join(dir, id, "credentials.prev.json"), old);
+  write(join(dir, id, "credentials.json"), text);
+  if (account !== undefined) write(join(dir, id, "account.json"), JSON.stringify(account));
+}
+
+// state.order first, then any other folder by name. A folder without a readable credentials.json is
+// skipped. The email is "" when account.json is missing.
+export function listSaved(dir = accountsDir(), state = readState(dir)): Saved[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((n) => ID.test(n));
+  } catch {
+    return [];
+  }
+  const ordered = [...new Set(state.order)].filter((id) => names.includes(id));
+  const ids = [...ordered, ...names.filter((n) => !ordered.includes(n)).sort()];
+  const list: Saved[] = [];
+  for (const id of ids) {
+    let creds: string;
+    try {
+      creds = readFileSync(join(dir, id, "credentials.json"), "utf8");
+    } catch {
+      continue;
+    }
+    const saved: Saved = { id, email: "" };
+    try {
+      const expires = JSON.parse(creds)?.claudeAiOauth?.refreshTokenExpiresAt;
+      if (typeof expires === "number") saved.expires = expires;
+    } catch {}
+    try {
+      const email = JSON.parse(readFileSync(join(dir, id, "account.json"), "utf8"))?.emailAddress;
+      if (typeof email === "string") saved.email = email;
+    } catch {}
+    list.push(saved);
+  }
+  return list;
+}
+
+// Whether a credentials file's text holds an account login (claudeAiOauth): one without can't be saved.
+export function hasLogin(credentials: string): boolean {
+  try {
+    loginIn(credentials);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Which saved account's login a credentials file's text holds (its claudeAiOauth, compared as JSON). Only
+// an id comes back, never any of the login. Undefined: none, or no login in the text.
+export function savedWith(credentials: string, dir = accountsDir()): string | undefined {
+  let login: string;
+  let names: string[];
+  try {
+    login = JSON.stringify(loginIn(credentials));
+    names = readdirSync(dir).filter((n) => ID.test(n));
+  } catch {
+    return;
+  }
+  for (const id of names)
+    try {
+      if (JSON.stringify(loginIn(readFileSync(join(dir, id, "credentials.json"), "utf8"))) === login) return id;
+    } catch {}
+}
+
+// Puts a saved login in place of the live one: only claudeAiOauth changes, every other key stays. A live
+// file that is missing or isn't a JSON object becomes the saved login alone. Returns the live file's new
+// mtimeMs, so the change can be told apart from one blimpd didn't make. Throws, with the live file
+// untouched, if it isn't saved.
+export function putLive(id: string, live = liveFile(), dir = accountsDir()): number {
+  checkId(id);
+  const claudeAiOauth = loginIn(readFileSync(join(dir, id, "credentials.json"), "utf8"));
+  let file: Record<string, unknown> = {};
+  try {
+    const j = JSON.parse(readFileSync(live, "utf8"));
+    if (j && typeof j === "object" && !Array.isArray(j)) file = j;
+  } catch {}
+  file.claudeAiOauth = claudeAiOauth;
+  write(live, JSON.stringify(file));
+  return statSync(live).mtimeMs;
+}
+
+export function forgetLogin(id: string, dir = accountsDir()) {
+  checkId(id);
+  rmSync(join(dir, id), { recursive: true, force: true });
+}

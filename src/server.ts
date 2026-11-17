@@ -31,6 +31,7 @@ import { listSecrets, removeSecret, saveSecret, tellSecret } from "./secrets";
 import { startNotes } from "./notes";
 import { addDevice, addWidget, isDeviceToken, isPushEnv, isWidgetToken, removeDevice, removeWidget } from "./push/store";
 import { startPush } from "./push/watch";
+import { startAccounts } from "./accounts/switcher";
 import { recap } from "./recaps";
 import { startReports } from "./reports";
 import { sessionPorts } from "./ports";
@@ -622,6 +623,7 @@ export function serve(): Server {
   // Phone notifications, and the widgets' pings: nothing runs until there's a push key and a phone that asked, or a
   // widget push token (push/watch.ts).
   startPush();
+  startAccounts(); // saved Claude logins: files a new one, and switches when the one in use runs out (accounts/switcher.ts)
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

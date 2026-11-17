@@ -84,7 +84,8 @@ function realPath(p: string): string {
 }
 
 // blimp's own key files: the daemon's token, the phone's token, the browser gate's key, the push key and
-// the Reddit key (all beside the socket), the model key, and the folder of secrets given to sessions (secrets.ts).
+// the Reddit key (all beside the socket), the model key, the folder of secrets given to sessions (secrets.ts),
+// and the folder of saved Claude logins (accounts/store.ts).
 // No fs route may serve, replace, or archive them: a client holding one token — the phone's —
 // must not read or plant another (the Mac's), so `blimpd pair --revoke` stays final.
 export function secretPaths(home = realHome(), dir = socketDir()): string[] {
@@ -98,6 +99,7 @@ export function secretPaths(home = realHome(), dir = socketDir()): string[] {
     join(dir, "reddit.json.tmp"),
     join(home, ".config", "zai", "key"),
     join(dir, "secrets"),
+    join(dir, "accounts"),
   ].map(realPath);
 }
 
@@ -134,12 +136,15 @@ export function guardEntry(path: string | null, home = realHome(), dir = socketD
   return real;
 }
 
-// guard() for the routes that list a folder (/fs/list, /fs/files): not the secrets folder nor one in
-// it, so a secret's name isn't listed through them either. A folder that holds it still lists.
+// The folders no listing shows the inside of: the secrets folder and the saved logins' folder.
+const unlisted = (dir: string) => [join(dir, "secrets"), join(dir, "accounts")].map(realPath);
+
+// guard() for the routes that list a folder (/fs/list, /fs/files): not the secrets folder, the saved
+// logins' folder, nor one in them, so a secret's name isn't listed through them either. A folder that
+// holds them still lists.
 export function guardList(path: string | null, home = realHome(), dir = socketDir()): string {
   const real = guard(path, home);
-  const secrets = realPath(join(dir, "secrets"));
-  if (real === secrets || real.startsWith(secrets + "/")) throw new HttpError(403, "that's one of blimp's own files");
+  if (unlisted(dir).some((u) => real === u || real.startsWith(u + "/"))) throw new HttpError(403, "that's one of blimp's own files");
   return real;
 }
 
@@ -277,11 +282,11 @@ export async function deleteEntry(path: string): Promise<void> {
 const MAX_FILES = 20_000;
 
 // For ⌘P. In a git repo, git's own list (respects .gitignore). Otherwise a walk that skips the usual noise.
-// Never anything in the secrets folder, as guardList: a root above it would list the secrets' names.
-// Async, so a big repo doesn't stall every open terminal while git or the walk runs.
+// Never anything in the secrets folder or the saved logins' folder, as guardList: a root above them
+// would list their names. Async, so a big repo doesn't stall every open terminal while git or the walk runs.
 export async function listFiles(root: string, dir = socketDir()): Promise<{ files: string[]; truncated: boolean }> {
-  const secrets = realPath(join(dir, "secrets"));
-  const files = ((await gitFiles(root)) ?? (await walk(root))).filter((f) => !inside(join(root, f), secrets));
+  const hide = unlisted(dir);
+  const files = ((await gitFiles(root)) ?? (await walk(root))).filter((f) => !hide.some((u) => inside(join(root, f), u)));
   return files.length > MAX_FILES ? { files: files.slice(0, MAX_FILES), truncated: true } : { files, truncated: false };
 }
 

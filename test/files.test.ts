@@ -142,11 +142,29 @@ describe("guardFile", () => {
     expect(guardFile(join(blimp, "secrets-notes.txt"), home, blimp)).toBe(join(blimp, "secrets-notes.txt"));
   });
 
+  test("the saved logins' folder, anything in it, and the folder that holds it are refused", () => {
+    mkdirSync(join(blimp, "accounts", "id-a"), { recursive: true });
+    writeFileSync(join(blimp, "accounts", "id-a", "credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "tok-A" } }));
+    expect(secretPaths(home, blimp)).toContain(join(blimp, "accounts"));
+    for (const p of [join(blimp, "accounts"), join(blimp, "accounts", "id-a", "credentials.json"), blimp]) {
+      expect(status(() => guardFile(p, home, blimp))).toBe(403);
+      expect(status(() => guardEntry(p, home, blimp))).toBe(403);
+    }
+    expect(guardFile(join(blimp, "accounts-notes.txt"), home, blimp)).toBe(join(blimp, "accounts-notes.txt"));
+  });
+
   test("the folder routes don't list the secrets folder or one in it; the folder that holds it still lists", () => {
     mkdirSync(join(blimp, "secrets", "sub"), { recursive: true });
     for (const p of [join(blimp, "secrets"), join(blimp, "secrets", "sub")]) expect(status(() => guardList(p, home, blimp))).toBe(403);
     expect(guardList(blimp, home, blimp)).toBe(blimp);
     expect(guardList(join(blimp, "secrets-notes"), home, blimp)).toBe(join(blimp, "secrets-notes"));
+  });
+
+  test("the folder routes don't list the saved logins' folder or one in it either", () => {
+    mkdirSync(join(blimp, "accounts", "id-a"), { recursive: true });
+    for (const p of [join(blimp, "accounts"), join(blimp, "accounts", "id-a")]) expect(status(() => guardList(p, home, blimp))).toBe(403);
+    expect(guardList(blimp, home, blimp)).toBe(blimp);
+    expect(guardList(join(blimp, "accounts-notes"), home, blimp)).toBe(join(blimp, "accounts-notes"));
   });
 });
 
@@ -356,6 +374,24 @@ describe("listFiles", () => {
       expect((await listFiles(r, dir)).files).toEqual(["state/secrets-notes.txt", "state/token"]);
       Bun.spawnSync(["git", "init", "-q"], { cwd: r });
       expect((await listFiles(r, dir)).files.sort()).toEqual(["state/secrets-notes.txt", "state/token"]);
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
+  });
+
+  test("never lists the saved logins' folder, walked or from git", async () => {
+    const r = realpathSync(mkdtempSync(join(tmpdir(), "blimp-lf-")));
+    try {
+      const dir = join(r, "state");
+      mkdirSync(join(dir, "accounts", "id-a"), { recursive: true });
+      writeFileSync(join(dir, "accounts", "id-a", "credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "tok-A" } }));
+      writeFileSync(join(dir, "accounts", "state.json"), "{}");
+      writeFileSync(join(dir, "token"), "t");
+      writeFileSync(join(dir, "accounts-notes.txt"), "");
+      expect((await listFiles(dir, dir)).files).toEqual(["accounts-notes.txt", "token"]);
+      expect((await listFiles(r, dir)).files).toEqual(["state/accounts-notes.txt", "state/token"]);
+      Bun.spawnSync(["git", "init", "-q"], { cwd: r });
+      expect((await listFiles(r, dir)).files.sort()).toEqual(["state/accounts-notes.txt", "state/token"]);
     } finally {
       rmSync(r, { recursive: true, force: true });
     }

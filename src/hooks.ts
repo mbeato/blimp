@@ -2,6 +2,10 @@
 // Claude's internal status files. `blimpd install-hooks` adds them; Claude runs `blimpd hook`.
 // Codex takes hooks in the same format in ~/.codex/hooks.json and sends the same JSON, so the same
 // install adds blimp's there too (`blimpd hook codex`): for Codex they are the only source of state.
+// A Claude turn that ends on an API error (StopFailure) also records the error, so blimpd can tell
+// when the account in use has run out. A /login that succeeded (the auth_success notice) leaves a note
+// with its time and Claude folder beside the status folder, so blimpd knows a changed login file is a
+// login, not a renewal.
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,7 +13,7 @@ import { dirname, join } from "node:path";
 import { promptFromHook } from "./prompt";
 import { blimpDir, claudeDir, isSafeName } from "./sessions";
 
-const EVENTS = ["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation"];
+const EVENTS = ["Notification", "Stop", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "PreToolUse", "Elicitation", "StopFailure"];
 
 // PreToolUse only for the question tool: it fires the moment Claude asks, and a hook on every tool call would
 // add a process start to each one.
@@ -25,6 +29,8 @@ const STATES: Record<string, string> = {
   UserPromptSubmit: "working",
   PostToolUse: "working",
   Stop: "done",
+  // A turn that ended on an API error. accounts/switcher.ts reads the error from the file.
+  StopFailure: "done",
 };
 
 // Claude also sends Notification for things that aren't a question, like idle_prompt (about 60 s after a
@@ -121,15 +127,29 @@ function writeSettings(settingsPath: string, settings: unknown) {
 
 // Runs inside Claude or Codex (which zmx started, so ZMX_SESSION names the session). Never fails their
 // turn: any problem is swallowed, and nothing is printed.
-export function writeHookStatus(input: string, session: string | undefined, statusDir = join(blimpDir(), "status"), codex = false) {
-  // The name becomes a file name: "../x" or "a/b" must not write anywhere else.
-  if (!session || !isSafeName(session)) return;
+export function writeHookStatus(
+  input: string,
+  session: string | undefined,
+  statusDir = join(blimpDir(), "status"),
+  codex = false,
+  loginNote = join(dirname(statusDir), "auth-success.json"), // read by accounts/store.ts readLoginNote
+) {
   let ev: any;
   try {
     ev = JSON.parse(input);
   } catch {
     return;
   }
+  // Whatever the session: a /login in a session blimp didn't start counts too. It holds no secret. It
+  // names the Claude folder, because a session with another (CLAUDE_CONFIG_DIR) runs this hook too.
+  if (!codex && ev?.hook_event_name === "Notification" && ev.notification_type === "auth_success")
+    try {
+      const tmp = `${loginNote}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ at: Date.now(), dir: claudeDir() }));
+      renameSync(tmp, loginNote);
+    } catch {}
+  // The name becomes a file name: "../x" or "a/b" must not write anywhere else.
+  if (!session || !isSafeName(session)) return;
   const state = (codex ? CODEX_STATES : STATES)[ev?.hook_event_name];
   if (!state) return;
   // Codex has no Notification event or question tool to tell apart.
@@ -173,8 +193,14 @@ export function writeHookStatus(input: string, session: string | undefined, stat
     const t = prev.since ?? prev.at;
     if (typeof t === "number") since = t;
   }
+  // Why the turn failed, for the account switcher. Only this event writes it, so the next one clears it.
+  const cut = (v: unknown) => (typeof v === "string" ? v.slice(0, 300) : undefined);
+  const failure =
+    ev.hook_event_name === "StopFailure"
+      ? { failure: typeof ev.error === "string" ? ev.error : "unknown", details: cut(ev.error_details), message: cut(ev.last_assistant_message) }
+      : undefined;
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }), ...(waitAgent && { agent: waitAgent }), ...(waitCall && { call: waitCall }) }));
+  writeFileSync(tmp, JSON.stringify({ state, at, since, sessionId: ev.session_id, event: ev.hook_event_name, ...(prompt && { prompt }), ...(waitAgent && { agent: waitAgent }), ...(waitCall && { call: waitCall }), ...failure }));
   renameSync(tmp, file); // the server never reads half a file
 }
 
