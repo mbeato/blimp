@@ -151,7 +151,10 @@ impl Target {
 impl Target {
     fn update_args(&self) -> Vec<String> {
         // ServerAlive: a server that stops answering mid-install ends the ssh within about a
-        // minute, so Update server and Install blimpd never wait forever.
+        // minute. That is the only wait it ends: an install that stays connected and is slow or
+        // stalled (a download on the server that hangs) still runs for as long as it takes.
+        // No shared master (as for the tunnel): over one already open from ~/.ssh/config, these
+        // options would not count, since the master's own connection carries the session.
         let mut args = strings(&[
             "-o",
             "BatchMode=yes",
@@ -161,6 +164,10 @@ impl Target {
             "ServerAliveInterval=15",
             "-o",
             "ServerAliveCountMax=3",
+            "-o",
+            "ControlMaster=no",
+            "-o",
+            "ControlPath=none",
         ]);
         args.extend(self.dest_args());
         args.push(UPDATE_CMD.into());
@@ -971,8 +978,21 @@ mod tests {
         let a = target("claude1", None, Some(2222)).update_args();
         assert_eq!(a[a.len() - 5..], ["-p", "2222", "--", "claude1", UPDATE_CMD]);
         assert_eq!(
-            a[..8],
-            ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"]
+            a[..12],
+            [
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
+                "-o",
+                "ControlMaster=no",
+                "-o",
+                "ControlPath=none"
+            ]
         );
     }
 
@@ -990,6 +1010,10 @@ mod tests {
                 "ServerAliveInterval=15",
                 "-o",
                 "ServerAliveCountMax=3",
+                "-o",
+                "ControlMaster=no",
+                "-o",
+                "ControlPath=none",
                 "-p",
                 "2222",
                 "--",
@@ -1008,6 +1032,10 @@ mod tests {
                 "ServerAliveInterval=15",
                 "-o",
                 "ServerAliveCountMax=3",
+                "-o",
+                "ControlMaster=no",
+                "-o",
+                "ControlPath=none",
                 "--",
                 "claude1",
                 UPDATE_CMD
