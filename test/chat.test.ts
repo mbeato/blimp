@@ -172,6 +172,8 @@ test("toolSummary", () => {
   expect(toolSummary("Agent", { description: "review" }, d)).toBe("Agent: review");
   expect(toolSummary("Bash", { command: "x".repeat(200) }, d)).toBe("Ran `" + "x".repeat(80) + "`");
   expect(toolSummary("WebFetch", {}, d)).toBe("WebFetch");
+  // The sign-in tool: which site, so an approval from the phone or a notification says it.
+  expect(toolSummary("mcp__signin__fill_login", { site: "github" }, d)).toBe("Sign in to github");
 });
 
 test("readAppended reads only complete lines added since the last read", () => {

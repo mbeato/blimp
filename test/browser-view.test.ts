@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findChrome, launchChrome, type Chrome } from "../src/browser/chrome";
 import { Gate } from "../src/browser/gate";
-import { openView } from "../src/browser/view";
+import { macEdit, openView } from "../src/browser/view";
 
 const path = findChrome();
 const live = path ? test : test.skip;
@@ -112,6 +112,36 @@ live("frames at the asked size; a click, typing and Enter reach the page", async
 
 // Every ack lets one more frame out, even acks that come together: Chrome keeps up to 3 unacked,
 // so a slow link still has frames on the way while the last is drawn.
+test("on a Mac the app's editing keys go with their editing command; on Linux as they are", () => {
+  expect(macEdit(2, 65, "darwin")).toBe("selectAll");
+  expect(macEdit(10, 90, "darwin")).toBe("redo");
+  expect(macEdit(2, 8, "darwin")).toBe("deleteWordBackward");
+  expect(macEdit(0, 65, "darwin")).toBeUndefined();
+  expect(macEdit(2, 65, "linux")).toBeUndefined();
+});
+
+live("the Mac app's editing keys work in a text field: select all, a word back, undo", async () => {
+  const id = await gate.createTab("/f", base + "/");
+  await until(async () => (await title(id)) === "start", "the page");
+  const w = await viewer(id);
+  await evalIn(id, "document.querySelector('input').focus()");
+  w.send({ type: "text", text: "one two" });
+  const key = (key: string, code: string, keyCode: number, modifiers: number) => {
+    w.send({ type: "key", event: "rawKeyDown", key, code, keyCode, modifiers });
+    w.send({ type: "key", event: "keyUp", key, code, keyCode, modifiers });
+  };
+  const field = (what: string) => evalIn(id, `(() => { const i = document.querySelector('input'); return ${what}; })()`);
+  await until(async () => (await field("i.value")) === "one two", "the typed text");
+  key("a", "KeyA", 65, 2);
+  await until(async () => (await field("i.selectionEnd - i.selectionStart")) === 7, "all of it selected");
+  key("End", "End", 35, 0);
+  key("Backspace", "Backspace", 8, 2);
+  await until(async () => (await field("i.value")) === "one ", "the last word gone");
+  key("z", "KeyZ", 90, 2);
+  await until(async () => (await field("i.value")) === "one two", "the word back");
+  w.v.close();
+}, 30_000);
+
 live("each ack lets one more frame out, even acks that come together", async () => {
   const id = await gate.createTab("/f", base + "/");
   await until(async () => (await title(id)) === "start", "the page");

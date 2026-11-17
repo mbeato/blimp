@@ -109,6 +109,7 @@ const SECRET_FILES = [
   "Read(~/.config/zai/**)",
   "Read(~/.claude/.credentials.json)",
   "Read(~/.codex/auth.json)",
+  "Read(~/.signin/**)",
 ];
 
 // The folder's Claude settings. Each command rule is there under the bare name (blimpd on PATH) and under the

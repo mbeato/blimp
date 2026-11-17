@@ -30,8 +30,10 @@ export const recordFile = () => join(process.env.CLAUDE_CONFIG_DIR || homedir(),
 export const loginNoteFile = (dir = blimpDir()) => join(dir, "auth-success.json");
 
 // Switching is off unless <socket dir>/config.json has "accounts": true, so no copy of a login is made
-// until the user asks. dir is the socket dir.
-export const accountsOn = (dir = blimpDir()) => (readConfig(join(dir, "config.json")) as { accounts?: unknown }).accounts === true;
+// until the user asks. dir is the socket dir. Never on a Mac: there Claude Code keeps its login in the
+// Keychain and reads .credentials.json only when the Keychain has none, so swapping the file switches nothing.
+export const accountsOn = (dir = blimpDir(), platform: string = process.platform) =>
+  platform !== "darwin" && (readConfig(join(dir, "config.json")) as { accounts?: unknown }).accounts === true;
 
 // An account id is oauthAccount.accountUuid. One that isn't letters, digits and dashes is refused, so
 // no path can leave the folder.

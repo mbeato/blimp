@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { deleteEntry, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, renameEntry, secretPaths, socketDir, writeFile } from "../src/files";
+import { deleteEntry, download, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, renameEntry, secretPaths, socketDir, tarFailed, writeFile } from "../src/files";
 import { socketPath } from "../src/sessions";
 
 // A fake home with a sibling folder outside it.
@@ -153,6 +153,18 @@ describe("guardFile", () => {
     expect(guardFile(join(blimp, "accounts-notes.txt"), home, blimp)).toBe(join(blimp, "accounts-notes.txt"));
   });
 
+  test("the sign-in tool's store (~/.signin), anything in it (there or not yet), and a link to it are refused", () => {
+    const store = join(home, ".signin");
+    expect(secretPaths(home, blimp)).toContain(store);
+    for (const p of [store, join(store, "logins.json")]) expect(status(() => guardFile(p, home, blimp))).toBe(403);
+    mkdirSync(store);
+    writeFileSync(join(store, "logins.json"), "{}");
+    symlinkSync(store, join(home, "signin-link"));
+    for (const p of [store, join(store, "logins.json"), join(store, "new"), join(home, "signin-link"), join(home, "signin-link", "logins.json")])
+      expect(status(() => guardFile(p, home, blimp))).toBe(403);
+    expect(guardFile(join(home, ".signin-notes.txt"), home, blimp)).toBe(join(home, ".signin-notes.txt"));
+  });
+
   test("the folder routes don't list the secrets folder or one in it; the folder that holds it still lists", () => {
     mkdirSync(join(blimp, "secrets", "sub"), { recursive: true });
     for (const p of [join(blimp, "secrets"), join(blimp, "secrets", "sub")]) expect(status(() => guardList(p, home, blimp))).toBe(403);
@@ -165,6 +177,66 @@ describe("guardFile", () => {
     for (const p of [join(blimp, "accounts"), join(blimp, "accounts", "id-a")]) expect(status(() => guardList(p, home, blimp))).toBe(403);
     expect(guardList(blimp, home, blimp)).toBe(blimp);
     expect(guardList(join(blimp, "accounts-notes"), home, blimp)).toBe(join(blimp, "accounts-notes"));
+  });
+});
+
+describe("letter case, which a Mac's disk ignores", () => {
+  // A fake home where the guarded names don't exist yet. realpath gives the true case of a name that
+  // exists, but not of one that doesn't, so on a Mac ~/.blimp/ACCOUNTS would pass as typed and the disk
+  // would then take it for ~/.blimp/accounts. On Linux's disk ACCOUNTS is another folder, made here so a
+  // file can be named inside it. The disk also takes ſ for s and K (Kelvin) for k.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "blimp-case-")));
+  const home = join(root, "home");
+  const blimp = join(home, ".blimp");
+  mkdirSync(join(blimp, "ACCOUNTS"), { recursive: true });
+  writeFileSync(join(blimp, "token"), "mac-token");
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const names = [
+    join(blimp, "ACCOUNTS"),
+    join(blimp, "ACCOUNTS", "id-a"),
+    join(blimp, "Secrets"),
+    join(blimp, "ſecrets"),
+    join(blimp, "PHONE-TOKEN"),
+    join(blimp, "APNS.P8"),
+    join(blimp, "phone-toKen"),
+    join(home, ".SIGNIN"),
+  ];
+  const listed = [join(blimp, "ACCOUNTS"), join(blimp, "ACCOUNTS", "id-a"), join(blimp, "Secrets")];
+  const sock = join(blimp, basename(socketPath()).toUpperCase());
+  writeFileSync(join(blimp, "ACCOUNTS", "state.json"), "{}");
+
+  test("with the Mac's rule, the other-case spellings of blimp's own files and folders are refused, there or not yet", async () => {
+    for (const p of names) {
+      expect(status(() => guardFile(p, home, blimp, "darwin"))).toBe(403);
+      expect(status(() => guardEntry(p, home, blimp, "darwin"))).toBe(403);
+    }
+    expect(status(() => guardEntry(sock, home, blimp, "darwin"))).toBe(403);
+    for (const p of listed) expect(status(() => guardList(p, home, blimp, "darwin"))).toBe(403);
+    expect((await listFiles(blimp, blimp, "darwin")).files).toEqual(["token"]);
+  });
+
+  // Only on a disk that minds case: on a Mac's, accounts already resolves to ACCOUNTS.
+  test.if(process.platform !== "darwin")("with Linux's rule they are other names, and pass as before", async () => {
+    for (const p of names) {
+      expect(guardFile(p, home, blimp, "linux")).toBe(p);
+      expect(guardEntry(p, home, blimp, "linux")).toBe(p);
+    }
+    expect(guardEntry(sock, home, blimp, "linux")).toBe(sock);
+    for (const p of listed) expect(guardList(p, home, blimp, "linux")).toBe(p);
+    expect((await listFiles(blimp, blimp, "linux")).files).toEqual(["ACCOUNTS/state.json", "token"]);
+  });
+
+  // On a real Mac, against its disk, with no platform given.
+  test.if(process.platform === "darwin")("on this Mac, other-case names of guarded ones not there yet are refused", () => {
+    rmSync(join(blimp, "ACCOUNTS"), { recursive: true });
+    for (const p of [join(blimp, "ACCOUNTS"), join(blimp, "Secrets"), join(blimp, "ſecrets"), join(blimp, "PHONE-TOKEN"), join(blimp, "APNS.P8"), join(home, ".SIGNIN")]) {
+      expect(status(() => guardFile(p, home, blimp))).toBe(403);
+      expect(status(() => guardEntry(p, home, blimp))).toBe(403);
+    }
+    expect(status(() => guardList(join(blimp, "Secrets"), home, blimp))).toBe(403);
+    // Why it matters: the disk takes the other case for the guarded name.
+    mkdirSync(join(blimp, "ACCOUNTS"));
+    expect(existsSync(join(blimp, "accounts"))).toBe(true);
   });
 });
 
@@ -200,7 +272,8 @@ describe("rename, move and delete", () => {
 
   test("guardEntry refuses home, outside it, blimp's own files and the folders that hold them", () => {
     for (const p of [home, "/", join(away, "keep.txt"), join(home, "away-link", "keep.txt")]) expect(status(() => guardEntry(p, home, blimp))).toBe(403);
-    for (const p of [blimp, join(blimp, "token"), join(blimp, "secrets"), join(blimp, "secrets", "API_KEY")]) expect(status(() => guardEntry(p, home, blimp))).toBe(403);
+    for (const p of [blimp, join(blimp, "token"), join(blimp, "secrets"), join(blimp, "secrets", "API_KEY"), join(home, ".signin"), join(home, ".signin", "logins.json")])
+      expect(status(() => guardEntry(p, home, blimp))).toBe(403);
     expect(status(() => guardEntry("relative", home, blimp))).toBe(400);
     expect(status(() => guardEntry(null, home, blimp))).toBe(400);
     // A link to ~/.blimp is refused too: deleting what it points to is never on the table, but a
@@ -395,5 +468,49 @@ describe("listFiles", () => {
     } finally {
       rmSync(r, { recursive: true, force: true });
     }
+  });
+});
+
+describe("download", () => {
+  const dir = join(home, "dl");
+  const bytes = (r: Response) => r.arrayBuffer().then((b) => new Uint8Array(b));
+
+  test("a folder as .tar.gz with what's in it, and on a Mac none of tar's ._ files", async () => {
+    mkdirSync(join(dir, "sub"), { recursive: true });
+    writeFileSync(join(dir, "a.txt"), "a");
+    writeFileSync(join(dir, "sub", "b.txt"), "bee");
+    // A Mac's tar adds a ._ file beside one that has an extended attribute, unless told not to.
+    if (process.platform === "darwin") Bun.spawnSync(["/usr/bin/xattr", "-w", "dev.blimp.test", "x", join(dir, "a.txt")]);
+    const r = download(dir, new AbortController().signal);
+    expect(r.headers.get("content-disposition")).toBe(`attachment; filename*=UTF-8''dl.tar.gz`);
+    const tar = Buffer.from(Bun.gunzipSync(await bytes(r)));
+    for (const name of ["dl/a.txt", "dl/sub/b.txt"]) expect(tar.includes(name)).toBe(true);
+    expect(tar.includes("._a.txt")).toBe(false);
+  });
+
+  test("a folder named @x is archived as itself: a Mac's tar isn't told to read the file x as an archive", async () => {
+    const top = join(home, "at");
+    mkdirSync(join(top, "@x"), { recursive: true });
+    writeFileSync(join(top, "@x", "in.txt"), "inside");
+    // What a Mac's tar would follow: a list that names a file elsewhere.
+    writeFileSync(join(top, "x"), `#mtree\nstolen type=file contents=${join(dir, "a.txt")}\n`);
+    const tar = Buffer.from(Bun.gunzipSync(await bytes(download(join(top, "@x"), new AbortController().signal))));
+    expect(tar.includes("@x/in.txt")).toBe(true);
+    expect(tar.includes("stolen")).toBe(false);
+  });
+
+  test("a file tar couldn't read fails the download instead of ending it short", async () => {
+    writeFileSync(join(dir, "sub", "locked"), "x");
+    chmodSync(join(dir, "sub", "locked"), 0);
+    try {
+      expect(await bytes(download(dir, new AbortController().signal)).then(() => "complete", () => "failed")).toBe("failed");
+    } finally {
+      chmodSync(join(dir, "sub", "locked"), 0o600);
+    }
+  });
+
+  test("which of tar's exit codes fail it: over 1 on Linux (1: a file changed while read), any but 0 on a Mac", () => {
+    expect([0, 1, 2].map((code) => tarFailed(code, "linux"))).toEqual([false, false, true]);
+    expect([0, 1, 2].map((code) => tarFailed(code, "darwin"))).toEqual([false, true, true]);
   });
 });

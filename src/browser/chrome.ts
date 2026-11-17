@@ -13,35 +13,54 @@ export type CdpMessage = { id?: number; method?: string; params?: any; result?: 
 
 // Chrome or Chromium on PATH, else the newest Playwright Chromium (Playwright builds for arm64
 // servers too; Chrome for Testing doesn't), where Playwright keeps them: PLAYWRIGHT_BROWSERS_PATH,
-// else ~/.cache/ms-playwright. null: none.
-export function findChrome(home = homedir(), which: (n: string) => string | null = (n) => Bun.which(n), browsers = process.env.PLAYWRIGHT_BROWSERS_PATH): string | null {
+// else ~/.cache/ms-playwright. On a Mac, after PATH: Google Chrome's app in apps (/Applications) or
+// in ~/Applications, else Playwright's newest in ~/Library/Caches/ms-playwright. null: none.
+export function findChrome(
+  home = homedir(),
+  which: (n: string) => string | null = (n) => Bun.which(n),
+  browsers = process.env.PLAYWRIGHT_BROWSERS_PATH,
+  platform = process.platform,
+  apps = "/Applications",
+): string | null {
   for (const n of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
     const p = which(n);
     if (p) return p;
   }
-  // macOS: Google Chrome's app (the iPhone app's simulator tests run blimpd on GitHub's Mac).
-  const app = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (process.platform === "darwin" && existsSync(app)) return app;
-  const root = browsers || join(home, ".cache", "ms-playwright");
+  const mac = platform === "darwin";
+  if (mac)
+    for (const dir of [apps, join(home, "Applications")]) {
+      const app = join(dir, "Google Chrome.app", "Contents", "MacOS", "Google Chrome");
+      if (existsSync(app)) return app;
+    }
+  const root = browsers || (mac ? join(home, "Library", "Caches", "ms-playwright") : join(home, ".cache", "ms-playwright"));
   let dirs: string[] = [];
   try {
     dirs = readdirSync(root).filter((d) => /^chromium-\d+$/.test(d));
   } catch {}
   dirs.sort((a, b) => Number(b.slice(9)) - Number(a.slice(9)));
+  const builds = mac
+    ? [join("chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing")]
+    : [join("chrome-linux64", "chrome"), join("chrome-linux", "chrome")];
   for (const d of dirs)
-    for (const sub of ["chrome-linux64", "chrome-linux"]) {
-      const p = join(root, d, sub, "chrome");
+    for (const build of builds) {
+      const p = join(root, d, build);
       if (existsSync(p)) return p;
     }
   return null;
 }
 
+// What to install when there's none: the end of the "no Chrome" messages.
+export const chromeHint = (platform = process.platform) =>
+  platform === "darwin" ? "Google Chrome in /Applications, or npx playwright install chromium" : "npx playwright install chromium";
+
 // Chrome's own user agent says "HeadlessChrome", which sites like Google answer with robot
 // checks. This is the one a normal Chrome of that version sends (minor version zeroed, as Chrome
-// does). versionOutput: what `chrome --version` prints.
+// does; on a Mac the Mac one, as the rest of what Chrome tells a site says macOS).
+// versionOutput: what `chrome --version` prints.
 const majorOf = (versionOutput: string) => versionOutput.match(/(\d+)\.\d+\.\d+\.\d+/)?.[1] ?? "140";
-export function userAgentFor(versionOutput: string): string {
-  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorOf(versionOutput)}.0.0.0 Safari/537.36`;
+export function userAgentFor(versionOutput: string, platform = process.platform): string {
+  const os = platform === "darwin" ? "Macintosh; Intel Mac OS X 10_15_7" : "X11; Linux x86_64";
+  return `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorOf(versionOutput)}.0.0.0 Safari/537.36`;
 }
 
 // What a phone's view (view.ts) makes the tab say instead: Chrome on Android, the same version, so

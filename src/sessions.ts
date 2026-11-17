@@ -77,7 +77,11 @@ export type State = "working" | "waiting" | "done" | "unknown";
 
 export const claudeDir = () => process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 
-export const zmxPath = () => Bun.which("zmx") ?? join(homedir(), ".local", "bin", "zmx");
+// On a Mac the one the installer put in ~/.local/bin goes first: Homebrew's zmx is a different major version.
+export const zmxPath = () => {
+  const own = join(homedir(), ".local", "bin", "zmx");
+  return process.platform === "darwin" && existsSync(own) ? own : (Bun.which("zmx") ?? own);
+};
 
 export const socketPath = () => process.env.BLIMPD_SOCKET || join(homedir(), ".blimp", "blimpd.sock");
 
@@ -413,10 +417,13 @@ export async function sessionExists(name: string): Promise<boolean> {
   return true; // still there, just busy
 }
 
-// The folder zmx keeps every session's socket in, found the way zmx finds it.
-export function zmxDir(env: Record<string, string | undefined> = process.env): string {
+// The folder zmx keeps every session's socket in, found the way zmx finds it. On a Mac with none set
+// it's ~/.zmx instead: zmx's own choice there is inside the per-user temp folder, whose long path
+// leaves 46 bytes for a session's name, and where macOS deletes old files.
+export function zmxDir(env: Record<string, string | undefined> = process.env, platform = process.platform): string {
   if (env.ZMX_DIR) return env.ZMX_DIR;
   if (env.XDG_RUNTIME_DIR) return join(env.XDG_RUNTIME_DIR, "zmx");
+  if (platform === "darwin") return join(homedir(), ".zmx");
   return join(env.TMPDIR || "/tmp", `zmx-${process.getuid!()}`);
 }
 
@@ -434,21 +441,36 @@ export function checkZmxDir(dir = zmxDir()) {
 
 // Inside a zmx session, ZMX_SESSION makes `zmx attach` switch sessions instead of creating one.
 // Every zmx call gets its env here, so the socket folder is checked before each one.
-export function zmxEnv() {
-  checkZmxDir();
+// On a Mac zmx is told the folder (ZMX_DIR), so it uses the one zmxDir() chose, and so do the sessions.
+export function zmxEnv(platform = process.platform) {
+  const dir = zmxDir(process.env, platform);
+  checkZmxDir(dir);
   const env = { ...process.env };
   delete env.ZMX_SESSION;
+  if (platform === "darwin") env.ZMX_DIR = dir;
   return env;
+}
+
+// How long a session's name can be. zmx refuses a socket path (<folder>/<name>) over 103 bytes on
+// macOS, where the limit is 4 bytes shorter than on Linux. On Linux names are left as they were.
+export function maxNameLength(dir = zmxDir(), platform = process.platform): number {
+  return platform === "darwin" ? 103 - Buffer.byteLength(dir) - 1 : Infinity;
 }
 
 // Same names as the claude1 shell helper: <folder>-<HHMMSS>, or <folder>-<NAME>.
 // Names end up in file paths, so a custom name is cleaned the same way as the folder.
-export function newSessionName(dir: string, at: Date, taken: string[], custom?: string): string {
+// max: the folder part is cut so the whole name is no longer than this (at least 1 character of it stays).
+// On a Mac a name is taken in any letter case: the sockets are files on a disk that ignores case.
+export function newSessionName(dir: string, at: Date, taken: string[], custom?: string, max = Infinity, platform = process.platform): string {
   const clean = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, "_");
   const two = (n: number) => String(n).padStart(2, "0");
-  const base = `${clean(basename(dir))}-${custom ? clean(custom) : two(at.getHours()) + two(at.getMinutes()) + two(at.getSeconds())}`;
-  let name = base;
-  for (let i = 2; taken.includes(name); i++) name = `${base}-${i}`;
+  const folder = clean(basename(dir));
+  const end = `-${custom ? clean(custom) : two(at.getHours()) + two(at.getMinutes()) + two(at.getSeconds())}`;
+  const named = (rest: string) => folder.slice(0, Math.max(1, max - rest.length)) + rest;
+  const fold = (s: string) => (platform === "darwin" ? s.toLowerCase() : s);
+  const used = taken.map(fold);
+  let name = named(end);
+  for (let i = 2; used.includes(fold(name)); i++) name = named(`${end}-${i}`);
   return name;
 }
 
@@ -479,7 +501,7 @@ async function start(dir: string, { name: custom, exact, kind = "claude", run = 
   const taken = parseZmxList(await zmxListAsync()).map((s) => s.name);
   if (exact && (!custom || !isSafeName(custom))) throw new Error(`not a session name: ${custom}`);
   if (exact && taken.includes(custom!)) throw new Error(`a session named ${custom} is already running`);
-  const name = exact ? custom! : newSessionName(dir, new Date(), taken, custom);
+  const name = exact ? custom! : newSessionName(dir, new Date(), taken, custom, maxNameLength());
   const shell = loginShell();
   const cmd = run.script ? [shell, "-l", "-i", "-c", run.script, ...run.args] : [shell, "-l", "-i"];
   // Before it's listed, so it never shows up as the wrong kind.

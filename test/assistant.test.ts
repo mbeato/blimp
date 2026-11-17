@@ -35,6 +35,7 @@ describe("assistantSettings", () => {
       "Read(~/.config/zai/**)",
       "Read(~/.claude/.credentials.json)",
       "Read(~/.codex/auth.json)",
+      "Read(~/.signin/**)",
     ]);
     expect(s.permissions.deny.filter((r) => s.permissions.allow.includes(r) || s.permissions.ask.includes(r))).toEqual([]);
   });

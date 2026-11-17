@@ -1,6 +1,6 @@
 name: Release
 
-# A tag like v0.3.0 publishes blimpd for Linux, its checksums, install.sh and the Mac app, with
+# A tag like v0.3.0 publishes blimpd for Linux and macOS, its checksums, install.sh and the Mac app, with
 # the app's signed update bundle and latest.json, which installed apps check for updates.
 # A tag with a "-" (v0.3.0-rc.1) is a prerelease, so "latest" (install.sh, the app's update
 # check) skips it.
@@ -21,7 +21,7 @@ env:
 
 jobs:
   build:
-    # One macOS job: bun cross-compiles blimpd for Linux, and the Mac app needs a Mac.
+    # One macOS job: bun cross-compiles blimpd for Linux and macOS, and the Mac app needs a Mac.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,13 +50,13 @@ jobs:
           # Apple chips only: an Intel build too took the Mac app's build from 2.7 to 4.9 min
           targets: aarch64-apple-darwin
 
-      # bun build --compile for bun-linux-x64 and bun-linux-arm64 (the root "build" script).
+      # bun build --compile for bun-linux-x64, bun-linux-arm64 and bun-darwin-arm64 (the root "build" script).
       - name: Build blimpd
         run: |
           bun install --production
           bun run build
           cd dist
-          shasum -a 256 blimpd-linux-x64 blimpd-linux-arm64 > SHA256SUMS
+          shasum -a 256 blimpd-linux-x64 blimpd-linux-arm64 blimpd-darwin-arm64 > SHA256SUMS
           cat SHA256SUMS
 
       - name: Install the app's packages
@@ -108,6 +108,7 @@ jobs:
           path: |
             dist/blimpd-linux-x64
             dist/blimpd-linux-arm64
+            dist/blimpd-darwin-arm64
             dist/SHA256SUMS
             install.sh
             app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
@@ -136,7 +137,7 @@ jobs:
           {
             echo "Server setup: \`curl -fsSL https://raw.githubusercontent.com/mbeato/blimp/main/install.sh | sh\`"
             echo
-            echo "SHA256SUMS lists the SHA-256 of both blimpd binaries:"
+            echo "SHA256SUMS lists the SHA-256 of all blimpd binaries:"
             echo
             echo '```'
             cat dist/SHA256SUMS
@@ -153,7 +154,7 @@ jobs:
           prerelease=""
           case "$tag" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$tag" $prerelease --title "blimp $tag" --notes-file "$notes" \
-            dist/blimpd-linux-x64 dist/blimpd-linux-arm64 dist/SHA256SUMS install.sh \
+            dist/blimpd-linux-x64 dist/blimpd-linux-arm64 dist/blimpd-darwin-arm64 dist/SHA256SUMS install.sh \
             app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg \
             app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/blimp.app.tar.gz \
             app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/blimp.app.tar.gz.sig \

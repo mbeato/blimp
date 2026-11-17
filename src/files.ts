@@ -88,6 +88,7 @@ function realPath(p: string): string {
 // and the folder of saved Claude logins (accounts/store.ts).
 // No fs route may serve, replace, or archive them: a client holding one token — the phone's —
 // must not read or plant another (the Mac's), so `blimpd pair --revoke` stays final.
+// Also the sign-in tool's store folder (~/.signin), a separate program's: the logins it types into pages.
 export function secretPaths(home = realHome(), dir = socketDir()): string[] {
   return [
     join(dir, "token"),
@@ -100,20 +101,29 @@ export function secretPaths(home = realHome(), dir = socketDir()): string[] {
     join(home, ".config", "zai", "key"),
     join(dir, "secrets"),
     join(dir, "accounts"),
+    join(home, ".signin"),
   ].map(realPath);
 }
 
-// One of those key files, anything in the secrets folder, or a folder that holds one.
-function ownFile(real: string, home: string, dir: string): boolean {
+// A path as a Mac's disk compares it: there letter case doesn't count, so ~/.blimp/ACCOUNTS is the saved
+// logins' folder even before it exists, when realpath can't give a name's true case. Upper then lower,
+// because the disk also takes ſ for s and K (Kelvin) for k. Elsewhere the path as it is.
+const caseless = (p: string, platform: string) => (platform === "darwin" ? p.toUpperCase().toLowerCase() : p);
+
+// One of those key files, anything in the secrets folder or the sign-in store, or a folder that holds one.
+function ownFile(path: string, home: string, dir: string, platform: string): boolean {
+  const real = caseless(path, platform);
   const slash = real === "/" ? "" : "/";
-  return secretPaths(home, dir).some((s) => s === real || s.startsWith(real + slash) || real.startsWith(s + "/"));
+  return secretPaths(home, dir)
+    .map((s) => caseless(s, platform))
+    .some((s) => s === real || s.startsWith(real + slash) || real.startsWith(s + "/"));
 }
 
 // guard() for the routes that read or write one file: inside home, and never one of those key
 // files, anything in the secrets folder, nor a folder that holds one (a folder download would archive it).
-export function guardFile(path: string | null, home = realHome(), dir = socketDir()): string {
+export function guardFile(path: string | null, home = realHome(), dir = socketDir(), platform: string = process.platform): string {
   const real = guard(path, home);
-  if (ownFile(real, home, dir)) throw new HttpError(403, "that's one of blimp's own files");
+  if (ownFile(real, home, dir, platform)) throw new HttpError(403, "that's one of blimp's own files");
   return real;
 }
 
@@ -121,30 +131,32 @@ export function guardFile(path: string | null, home = realHome(), dir = socketDi
 // A symlink is renamed or deleted as a link, never what it points to. Inside home and never home
 // itself (its folder is outside), nor blimp's own files, blimpd's socket, a folder that holds one
 // (home, ~/.blimp, ~/.config), anything in the secrets folder, or a link to one of those.
-export function guardEntry(path: string | null, home = realHome(), dir = socketDir()): string {
+export function guardEntry(path: string | null, home = realHome(), dir = socketDir(), platform: string = process.platform): string {
   if (!path || !isAbsolute(path)) throw new HttpError(400, "path must be absolute");
   const abs = resolve(path);
   if (abs === "/") throw new HttpError(403, "outside your home folder");
   const real = join(guard(dirname(abs), home), basename(abs));
   if (real === home) throw new HttpError(403, "that's your home folder");
   // Also through a link: a ~/.blimp that is itself a link to the real folder.
-  if (ownFile(real, home, dir) || ownFile(realPath(real), home, dir)) throw new HttpError(403, "that's one of blimp's own files");
+  if (ownFile(real, home, dir, platform) || ownFile(realPath(real), home, dir, platform)) throw new HttpError(403, "that's one of blimp's own files");
   // Nor blimpd's socket: with it gone or moved, no new connection gets in (the Mac's, the phone's)
   // until blimpd restarts. Only here: reading it is harmless, so guardFile doesn't check it.
-  const sock = realPath(join(dir, basename(process.env.BLIMPD_SOCKET || "blimpd.sock")));
-  if (real === sock || realPath(real) === sock) throw new HttpError(403, "that's one of blimp's own files");
+  const sock = caseless(realPath(join(dir, basename(process.env.BLIMPD_SOCKET || "blimpd.sock"))), platform);
+  if (caseless(real, platform) === sock || caseless(realPath(real), platform) === sock) throw new HttpError(403, "that's one of blimp's own files");
   return real;
 }
 
-// The folders no listing shows the inside of: the secrets folder and the saved logins' folder.
-const unlisted = (dir: string) => [join(dir, "secrets"), join(dir, "accounts")].map(realPath);
+// The folders no listing shows the inside of: the secrets folder and the saved logins' folder, as
+// caseless() has them.
+const unlisted = (dir: string, platform: string) => [join(dir, "secrets"), join(dir, "accounts")].map((p) => caseless(realPath(p), platform));
 
 // guard() for the routes that list a folder (/fs/list, /fs/files): not the secrets folder, the saved
 // logins' folder, nor one in them, so a secret's name isn't listed through them either. A folder that
 // holds them still lists.
-export function guardList(path: string | null, home = realHome(), dir = socketDir()): string {
+export function guardList(path: string | null, home = realHome(), dir = socketDir(), platform: string = process.platform): string {
   const real = guard(path, home);
-  if (unlisted(dir).some((u) => real === u || real.startsWith(u + "/"))) throw new HttpError(403, "that's one of blimp's own files");
+  const r = caseless(real, platform);
+  if (unlisted(dir, platform).some((u) => r === u || r.startsWith(u + "/"))) throw new HttpError(403, "that's one of blimp's own files");
   return real;
 }
 
@@ -284,9 +296,9 @@ const MAX_FILES = 20_000;
 // For ⌘P. In a git repo, git's own list (respects .gitignore). Otherwise a walk that skips the usual noise.
 // Never anything in the secrets folder or the saved logins' folder, as guardList: a root above them
 // would list their names. Async, so a big repo doesn't stall every open terminal while git or the walk runs.
-export async function listFiles(root: string, dir = socketDir()): Promise<{ files: string[]; truncated: boolean }> {
-  const hide = unlisted(dir);
-  const files = ((await gitFiles(root)) ?? (await walk(root))).filter((f) => !hide.some((u) => inside(join(root, f), u)));
+export async function listFiles(root: string, dir = socketDir(), platform: string = process.platform): Promise<{ files: string[]; truncated: boolean }> {
+  const hide = unlisted(dir, platform);
+  const files = ((await gitFiles(root)) ?? (await walk(root))).filter((f) => !hide.some((u) => inside(caseless(join(root, f), platform), u)));
   return files.length > MAX_FILES ? { files: files.slice(0, MAX_FILES), truncated: true } : { files, truncated: false };
 }
 
@@ -329,6 +341,11 @@ async function walk(root: string): Promise<string[]> {
 
 const attachment = (name: string) => `attachment; filename*=UTF-8''${encodeURIComponent(name)}`;
 
+// Whether tar's exit code means the archive has files missing. GNU tar: 2 (a file it couldn't read);
+// its 1 is "a file changed while read", which is kept. A Mac's tar exits 1 for a file it couldn't
+// read and 0 for one that changed, so there any code but 0 fails.
+export const tarFailed = (code: number, platform: string = process.platform) => code > (platform === "darwin" ? 0 : 1);
+
 // A file as it is, of any size (streamed), or a folder as <name>.tar.gz made on the fly. tar
 // stores symlinks as links and never follows them, so nothing outside home is read.
 // signal: the request's, so a cancelled download stops tar.
@@ -336,18 +353,27 @@ export function download(path: string, signal: AbortSignal): Response {
   const st = statSync(path);
   const name = basename(path);
   if (st.isDirectory()) {
-    const tar = Bun.spawn(["tar", "-czf", "-", "-C", dirname(path), "--", name], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+    // On a Mac: the system's tar by its full path, told not to add a ._ file beside each file that
+    // has extended attributes. The name goes as ./<name>: a Mac's tar reads a name that starts with @
+    // as "copy the entries of this archive", even after --.
+    const mac = process.platform === "darwin";
+    const tar = Bun.spawn([mac ? "/usr/bin/tar" : "tar", "-czf", "-", "-C", dirname(path), "--", mac ? `./${name}` : name], {
+      stdout: "pipe",
+      stderr: "ignore",
+      stdin: "ignore",
+      ...(mac && { env: { ...process.env, COPYFILE_DISABLE: "1" } }),
+    });
     signal.addEventListener("abort", () => tar.kill());
-    // The status went out with the first bytes, so a tar that fails part way (2: a file it
-    // couldn't read) breaks the stream instead, and the app shows the download as failed rather
-    // than saving an archive with files missing. (1 is "a file changed while read": kept.)
+    // The status went out with the first bytes, so a tar that fails part way (a file it couldn't
+    // read) breaks the stream instead, and the app shows the download as failed rather than saving
+    // an archive with files missing (tarFailed).
     const out = tar.stdout.getReader();
     const body = new ReadableStream<Uint8Array>({
       async pull(c) {
         const { done, value } = await out.read();
         if (!done) return c.enqueue(value);
         const code = await tar.exited;
-        if (code > 1) c.error(new Error(`tar exited with ${code}`));
+        if (tarFailed(code)) c.error(new Error(`tar exited with ${code}`));
         else c.close();
       },
       cancel: () => void tar.kill(),

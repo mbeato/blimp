@@ -1,6 +1,6 @@
 # blimp
 
-blimp is a Mac app for Claude Code sessions that run on your own Linux server. It is laid out like VS Code: you open a project folder on the server, its files are on the left, the files you open are in tabs, and the terminal is at the bottom. Next to the terminal is the list of Claude sessions in that folder, with what each one is doing. Click a session to use its terminal, as if you had connected with SSH. You do not need to keep a terminal open, and you do not need another editor.
+blimp is a Mac app for Claude Code sessions that run on your own server. The server is a Linux machine, or a Mac with an Apple chip. It is laid out like VS Code: you open a project folder on the server, its files are on the left, the files you open are in tabs, and the terminal is at the bottom. Next to the terminal is the list of Claude sessions in that folder, with what each one is doing. Click a session to use its terminal, as if you had connected with SSH. You do not need to keep a terminal open, and you do not need another editor.
 
 ![blimp in dark mode: files on the left, a Markdown file open at the top, a Claude Code terminal below it, and the folder's sessions on the right](docs/screenshots/main-dark.png)
 
@@ -12,14 +12,14 @@ These screenshots come from the browser build that the end-to-end tests use. The
 
 - The app runs your normal `ssh` command. It uses your keys, your SSH agent and your `~/.ssh/config`.
 - On the server, a small service called **blimpd** listens on a private unix socket (`~/.blimp/blimpd.sock`). It does not open a network port. The app forwards a local port to that socket through SSH.
-- Sessions run in **zmx**, a small program that keeps terminal sessions alive. When you close the app, your sessions keep running on the server. With user systemd, this needs linger (see [Requirements](#requirements)).
+- Sessions run in **zmx**, a small program that keeps terminal sessions alive. When you close the app, your sessions keep running on the server. With user systemd, this needs linger (see [Requirements](#requirements)). On a Mac server, you must stay logged in at that Mac's desktop (see [A Mac as the server](#a-mac-as-the-server)).
 - blimp is one more way to attach to those sessions. A plain terminal still works at the same time. On the server, `zmx list` shows the same sessions, and `zmx attach <name>` joins one. If you type in one place, the text shows in both places.
 
 There is also an iPhone app. It shows your sessions and their chat, and you can answer prompts and talk to Claude by voice. It is not released yet. See [ios/README.md](ios/README.md).
 
 The server can also answer a prompt without the terminal. The phone sends the answer, and blimpd types the same keys you would. It types them only if Claude still asks the same thing. If you already answered on the Mac, nothing is typed. "No, because…" is one step: blimpd presses Esc, then types your reason as a message. A permission prompt also says what Claude wants to run or change: the whole command, the file, or the web address. A command that pushes, deploys, force-resets or deletes things is marked as risky.
 
-**Pair your iPhone.** On the server, run `blimpd pair`. It prints a QR code and a `blimp://` link. On the iPhone, open blimp and tap Scan QR code, or paste the link. The phone gets its own token, separate from the Mac's. To cut the phone off, run `blimpd pair --revoke` on the server. The Mac keeps working. The phone reaches the server through Tailscale, so `blimpd pair` takes the server's address from Tailscale. Without Tailscale, give the address yourself: `blimpd pair --url <address>`.
+**Pair your iPhone.** On the server, run `blimpd pair`. It prints a QR code and a `blimp://` link. On the iPhone, open blimp and tap Scan QR code, or paste the link. The phone gets its own token, separate from the Mac's. To cut the phone off, run `blimpd pair --revoke` on the server. The Mac keeps working. The phone reaches the server through Tailscale, so `blimpd pair` takes the server's address from Tailscale. Without Tailscale, give the address yourself: `blimpd pair --url <address>`. The iPhone app is not supported with a Mac server yet (see [A Mac as the server](#a-mac-as-the-server)).
 
 **Notifications on the iPhone.** blimpd sends them straight to Apple with your own push key. To set it up once:
 1. In Apple's developer site (Certificates, Identifiers & Profiles), open Keys and add one with "Apple Push Notifications service (APNs)" ticked (Sandbox & Production). Download the `.p8` file (Apple lets you download it only once) and note its Key ID. Your Team ID is under Membership.
@@ -32,7 +32,7 @@ The notification's text (a session's title, a command, a question, the start of 
 
 **Visuals.** A session can show you a chart, a diagram, a small report or a 3D scene you can turn and zoom. Ask Claude for one: it writes a web page (with a folder of models and photos beside it, if it needs them) and calls blimp's show tool. The phone's chat gets a card that opens it full screen, and the Mac opens it in a tab of that project. Pages run locked down, with no internet; blimp gives them its colours, a chart library, a diagram library and three.js for 3D. blimpd keeps each one for 30 days, and at most 2 GB of them. The first show in a session asks permission, as other tools do; allow it for the session (or always) to skip the question.
 
-**More than one Claude account.** If you have more than one Claude login, blimpd can move to the next one when the one in use runs out of usage. It is off by default. To turn it on, add `"accounts": true` to `~/.blimp/config.json`. If there's no such file, make one with `{ "accounts": true }`. It takes effect within a second, with no restart. To add an account, run `/login` inside a Claude session, as you do now. Don't use `/logout` on an account blimp keeps, because it ends that login on Anthropic's side and the saved copy stops working; change accounts with `/login`, and drop one with `blimpd account forget <email>`. A login made another way, such as `claude auth login` in a plain shell, is taken for the account that was in use. To put that right, log in again with `/login` in a session: first to the account that was in use, then to the new one. If blimp can't tell which account is logged in, it saves nothing and tells you. blimpd keeps a copy of each login on the server, in a folder only you can read. When a session stops because the account is out, blimpd puts the next saved login in place, types `continue` into the sessions that stopped on the limit, and sends a notification to your iPhone. A session that is asking you something is left alone. If every account is out, blimpd says so and stays on the one in use. It does not check again on a timer. Claude Code's own wait still resumes a session when its limit resets. `blimpd accounts` lists the saved accounts: which one is in use, which ran out and until when, and when each login expires. `blimpd account use <email>` switches by hand, and `blimpd account forget <email>` removes a saved account. Connectors such as Slack, Gmail or Zapier belong to the Claude account, so connect the same ones on every account at claude.ai/customize/connectors. About 30 seconds after each switch, and once a day, blimpd asks Claude Code which connectors the account in use has, and if it lacks one that another account has, it sends a notification once and `blimpd accounts` shows what is missing under that account. A session can keep showing the old account's name after a switch. The next turn still runs on the new one, and `blimpd accounts` says which is in use. After you update blimpd, `blimpd install-hooks` must run once so that it hears about the limit. The installer does this.
+**More than one Claude account.** If you have more than one Claude login, blimpd can move to the next one when the one in use runs out of usage. It works on Linux only: on a Mac, Claude Code keeps its login in the macOS Keychain, where blimp can't swap it yet. It is off by default. To turn it on, add `"accounts": true` to `~/.blimp/config.json`. If there's no such file, make one with `{ "accounts": true }`. It takes effect within a second, with no restart. To add an account, run `/login` inside a Claude session, as you do now. Don't use `/logout` on an account blimp keeps, because it ends that login on Anthropic's side and the saved copy stops working; change accounts with `/login`, and drop one with `blimpd account forget <email>`. A login made another way, such as `claude auth login` in a plain shell, is taken for the account that was in use. To put that right, log in again with `/login` in a session: first to the account that was in use, then to the new one. If blimp can't tell which account is logged in, it saves nothing and tells you. blimpd keeps a copy of each login on the server, in a folder only you can read. When a session stops because the account is out, blimpd puts the next saved login in place, types `continue` into the sessions that stopped on the limit, and sends a notification to your iPhone. A session that is asking you something is left alone. If every account is out, blimpd says so and stays on the one in use. It does not check again on a timer. Claude Code's own wait still resumes a session when its limit resets. `blimpd accounts` lists the saved accounts: which one is in use, which ran out and until when, and when each login expires. `blimpd account use <email>` switches by hand, and `blimpd account forget <email>` removes a saved account. Connectors such as Slack, Gmail or Zapier belong to the Claude account, so connect the same ones on every account at claude.ai/customize/connectors. About 30 seconds after each switch, and once a day, blimpd asks Claude Code which connectors the account in use has, and if it lacks one that another account has, it sends a notification once and `blimpd accounts` shows what is missing under that account. A session can keep showing the old account's name after a switch. The next turn still runs on the new one, and `blimpd accounts` says which is in use. After you update blimpd, `blimpd install-hooks` must run once so that it hears about the limit. The installer does this.
 
 **A feed of what's new in tech, on the iPhone.** It is off by default. blimpd can fetch Hacker News, Reddit, GitHub trending and release notes every hour. The iPhone shows them one card at a time, each with a short summary that the small Claude model writes on your own sign-in (at most 6 calls an hour). To turn it on, add `"feed": { "on": true }` to `~/.blimp/config.json`. If there's no such file, make one with `{ "feed": { "on": true } }`. The same place takes your own lists: `"subreddits"`, `"rss"` (feed addresses) and `"interests"` (cards about these come first). Reddit needs a key. At https://www.reddit.com/prefs/apps, create an app of type "script" (any redirect address, for example `http://localhost`). Then run `blimpd reddit-key <client id> <secret>` on the server. Without a key, the feed skips Reddit and says so after the last card.
 
@@ -40,19 +40,20 @@ The notification's text (a session's title, a command, a question, the start of 
 
 **Server**
 
-- Linux on x86_64 or arm64.
+- Linux on x86_64 or arm64, or macOS 13 (Ventura) or later on a Mac with an Apple chip (M1 and later). An Intel Mac does not work: the installer stops there. A Mac server has its own rules: see [A Mac as the server](#a-mac-as-the-server).
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code), on the `PATH` of your login shell. blimp starts each session as `claude`, through your login shell, in the folder you choose.
 - A Claude Code login on the server. Run `claude` on the server once and log in. If you do not, each new session in blimp shows Claude's login steps instead of a prompt.
-- An SSH server that allows forwarding to a unix socket. The app needs this to reach blimpd. It is on by default. A hardened `/etc/ssh/sshd_config` can turn it off with `AllowStreamLocalForwarding no` (or `remote`), or with `DisableForwarding yes`. To check, run `sudo sshd -T | grep -i forwarding` on the server. It must show `disableforwarding no`, and `allowstreamlocalforwarding` must be `yes`, `all` or `local`.
-- `curl`, `tar` and `sha256sum`. Most Linux systems have them.
-- Optional, for browser tabs: Chrome or Chromium; and for the browser sessions can use, also `npx` (Node.js) on the `PATH` of your login shell. If you have neither Chrome nor Chromium, `npx playwright install chromium` installs one. Run `blimpd browser` to see which one blimp found.
-- User systemd (`systemctl --user`). This is recommended. If you have it, the installer runs blimpd as a user service. If you do not have it, you must start blimpd yourself, and start it again after each reboot.
+- An SSH server that allows forwarding to a unix socket. The app needs this to reach blimpd. It is on by default. A hardened `/etc/ssh/sshd_config` can turn it off with `AllowStreamLocalForwarding no` (or `remote`), or with `DisableForwarding yes`. To check, run `sudo sshd -T | grep -i forwarding` on the server. It must show `disableforwarding no`, and `allowstreamlocalforwarding` must be `yes`, `all` or `local`. On a Mac, the SSH server is off until you turn on Remote Login (System Settings > General > Sharing).
+- `curl` and `tar`, and `sha256sum` or `shasum`. Most Linux systems have them, and macOS has them.
+- Optional, for browser tabs: Chrome or Chromium; and for the browser sessions can use, also `npx` (Node.js) on the `PATH` of your login shell. If you have neither Chrome nor Chromium, `npx playwright install chromium` installs one. On a Mac, blimp also finds Google Chrome in `/Applications` or in `~/Applications`. Run `blimpd browser` to see which one blimp found.
+- On Linux: user systemd (`systemctl --user`). This is recommended. If you have it, the installer runs blimpd as a user service. If you do not have it, you must start blimpd yourself, and start it again after each reboot.
 - Linger, if you use systemd. This is strongly recommended.
   - Without linger, systemd stops blimpd when your last SSH connection to the server ends. That also ends every session that blimpd started. The app's own connection counts. So if you quit blimp and no other SSH connection is open, your sessions end.
   - To turn linger on: `sudo loginctl enable-linger "$USER"`. To check it: `loginctl show-user "$USER" -p Linger`.
   - Turning linger on usually needs root. If you do not have sudo, ask the server's admin to run `loginctl enable-linger <your user name>` as root.
+- On a Mac: a user who is logged in at the Mac's desktop. The installer runs blimpd as a launchd agent of that login. A Mac has no systemd and no linger.
 
-**Mac**
+**The Mac that runs the app**
 
 - macOS 11 (Big Sur) or later, with Safari 16 or later installed. macOS 13 (Ventura) and later come with Safari 16 or later.
 - SSH with a key, and no password prompt. blimp runs `/usr/bin/ssh` with `BatchMode=yes`, so ssh never asks you anything. Test this in Terminal first. This command must print `ok` without a prompt:
@@ -69,13 +70,13 @@ curl -fsSL https://raw.githubusercontent.com/mbeato/blimp/main/install.sh | sh
 
 The script does these things (see [install.sh](install.sh)):
 
-1. It stops if the system is not Linux, or the CPU is not x86_64 or arm64, or `curl` is missing.
+1. It stops if the system is not Linux or macOS, or the CPU is not x86_64 or arm64 (on a Mac: not an Apple chip), or `curl` is missing.
 2. It installs into `~/.local/bin`. It does not need root.
-3. **zmx:** if you already have zmx, the script keeps it. If not, it downloads zmx 0.8.1 from zmx's GitHub releases. It checks the download against a SHA-256 sum that is written in the script, and stops if the sum does not match.
-4. **blimpd:** it downloads `blimpd-linux-x64` or `blimpd-linux-arm64` from the latest blimp release on GitHub. It also downloads `SHA256SUMS` from the same release, and stops if the binary does not match.
+3. **zmx:** if you already have zmx, the script keeps it. If not, it downloads zmx 0.8.1 from zmx's GitHub releases. It checks the download against a SHA-256 sum that is written in the script, and stops if the sum does not match. On a Mac, only a zmx in `~/.local/bin` counts: one that is elsewhere on your `PATH` (Homebrew's, say) can be another major version.
+4. **blimpd:** it downloads `blimpd-linux-x64`, `blimpd-linux-arm64` or (on a Mac) `blimpd-darwin-arm64` from the latest blimp release on GitHub. It also downloads `SHA256SUMS` from the same release, and stops if the binary does not match.
 5. **Claude Code hooks:** it runs `blimpd install-hooks`. This adds blimp's status hooks to `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`). It keeps all your other settings and hooks. Before the first change, it saves a copy as `settings.json.blimp-backup`. These hooks tell blimp the moment a session starts to wait for you. If you use Codex on the server (`~/.codex` exists), it also adds blimp's hooks to `~/.codex/hooks.json` the same way (backup `hooks.json.blimp-backup`), after any hooks you have there. Codex runs a new hook only after you trust it: the first time Codex says hooks need review, open `/hooks` in Codex and trust blimp's. Your `notify` setting in `~/.codex/config.toml` is not touched.
 6. It tells you if `claude` is not found. It does not install Claude Code for you.
-7. **Service:** if user systemd works, it writes `~/.config/systemd/user/blimpd.service`, then enables and starts it. If not, it prints the command to start blimpd yourself.
+7. **Service:** on Linux, if user systemd works, it writes `~/.config/systemd/user/blimpd.service`, then enables and starts it. If not, it prints the command to start blimpd yourself. On a Mac, it writes `~/Library/LaunchAgents/dev.blimp.blimpd.plist` and loads it with `launchctl`.
 8. It prints this server's own name and your user name. In the app, enter the name that you use with ssh. That name can be different: for example an alias from `~/.ssh/config`, a full domain name, or an IP address.
 
 To read the script before you run it:
@@ -86,7 +87,44 @@ curl -fsSL https://raw.githubusercontent.com/mbeato/blimp/main/install.sh -o bli
 
 Then run it with `sh blimp-install.sh`. After that, you can delete `blimp-install.sh`.
 
-To check the service: `systemctl --user status blimpd`. To list sessions from the command line: `~/.local/bin/blimpd sessions`.
+To check the service: `systemctl --user status blimpd` (on a Mac: `launchctl print gui/$(id -u)/dev.blimp.blimpd`). To list sessions from the command line: `~/.local/bin/blimpd sessions`.
+
+## A Mac as the server
+
+The server can be a Mac with an Apple chip. The install command is the same as on Linux. These things are different.
+
+**The service is a launchd agent**
+
+A Mac has no systemd. The installer runs blimpd as a launchd agent, in your desktop login.
+
+- The agent's file is `~/Library/LaunchAgents/dev.blimp.blimpd.plist`. The installer writes it again each time it runs, so do not keep your own changes in it.
+- blimpd's log is `~/Library/Logs/blimpd.log`.
+- To check it: `launchctl print gui/$(id -u)/dev.blimp.blimpd`. The line `state = running` means that blimpd runs.
+- To restart it: `launchctl kickstart -k gui/$(id -u)/dev.blimp.blimpd`. The agent is set up so that your sessions keep running, as on Linux.
+- To stop it: `launchctl bootout gui/$(id -u)/dev.blimp.blimpd`. To start it again: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.blimp.blimpd.plist`.
+- If blimpd crashes, launchd starts it again.
+
+**You must be logged in at the Mac's desktop**
+
+- blimpd runs while you are logged in at the Mac's desktop. A locked screen is fine. If you log out there, blimpd stops.
+- After the Mac restarts, blimpd starts when you log in at its desktop. An SSH login does not start it.
+- With FileVault on and no automatic login, nothing runs after a restart until someone logs in at the Mac.
+- If nobody is logged in at the desktop when you run the installer, it still installs everything. It says that blimpd starts at the next desktop login.
+
+**Folders that macOS protects**
+
+macOS asks before a program reads your Documents, Desktop or Downloads folder. For blimp, the question shows on the Mac's own screen, not in the app. Keep your projects in another folder, for example `~/code`. If you do not, expect that question: someone must answer it at the Mac before blimp can read the folder, and macOS can ask again after blimpd is updated.
+
+**zmx**
+
+- blimp keeps zmx's sockets in `~/.zmx` on a Mac. zmx's own choice there is a temporary folder with a long path, which leaves little room for a session's name.
+- To use `zmx list` or `zmx attach` yourself, give zmx the same folder first: add `export ZMX_DIR="$HOME/.zmx"` to `~/.zshenv`. Inside a blimp session, it is set already.
+- A session's name must fit in macOS's limit for a socket's path. So in the name of a new session, a long folder name is cut.
+- zmx 0.8.1 has a known fault on macOS ([zmx issue 294](https://github.com/neurosnap/zmx/issues/294)): when a session ends, macOS saves a crash report for zmx in `~/Library/Logs/DiagnosticReports`. The report is about zmx, not about blimp. You can delete it.
+
+**The iPhone app**
+
+The iPhone app is not supported with a Mac server yet. The phone reaches blimpd through Tailscale, and that route is not tested on a Mac.
 
 ## Install the app
 
@@ -166,7 +204,7 @@ To add more servers, click **Add server** on the Welcome page. The app keeps you
 - **Earlier** lists this folder's past conversations that are not running, with how many there are. Click it to unfold or fold the list (blimp remembers which), and click a conversation to resume it in a new session.
 - Hover a session and click the trash icon to end it. An idle Claude session ends at once; its conversation is saved, so you can resume it from **Earlier**. A session that is working or waiting, or a shell, asks first.
 - blimp starts every session in the real folder on the server, the same as typing `claude` there. So Claude reads that project's CLAUDE.md and settings.
-- Closing the window or quitting blimp only detaches. Sessions keep running on the server. A reboot of the server ends them. With user systemd and linger, blimpd starts again by itself after the reboot.
+- Closing the window or quitting blimp only detaches. Sessions keep running on the server. A reboot of the server ends them. With user systemd and linger, blimpd starts again by itself after the reboot. On a Mac server, it starts again when you log in at the Mac's desktop.
 - If you detach with `ctrl+\` (zmx's detach key), the terminal shows "Detached" and a **Reattach** button. If the connection drops, the terminal reconnects by itself.
 - **⌘K** searches all sessions on all servers, by title, folder and name. Pick one and blimp shows it in its folder's tab. If another window has that folder open, that window comes to the front; else the folder opens in a new tab here.
 - **Which session is on what.** blimp shows which git branch each Claude session works on. Hover a session to see its branch, and "(worktree)" when the folder is a git worktree. ⌘K shows the branch next to the folder.
@@ -414,9 +452,10 @@ SSH works, but the app cannot reach blimpd. Often the message ends with `channel
   - `systemctl --user status blimpd` shows if it runs, and its last log lines.
   - `journalctl --user -u blimpd -n 50` shows more of the log.
   - `systemctl --user restart blimpd` starts it again.
+  - On a Mac server: `launchctl print gui/$(id -u)/dev.blimp.blimpd` shows if it runs, `tail -n 50 ~/Library/Logs/blimpd.log` shows the end of its log, and `launchctl kickstart -k gui/$(id -u)/dev.blimp.blimpd` starts it again. If `launchctl` says it could not find the service, log in at the Mac's desktop, then run the installer again.
 - blimpd runs, but the SSH server does not allow forwarding to a unix socket. Run `sudo sshd -T | grep -i forwarding` on the server. If it shows `disableforwarding yes`, or `allowstreamlocalforwarding no` or `remote`, change that setting in `/etc/ssh/sshd_config` (or in a file in `/etc/ssh/sshd_config.d/`), then reload sshd. Without sudo, ask the server's admin.
 
-**No user systemd**
+**No user systemd (Linux)**
 The installer then prints this start command. It keeps blimpd running after you log out:
 `nohup "$HOME/.local/bin/blimpd" serve >"$HOME/blimpd.log" 2>&1 &`
 Do this again after each reboot. Without user systemd, `XDG_RUNTIME_DIR` is often not set, and zmx then keeps its sockets in `/tmp/zmx-<your uid>`. On a shared server, first add `export ZMX_DIR="$HOME/.zmx"` to your shell profile. blimpd and your terminal must use the same `ZMX_DIR` to see the same sessions.
@@ -426,10 +465,10 @@ blimpd checks the folder where zmx keeps its sockets, because another user who c
 - `blimpd: zmx's socket folder <folder> isn't a folder you own. Set ZMX_DIR to a private folder.`
 - `blimpd: zmx's socket folder <folder> is writable by others. Run: chmod 700 <folder>`
 
-Do what the message says. With systemd, set `ZMX_DIR` for the service: run `systemctl --user edit blimpd`, add the two lines `[Service]` and `Environment=ZMX_DIR=%h/.zmx`, then run `systemctl --user restart blimpd`. Set the same `ZMX_DIR` in your shell profile.
+Do what the message says. With systemd, set `ZMX_DIR` for the service: run `systemctl --user edit blimpd`, add the two lines `[Service]` and `Environment=ZMX_DIR=%h/.zmx`, then run `systemctl --user restart blimpd`. Set the same `ZMX_DIR` in your shell profile. On a Mac server, the folder is `~/.zmx`, and the agent's file sets `ZMX_DIR` already.
 
 **`~/.local/bin` is not on your PATH**
-The installer then prints a note. blimp still works: the service and the hooks use the full path. Only commands that you type need it. First log out and log in again. Many systems, Debian too, add `~/.local/bin` to the `PATH` by themselves once the folder exists. If it is still not on the `PATH`, use `~/.local/bin/blimpd`, or add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.
+The installer then prints a note. blimp still works: the service and the hooks use the full path. Only commands that you type need it. First log out and log in again. Many Linux systems, Debian too, add `~/.local/bin` to the `PATH` by themselves once the folder exists. macOS does not. If it is still not on the `PATH`, use `~/.local/bin/blimpd`, or add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.
 
 **A new session ends at once**
 blimp starts `claude` through your login shell. Check that your login shell finds it: `$SHELL -l -i -c 'command -v claude'`.
@@ -444,11 +483,12 @@ Apps opened from Finder get a short `PATH`. blimp adds `/opt/homebrew/bin` and `
 
 **Server.** Run these on the server, in this order.
 
-1. End the sessions that you want to end. Uninstalling does not stop them. `zmx list` shows them, and `zmx kill <name>` ends one. Do this before step 4, because step 4 can remove zmx.
+1. End the sessions that you want to end. Uninstalling does not stop them. `zmx list` shows them, and `zmx kill <name>` ends one. Do this before step 4, because step 4 can remove zmx. On a Mac, zmx finds them only with `ZMX_DIR` set (see [A Mac as the server](#a-mac-as-the-server)).
 2. Remove the Claude Code and Codex hooks: `~/.local/bin/blimpd uninstall-hooks`
-3. Stop the service: `systemctl --user disable --now blimpd`
+3. Stop the service: `systemctl --user disable --now blimpd`. On a Mac: `launchctl bootout gui/$(id -u)/dev.blimp.blimpd`
 4. Remove the files:
    - `rm ~/.config/systemd/user/blimpd.service && systemctl --user daemon-reload` (the folder is `$XDG_CONFIG_HOME/systemd/user` if you set `XDG_CONFIG_HOME`)
+   - On a Mac, in place of that: `rm ~/Library/LaunchAgents/dev.blimp.blimpd.plist ~/Library/Logs/blimpd.log`
    - `rm ~/.local/bin/blimpd`
    - `rm -r ~/.blimp` (the socket, the token, the hook status files in `status/`, and blimp's session names in `names.json`)
    - `rm ~/blimpd.log`, if you started blimpd yourself with `nohup`.
@@ -457,10 +497,11 @@ Apps opened from Finder get a short `PATH`. blimp adds `/opt/homebrew/bin` and `
      1. Run `~/.local/bin/zmx version`. The `log_dir` line shows where the logs are. Usually this is `~/.local/state/zmx/logs`. If you set `ZMX_DIR`, it is in that folder.
      2. `rm ~/.local/bin/zmx && rm -r ~/.local/state/zmx`
      3. If you set `ZMX_DIR` (for example to `~/.zmx`), also remove that folder, and the `export ZMX_DIR` line from your shell profile.
+     4. On a Mac, in place of steps 2 and 3: zmx's sockets and logs are both in `~/.zmx`, so `rm ~/.local/bin/zmx && rm -r ~/.zmx`. Also remove the `export ZMX_DIR` line from `~/.zshenv`, if you added it.
 5. Check `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`):
    - If `settings.json.blimp-backup` exists, it is your settings file from before the install. Check that `settings.json` is correct, then delete the backup.
    - If there is no backup, `settings.json` did not exist before the install. If it now holds only `{}`, you can delete it.
-6. If you turned linger on only for blimp, turn it off: `sudo loginctl disable-linger "$USER"`
+6. On Linux, if you turned linger on only for blimp, turn it off: `sudo loginctl disable-linger "$USER"`
 
 **Mac.**
 
@@ -489,7 +530,7 @@ install.sh      server setup
 
 - `bun install`
 - `bun test --parallel` (or `bun run test`) runs the blimpd tests in `test/`, a file per CPU core at once: about 1 minute, against 1.5 one at a time (CI runs them one at a time: on its 4 cores two timing-sensitive tests failed in parallel). They need zmx on your `PATH`. They start real zmx sessions named `blimptest-*` and kill them at the end.
-- `bun run build` builds `dist/blimpd-linux-x64` and `dist/blimpd-linux-arm64`.
+- `bun run build` builds `dist/blimpd-linux-x64`, `dist/blimpd-linux-arm64` and `dist/blimpd-darwin-arm64` (for a Mac with an Apple chip).
 - `bun src/main.ts sessions` runs blimpd from source. `install-hooks` works only from a built binary, because the hooks run that exact file.
 - `sh test/install-debian.sh` runs `install.sh` on a fresh Debian 13 in systemd-nspawn. It needs sudo, debootstrap and systemd-container. Run `bun run build` first.
 
@@ -518,7 +559,7 @@ install.sh      server setup
 1. Set the version: `sh scripts/version.sh 0.3.0`. This sets the same version in five places: `package.json`, `app/package.json`, `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml` and the iPhone app's `MARKETING_VERSION` in `ios/project.yml`. Then it refreshes `Cargo.lock`. With no version, it prints the current one, or lists all five if they differ. Commit the change.
 2. If the iPhone app changed since the last release, run its layout and gesture tests first (every other run has only the core ones): `gh workflow run iOS --ref main -f layout=true -f testflight=false`, and wait for it to pass.
    Then push a tag for that version: `git tag v0.3.0 && git push origin v0.3.0`.
-3. The release workflow stops if the tag is not `vX.Y.Z` or `vX.Y.Z-rc.N`, or if it does not match the version in the five places. Then it builds both blimpd binaries, `SHA256SUMS`, the Mac `.dmg`, and the app's update (`blimp.app.tar.gz`, its signature, and `latest.json`), and publishes them with `install.sh` as a GitHub release. Installed apps find it through `latest.json` and offer to update.
+3. The release workflow stops if the tag is not `vX.Y.Z` or `vX.Y.Z-rc.N`, or if it does not match the version in the five places. Then it builds the three blimpd binaries (two for Linux, one for a Mac with an Apple chip), `SHA256SUMS`, the Mac `.dmg`, and the app's update (`blimp.app.tar.gz`, its signature, and `latest.json`), and publishes them with `install.sh` as a GitHub release. Installed apps find it through `latest.json` and offer to update.
    A `v*` tag also runs the iOS workflow. It uploads the iPhone app to TestFlight once the App Store Connect secrets are set ([ios/README.md](ios/README.md#testflight)).
    Once it's published, update each server's blimpd: Update server in the Mac app, or `curl -fsSL https://github.com/mbeato/blimp/releases/download/v0.3.0/install.sh | sh` on the server. TestFlight updates the phone by itself, and what's new there can need the new blimpd (0.3.6's Hide said "Couldn't do that" on a 0.3.4 server). Until it's updated, the phone's top bar says the server runs an older blimp.
 4. A tag like `v0.3.0-rc.1` makes a prerelease. The installer and the app's update check both skip prereleases, so put out each version you want installed apps to get as a plain `vX.Y.Z`.

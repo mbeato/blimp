@@ -4,6 +4,7 @@
 // the terminals, isn't held up), and whether that process descends from a session's zmx daemon
 // (its parents, from /proc). Programs outside blimp's sessions (sshd, databases, blimpd) aren't
 // listed. Without `ss`, /proc is walked from the sessions down instead. Without /proc, none.
+// macOS has neither: there the sockets come from `lsof` and every process's parent from one `ps`.
 
 import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 
@@ -120,11 +121,79 @@ export function parseSs(out: string) {
   return list;
 }
 
-// The session whose zmx daemon `pid` descends from, by walking up its parents.
-function sessionOf(pid: number, daemons: Map<number, string>): string | null {
+// macOS's own tools, by full path: launchd's PATH is short, and another lsof may come first on
+// yours. A tool's output and exit code, or null if it can't run or isn't done in 3 s (lsof can wait
+// on a dead network mount, and the session list and the browser's gate wait on this).
+async function tool(cmd: string[]): Promise<{ out: string; code: number } | null> {
+  try {
+    const p = Bun.spawn(cmd, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 3000, killSignal: "SIGKILL" });
+    const out = await new Response(p.stdout).text();
+    const code = await p.exited;
+    return p.signalCode ? null : { out, code };
+  } catch {
+    return null;
+  }
+}
+
+// lsof's output. Its exit code isn't looked at: it's 1, with no output, when no socket matches.
+export const lsof = async (...args: string[]) => (await tool(["/usr/sbin/lsof", "-nP", ...args]))?.out ?? null;
+
+// `lsof -nP -iTCP -sTCP:LISTEN -F pctn`: one field a line. p starts a process (c: its command), f
+// one of its sockets (t: IPv4 or IPv6, n: address:port). Only your own processes are listed.
+export function parseLsofListen(out: string): ReturnType<typeof parseSs> {
+  const list: ReturnType<typeof parseSs> = [];
+  let pid = 0;
+  let command = "";
+  let type = "";
+  for (const line of out.split("\n")) {
+    const v = line.slice(1);
+    if (line[0] === "p") [pid, command] = [Number(v), ""];
+    else if (line[0] === "c") command = v;
+    else if (line[0] === "f") type = "";
+    else if (line[0] === "t") type = v;
+    else if (line[0] === "n") {
+      const i = v.lastIndexOf(":");
+      const addr = v.slice(0, i);
+      const port = Number(v.slice(i + 1));
+      // Any address is * for both families. An IPv6 one also takes IPv4 unless the program turned
+      // that off, which lsof doesn't say; ::1 reaches it either way.
+      const host = type === "IPv4" && ["127.0.0.1", "*"].includes(addr) ? "127.0.0.1" : type === "IPv6" && ["[::1]", "*"].includes(addr) ? "::1" : null;
+      if (!host || !port || !pid) continue;
+      let l = list.find((x) => x.port === port && x.host === host);
+      if (!l) list.push((l = { port, host, owners: [] }));
+      l.owners.push({ pid, command });
+    }
+  }
+  return list;
+}
+
+// `ps -axo pid=,ppid=`: every process's parent.
+export function parsePs(out: string): Map<number, number> {
+  const parents = new Map<number, number>();
+  for (const line of out.split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (pid) parents.set(pid, ppid || 0);
+  }
+  return parents;
+}
+
+// macOS: the listening sockets and every process's parent. null if lsof or ps can't run.
+async function fromLsof(): Promise<{ listeners: ReturnType<typeof parseSs>; parents: Map<number, number> } | null> {
+  const [sockets, ps] = await Promise.all([lsof("-iTCP", "-sTCP:LISTEN", "-F", "pctn"), tool(["/bin/ps", "-axo", "pid=,ppid="])]);
+  if (sockets === null || ps?.code !== 0) return null;
+  return { listeners: parseLsofListen(sockets), parents: parsePs(ps.out) };
+}
+
+// The session whose zmx daemon `pid` descends from, by walking up its parents: from `parents`
+// (macOS), else from /proc.
+function sessionOf(pid: number, daemons: Map<number, string>, parents?: Map<number, number>): string | null {
   for (let p = pid, hops = 0; p > 1 && hops < 64; hops++) {
     const name = daemons.get(p);
     if (name) return name;
+    if (parents) {
+      p = parents.get(p) ?? 0;
+      continue;
+    }
     const stat = read(`/proc/${p}/stat`);
     p = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
   }
@@ -135,14 +204,17 @@ function sessionOf(pid: number, daemons: Map<number, string>): string | null {
 export async function sessionPorts(sessions: { name: string; pid: number }[]): Promise<Port[]> {
   const live = sessions.filter((s) => s.pid > 0);
   if (!live.length) return [];
-  const ss = await fromSs();
+  // macOS: lsof and ps in place of ss and /proc. Without them, none.
+  const mac = process.platform === "darwin" ? await fromLsof() : undefined;
+  if (mac === null) return [];
+  const ss = mac ? mac.listeners : await fromSs();
   if (ss) {
     const daemons = new Map(live.map((s) => [s.pid, s.name]));
     const byPort = new Map<number, Port>();
     for (const x of ss) {
       if (byPort.get(x.port)?.host === "127.0.0.1") continue; // on IPv4 and IPv6: IPv4
       for (const o of x.owners) {
-        const session = sessionOf(o.pid, daemons);
+        const session = sessionOf(o.pid, daemons, mac?.parents);
         if (session) {
           byPort.set(x.port, { port: x.port, host: x.host, session, pid: o.pid, command: o.command });
           break;

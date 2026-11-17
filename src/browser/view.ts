@@ -23,6 +23,24 @@ const SELECTION = `(() => {
   return String(getSelection());
 })()`;
 
+// The Mac app sends its editing keys as a Linux Chrome wants them (Ctrl+A, Ctrl+Z, Ctrl+Left…). A Mac's
+// Chrome has no such keys, so there each one goes with the editing command it stands for.
+// Keyed by "<modifiers>:<key code>": 2 is Ctrl, 10 is Ctrl+Shift.
+const MAC_EDIT: Record<string, string> = {
+  "2:65": "selectAll",
+  "2:90": "undo",
+  "10:90": "redo",
+  "2:89": "redo",
+  "2:88": "cut",
+  "2:37": "moveWordLeft",
+  "10:37": "moveWordLeftAndModifySelection",
+  "2:39": "moveWordRight",
+  "10:39": "moveWordRightAndModifySelection",
+  "2:8": "deleteWordBackward",
+};
+export const macEdit = (modifiers: number, keyCode: number, platform: string = process.platform): string | undefined =>
+  platform === "darwin" ? MAC_EDIT[`${modifiers}:${keyCode}`] : undefined;
+
 // Whether what has focus takes typing, so a phone shows its keyboard.
 const EDITABLE = `(() => {
   const a = document.activeElement;
@@ -235,18 +253,23 @@ export async function openView(chrome: Chrome, attach: (targetId: string) => Pro
             deltaX: clamp(m.deltaX, -1e5, 1e5, 0),
             deltaY: clamp(m.deltaY, -1e5, 1e5, 0),
           });
-        case "key":
+        case "key": {
           if (!KEY.has(m.event)) return;
+          const keyCode = clamp(m.keyCode, 0, 255, 0);
+          const modifiers = clamp(m.modifiers, 0, 15, 0);
+          const command = m.event !== "keyUp" ? macEdit(modifiers, keyCode) : undefined;
           return void send(true, "Input.dispatchKeyEvent", {
             type: m.event,
             key: str(m.key),
             code: str(m.code),
-            windowsVirtualKeyCode: clamp(m.keyCode, 0, 255, 0),
-            nativeVirtualKeyCode: clamp(m.keyCode, 0, 255, 0),
+            windowsVirtualKeyCode: keyCode,
+            nativeVirtualKeyCode: keyCode,
             text: str(m.text),
             unmodifiedText: str(m.text),
-            modifiers: clamp(m.modifiers, 0, 15, 0),
+            modifiers,
+            ...(command && { commands: [command] }),
           });
+        }
         case "text":
           if (typeof m.text === "string" && m.text) send(true, "Input.insertText", { text: m.text });
           return;
