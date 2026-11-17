@@ -92,7 +92,7 @@ export class Switcher {
       // one from before blimpd started is a stale status file: neither asks for a switch. Nothing
       // switches over a change not yet filed (seconds old, or a /login waiting for its record), so the
       // copy put back later has the newest refresh token; the stops ask again next tick. Nor while blimp
-      // can't tell whose login is in place: no account to mark out, and a stop asks once that is known.
+      // can't tell whose login is in place: no account to mark out. A stop from this time doesn't switch later either: the next one does.
       const asks = (s: Stop) => this.asked.get(s.session) !== s.at && s.at > (state.switchedAt ?? 0) + QUIET_MS && s.at >= this.started;
       const asking = unfiled() || state.unknown ? [] : out.filter(asks);
       let switched: { from: string; to: string } | undefined;
