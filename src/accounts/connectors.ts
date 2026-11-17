@@ -6,7 +6,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkId, listSaved, write } from "./store";
+import { CONNECTORS_AFTER_SWITCH_MS, CONNECTORS_EVERY_MS, CONNECTORS_RETRY_MS, CONNECTORS_ZERO_AGAIN_MS } from "./rules";
+import { checkId, listSaved, liveMtime, readState, type Saved, type State, write } from "./store";
 
 export type Connector = { name: string; state: "ok" | "signin" | "down" };
 // at: when the reading was taken. told: the gap key last told for this account (gapKey).
@@ -84,4 +85,111 @@ export function gapOf(id: string, dir: string): Gap | undefined {
     .filter((a) => a.id !== id)
     .map((a) => readConnectors(a.id, dir)?.connectors ?? []);
   return gap(mine.connectors, others);
+}
+
+// What the phone is told: `No A, B.` for the missing ones, `C needs a sign-in.` for the others.
+const gapText = (g: Gap) =>
+  [g.missing.length && `No ${g.missing.join(", ")}.`, g.signin.length && `${g.signin.join(", ")} needs a sign-in.`].filter(Boolean).join(" ");
+
+// running: a reading is under way. until: a failed reading, or a first zero, asks to wait till then.
+export type Due = { state: State; saved: Saved[]; mtime: number | undefined; reading: Reading | undefined; running: boolean; until?: number };
+
+// Whether to ask now about the account in use. Only about a login blimp knows is that account's (filed,
+// not unknown) and one that has settled after a switch; then when its reading is missing, from before
+// the switch, or a day old. With one saved account there is nothing to compare.
+export function readingDue(d: Due, now: number): boolean {
+  const s = d.state;
+  if (d.saved.length < 2 || !s.active || !d.saved.some((a) => a.id === s.active)) return false;
+  if (s.unknown || d.mtime === undefined || d.mtime !== s.filed?.mtime) return false;
+  if (s.switchedAt !== undefined && now - s.switchedAt < CONNECTORS_AFTER_SWITCH_MS) return false;
+  if (d.running || (d.until !== undefined && now < d.until)) return false;
+  const r = d.reading;
+  return !r || (s.switchedAt !== undefined && r.at < s.switchedAt) || now - r.at > CONNECTORS_EVERY_MS;
+}
+
+export type ConnectorsDeps = {
+  dir: string; // the accounts folder
+  live: string; // the live login file
+  list: () => Promise<string | undefined>; // what `claude mcp list` printed; undefined: it failed
+  tell: (title: string, body: string) => Promise<void>;
+  log: (entry: Record<string, unknown>) => void; // one line of accounts/log.jsonl
+  now: () => number;
+};
+
+// Takes a reading of the account in use when one is due (readingDue), stores it and tells a new gap.
+// What only this process has seen stays in memory: a reading running, a wait asked for, a first zero.
+export class Connectors {
+  private running = false;
+  private until?: number;
+  private zero?: { id: string; at: number }; // a reading with no connector, not yet believed
+
+  constructor(private deps: ConnectorsDeps) {}
+
+  // Called after each tick of the account loop. Never throws.
+  async tick(): Promise<void> {
+    if (this.running) return;
+    const { dir, live } = this.deps;
+    const at = this.deps.now();
+    const state = readState(dir);
+    const saved = listSaved(dir, state);
+    const id = state.active;
+    const reading = id && saved.some((a) => a.id === id) ? readConnectors(id, dir) : undefined;
+    if (!readingDue({ state, saved, mtime: liveMtime(live), reading, running: this.running, until: this.until }, at)) return;
+    this.running = true;
+    try {
+      await this.take(id!, at);
+    } catch (e) {
+      this.failed(id!, (e as Error)?.message ?? String(e));
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private failed(id: string, error?: string) {
+    this.until = this.deps.now() + CONNECTORS_RETRY_MS;
+    this.deps.log({ event: "connectors-failed", account: id, ...(error && { error }) });
+  }
+
+  private async take(id: string, at: number) {
+    const { dir, live } = this.deps;
+    const text = await this.deps.list();
+    // The account may have changed while the command ran: then the reading may be of either one.
+    const after = readState(dir);
+    const m = liveMtime(live);
+    if (after.active !== id || after.unknown || m === undefined || m !== after.filed?.mtime) return;
+    if (text === undefined || !text.includes("Checking MCP server health")) return this.failed(id);
+    this.until = undefined;
+    const connectors = parseMcpList(text);
+    // claude.ai not answering might print no connector at all, so a zero is believed only when
+    // another one at least a minute later, and within ten, says the same.
+    if (!connectors.length) {
+      const z = this.zero;
+      if (!z || z.id !== id || at - z.at < CONNECTORS_ZERO_AGAIN_MS || at - z.at > CONNECTORS_RETRY_MS) {
+        this.zero = { id, at };
+        this.until = this.deps.now() + CONNECTORS_ZERO_AGAIN_MS;
+        return;
+      }
+    }
+    this.zero = undefined;
+    const r: Reading = { at, connectors, told: readConnectors(id, dir)?.told ?? [] };
+    writeConnectors(id, r, dir);
+
+    // A gap is told once: the same one again says nothing, an empty one clears what was told.
+    const g = gapOf(id, dir)!;
+    const key = gapKey(g);
+    if (!key.length) {
+      if (r.told.length) writeConnectors(id, { ...r, told: [] }, dir);
+      return;
+    }
+    if (key.length === r.told.length && key.every((k, i) => k === r.told[i])) return;
+    const who = listSaved(dir).find((a) => a.id === id);
+    let error: string | undefined;
+    try {
+      await this.deps.tell(`${who?.email || id} is missing connectors`, `${gapText(g)} Add them at claude.ai/customize/connectors.`);
+      writeConnectors(id, { ...r, told: key }, dir);
+    } catch (e) {
+      error = (e as Error)?.message ?? String(e); // told stays, so the next reading tries again
+    }
+    this.deps.log({ event: "connector-gap", account: id, missing: g.missing, signin: g.signin, ...(error && { error }) });
+  }
 }
