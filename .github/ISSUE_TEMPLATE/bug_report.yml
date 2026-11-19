@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in blimp does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Look at [Troubleshooting](https://github.com/mbeato/blimp#troubleshooting) first. It covers the common problems with SSH, systemd and zmx.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened. If blimp showed an error, copy its text.
+    validations:
+      required: true
+  - type: dropdown
+    id: part
+    attributes:
+      label: Where
+      options:
+        - The Mac app
+        - blimpd (the server part)
+        - The installer
+        - The iPhone app
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: "In the app: blimp > About blimp."
+      placeholder: "0.3.17"
+  - type: input
+    id: blimpd-version
+    attributes:
+      label: blimpd version
+      description: "On the server: ~/.local/bin/blimpd --version"
+      placeholder: "0.3.17"
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 15.5"
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      description: The server's system and CPU.
+      placeholder: "Debian 13 on x86_64"
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, or the output of `systemctl --user status blimpd`. Remove anything private first.
