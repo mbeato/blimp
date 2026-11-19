@@ -22,6 +22,7 @@
 //   blimpd answer <session> <n>      pick option n of what a session asks (act.ts)
 //   blimpd accounts            the saved Claude logins: which is in use, which is out (accounts/cli.ts)
 //   blimpd account use|forget <email>  put a saved login in place now, or remove one (accounts/cli.ts)
+//   blimpd usage-scan          counts new token usage into the usage database; blimpd runs it (usage/scan.ts)
 //   blimpd --version
 
 import pkg from "../package.json";
@@ -41,6 +42,7 @@ import { runRedditKey } from "./feed/reddit";
 import { runSend } from "./send";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
+import { runUsageScan } from "./usage/scan";
 import { runVisualsMcp } from "./visuals/mcp";
 import { withWorkNow } from "./work";
 
@@ -123,6 +125,8 @@ if (cmd === "sessions") {
   process.exit(runAccounts());
 } else if (cmd === "account") {
   process.exit(await runAccount(args));
+} else if (cmd === "usage-scan") {
+  process.exit(runUsageScan());
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
