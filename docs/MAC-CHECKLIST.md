@@ -290,6 +290,42 @@ The page describes the menu and Rust draws it, so none of this runs in the Linux
   Do: get two sessions to wait for you at the same time. Then answer one, then the other.
   Expect: the Dock icon shows 2, then 1, then no badge.
 
+## Usage
+
+These need a server whose blimpd counts usage, with `blimpd install-statusline` run there, and a Claude session that has replied since.
+
+- [ ] **The bottom bar.**
+  Do: look at the bottom of the window. Run `blimpd usage` on the server and compare.
+  Expect: a thin bar under the files, the terminal and the sessions, full width, in both the light and the dark theme. It shows the account in use (its email before `@`), `5h` and `week` with a meter and a percent each, `Codex` with its meter if you use Codex, and `today $N`. The numbers match `blimpd usage`. The terminal's last line is not hidden behind it. A toast and the transfers list sit just above it.
+
+- [ ] **Red over 80%.**
+  Do: wait until a limit is over 80% (or note it when it happens).
+  Expect: that meter's fill and its percent turn red, the same red as a session row's context bar. At exactly 80% it is not red yet.
+
+- [ ] **Hover and click.**
+  Do: hover the bar. Then click it. Close the window with Esc, then click a row in the session list and press Tab until the bar has the focus ring, and press Space.
+  Expect: the tooltip says each limit's reset ("resets in 1 h 40 min"), how old the numbers are and today's tokens, one per line. A click anywhere on the items opens the Usage window. The bar is one tab stop, and Space opens the window too (write down if Tab never reaches it).
+
+- [ ] **The bar follows the tab in front.**
+  Do: with two servers saved, switch between tabs on each. On the server, run `blimpd account use <another email>`, then wait a minute or click into the window.
+  Expect: the bar shows the numbers of the server of the tab in front. After the switch it names the new account; its meters show its last numbers, or none until it has replied.
+
+- [ ] **The Usage window.**
+  Do: choose Server > Usage…. Click Today, 7 days, 30 days and All, then By account and By model. Hover a part of a bar.
+  Expect: the window says "Usage" and the server's name, then a line per account with its meters and "in use" or how old the numbers are, and a line for Codex. 30 days is pressed first. Each range changes the four numbers (cost "at API prices", tokens, replies, from cache), the bars and the tables. The bars change colour by account or by model, with a legend under them; a part's tooltip reads like `Nov 19 · claude-opus-5-5 · $12.35`. The colours are easy to tell apart in both themes. The window scrolls inside, and no number is cut off at 30 days or All.
+
+- [ ] **The tables.**
+  Do: scroll to By account, By model and By project.
+  Expect: numbers line up on the right. Model names are as the vendor writes them (`claude-haiku-4-5-20251001`, `GLM-5.3`). A model with no price (GLM, Morph, `gpt-6-luna`) says "no price" in Cost, and a line under the table names them and says to add them to `~/.blimp/prices.json`. Accounts show their email; replies from before account tracking show as "Before account tracking". The last project row is "Everything else" when there are more than 20. Hover a project: its full path shows.
+
+- [ ] **Counting.**
+  Do: on a server where blimpd has never counted, update blimpd (or stop it, move `~/.blimp/usage` aside, and start it). Open the Usage window within a minute.
+  Expect: "Counting your history…". Within a few minutes it fills in by itself, with no click. Put the folder back afterwards if you moved it.
+
+- [ ] **An older blimpd.**
+  Do: connect to a server whose blimpd is older than this feature.
+  Expect: the bottom bar is there but empty, and no toast or error shows. Server > Usage… says blimpd there is too old to count usage and to update it.
+
 ## Connection
 
 - [ ] **Reconnect after sleep.**

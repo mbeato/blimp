@@ -1,6 +1,6 @@
 # Usage
 
-Date: 2026-11-19. Not built yet. Asked by Max: see token usage, stats and cost across every account logged in on the server and every model, as contextscope does for one account. He picked: history and limits; limits only have to be live for the account in use; a thin bar under the terminal that shows usage passively and opens the full view on a click.
+Built 2026-11-19. Asked by Max: see token usage, stats and cost across every account logged in on the server and every model, as contextscope does for one account. He picked: history and limits; limits only have to be live for the account in use; a thin bar under the terminal that shows usage passively and opens the full view on a click.
 
 Ground rule: blimp only reads what Claude Code and Codex already write. The one change it makes to anyone's settings is the status line step, which is a command the user runs and can undo.
 
@@ -14,7 +14,7 @@ Ground rule: blimp only reads what Claude Code and Codex already write. The one 
 - **Models seen:** `claude-opus-5-5`, `claude-fable-5-2`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`, `claude-fable-5-1`, `claude-opus-4-8`, `GLM-5.3`, `GLM-5.3-Flash`, `morph-dsv41flash`, `morph-dsv41flash-abliterated`, `morph-kimik31`. 64% of replies are a helper agent's. No reply used fast mode.
 - **A transcript does not say whose account paid.** Claude Code's `session-owner` line names an account, but only 1 reply in 9 has one before it, and after a swap by blimp it names the old account. It is not used. blimp's own log (`accounts/log.jsonl`, since 2026-11-16) says which account was in use when.
 - **One Claude folder.** `~/.claude2` has had no login since October and shares the same `projects` folder.
-- **Codex writes each turn's usage.** A session file (`<codex home>/sessions/**/*.jsonl`) has `turn_context` lines with `model` (`gpt-6-astra`, `gpt-5.6-terra`) and `event_msg` lines with `payload.type: "token_count"`: `info.total_token_usage` (`input_tokens`, `cached_input_tokens`, `output_tokens`; it only grows; cached is part of input, reasoning is part of output) and `rate_limits.primary` (`used_percent`, `window_minutes`, `resets_at` in seconds) with `plan_type`. 284 files.
+- **Codex writes each turn's usage.** A session file (`<codex home>/sessions/**/*.jsonl`) has `turn_context` lines with `model` (`gpt-6-astra`, `gpt-5.6-terra`, `gpt-6-luna`) and `event_msg` lines with `payload.type: "token_count"`: `info.total_token_usage` (`input_tokens`, `cached_input_tokens`, `output_tokens`; it only grows; cached is part of input, reasoning is part of output) and `rate_limits.primary` (`used_percent`, `window_minutes`, `resets_at` in seconds) with `plan_type`. 284 files.
 - **Claude's limit numbers reach only the status line.** Its command gets JSON on stdin with `rate_limits.five_hour` and `rate_limits.seven_day`, each `{ used_percentage (0 to 100), resets_at (seconds) }`, plus `session_id` and `transcript_path`. They are there only for a subscription login, only after the session's first reply, and a window goes once its reset time passes (statusline docs, read 2026-11-19). No hook, file or command gives them. The status line here is already taken: `node …/gsd-statusline.js`.
 - **`bun:sqlite` is in Bun** (SQLite 3.53.4), so a database adds no dependency.
 
@@ -30,7 +30,8 @@ Ground rule: blimp only reads what Claude Code and Codex already write. The one 
   - A model that does not start with `claude-` is not on a Claude account: account `other`. Codex: account `codex`.
   - With an accounts log: the account in use at the reply's time, from the log's `switch` (`to`), `login`, `adopted` and `renewal` (`account`) lines, read from `log.1.jsonl` and `log.jsonl`. An `unknown` line means nobody until the next of those. A reply from before the log's first line has no account, shown as "Before account tracking".
   - With no accounts log (switching was never on, or a Mac): the account `.claude.json` names when the scan runs.
-- **When.** 30 seconds after blimpd starts, then every 10 minutes, and when `GET /usage` is asked and the last scan ended over a minute ago. One at a time. It is a child process, so a long first scan does not hold up blimpd.
+- **When.** 30 seconds after blimpd starts, then every 10 minutes, and when `GET /usage` is asked and the last scan ended over a minute ago. One at a time. It is a child process, so a long first scan does not hold up blimpd. What a failed scan says goes to blimpd's own log (`src/usage/service.ts`).
+- **How long.** On claude1 the first full scan took 189 seconds and counted 225,779 Claude replies. A second scan took 1.4 seconds.
 - **Codex's limit.** The newest `token_count` line's `rate_limits` and `plan_type` are kept in the database as they are.
 
 ## Cost
@@ -53,7 +54,8 @@ Ground rule: blimp only reads what Claude Code and Codex already write. The one 
 | gpt-5.6-terra | 2 | 12 | 0.20 | | |
 
 - Fast mode is twice the model's prices (Fable 5.2, Opus 5.5, Opus 5, Opus 4.8; the page's fast rows are each exactly double, and caching multiplies on top).
-- GLM and Morph have no price here: Z.ai's page could not be read exactly, and Morph's are Max's own. `<socket dir>/prices.json` adds or replaces prices: `{ "GLM-5.3": { "input": 1.4, "output": 4.4, "cacheRead": 0.26 } }` (missing write prices count as the input price). A file that is there but wrong is ignored as a whole, with a note saying why, as with `kinds.json`.
+- GLM and Morph have no price here: Z.ai's page could not be read exactly, and Morph's are Max's own. Codex's `gpt-6-luna` is in the real data and has no price here either. `<socket dir>/prices.json` adds or replaces prices: `{ "GLM-5.3": { "input": 1.4, "output": 4.4, "cacheRead": 0.26 } }` (missing write prices count as the input price). A file that is there but wrong is ignored as a whole, with a note saying why, as with `kinds.json`.
+- A `prices.json` entry is matched by the id as written first, then by the shortened id (no date ending, no `[1m]`), then the table is (`entryFor` in `src/usage/prices.ts`).
 - A model with no price is counted in tokens, adds nothing to cost, and is named in `unpriced`.
 - Cost is worked out when asked, so a corrected price corrects history.
 - The cost is what the tokens would cost at API prices. Max pays subscriptions, so every place that shows it says "at API prices".
@@ -62,30 +64,31 @@ Ground rule: blimp only reads what Claude Code and Codex already write. The one 
 ## Limits
 
 - **`blimpd statusline`** is a status line command that stands in front of the user's own. It reads stdin, saves the limit numbers, then runs the user's own command with the same stdin and prints what that prints. Whatever goes wrong in blimp's part, the user's command still runs. With no command of the user's it prints nothing.
-- **Saving.** Only when `rate_limits` is there. To `<socket dir>/usage/limits/<account>.json`, through a temp file and a rename: `{ at, fiveHour: { used, resetsAt }, sevenDay: { used, resetsAt } }`. The account is `accounts/state.json`'s `active`, or `one` when there is none (the server names it from `.claude.json` when asked). After a swap, a session that has not replied since still carries the old account's numbers, so nothing is saved when the session's transcript (`transcript_path`) was last written before `switchedAt`.
-- **`blimpd install-statusline`** keeps the `statusLine` object now in Claude's `settings.json` in `<socket dir>/usage/statusline.json`, then sets its `command` to this blimpd's `statusline` (other keys, such as `padding`, stay). Run again, it changes nothing. `settings.json` is written as `install-hooks` writes it (its symlink followed, a backup kept once). **`blimpd uninstall-statusline`** puts the kept object back, or removes `statusLine` when there was none.
+- **Saving.** Only when `rate_limits` is there. To `<socket dir>/usage/limits/<account>.json`, through a temp file and a rename: `{ at, fiveHour: { used, resetsAt }, sevenDay: { used, resetsAt } }`. The account is `accounts/state.json`'s `active`, or `one` when there is none (the server names it from `.claude.json` when asked). After a swap, a session that has not replied since still carries the old account's numbers, so nothing is saved when the session's transcript (`transcript_path`) was last written before `switchedAt`. Nothing is saved either while logins are saved but blimp can't tell which one is in place (no `active`): the numbers would be nobody's (`saveLimits` in `src/usage/statusline.ts`).
+- **`blimpd install-statusline`** runs only from the built blimpd binary, since the status line runs that exact binary, as the hooks do. It keeps the `statusLine` object now in Claude's `settings.json` in `<socket dir>/usage/statusline.json`, then sets its `command` to this blimpd's `statusline` (other keys, such as `padding`, stay). Run again, it changes nothing. `settings.json` is written as `install-hooks` writes it (its symlink followed, a backup kept once). **`blimpd uninstall-statusline`** puts the kept object back, or removes `statusLine` when there was none.
 - If another tool sets the status line again later, blimp's numbers stop coming. Every number shows its age, and `blimpd usage` says when the step is not in place.
 - **What is shown.** The account in use: its numbers. Any other saved account: its last numbers with their age. A window whose reset time has passed shows as reset, not as its old number.
 - Codex's limit needs none of this (Counting).
 
 ## API
 
-- `GET /usage?days=<1 to 3660>&tz=<minutes east of UTC>`: the days are local days by `tz`, today included. `{ scanning, firstDay, totals, days: [{ day, byAccount, byModel }], accounts, models, projects, unpriced }`. `totals` and each entry of `accounts`, `models` and `projects` are `{ replies, input, output, cacheRead, cacheWrite, cost, helperCost }`; an account also has `id` and `email`, a model `model` and `priced`, a project `project`. `projects` is the 20 with the most cost, then one "Everything else". `byAccount` and `byModel` are cost by id. Before the first scan has ended, `scanning` is true and the rest is empty.
+- `GET /usage?days=<1 to 3660>&tz=<minutes east of UTC>`: the days are local days by `tz`, today included. `{ scanning, firstDay, totals, days: [{ day, byAccount, byModel }], accounts, models, projects, unpriced }`. `totals` and each entry of `accounts`, `models` and `projects` are `{ replies, input, output, cacheRead, cacheWrite, cost, helperCost }`; an account also has `id` and `email`, a model `model` and `priced`, a project `project`. `projects` is the 20 with the most cost, then one "Everything else". `byAccount` and `byModel` are cost by id. Before the first scan has ended, `scanning` is true and the rest is empty. A read-only open of the database finds nothing until the first scan has made its tables, so it answers "still counting" too (`openUsage` in `src/usage/db.ts`).
 - `GET /usage/now?tz=`: `{ accounts: [{ id, email, inUse, at, fiveHour, sevenDay }], codex: { at, plan, windows: [{ minutes, used, resetsAt }] }, today: { cost, tokens }, statusline }`. A window is `{ used, resetsAt, reset }`. `statusline` says whether the step is in place. It reads small files and one day of rows.
 - `blimpd usage [--days N]` asks the running blimpd and prints the same: limits, then totals, then by account, by model and by project.
 - No route returns a token, and none of this reads a login.
 
 ## The apps
 
-- **Bottom bar** (`components/StatusBar.tsx`). A strip one text line high along the bottom of the window, full width, for the server of the tab in front. Items left to right: the account in use (the part of its email before `@`), `5h` and `week` meters with their percent, `Codex` and its meter when Codex has a limit, and "today $N". A meter is red over 80%, as a session row's context bar. Hovering an item says when it resets and how old the number is. A click anywhere on the usage items opens the Usage window. It asks `/usage/now` when shown and every 60 seconds. An older blimpd (404) shows an empty bar. With the status line step not in place, the Claude meters are left out. The bar is a row of items, so later ones (a branch, ports) go in without a new layout.
+- **Bottom bar** (`components/StatusBar.tsx`). A strip one text line high along the bottom of the window, full width, for the server of the tab in front. Items left to right: the account in use (the part of its email before `@`), `5h` and `week` meters with their percent, `Codex` and its meter when Codex has a limit, and "today $N". A meter is red over 80%, as a session row's context bar. Hovering the bar says when each window resets and how old the numbers are (one tooltip: the items are one button). A click anywhere on the usage items opens the Usage window. It asks `/usage/now` when shown, when the window gets focus, and every 60 seconds while the window is visible. An older blimpd (404), or any other error, shows an empty bar. With the status line step not in place, or no numbers for the account in use, the Claude meters are left out. The bar is a row of items, so later ones (a branch, ports) go in without a new layout. The toast and the transfers list sit 22 px higher, above it.
 - **Usage window** (`components/UsageDialog.tsx`; Server menu, "Usage…"; also a click on the bar). For the server of the tab in front.
-  - Limits: one line per account and one for Codex, with the meters, reset times, "in use" or the numbers' age.
+  - Limits: one line per account and one for Codex, with the meters, reset times, "in use" or the numbers' age. An account's last numbers show also while the status line step is not in place, with a line saying how to put it back.
   - Range: Today, 7 days, 30 days, All.
   - Four numbers: cost (at API prices), tokens, replies, the share of input that came from cache.
-  - Cost per day as bars, coloured by account or by model (a switch). Drawn by hand: the app has no chart library and this does not need one.
+  - Cost per day as bars, coloured by account or by model (a switch). Drawn by hand: the app has no chart library and this does not need one. The 5 with the most cost get a colour each, the rest one grey. Over 90 days, a bar is 7 days.
   - Tables by account, by model and by project: input, output, cached, cost, share of cost. A model with no price says "no price".
   - While the first scan runs: "Counting your history…".
-- `lib/usage.ts`: the types and the wording (1.2M, $12.34, "resets in 1 h 40 min", a meter's level), unit tested.
+  - An older blimpd (404): the window says it is too old to count usage and to update it.
+- `lib/usage.ts`: the types and the wording (1.2M, $12.34, "resets in 1 h 40 min", a meter's level), and the bars' grouping by day or week (`chart`), unit tested.
 - The iPhone app: not in this version.
 
 ## Not in this version
