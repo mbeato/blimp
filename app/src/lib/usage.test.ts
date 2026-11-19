@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Job, Session } from "./api";
-import { accountName, axis, barInfo, busiest, cacheShare, change, chart, dayLabel, high, modelName, money, projectParts, resetsIn, share, tokens, windowLabel, type Sum, type UsageView } from "./usage";
+import { accountName, amount, axis, barInfo, busiest, cacheShare, change, chart, dayLabel, high, measured, modelName, money, projectParts, resetsIn, share, tokens, windowLabel, type Sum, type UsageView } from "./usage";
 
 const sum = (s: Partial<Sum> = {}): Sum => ({ replies: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, helperCost: 0, ...s });
 
@@ -196,6 +196,30 @@ test("busiest: the day with the most cost; none when nothing cost anything", () 
   expect(busiest(days)).toEqual({ day: "2026-11-16", cost: 2529 });
   expect(busiest([{ day: "2026-11-17", byModel: {} }])).toBeUndefined();
   expect(busiest([])).toBeUndefined();
+});
+
+test("amount: cost, or all tokens (input, output, cache read and write)", () => {
+  const s = sum({ input: 1, output: 20, cacheRead: 300, cacheWrite: 4000, cost: 2.5, helperCost: 1 });
+  expect(amount(s, "cost")).toBe(2.5);
+  expect(amount(s, "tokens")).toBe(4321);
+});
+
+test("measured: cost keeps the cost maps; tokens takes the token maps, none from an older blimpd", () => {
+  const rows = [
+    { day: "2026-11-18", byAccount: { A: 2 }, byModel: { m: 2 }, tokensByAccount: { A: 900 }, tokensByModel: { m: 500, glm: 400 } },
+    { day: "2026-11-19", byAccount: { A: 5 }, byModel: { m: 5 } },
+  ];
+  expect(measured(rows, "cost").map((r) => [r.day, r.byAccount, r.byModel])).toEqual([
+    ["2026-11-18", { A: 2 }, { m: 2 }],
+    ["2026-11-19", { A: 5 }, { m: 5 }],
+  ]);
+  expect(measured(rows, "tokens")).toEqual([
+    { day: "2026-11-18", byAccount: { A: 900 }, byModel: { m: 500, glm: 400 } },
+    { day: "2026-11-19", byAccount: {}, byModel: {} },
+  ]);
+  // chart() and busiest() take them as they are.
+  expect(busiest(measured(rows, "tokens"))).toEqual({ day: "2026-11-18", cost: 900 });
+  expect(chart(measured(rows, "tokens"), "model", ["m", "glm"]).bars[0]).toMatchObject({ costs: [500, 400], total: 900 });
 });
 
 const sess = (o: Partial<Session> & { name: string }): Session => ({ kind: "claude", pid: 1, clients: 0, created: 0, dir: "/r/app", cmd: "", title: o.name, status: "", state: "done", ...o });
