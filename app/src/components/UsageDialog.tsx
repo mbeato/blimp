@@ -4,7 +4,7 @@ import { errorText, type ServerLink } from "../lib/connection";
 import { relTime } from "../lib/time";
 import { accountName, cacheShare, chart, dayLabel, money, projectName, resetsIn, share, tokens, windowLabel, type NowView, type Sum, type UsageView, type Window } from "../lib/usage";
 import { Dialog } from "./Dialog";
-import { Meter, tzNow } from "./StatusBar";
+import { Meter, shown, tzNow } from "./StatusBar";
 
 const RANGES = [
   { days: 1, label: "Today" },
@@ -137,7 +137,7 @@ function Limits(props: { now: NowView }) {
       w ? (
         <span key={label} className="usage-window">
           {label}
-          <Meter w={w} />
+          <Meter used={shown(w)} />
           <span className="usage-window-num">{w.reset ? 0 : Math.round(w.used)}%</span>
           <span className="usage-window-reset">{resetsIn(w.resetsAt, at)}</span>
         </span>

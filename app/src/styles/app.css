@@ -2509,7 +2509,7 @@ body.dragging-session * {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 42px; /* over the bottom bar (22 px) */
+  bottom: 44px; /* over the bottom bar (24 px) */
   transform: translateX(-50%);
   z-index: 20;
   max-width: min(560px, calc(100% - 32px));
@@ -2535,7 +2535,7 @@ body.dragging-session * {
 .transfers {
   position: fixed;
   left: 8px;
-  bottom: 30px; /* over the bottom bar (22 px) */
+  bottom: 32px; /* over the bottom bar (24 px) */
   z-index: 15;
   width: 224px;
   max-height: 50vh;
@@ -3015,42 +3015,138 @@ body.dragging-session * {
 
 /* ---- bottom bar (components/StatusBar.tsx) ---- */
 
-/* Under every workbench, one text line high: the workbench above keeps the rest (.wb is flex: 1). A row of items,
-   so later ones go in without a new layout. Empty, it keeps its height, so nothing moves when numbers arrive. */
+/* Under every workbench, 24 px: the workbench above keeps the rest (.wb is flex: 1). Left, where you are; right, usage.
+   A row of items, so later ones go in without a new layout. Nothing in it wraps or scrolls: when the window is narrow,
+   the left group's items shrink and cut their text first, and the usage group stays whole. Empty, it keeps its height,
+   so nothing moves when numbers arrive. */
 .statusbar {
   flex: none;
   display: flex;
   align-items: stretch;
-  height: 22px;
-  padding: 0 4px;
+  height: 24px;
   background: var(--bg-side);
   border-top: 1px solid var(--line);
   font-size: 11px;
+  line-height: 1;
   color: var(--fg-dim);
-}
-
-.statusbar-usage {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 6px;
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
 }
 
-.statusbar-usage:hover {
-  color: var(--fg);
-  background: var(--hover);
+.sb-left {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.statusbar-item {
+.sb-item {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 9px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-left > .sb-item {
+  overflow: hidden;
+}
+
+.sb-item > svg,
+.sb-item > .srv-dot,
+.sb-item .meter {
+  flex: none;
+}
+
+button.sb-item:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button.sb-item {
+    transition: background-color 0.12s, color 0.12s;
+  }
+}
+
+/* An item's words, cut with an ellipsis at its own width. */
+.sb-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sb-server {
+  max-width: 160px;
+}
+
+.sb-branch {
+  max-width: 200px;
+}
+
+.sb-label {
+  max-width: 120px;
+}
+
+.sb-pr {
+  flex: none;
+  color: var(--fg-faint);
+}
+
+button.sb-item:hover .sb-pr {
+  color: inherit;
+}
+
+/* The one amber thing in the bar: it is what amber means. */
+.sb-waiting {
+  color: var(--waiting);
+}
+
+.sb-item > span + .sb-waiting {
+  margin-left: 4px;
+}
+
+.sb-ctx .meter {
+  width: 28px;
+}
+
+/* Usage: a hairline from the left group; the account in full ink, labels faint, numbers dim, today's cost last. */
+.sb-usage {
+  flex: none;
+  margin-left: auto;
+  gap: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.sb-group {
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 
-/* A limit's meter: a track and its fill, red over 80% as a session row's context bar (.ctx-meter.high). */
+.sb-account,
+.sb-amount {
+  color: var(--fg);
+}
+
+.sb-label-faint {
+  color: var(--fg-faint);
+}
+
+.sb-num {
+  color: var(--fg-dim);
+}
+
+.sb-usage .meter {
+  width: 32px;
+}
+
+/* A meter: a track and its fill, fully rounded, red over 80% as a session row's context bar (.ctx-meter.high). */
 .meter {
   flex: none;
   position: relative;
@@ -3064,6 +3160,7 @@ body.dragging-session * {
 .meter-fill {
   position: absolute;
   inset: 0 auto 0 0;
+  border-radius: inherit;
   background: var(--fg-dim);
 }
 
@@ -3071,6 +3168,7 @@ body.dragging-session * {
   background: var(--danger);
 }
 
+.sb-num.meter-high,
 .meter-high {
   color: var(--danger);
 }

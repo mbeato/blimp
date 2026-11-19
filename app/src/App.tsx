@@ -891,8 +891,8 @@ export function App() {
           />
         );
       })}
-      {/* Under every workbench: the front tab's server's limits and today's cost. */}
-      <StatusBar link={link} onOpen={() => setDialog("usage")} />
+      {/* Under every workbench: where the front tab is (its server, branch, sessions, jobs), then its server's limits and today's cost. */}
+      <StatusBar link={link} folder={root} focused={front?.panes[front.focus]} onOpen={() => setDialog("usage")} onJump={() => setDialog("palette")} />
 
       {dialog === "palette" && <Palette links={linkList} onPick={(l, name) => void pickSession(l, name)} onClose={() => setDialog(null)} />}
       {dialog === "open" && connected.length > 0 && (
