@@ -69,6 +69,9 @@ test("totals and cost for two models, by account, model and project, most cost f
   expect(v.unpriced).toEqual([]);
   expect(v.days.at(-1)!.byModel["claude-opus-5-5"]).toBeCloseTo(37.2, 9);
   expect(v.days.at(-1)!.byAccount.B).toBeCloseTo(28.05, 9);
+  // Tokens by the same ids: input, output, cache read and both cache writes.
+  expect(v.days.at(-1)!.tokensByModel).toEqual({ "claude-opus-5-5": 5 * M, "claude-sonnet-4-6": 5 * M });
+  expect(v.days.at(-1)!.tokensByAccount).toEqual({ A: 5 * M, B: 5 * M });
 });
 
 test("a model with no price counts its tokens, adds no cost, and is named in unpriced", () => {
@@ -84,6 +87,10 @@ test("a model with no price counts its tokens, adds no cost, and is named in unp
   // No cost either way: the one with more tokens comes first.
   expect(v.models[0].model).toBe("claude-opus-5-5");
   expect(v.totals.input).toBe(501);
+  // Its tokens are in the day's token maps; its cost is 0.
+  expect(v.days.at(-1)!.tokensByModel).toEqual({ "GLM-5.3": 510, "claude-opus-5-5": 1 });
+  expect(v.days.at(-1)!.tokensByAccount).toEqual({ other: 510, A: 1 });
+  expect(v.days.at(-1)!.byModel["GLM-5.3"]).toBe(0);
   // A price from prices.json prices it.
   const priced = summarize(db, opts({ prices: { extra: { "GLM-5.3": { input: 1, output: 1, cacheRead: 1, write5m: 1, write1h: 1 } } } }));
   expect(priced.unpriced).toEqual([]);
@@ -111,7 +118,7 @@ test("days has every day of the range, the empty ones too, and never starts befo
   ]);
   const v = summarize(db, opts({ days: 7 }));
   expect(v.days.map((d) => d.day)).toEqual(["2026-11-13", "2026-11-14", "2026-11-15", "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19"]);
-  expect(v.days[2]).toEqual({ day: "2026-11-15", byAccount: {}, byModel: {} });
+  expect(v.days[2]).toEqual({ day: "2026-11-15", byAccount: {}, byModel: {}, tokensByAccount: {}, tokensByModel: {} });
   expect(v.totals.replies).toBe(2);
   expect(v.firstDay).toBe("2026-10-10");
   const recent = summarize(filled([{ at: NOW - 3 * 86_400_000, input: M }]), opts({ days: 30 }));
@@ -214,7 +221,7 @@ test("previous: the totals of the same number of days just before the range; lef
   expect(summarize(filled([]), opts({ days: 7 })).previous).toBeUndefined();
 });
 
-test("hours: only for today, 24 local hours with cost by account and model; a 23:30 UTC row is hour 0 at tz 60", () => {
+test("hours: only for today, 24 local hours with cost and tokens by account and model; a 23:30 UTC row is hour 0 at tz 60", () => {
   const db = filled([
     { at: Date.UTC(2026, 10, 18, 23, 30), input: M }, // 00:30 on the 19th at tz 60
     { at: Date.UTC(2026, 10, 19, 9, 10), input: M, account: "B", model: "claude-sonnet-4-6" },
@@ -222,10 +229,12 @@ test("hours: only for today, 24 local hours with cost by account and model; a 23
   ]);
   const utc = summarize(db, opts({ days: 1 }));
   expect(utc.hours!.map((h) => h.hour)).toEqual(Array.from({ length: 24 }, (_, i) => i));
-  expect(utc.hours![0]).toEqual({ hour: 0, byAccount: {}, byModel: {} });
+  expect(utc.hours![0]).toEqual({ hour: 0, byAccount: {}, byModel: {}, tokensByAccount: {}, tokensByModel: {} });
   expect(utc.hours![9].byAccount.A).toBeCloseTo(4, 9);
   expect(utc.hours![9].byAccount.B).toBeCloseTo(3, 9);
   expect(utc.hours![9].byModel["claude-sonnet-4-6"]).toBeCloseTo(3, 9);
+  expect(utc.hours![9].tokensByAccount).toEqual({ A: M, B: M });
+  expect(utc.hours![9].tokensByModel).toEqual({ "claude-opus-5-5": M, "claude-sonnet-4-6": M });
   const east = summarize(db, opts({ days: 1, tz: 60 }));
   expect(east.hours![0].byAccount.A).toBeCloseTo(4, 9);
   expect(east.hours![10].byAccount.B).toBeCloseTo(3, 9);

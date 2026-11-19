@@ -10,14 +10,15 @@ export type UsageView = {
   scanning: boolean;
   firstDay?: string; // "2026-10-16", the first local day with a reply
   totals: Sum;
-  days: { day: string; byAccount: Record<string, number>; byModel: Record<string, number> }[]; // cost, every day of the range, oldest first
+  // byAccount and byModel: cost by id; tokensByAccount and tokensByModel: all tokens by id (older blimpd: absent).
+  days: { day: string; byAccount: Record<string, number>; byModel: Record<string, number>; tokensByAccount?: Record<string, number>; tokensByModel?: Record<string, number> }[]; // every day of the range, oldest first
   accounts: (Sum & { id: string; email?: string })[]; // most cost first
   models: (Sum & { model: string; priced: boolean })[];
   projects: (Sum & { project: string })[]; // 20, then { project: "" } for everything else when there is more
   unpriced: string[];
   note?: string; // why prices.json was ignored
   previous?: Sum; // the same number of days just before the range; absent when the range starts at firstDay (older blimpd: absent)
-  hours?: { hour: number; byAccount: Record<string, number>; byModel: Record<string, number> }[]; // Today only: its 24 local hours, cost (older blimpd: absent)
+  hours?: { hour: number; byAccount: Record<string, number>; byModel: Record<string, number>; tokensByAccount?: Record<string, number>; tokensByModel?: Record<string, number> }[]; // Today only: its 24 local hours, by id as days (older blimpd: absent)
 };
 export type Window = { used: number; resetsAt: number; reset: boolean }; // used 0 to 100; resetsAt ms
 export type NowView = {
@@ -121,7 +122,21 @@ export function axis(max: number): number[] {
   return out;
 }
 
-// The day (or hour, given as day) that cost the most; none when nothing cost anything.
+// What the Usage window's chart, busiest day and table go by. Tokens are all of them: input, output, cache read and write.
+export type Measure = "cost" | "tokens";
+type ByIds = { byAccount: Record<string, number>; byModel: Record<string, number> };
+
+export const sumTokens = (s: Sum) => s.input + s.output + s.cacheRead + s.cacheWrite;
+// A total's amount by the measure: an account's, a model's, a project's or the range's.
+export const amount = (s: Sum, measure: Measure) => (measure === "cost" ? s.cost : sumTokens(s));
+
+// The rows chart() and busiest() take, with the measure's amounts in byAccount and byModel: cost as sent, or the token
+// maps (none from an older blimpd).
+export function measured(rows: ({ day: string; tokensByAccount?: Record<string, number>; tokensByModel?: Record<string, number> } & ByIds)[], measure: Measure): ({ day: string } & ByIds)[] {
+  return measure === "cost" ? rows : rows.map((r) => ({ day: r.day, byAccount: r.tokensByAccount ?? {}, byModel: r.tokensByModel ?? {} }));
+}
+
+// The day (or hour, given as day) with the biggest amount (cost, or tokens from measured()); none when it is 0 everywhere.
 export function busiest(days: { day: string; byModel: Record<string, number> }[]): { day: string; cost: number } | undefined {
   let best: { day: string; cost: number } | undefined;
   for (const d of days) {
@@ -184,12 +199,13 @@ export function dayLabel(day: string): string {
   return `${MONTHS[m - 1]} ${d}`;
 }
 
-// The cost-per-day bars. series: the 5 costliest ids, each with its own colour; rest: everything else, as one.
+// The bars per day, by cost or tokens (measured()). series: the 5 biggest ids, each with its own colour; rest:
+// everything else, as one. costs and total are the measure's amounts.
 export type Chart = { series: string[]; rest: boolean; bars: { from: string; to: string; costs: number[]; rest: number; total: number }[]; max: number };
 const SERIES = 5;
 const WEEKLY_OVER = 90;
 
-// ranked: the ids by most cost first (the view's accounts or models).
+// ranked: the ids by the biggest amount first (the view's accounts or models).
 export function chart(days: UsageView["days"], by: "account" | "model", ranked: string[]): Chart {
   const series = ranked.slice(0, SERIES);
   const index = new Map(series.map((id, i) => [id, i]));

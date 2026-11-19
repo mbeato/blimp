@@ -6,18 +6,20 @@ import type { Database } from "bun:sqlite";
 import { costOf, type Entry, type Tier } from "./prices";
 
 export type Sum = { replies: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; helperCost: number };
+type ByIds = { byAccount: Record<string, number>; byModel: Record<string, number>; tokensByAccount: Record<string, number>; tokensByModel: Record<string, number> };
 export type UsageView = {
   scanning: boolean;
   firstDay?: string; // "2026-10-16", the first local day with a reply
   totals: Sum;
-  days: { day: string; byAccount: Record<string, number>; byModel: Record<string, number> }[]; // cost, every day of the range, oldest first
+  // byAccount and byModel: cost by id; tokensByAccount and tokensByModel: all tokens by id (a model with no price too).
+  days: ({ day: string } & ByIds)[]; // every day of the range, oldest first
   accounts: (Sum & { id: string; email?: string })[]; // most cost first
   models: (Sum & { model: string; priced: boolean })[];
   projects: (Sum & { project: string })[]; // 20, then { project: "" } for everything else when there is more
   unpriced: string[];
   note?: string; // why prices.json was ignored
   previous?: Sum; // the same number of local days just before the range, cut at firstDay; absent when the range starts at firstDay
-  hours?: { hour: number; byAccount: Record<string, number>; byModel: Record<string, number> }[]; // days 1 only: today's 24 local hours, cost
+  hours?: ({ hour: number } & ByIds)[]; // days 1 only: today's 24 local hours, by id as days
 };
 export type Window = { used: number; resetsAt: number; reset: boolean }; // used 0 to 100; resetsAt ms
 export type NowView = {
@@ -51,6 +53,17 @@ function add(s: Sum, r: Row, cost: number) {
   if (r.helper) s.helperCost += cost;
 }
 
+const byIds = (): ByIds => ({ byAccount: {}, byModel: {}, tokensByAccount: {}, tokensByModel: {} });
+
+// A row's cost and tokens into a day's (or an hour's) maps by account and by model.
+function addTo(m: ByIds, r: Row, cost: number) {
+  const t = r.input + r.output + r.cache_read + r.write_5m + r.write_1h;
+  m.byAccount[r.account] = (m.byAccount[r.account] ?? 0) + cost;
+  m.byModel[r.model] = (m.byModel[r.model] ?? 0) + cost;
+  m.tokensByAccount[r.account] = (m.tokensByAccount[r.account] ?? 0) + t;
+  m.tokensByModel[r.model] = (m.tokensByModel[r.model] ?? 0) + t;
+}
+
 const rowCost = (r: Row, extra: Record<string, Entry>) =>
   costOf({ replies: r.replies, input: r.input, output: r.output, cacheRead: r.cache_read, write5m: r.write_5m, write1h: r.write_1h }, r.model, r.tier, extra);
 
@@ -73,10 +86,10 @@ export function summarize(
   // The days before the range: as many, cut at the first day. None when the range starts at the first day.
   const before = firstDay !== undefined && today - o.days + 1 > firstDay ? Math.max(from - o.days, firstDay) : undefined;
   const previous = before === undefined ? undefined : zero();
-  const hours = o.days === 1 ? Array.from({ length: 24 }, (_, hour) => ({ hour, byAccount: {} as Record<string, number>, byModel: {} as Record<string, number> })) : undefined;
+  const hours = o.days === 1 ? Array.from({ length: 24 }, (_, hour) => ({ hour, ...byIds() })) : undefined;
 
   const days = new Map<number, UsageView["days"][number]>();
-  for (let d = from; d <= today; d++) days.set(d, { day: dayText(d), byAccount: {}, byModel: {} });
+  for (let d = from; d <= today; d++) days.set(d, { day: dayText(d), ...byIds() });
   const totals = zero();
   const accounts = new Map<string, Sum & { id: string; email?: string }>();
   const models = new Map<string, Sum & { model: string; priced: boolean }>();
@@ -95,13 +108,8 @@ export function summarize(
     if (c === undefined) unpriced.add(r.model);
     const cost = c ?? 0;
     add(totals, r, cost);
-    day.byAccount[r.account] = (day.byAccount[r.account] ?? 0) + cost;
-    day.byModel[r.model] = (day.byModel[r.model] ?? 0) + cost;
-    if (hours) {
-      const h = hours[hourOf(r.hour, o.tz)];
-      h.byAccount[r.account] = (h.byAccount[r.account] ?? 0) + cost;
-      h.byModel[r.model] = (h.byModel[r.model] ?? 0) + cost;
-    }
+    addTo(day, r, cost);
+    if (hours) addTo(hours[hourOf(r.hour, o.tz)], r, cost);
     let a = accounts.get(r.account);
     if (!a) {
       const email = o.emails.get(r.account);

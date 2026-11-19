@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { relTime } from "../lib/time";
-import { accountName, busiest, cacheShare, change, dayLabel, high, modelName, money, projectParts, resetsIn, share, tokens, windowLabel, type NowView, type Sum, type UsageView, type Window } from "../lib/usage";
+import { accountName, amount, busiest, cacheShare, change, dayLabel, high, measured, modelName, money, projectParts, resetsIn, share, sumTokens, tokens, windowLabel, type Measure, type NowView, type Sum, type UsageView, type Window } from "../lib/usage";
 import { Dialog } from "./Dialog";
 import { Meter, shown, tzNow } from "./StatusBar";
 import { chartSeries, CostChart } from "./UsageChart";
@@ -14,6 +14,11 @@ const RANGES = [
   { value: 3660, label: "All" },
 ];
 
+const MEASURES: { value: Measure; label: string }[] = [
+  { value: "cost", label: "Cost" },
+  { value: "tokens", label: "Tokens" },
+];
+
 type Tab = "account" | "model" | "project";
 
 // Usage (Server > Usage…, or a click on the bottom bar; docs/superpowers/specs/2026-11-19-usage-design.md, "Usage
@@ -23,6 +28,7 @@ type Tab = "account" | "model" | "project";
 export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
   const l = props.link;
   const [days, setDays] = useState(30);
+  const [measure, setMeasure] = useState<Measure>("cost");
   const [by, setBy] = useState<"account" | "model">("model");
   const [tab, setTab] = useState<Tab>("model");
   const [view, setView] = useState<UsageView | null>(null);
@@ -58,11 +64,16 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
   }, [l.api, days]);
 
   const hourly = days === 1 && !!view?.hours;
+  // An older blimpd sends no tokens by day: no Show switch, and everything goes by cost.
+  const noTokens = !!view && view.days.length > 0 && !view.days[0].tokensByModel;
+  const m: Measure = noTokens ? "cost" : measure;
+  const title = `${m === "tokens" ? "Tokens" : "Cost"} per ${hourly ? "hour" : "day"}`;
   return (
     <Dialog className="usage" onClose={props.onClose}>
       <div className="usage-head">
         <h2>Usage</h2>
         <span className="usage-server">{l.name}</span>
+        {!noTokens && <Choice label="Show" options={MEASURES} value={measure} onChange={setMeasure} />}
         <Choice label="Range" options={RANGES} value={days} onChange={setDays} />
       </div>
       <div className="usage-body">
@@ -71,10 +82,10 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
         {view?.scanning && <p className="usage-note">Counting your history…</p>}
         {view && !view.scanning && (
           <>
-            <Headline view={view} days={days} />
-            <section className="usage-card" aria-label={hourly ? "Cost per hour" : "Cost per day"}>
+            <Headline view={view} days={days} measure={m} />
+            <section className="usage-card" aria-label={title}>
               <div className="usage-card-head">
-                <h3>{hourly ? "Cost per hour" : "Cost per day"}</h3>
+                <h3>{title}</h3>
                 <Choice
                   label="Colour by"
                   options={[
@@ -85,9 +96,9 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
                   onChange={setBy}
                 />
               </div>
-              <CostChart view={view} by={by} days={days} />
+              <CostChart view={view} by={by} days={days} measure={m} />
             </section>
-            <Breakdown view={view} tab={tab} onTab={setTab} by={by} home={l.home} />
+            <Breakdown view={view} tab={tab} onTab={setTab} by={by} measure={m} home={l.home} />
           </>
         )}
       </div>
@@ -95,10 +106,10 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
   );
 }
 
-const sumTokens = (s: Sum) => s.input + s.output + s.cacheRead + s.cacheWrite;
 const percent = (part: number) => `${Math.round(part * 100)}%`;
 
-// A rounded track with the chosen option raised in it: the range, what the chart is coloured by, the table's tab.
+// A rounded track with the chosen option raised in it: cost or tokens, the range, what the chart is coloured by, the
+// table's tab.
 function Choice<T extends string | number>(props: { label: string; options: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   return (
     <div className="usage-choice" role="group" aria-label={props.label}>
@@ -182,22 +193,24 @@ function Limits(props: { now: NowView }) {
 
 // Four numbers in one strip, each with a line of context: cost against the period before (never coloured: spending
 // more isn't a fault), tokens and the share read from cache, replies and the helpers' share of cost, cost per day
-// (Today: per hour) and the busiest one.
-function Headline(props: { view: UsageView; days: number }) {
+// (Today: per hour) and the busiest one. By tokens only the last changes: tokens per day and the busiest by tokens.
+function Headline(props: { view: UsageView; days: number; measure: Measure }) {
   const v = props.view;
   const t = v.totals;
   // Today isn't over, so it is held against the whole of yesterday.
   const before = props.days === 1 ? "all of yesterday" : `the ${props.days} days before`;
   const c = change(t.cost, v.previous?.cost);
   const vs = c === undefined ? "" : c === "the same" ? `the same as ${before}` : `${c} than ${before}`;
+  const fmt = props.measure === "tokens" ? tokens : money;
+  const all = amount(t, props.measure);
   let per: { label: string; value: string; note: string };
   if (props.days === 1 && v.hours) {
     const hours = new Date().getHours() + 1; // today's hours so far, this one included
-    const peak = busiest(v.hours.map((h) => ({ day: `${String(h.hour).padStart(2, "0")}:00`, byModel: h.byModel })));
-    per = { label: "Per hour", value: money(t.cost / hours), note: peak ? `busiest ${peak.day} · ${money(peak.cost)}` : "" };
+    const peak = busiest(measured(v.hours.map((h) => ({ ...h, day: `${String(h.hour).padStart(2, "0")}:00` })), props.measure));
+    per = { label: "Per hour", value: fmt(all / hours), note: peak ? `busiest ${peak.day} · ${fmt(peak.cost)}` : "" };
   } else {
-    const peak = busiest(v.days);
-    per = { label: "Per day", value: money(t.cost / Math.max(1, v.days.length)), note: peak ? `busiest ${dayLabel(peak.day)} · ${money(peak.cost)}` : "" };
+    const peak = busiest(measured(v.days, props.measure));
+    per = { label: "Per day", value: fmt(all / Math.max(1, v.days.length)), note: peak ? `busiest ${dayLabel(peak.day)} · ${fmt(peak.cost)}` : "" };
   }
   const cells = [
     { label: "Cost at API prices", value: money(t.cost), note: vs },
@@ -223,14 +236,16 @@ function Headline(props: { view: UsageView; days: number }) {
 
 // One table with a tab each for accounts, models and projects, most cost first: the name (with the chart's dot when it
 // is one of the chart's series), a bar for its share of the range's cost, then cost, share and tokens. A model with no
-// price says so and has no share.
-function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; by: "account" | "model"; home: string }) {
+// price says so and has no share. By tokens the rows go by tokens, most first, and the bar and Share are the share of
+// the range's tokens, so a model with no price has them too (its Cost still says "no price").
+function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; by: "account" | "model"; measure: Measure; home: string }) {
   const v = props.view;
-  const total = v.totals.cost;
+  const byTokens = props.measure === "tokens";
+  const total = amount(v.totals, props.measure);
   // undefined: no dot column (projects); null: a dot's room, empty, so the names line up.
   type Row = { key: string; name: ReactNode; title?: string; sum: Sum; priced?: boolean; dot?: string | null };
   // A dot points at the chart, so rows get theirs only while the chart is drawn by the same thing.
-  const dots = (by: "account" | "model") => new Map(by === props.by ? chartSeries(v, by).map((s, i) => [s.id, `var(--series-${i + 1})`] as const) : []);
+  const dots = (by: "account" | "model") => new Map(by === props.by ? chartSeries(v, by, props.measure).map((s, i) => [s.id, `var(--series-${i + 1})`] as const) : []);
   let rows: Row[];
   if (props.tab === "account") {
     const d = dots("account");
@@ -250,6 +265,9 @@ function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; 
       return { key: p.project, name, title: p.project || "Every other folder", sum: p };
     });
   }
+  // blimpd sends them most cost first; by tokens they are sorted again, and "Everything else" (project "") stays last.
+  const last = (r: Row) => (props.tab === "project" && r.key === "" ? 1 : 0);
+  if (byTokens) rows.sort((a, b) => last(a) - last(b) || sumTokens(b.sum) - sumTokens(a.sum));
   return (
     <section className="usage-card" aria-label="Breakdown">
       <div className="usage-card-head">
@@ -281,7 +299,7 @@ function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; 
           <thead>
             <tr>
               <th>Name</th>
-              <th aria-label="Share of cost" />
+              <th aria-label={byTokens ? "Share of tokens" : "Share of cost"} />
               <th>Cost</th>
               <th>Share</th>
               <th>Input</th>
@@ -293,6 +311,8 @@ function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; 
           <tbody>
             {rows.map((r) => {
               const priced = r.priced !== false;
+              const counts = priced || byTokens; // a model with no price has no share of cost
+              const part = amount(r.sum, props.measure);
               return (
                 <tr key={r.key}>
                   <td title={r.title}>
@@ -302,10 +322,10 @@ function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; 
                     </span>
                   </td>
                   <td>
-                    <span className="usage-share">{priced && total > 0 && <span className="usage-share-fill" style={{ width: `${Math.min(100, (r.sum.cost / total) * 100)}%` }} />}</span>
+                    <span className="usage-share">{counts && total > 0 && <span className="usage-share-fill" style={{ width: `${Math.min(100, (part / total) * 100)}%` }} />}</span>
                   </td>
                   <td className={priced ? "usage-cost" : "usage-faint"}>{priced ? money(r.sum.cost) : "no price"}</td>
-                  <td>{priced ? share(r.sum.cost, total) : "—"}</td>
+                  <td>{counts ? share(part, total) : "—"}</td>
                   <td>{tokens(r.sum.input)}</td>
                   <td>{tokens(r.sum.output)}</td>
                   <td>{tokens(r.sum.cacheRead + r.sum.cacheWrite)}</td>

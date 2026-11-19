@@ -1,42 +1,47 @@
 import { useState, type PointerEvent } from "react";
-import { accountName, axis, busiest, chart, dayLabel, modelName, money, type Chart, type UsageView } from "../lib/usage";
+import { accountName, amount, axis, busiest, chart, dayLabel, measured, modelName, money, tokens, type Chart, type Measure, type UsageView } from "../lib/usage";
 
 const GUTTER = 44; // px, the axis values' column left of the plot (.uc-plot's padding-left)
 const DENSE = 120; // more bars than this: no gap between them (years of weeks)
 const MIN_BOX = 150; // px: less room than this beside a slot, and the hover box goes elsewhere
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-// The ids that get a colour on the chart, most cost first, with their names and their cost over the range. The
-// Breakdown table puts the same dots by the same rows.
-export function chartSeries(v: UsageView, by: "account" | "model"): { id: string; name: string; cost: number }[] {
-  const named =
+// The ids that get a colour on the chart, the biggest first, with their names and their amount over the range (cost, or
+// tokens). The Breakdown table puts the same dots by the same rows.
+export function chartSeries(v: UsageView, by: "account" | "model", measure: Measure): { id: string; name: string; amount: number }[] {
+  const named = (
     by === "account"
-      ? v.accounts.filter((a) => a.cost > 0).map((a) => ({ id: a.id, name: accountName(a), cost: a.cost }))
-      : v.models.filter((m) => m.cost > 0).map((m) => ({ id: m.model, name: modelName(m.model), cost: m.cost }));
+      ? v.accounts.map((a) => ({ id: a.id, name: accountName(a), amount: amount(a, measure) }))
+      : v.models.map((m) => ({ id: m.model, name: modelName(m.model), amount: amount(m, measure) }))
+  ).filter((n) => n.amount > 0);
+  // blimpd sends them most cost first; by tokens they are sorted again (a tie keeps that order).
+  if (measure === "tokens") named.sort((x, y) => y.amount - x.amount);
   // chart() picks the series from the ranked ids alone.
   return named.slice(0, chart([], by, named.map((n) => n.id)).series.length);
 }
 
-// An axis value, short: $0, $250, $2.5K, $0.5.
-const tick = (n: number) => (n >= 1000 ? `$${Number((n / 1000).toFixed(1))}K` : `$${n}`);
+// An axis value, short: $0, $250, $2.5K, $0.5; tokens as tokens() says them (0, 500M, 1B).
+const tick = (n: number, measure: Measure) => (measure === "tokens" ? tokens(n) : n >= 1000 ? `$${Number((n / 1000).toFixed(1))}K` : `$${n}`);
 const two = (n: number) => String(n).padStart(2, "0");
 const weekday = (day: string) => WEEKDAYS[new Date(day + "T00:00:00Z").getUTCDay()];
 
-// Cost per day (Today: per hour, from view.hours), stacked by account or by model, drawn by hand. The 5 costliest
-// series get a colour each and the rest share a grey. The grid's steps come from axis(), and the top step is the top
-// of the plot. One pointer handler on the plot works out the slot under the pointer from its x, so moving between
-// slots never flickers; the slot gets a band and a box beside it with the day's cost by series.
-export function CostChart(props: { view: UsageView; by: "account" | "model"; days: number }) {
+// Cost or tokens per day (Today: per hour, from view.hours), stacked by account or by model, drawn by hand. The 5
+// biggest series get a colour each and the rest share a grey. The grid's steps come from axis(), and the top step is
+// the top of the plot. One pointer handler on the plot works out the slot under the pointer from its x, so moving
+// between slots never flickers; the slot gets a band and a box beside it with the day's amount by series.
+export function CostChart(props: { view: UsageView; by: "account" | "model"; days: number; measure: Measure }) {
   const v = props.view;
   // The slot under the pointer, and the bars' width in px then (to place the box).
   const [pointer, setPointer] = useState<{ i: number; w: number } | null>(null);
   const hourly = props.days === 1 && !!v.hours;
-  const rows = hourly ? v.hours!.map((h) => ({ day: two(h.hour), byAccount: h.byAccount, byModel: h.byModel })) : v.days;
-  const named = chartSeries(v, props.by);
+  const rows = measured(hourly ? v.hours!.map((h) => ({ ...h, day: two(h.hour) })) : v.days, props.measure);
+  const named = chartSeries(v, props.by, props.measure);
   const c = chart(rows, props.by, named.map((n) => n.id));
   const n = c.bars.length;
   const hover = pointer && pointer.i < n ? pointer.i : null; // the slot under the pointer, if it is still there
-  if (!c.max) return <p className="uc-empty">No cost in this range.</p>;
+  const byTokens = props.measure === "tokens";
+  const fmt = byTokens ? tokens : money;
+  if (!c.max) return <p className="uc-empty">{byTokens ? "No tokens in this range." : "No cost in this range."}</p>;
 
   const rest = c.bars.reduce((a, bar) => a + bar.rest, 0);
   const ticks = axis(c.max);
@@ -48,8 +53,8 @@ export function CostChart(props: { view: UsageView; by: "account" | "model"; day
   const peak = busiest(rows);
   const range = props.days === 1 ? "today" : props.days > 366 ? "all of the history" : `the last ${props.days} days`;
   const aria =
-    `Cost per ${hourly ? "hour" : "day"}, ${range}: ${money(v.totals.cost)} in all` +
-    (peak ? `; the busiest ${hourly ? "hour" : "day"} was ${hourly ? `${peak.day}:00` : dayLabel(peak.day)}, ${money(peak.cost)}` : "");
+    `${byTokens ? "Tokens" : "Cost"} per ${hourly ? "hour" : "day"}, ${range}: ${fmt(amount(v.totals, props.measure))} in all` +
+    (peak ? `; the busiest ${hourly ? "hour" : "day"} was ${hourly ? `${peak.day}:00` : dayLabel(peak.day)}, ${fmt(peak.cost)}` : "");
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -86,7 +91,7 @@ export function CostChart(props: { view: UsageView; by: "account" | "model"; day
         <div className="uc-grid" aria-hidden>
           {ticks.map((t) => (
             <div key={t} className="uc-line" style={{ bottom: `${(t / top) * 100}%` }}>
-              <span className="uc-tick">{tick(t)}</span>
+              <span className="uc-tick">{tick(t, props.measure)}</span>
             </div>
           ))}
         </div>
@@ -110,13 +115,13 @@ export function CostChart(props: { view: UsageView; by: "account" | "model"; day
                 {label(b)}
                 {hover === current && " so far"}
               </span>
-              <span className="uc-box-total">{money(b.total)}</span>
+              <span className="uc-box-total">{fmt(b.total)}</span>
             </div>
             {parts.map((p) => (
               <div key={p.name} className="uc-box-row">
                 <span className="usage-dot" style={{ background: p.color }} />
                 <span className="uc-box-name">{p.name}</span>
-                <span className="uc-box-cost">{money(p.cost)}</span>
+                <span className="uc-box-cost">{fmt(p.cost)}</span>
               </div>
             ))}
           </div>
@@ -134,14 +139,14 @@ export function CostChart(props: { view: UsageView; by: "account" | "model"; day
           <span key={s.id} className="uc-key">
             <span className="usage-dot" style={{ background: `var(--series-${i + 1})` }} />
             <span className="uc-key-name">{s.name}</span>
-            <span className="uc-key-cost">{money(s.cost)}</span>
+            <span className="uc-key-cost">{fmt(s.amount)}</span>
           </span>
         ))}
         {rest > 0 && (
           <span className="uc-key">
             <span className="usage-dot" style={{ background: "var(--series-rest)" }} />
             <span className="uc-key-name">Other</span>
-            <span className="uc-key-cost">{money(rest)}</span>
+            <span className="uc-key-cost">{fmt(rest)}</span>
           </span>
         )}
       </div>

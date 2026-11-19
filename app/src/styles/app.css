@@ -3205,6 +3205,11 @@ button.sb-item:hover .sb-pr {
   margin-left: auto;
 }
 
+/* Show, then the range: together at the right, the head's gap between them. */
+.usage-head .usage-choice + .usage-choice {
+  margin-left: 0;
+}
+
 .usage-body {
   display: flex;
   flex-direction: column;

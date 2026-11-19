@@ -13,7 +13,7 @@ const view: UsageView = {
   scanning: false,
   firstDay: "2026-10-16",
   totals: sum({ replies: 4321, input: 1_200_000, output: 200_000, cacheRead: 1_500_000, cacheWrite: 500_000, cost: 1234.5 }),
-  days: Array.from({ length: 30 }, (_, i) => ({ day: `d${i}`, byAccount: {}, byModel: {} })),
+  days: Array.from({ length: 30 }, (_, i) => ({ day: `d${i}`, byAccount: {}, byModel: {}, tokensByAccount: {}, tokensByModel: {} })),
   accounts: [
     { ...sum({ input: 1_000_000, output: 150_000, cacheRead: 1_000_000, cacheWrite: 400_000, cost: 1200 }), id: "A", email: "a@x.com" },
     { ...sum({ input: 200_000, output: 50_000, cacheRead: 500_000, cacheWrite: 100_000, cost: 34.5 }), id: "codex" },
