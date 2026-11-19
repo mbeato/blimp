@@ -3141,14 +3141,14 @@ body.dragging-session * {
 
 .usage-limit {
   display: flex;
-  align-items: center;
+  align-items: start;
   gap: 14px;
-  min-height: 26px;
+  padding: 5px 0;
   font-size: 12px;
 }
 
 .usage-limit-name {
-  flex: 0 1 220px;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3159,14 +3159,25 @@ body.dragging-session * {
   flex: none;
   width: 60px;
   color: var(--fg-faint);
+  white-space: nowrap;
 }
 
+/* The label, the meter and the percent on one line, and when it resets under them: the same
+   columns in every row, so the meters line up down the list. */
 .usage-window {
-  display: inline-flex;
+  flex: none;
+  display: grid;
+  grid-template-columns: 34px 60px 34px;
+  column-gap: 6px;
   align-items: center;
-  gap: 6px;
+  width: 170px;
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* A row with one window (Codex's week): it sits under the others' last one, and its age under theirs. */
+.usage-limit-age + .usage-window:last-child {
+  margin-left: 184px;
 }
 
 .usage-window .meter {
@@ -3182,6 +3193,12 @@ body.dragging-session * {
 .usage-window-reset,
 .usage-window-none {
   color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.usage-window-reset {
+  grid-column: 1 / -1;
+  font-size: 11px;
 }
 
 .usage-controls {

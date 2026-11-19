@@ -14,10 +14,14 @@ const clock = (t: number) => `${pad(new Date(t).getHours())}:${pad(new Date(t).g
 const date = (t: number) => `${MONTHS[new Date(t).getMonth()]} ${new Date(t).getDate()}`;
 
 // The same words the app uses.
+const UNITS: [string, number][] = [["K", 1e3], ["M", 1e6], ["B", 1e9]];
 const tokens = (n: number) => {
-  if (n < 1000) return String(n);
-  const [v, unit] = n < 1e6 ? [n / 1e3, "K"] : n < 1e9 ? [n / 1e6, "M"] : [n / 1e9, "B"];
-  return `${v < 100 ? v.toFixed(1) : v.toFixed(0)}${unit}`;
+  if (Math.round(n) < 1000) return String(Math.round(n));
+  let i = 0;
+  // 999,960 is "1M", not "1000K".
+  while (i < UNITS.length - 1 && Math.round(n / UNITS[i][1]) >= 1000) i++;
+  const v = n / UNITS[i][1];
+  return (v < 99.95 ? v.toFixed(1).replace(/\.0$/, "") : String(Math.round(v))) + UNITS[i][0];
 };
 const money = (n: number) => (n === 0 ? "$0" : n < 0.01 ? "<$0.01" : n < 1000 ? `$${n.toFixed(2)}` : `$${Math.round(n).toLocaleString("en-US")}`);
 const accountName = (a: { id: string; email?: string }) =>
