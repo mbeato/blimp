@@ -95,7 +95,8 @@ test("screenshots", async ({ page }) => {
     const ws = page.locator(".wb:not([hidden])");
     await expect(ws.locator(".srow", { hasText: "Checkout page loads twice on Safari" })).toBeVisible({ timeout: 10_000 });
     await expect(ws.locator(".tpane-terms .term:not([hidden]) .xterm-rows")).toContainText("Wiring up the payment sheet");
-    if ((await ws.locator(".slist-fold").getAttribute("aria-expanded")) === "false") await ws.locator(".slist-fold").click();
+    const earlier = ws.locator(".slist-fold", { hasText: "Earlier" }); // Inbox is a fold too
+    if ((await earlier.getAttribute("aria-expanded")) === "false") await earlier.click();
     await expect(ws.locator(".srow-main.earlier").first()).toBeVisible();
     const row = (await ws.locator(".srow", { hasText: "Checkout page loads twice on Safari" }).boundingBox())!;
     const terms = (await ws.locator(".tpane-terms").boundingBox())!;
