@@ -1,4 +1,33 @@
-# blimp
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/blimp-silver.svg">
+    <img src="brand/blimp-ink.svg" alt="" width="220">
+  </picture>
+</p>
+
+<h1 align="center">blimp</h1>
+
+<p align="center">
+  <b>A Mac app for Claude Code sessions that run on your own server.</b><br>
+  Files, editor tabs, a terminal and a live list of sessions, over your normal SSH.
+</p>
+
+<p align="center">
+  <a href="https://github.com/mbeato/blimp/releases/latest"><img src="https://img.shields.io/github/v/release/mbeato/blimp?label=release&color=555" alt="Latest release"></a>
+  <a href="https://github.com/mbeato/blimp/actions/workflows/ci.yml"><img src="https://github.com/mbeato/blimp/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/mbeato/blimp?color=555" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/app-macOS%2011%2B%2C%20Apple%20chip-555" alt="The app runs on macOS 11 or later, on a Mac with an Apple chip">
+  <img src="https://img.shields.io/badge/server-Linux%20or%20macOS-555" alt="The server is Linux or macOS">
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#requirements">Requirements</a> ·
+  <a href="#using-it">Using it</a> ·
+  <a href="#security-in-brief">Security</a> ·
+  <a href="#troubleshooting">Troubleshooting</a> ·
+  <a href="#development">Development</a>
+</p>
 
 blimp is a Mac app for Claude Code sessions that run on your own server. The server is a Linux machine, or a Mac with an Apple chip. It is laid out like VS Code: you open a project folder on the server, its files are on the left, the files you open are in tabs, and the terminal is at the bottom. Next to the terminal is the list of Claude sessions in that folder, with what each one is doing. Click a session to use its terminal, as if you had connected with SSH. You do not need to keep a terminal open, and you do not need another editor.
 
@@ -7,6 +36,44 @@ blimp is a Mac app for Claude Code sessions that run on your own server. The ser
 blimp follows the system setting for light or dark mode. See the [light mode screenshot](docs/screenshots/main.png).
 
 These screenshots come from the browser build that the end-to-end tests use. The sessions in them are made up.
+
+## What you get
+
+- **Your project, laid out like VS Code.** Files on the left, the files you open in tabs, the terminal at the bottom.
+- **Every session at a glance.** The list next to the terminal shows which sessions are working, which wait for you and which are idle. When a session starts to wait for you, blimp sends a Mac notification, and the Dock icon counts the sessions that wait.
+- **Sessions that keep running.** They live on the server. Close the app and they carry on. A plain terminal can attach to the same session at the same time.
+- **No new port on the server.** The app reaches the server through your own `ssh`, with your keys and your `~/.ssh/config`.
+- **Two sessions side by side.** Drag a session onto the terminal for a split, or out of the window for a window of its own.
+- **Browser tabs.** They run in a Chrome on the server and show live next to your files. So `localhost:3000` is the server's own.
+- **More than Claude Code.** Codex, Claude Code on GLM, your own kinds of session, and plain shells.
+- **An assistant across your projects.** One Claude chat that isn't tied to a project. It is off until you turn it on.
+- **A Linux or Mac server.** Linux on x86_64 or arm64, or a Mac with an Apple chip.
+- **An iPhone app.** It is not released yet. See [ios/README.md](ios/README.md).
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/editor-dark.png" alt="A TypeScript file open in the editor, above two Claude Code sessions side by side"></td>
+    <td width="50%"><img src="docs/screenshots/palette-dark.png" alt="The session search, open over the window, with sessions from two projects"></td>
+  </tr>
+  <tr>
+    <td align="center">A file open in the editor</td>
+    <td align="center">⌘K jumps to any session, in any project</td>
+  </tr>
+</table>
+
+## Quick start
+
+Read the [Requirements](#requirements) first. The two that matter most: Claude Code is installed and logged in on the server, and `ssh` to the server works with a key and no password prompt.
+
+1. **On the server**, as your normal user (not root), run:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/mbeato/blimp/main/install.sh | sh
+   ```
+
+   It installs into `~/.local/bin` and does not need root. [Install the server part](#install-the-server-part) says what the script does, and how to read it first.
+2. **On your Mac**, download the `.dmg` file from the [latest release](https://github.com/mbeato/blimp/releases/latest). Open it and drag **blimp** to Applications. If macOS blocks the first launch, see [Install the app](#install-the-app).
+3. **Open blimp** and add your server, by the same name you type after `ssh`. See [First run](#first-run).
 
 ## How it works
 
