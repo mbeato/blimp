@@ -2509,7 +2509,7 @@ body.dragging-session * {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 20px;
+  bottom: 42px; /* over the bottom bar (22 px) */
   transform: translateX(-50%);
   z-index: 20;
   max-width: min(560px, calc(100% - 32px));
@@ -2535,7 +2535,7 @@ body.dragging-session * {
 .transfers {
   position: fixed;
   left: 8px;
-  bottom: 8px;
+  bottom: 30px; /* over the bottom bar (22 px) */
   z-index: 15;
   width: 224px;
   max-height: 50vh;
@@ -3011,4 +3011,391 @@ body.dragging-session * {
 
 .settings-confirm button.danger {
   color: var(--danger);
+}
+
+/* ---- bottom bar (components/StatusBar.tsx) ---- */
+
+/* Under every workbench, one text line high: the workbench above keeps the rest (.wb is flex: 1). A row of items,
+   so later ones go in without a new layout. Empty, it keeps its height, so nothing moves when numbers arrive. */
+.statusbar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 22px;
+  padding: 0 4px;
+  background: var(--bg-side);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.statusbar-usage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.statusbar-usage:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.statusbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* A limit's meter: a track and its fill, red over 80% as a session row's context bar (.ctx-meter.high). */
+.meter {
+  flex: none;
+  position: relative;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--selected);
+  overflow: hidden;
+}
+
+.meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--fg-dim);
+}
+
+.meter-fill.high {
+  background: var(--danger);
+}
+
+.meter-high {
+  color: var(--danger);
+}
+
+/* ---- usage (components/UsageDialog.tsx) ---- */
+
+.dialog.usage {
+  width: 760px;
+  max-height: 80vh;
+  padding: 0;
+}
+
+.usage-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.usage-server {
+  font-size: 12px;
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-body {
+  overflow-y: auto;
+  padding: 4px 18px 16px;
+}
+
+.usage-section h3 {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+
+.usage-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 6px;
+}
+
+.usage-section-head h3 {
+  margin: 0;
+}
+
+.usage-note {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--fg-faint);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.usage-error {
+  padding: 0;
+  margin: 8px 0;
+}
+
+.usage-limit {
+  display: flex;
+  align-items: start;
+  gap: 14px;
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+.usage-limit-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-limit-age {
+  flex: none;
+  width: 60px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+/* The label, the meter and the percent on one line, and when it resets under them: the same
+   columns in every row, so the meters line up down the list. */
+.usage-window {
+  flex: none;
+  display: grid;
+  grid-template-columns: 34px 60px 34px;
+  column-gap: 6px;
+  align-items: center;
+  width: 170px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A row with one window (Codex's week): it sits under the others' last one, and its age under theirs. */
+.usage-limit-age + .usage-window:last-child {
+  margin-left: 184px;
+}
+
+.usage-window .meter {
+  width: 60px;
+}
+
+.usage-window-num {
+  min-width: 30px;
+  text-align: right;
+  color: var(--fg);
+}
+
+.usage-window-reset,
+.usage-window-none {
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.usage-window-reset {
+  grid-column: 1 / -1;
+  font-size: 11px;
+}
+
+.usage-controls {
+  display: flex;
+  margin-top: 16px;
+}
+
+/* A row of buttons, one pressed: the range, and By account / By model. */
+.usage-choice {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.usage-choice button {
+  padding: 3px 11px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.usage-choice button + button {
+  border-left: 1px solid var(--line);
+}
+
+.usage-choice button:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.usage-choice button[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--fg);
+}
+
+.usage-numbers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.usage-number {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.usage-number-label,
+.usage-number-note {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.usage-number-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The bars: a column per day (or week), parts stacked from the baseline with a 2 px gap of the dialog's colour,
+   rounded only at the top. The biggest one's cost names the top line. */
+.usage-plot {
+  position: relative;
+  height: 140px;
+  padding-top: 18px;
+}
+
+.usage-plot-max {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-bars {
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--fg-faint);
+}
+
+/* Years of days, by week: too many for gaps. */
+.usage-bars.dense {
+  gap: 0;
+}
+
+.usage-bar-slot {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.usage-bar-slot:hover .usage-bar {
+  opacity: 0.85;
+}
+
+.usage-bar {
+  width: 100%;
+  max-width: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+}
+
+.usage-part {
+  flex-basis: 0;
+  min-height: 0;
+}
+
+.usage-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.usage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.usage-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.usage-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.usage-table th {
+  padding: 4px 6px;
+  font-weight: 400;
+  color: var(--fg-faint);
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.usage-table td {
+  padding: 4px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.usage-table th:first-child,
+.usage-table td:first-child {
+  width: 40%;
+  padding-left: 0;
+  text-align: left;
+}
+
+.usage-table th:last-child,
+.usage-table td:last-child {
+  padding-right: 0;
+}
+
+.usage-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+  -webkit-user-select: text;
 }

@@ -45,6 +45,7 @@ export const COMMANDS: Command[] = [
   { id: "manage-servers", title: "Manage Servers…", menu: "Server" },
   { id: "reconnect", title: "Reconnect", menu: "Server" },
   { id: "update-server", title: "Update Server…", menu: "Server" },
+  { id: "usage", title: "Usage…", menu: "Server" },
 
   { id: "prev-tab", title: "Show Previous Tab", menu: "Window", key: { key: "[", shift: true, code: "BracketLeft" } },
   { id: "next-tab", title: "Show Next Tab", menu: "Window", key: { key: "]", shift: true, code: "BracketRight" } },

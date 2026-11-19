@@ -54,7 +54,7 @@ test("each menu holds what the plan lists", () => {
   ]);
   expect(outline(menuOf(spec, "Edit"))).toEqual(["undo", "redo", "—", "cut", "copy", "paste", "select-all"]);
   expect(outline(menuOf(spec, "View"))).toEqual(["Files", "Terminal", "Sessions", "Browser Tabs", "—", "Jump to Session…", "—", "Bigger Text", "Smaller Text", "Default Text Size", "—", "fullscreen"]);
-  expect(outline(menuOf(spec, "Server"))).toEqual(["claude1", "Lab", "gpu", "—", "Add Server…", "Manage Servers…", "—", "Reconnect", "Update Server…"]);
+  expect(outline(menuOf(spec, "Server"))).toEqual(["claude1", "Lab", "gpu", "—", "Add Server…", "Manage Servers…", "—", "Reconnect", "Update Server…", "—", "Usage…"]);
   expect(outline(menuOf(spec, "Window"))).toEqual(["minimize", "zoom", "—", "Show Previous Tab", "Show Next Tab", "Go to Home", "—", "bring-all-to-front"]);
   expect(outline(menuOf(spec, "Help"))).toEqual(["Keyboard Shortcuts", "blimp Help", "Report a Problem…"]);
 });
@@ -113,7 +113,7 @@ test("the Server menu lists every server by name, ticks the front tab's, and goe
   ]);
   // One server: still listed, ticked; none: no list and no separator before Add Server….
   expect(outline(menuOf(menuSpec(state({ servers: [{ name: "lab", status: "connected" }], front: 0 })), "Server"))[0]).toBe("lab");
-  expect(outline(menuOf(menuSpec(state({ servers: [], front: -1 })), "Server"))).toEqual(["Add Server…", "Manage Servers…", "—", "Reconnect", "Update Server…"]);
+  expect(outline(menuOf(menuSpec(state({ servers: [], front: -1 })), "Server"))).toEqual(["Add Server…", "Manage Servers…", "—", "Reconnect", "Update Server…", "—", "Usage…"]);
 });
 
 test("a server going between offline and connecting doesn't change the description, so the menu isn't redrawn", () => {

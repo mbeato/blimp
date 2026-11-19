@@ -1,5 +1,7 @@
 // Typed client for blimpd (docs/DESIGN.md, "blimpd API"). One instance per connected server.
 
+import type { NowView, UsageView } from "./usage";
+
 export type SessionState = "working" | "waiting" | "done" | "unknown";
 
 // A port a program in a session listens on (blimpd's ports.ts). host: where it is on the server.
@@ -316,5 +318,16 @@ export class Api {
 
   fsFiles(root: string) {
     return this.json<{ files: string[]; truncated: boolean }>("/fs/files", { query: { root } });
+  }
+
+  // Tokens and cost at API prices over the last `days` local days (tz: minutes east of UTC), by day, account,
+  // model and project (lib/usage.ts). Older blimpd: 404.
+  usage(days: number, tz: number) {
+    return this.json<UsageView>("/usage", { query: { days, tz } });
+  }
+
+  // The bottom bar's numbers: each account's limits, Codex's, and today's cost (older blimpd: 404).
+  usageNow(tz: number) {
+    return this.json<NowView>("/usage/now", { query: { tz } });
   }
 }

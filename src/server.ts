@@ -32,6 +32,7 @@ import { startNotes } from "./notes";
 import { addDevice, addWidget, isDeviceToken, isPushEnv, isWidgetToken, removeDevice, removeWidget } from "./push/store";
 import { startPush } from "./push/watch";
 import { startAccounts } from "./accounts/switcher";
+import { listSaved, readRecord, readState } from "./accounts/store";
 import { recap } from "./recaps";
 import { startReports } from "./reports";
 import { sessionPorts } from "./ports";
@@ -56,10 +57,22 @@ import {
   zmxListAsync,
 } from "./sessions";
 import { cleanUploads, saveUpload } from "./uploads";
+import { openUsage } from "./usage/db";
+import { readPrices } from "./usage/prices";
+import { ensureScan, startUsage } from "./usage/service";
+import { readLimits, statuslineInstalled } from "./usage/statusline";
+import { nowView, summarize } from "./usage/summary";
 import { visualResponse } from "./visuals/http";
 import { cleanVisuals, makeVisual, visualKey } from "./visuals/store";
 import { widgetKey, widgetSummary } from "./widget";
 import { type AttachData, attachMessage, closeAttach, openAttach, termSize } from "./terminal";
+
+// GET /usage's and /usage/now's tz: minutes east of UTC, as the apps' clocks say.
+function usageTz(q: URLSearchParams): number {
+  const tz = Number(q.get("tz") ?? 0);
+  if (!Number.isInteger(tz) || tz < -840 || tz > 840) throw new HttpError(400, "tz must be minutes east of UTC, a whole number from -840 to 840");
+  return tz;
+}
 
 // A live view of a server browser tab (browser/view.ts): input waits in queue until it's open.
 type ViewData = { kind: "view"; id: string; view?: Awaited<ReturnType<typeof viewTab>>; queue: string[]; gone?: boolean };
@@ -341,6 +354,37 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const key = widgetKey(phone ?? readPhoneToken(blimpDir()));
     if (!key) throw new HttpError(404, "no phone is paired (blimpd pair)");
     return Response.json({ key });
+  }
+
+  // Usage (usage/): tokens and cost at API prices by day, account, model and project, and for the bottom bar
+  // the limits and today's cost. Read only here: the scan, a child process (usage/service.ts), writes.
+  if (path === "/usage" && get) {
+    const days = Number(q.get("days") ?? 30);
+    if (!Number.isInteger(days) || days < 1 || days > 3660) throw new HttpError(400, "days must be a whole number from 1 to 3660");
+    const tz = usageTz(q);
+    ensureScan();
+    const emails = new Map(listSaved().filter((a) => a.email).map((a) => [a.id, a.email]));
+    const record = readRecord();
+    if (record?.email && !emails.has(record.id)) emails.set(record.id, record.email);
+    const db = openUsage(undefined, true);
+    try {
+      return Response.json(summarize(db, { days, tz, now: Date.now(), prices: readPrices(), emails }));
+    } finally {
+      db?.close();
+    }
+  }
+  if (path === "/usage/now" && get) {
+    const tz = usageTz(q);
+    const state = readState();
+    const record = readRecord();
+    const db = openUsage(undefined, true);
+    try {
+      return Response.json(
+        nowView(db, { tz, now: Date.now(), prices: readPrices(), saved: listSaved(undefined, state), active: state.active, record: record && { id: record.id, email: record.email }, limits: readLimits(), statusline: statuslineInstalled() }),
+      );
+    } finally {
+      db?.close();
+    }
   }
 
   // Visuals (visuals/store.ts): a session's show tool hands over a page (visuals/mcp.ts); the apps hear of it on
@@ -633,6 +677,7 @@ export function serve(): Server {
   // widget push token (push/watch.ts).
   startPush();
   startAccounts(); // saved Claude logins: files a new one, and switches when the one in use runs out (accounts/switcher.ts)
+  startUsage(); // token usage: a scan 30 s after the start, then every 10 minutes (usage/service.ts)
   console.log(`blimpd ${pkg.version} listening on ${sock}`);
   return server;
 }

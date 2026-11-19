@@ -53,7 +53,7 @@ export const CLAUDE_HOOKS: HookSet = { events: EVENTS, matchers: MATCHERS, arg: 
 export const CODEX_HOOKS: HookSet = { events: Object.keys(CODEX_STATES), matchers: {}, arg: "hook codex" };
 export const codexHooksFile = () => join(process.env.CODEX_HOME || join(homedir(), ".codex"), "hooks.json");
 
-const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
+export const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 // Ours: any blimpd's hook (an older install, another path), or this exact command whatever the binary is called.
 const isOurs = (h: any, command: string) =>
@@ -113,7 +113,7 @@ export function uninstallHooks(blimpdPath: string, settingsPath = join(claudeDir
 }
 
 // Atomic (temp file, then rename), keeping the file's mode.
-function writeSettings(settingsPath: string, settings: unknown) {
+export function writeSettings(settingsPath: string, settings: unknown) {
   const exists = existsSync(settingsPath);
   mkdirSync(dirname(settingsPath), { recursive: true });
   // settings.json is often a symlink into a dotfiles repo: write its target, or the rename replaces the link.

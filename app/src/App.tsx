@@ -7,8 +7,10 @@ import { ServerDot, ServerSwitcher } from "./components/ServerSwitcher";
 import { DragGhost, noActions, TerminalPane, type PaneActions } from "./components/TerminalPane";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
+import { StatusBar } from "./components/StatusBar";
 import { TransferList } from "./components/TransferList";
 import { UpdateBars } from "./components/UpdateBars";
+import { UsageDialog } from "./components/UsageDialog";
 import { Welcome } from "./components/Welcome";
 import { Workbench, type FileDrop, type Opener, type PageOpener } from "./components/Workbench";
 import { commandForKey, inChord, REPO, runner, type Action } from "./lib/commands";
@@ -54,7 +56,7 @@ import { jobsOpen, JobWatcher, viewingList } from "./lib/jobs";
 import blimpSilver from "./assets/blimp-silver.svg";
 import blimpInk from "./assets/blimp-ink.svg";
 
-type DialogKind = "palette" | "open" | "add" | "manage" | "settings" | "shortcuts" | null;
+type DialogKind = "palette" | "open" | "add" | "manage" | "settings" | "shortcuts" | "usage" | null;
 
 // One window: project tabs along the top (Home, the server's home folder, first), each laid out
 // by its own Workbench. Every tab stays mounted while open, so its files and terminals survive
@@ -631,6 +633,7 @@ export function App() {
       "manage-servers": { run: () => setDialog("manage"), enabled: !!servers?.length },
       reconnect: link ? { run: () => link.retryNow() } : undefined,
       "update-server": canUpdate() && link ? { run: () => void updateLink(link, setNotice), enabled: blimpdBehind(link) } : undefined,
+      usage: { run: () => setDialog("usage"), enabled: link?.status === "connected" },
       "prev-tab": { run: () => setLayout((l) => l && stepTab(l, -1)), enabled: tabs > 1 },
       "next-tab": { run: () => setLayout((l) => l && stepTab(l, 1)), enabled: tabs > 1 },
       home: { run: () => setLayout((l) => l && { ...l, active: 0 }) },
@@ -888,6 +891,8 @@ export function App() {
           />
         );
       })}
+      {/* Under every workbench: the front tab's server's limits and today's cost. */}
+      <StatusBar link={link} onOpen={() => setDialog("usage")} />
 
       {dialog === "palette" && <Palette links={linkList} onPick={(l, name) => void pickSession(l, name)} onClose={() => setDialog(null)} />}
       {dialog === "open" && connected.length > 0 && (
@@ -903,6 +908,7 @@ export function App() {
         <ManageServersDialog links={linkList} onRename={renameServer} onRemove={removeServer} onAdd={() => setDialog("add")} onNotice={setNotice} onClose={() => setDialog(null)} />
       )}
       {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
+      {dialog === "usage" && <UsageDialog link={link} onClose={() => setDialog(null)} />}
       {dialog === "settings" && (
         <SettingsDialog
           at={settingsAt}

@@ -26,6 +26,16 @@
   --group-bg: rgba(122, 167, 224, 0.14);
   /* A web page's own canvas (an HTML file shown as a page): white in both themes, as in a browser. */
   --paper: #ffffff;
+  /* The Usage window's cost bars, one colour per account or model, in this order; the rest in grey. The dataviz
+     skill's categorical palette, slots blue, orange, aqua, violet, magenta: its yellow is left out, since amber
+     means waiting here. This order passes its colour-blind and contrast checks on the dialog's colour in both
+     themes; the grey is a step lighter (dark) or darker (light) than the magenta it sits on. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #9085e9;
+  --series-5: #d55181;
+  --series-rest: #b4b5bb;
 
   /* xterm.js reads these when a terminal opens and when the system theme changes. */
   --term-bg: #1e1f22;
@@ -74,6 +84,12 @@
     --unread: #0a6cff;
     --group: #2f6fc4;
     --group-bg: rgba(47, 111, 196, 0.1);
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --series-4: #6250d6;
+    --series-5: #e87ba4;
+    --series-rest: #6e6f76;
 
     --term-bg: #ffffff;
     --term-fg: #1d1d1f;
@@ -119,6 +135,12 @@
   --unread: #0a6cff;
   --group: #2f6fc4;
   --group-bg: rgba(47, 111, 196, 0.1);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #6250d6;
+  --series-5: #e87ba4;
+  --series-rest: #6e6f76;
 
   --term-bg: #ffffff;
   --term-fg: #1d1d1f;
