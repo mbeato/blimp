@@ -1,8 +1,9 @@
 // The usage scan (src/usage/scan.ts): each Claude reply and Codex turn counted once, by hour, account,
 // model, project, helper and tier. Made-up transcripts in fresh temp folders; never the real ~/.claude.
 
-import { afterAll, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { afterAll, expect, spyOn, test } from "bun:test";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { openUsage } from "../src/usage/db";
@@ -282,4 +283,56 @@ test("a reply across the 8 MB read boundary, and one after a line longer than a 
   put(session(d, "a.jsonl"), filler(8 * 1024 * 1024 - 100) + claude({ id: "m1" }) + filler(9 * 1024 * 1024) + claude({ id: "m2" }));
   expect(scan(d, NOW)).toEqual({ files: 1, replies: 2 });
   expect(rows(d)[0].replies).toBe(2);
+});
+
+test("the daily copy: one scan makes today's, 600, a whole database; a second scan the same day makes no other", () => {
+  const d = fresh();
+  put(session(d, "a.jsonl"), claude({ id: "m1" }) + claude({ id: "m2", at: T0 + 2 * H }));
+  scan(d, NOW);
+  const backups = join(d.usage, "backups");
+  const file = join(backups, "usage-2026-11-19.db");
+  expect(readdirSync(backups)).toEqual(["usage-2026-11-19.db"]);
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  expect(statSync(backups).mode & 0o777).toBe(0o700);
+  const copy = new Database(file, { readonly: true });
+  expect((copy.query("select count(*) as n from rows").get() as { n: number }).n).toBe(rows(d).length);
+  expect(rows(d).length).toBe(2);
+  copy.close();
+  put(session(d, "b.jsonl"), claude({ id: "m3" }));
+  scan(d, NOW + H);
+  expect(readdirSync(backups)).toEqual(["usage-2026-11-19.db"]);
+});
+
+test("the daily copy: of the dated copies the newest 7 stay; other files are left alone", () => {
+  const d = fresh();
+  const backups = join(d.usage, "backups");
+  for (let i = 1; i <= 9; i++) put(join(backups, `usage-2026-11-0${i}.db`), "x");
+  put(join(backups, "notes.txt"), "mine");
+  scan(d, NOW);
+  expect(readdirSync(backups).sort()).toEqual([
+    "notes.txt",
+    "usage-2026-11-04.db",
+    "usage-2026-11-05.db",
+    "usage-2026-11-06.db",
+    "usage-2026-11-07.db",
+    "usage-2026-11-08.db",
+    "usage-2026-11-09.db",
+    "usage-2026-11-19.db",
+  ]);
+});
+
+test("the daily copy failing (backups is a file) leaves the scan's result whole and says why on stderr", () => {
+  const d = fresh();
+  put(join(d.usage, "backups"), "not a folder");
+  put(session(d, "a.jsonl"), claude());
+  const err = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    expect(scan(d, NOW)).toEqual({ files: 1, replies: 1 });
+    expect(err).toHaveBeenCalledTimes(1);
+    expect(String(err.mock.calls[0][0])).toStartWith("blimpd usage-scan: the daily copy failed: ");
+  } finally {
+    err.mockRestore();
+  }
+  expect(meta(d, "scanEnded")).toBe(String(NOW));
+  expect(rows(d).length).toBe(1);
 });

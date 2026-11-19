@@ -194,3 +194,43 @@ test("nowView: Codex's limit from the database, and today's cost and tokens by t
   db.run("update meta set value = ? where key = 'codexLimit'", [JSON.stringify({ at: 1, primary: { used_percent: 1, window_minutes: 300, resets_at: 2 }, secondary: null })]);
   expect(nowView(db, nowOpts()).codex).toEqual({ at: 1, windows: [{ minutes: 300, used: 1, resetsAt: 2000, reset: true }] });
 });
+
+test("previous: the totals of the same number of days just before the range; left out when the range starts at the first day", () => {
+  const D = 86_400_000;
+  const db = filled([
+    { at: NOW - 20 * D, input: M }, // the first day, before both ranges
+    { at: NOW - 10 * D, input: M, replies: 2 }, // in the 7 days before the last 7
+    { at: NOW - 7 * D, output: M, helper: 1 }, // the first day of the 7 before (2026-11-12)
+    { at: NOW - 6 * D, input: M, replies: 5 }, // the first day of the range: not previous
+  ]);
+  const v = summarize(db, opts({ days: 7 }));
+  expect(v.previous).toMatchObject({ replies: 3, input: M, output: M });
+  expect(v.previous!.cost).toBeCloseTo(4 + 20, 9);
+  expect(v.previous!.helperCost).toBeCloseTo(20, 9);
+  // 30 days: the range starts at the first day (2026-10-30), nothing before it.
+  expect(summarize(db, opts({ days: 30 })).previous).toBeUndefined();
+  // 14 days reach back to 2026-11-06; the 14 before it are cut at the first day (2026-10-30).
+  expect(summarize(db, opts({ days: 14 })).previous).toMatchObject({ replies: 1, input: M });
+  expect(summarize(filled([]), opts({ days: 7 })).previous).toBeUndefined();
+});
+
+test("hours: only for today, 24 local hours with cost by account and model; a 23:30 UTC row is hour 0 at tz 60", () => {
+  const db = filled([
+    { at: Date.UTC(2026, 10, 18, 23, 30), input: M }, // 00:30 on the 19th at tz 60
+    { at: Date.UTC(2026, 10, 19, 9, 10), input: M, account: "B", model: "claude-sonnet-4-6" },
+    { at: Date.UTC(2026, 10, 19, 9, 50), input: M },
+  ]);
+  const utc = summarize(db, opts({ days: 1 }));
+  expect(utc.hours!.map((h) => h.hour)).toEqual(Array.from({ length: 24 }, (_, i) => i));
+  expect(utc.hours![0]).toEqual({ hour: 0, byAccount: {}, byModel: {} });
+  expect(utc.hours![9].byAccount.A).toBeCloseTo(4, 9);
+  expect(utc.hours![9].byAccount.B).toBeCloseTo(3, 9);
+  expect(utc.hours![9].byModel["claude-sonnet-4-6"]).toBeCloseTo(3, 9);
+  const east = summarize(db, opts({ days: 1, tz: 60 }));
+  expect(east.hours![0].byAccount.A).toBeCloseTo(4, 9);
+  expect(east.hours![10].byAccount.B).toBeCloseTo(3, 9);
+  // A half-hour zone west of UTC: 09:10 UTC is 03:40 at tz -330, hour 3.
+  const west = summarize(db, opts({ days: 1, tz: -330 }));
+  expect(west.hours![3].byAccount.B).toBeCloseTo(3, 9);
+  expect(summarize(db, opts({ days: 7 })).hours).toBeUndefined();
+});
