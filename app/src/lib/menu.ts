@@ -122,7 +122,7 @@ export function menuSpec(s: MenuState): MenuItem[] {
       sep,
       native("fullscreen"),
     ]),
-    menu("Server", [...servers, ...(servers.length ? [sep] : []), cmd("add-server"), cmd("manage-servers"), sep, cmd("reconnect"), cmd("update-server")]),
+    menu("Server", [...servers, ...(servers.length ? [sep] : []), cmd("add-server"), cmd("manage-servers"), sep, cmd("reconnect"), cmd("update-server"), sep, cmd("usage")]),
     menu("Window", [native("minimize"), native("zoom"), sep, cmd("prev-tab"), cmd("next-tab"), cmd("home"), sep, native("bring-all-to-front")], "window"),
     menu("Help", [cmd("shortcuts"), cmd("help"), cmd("report")], "help"),
   ];
