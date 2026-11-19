@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Job, Session } from "./api";
-import { accountName, axis, barInfo, busiest, cacheShare, change, chart, dayLabel, high, modelName, money, projectName, projectParts, resetsIn, share, tokens, windowLabel, type Sum, type UsageView } from "./usage";
+import { accountName, axis, barInfo, busiest, cacheShare, change, chart, dayLabel, high, modelName, money, projectParts, resetsIn, share, tokens, windowLabel, type Sum, type UsageView } from "./usage";
 
 const sum = (s: Partial<Sum> = {}): Sum => ({ replies: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, helperCost: 0, ...s });
 
@@ -66,16 +66,6 @@ test("cacheShare: cache reads over all input", () => {
   expect(cacheShare(sum())).toBe(0);
   expect(cacheShare(sum({ input: 10, cacheRead: 80, cacheWrite: 10, output: 500 }))).toBe(0.8);
   expect(cacheShare(sum({ input: 10 }))).toBe(0);
-});
-
-test("projectName: the last two parts of the path; empty is everything else", () => {
-  expect(projectName("")).toBe("Everything else");
-  expect(projectName("/home/max/code/blimp")).toBe("code/blimp");
-  expect(projectName("/home/max/code/blimp/")).toBe("code/blimp");
-  expect(projectName("/srv")).toBe("srv");
-  expect(projectName("/")).toBe("/");
-  expect(projectName("/home/max", "/home/max")).toBe("~");
-  expect(projectName("/home/max/blimp", "/home/max")).toBe("max/blimp");
 });
 
 test("share: a part of the total cost as a percent", () => {

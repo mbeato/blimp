@@ -78,14 +78,6 @@ export function cacheShare(s: Sum): number {
   return all ? s.cacheRead / all : 0;
 }
 
-// A project is a folder on the server; the full path goes in the row's tooltip.
-export function projectName(p: string, home?: string): string {
-  if (p === "") return "Everything else";
-  if (home && p.replace(/\/+$/, "") === home.replace(/\/+$/, "")) return "~";
-  const parts = p.split("/").filter(Boolean);
-  return parts.length ? parts.slice(-2).join("/") : p;
-}
-
 // A project as the table shows it: the folder's name, and where it is (home as ~). The full path goes in the row's tooltip.
 export function projectParts(path: string, home?: string): { name: string; where: string } {
   if (path === "") return { name: "Everything else", where: "" };
