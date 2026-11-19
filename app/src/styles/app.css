@@ -3178,7 +3178,8 @@ button.sb-item:hover .sb-pr {
 /* The head stays put; the body scrolls inside. As tall as 86% of the window at most, less the scrim's top gap. */
 .dialog.usage {
   width: 840px;
-  max-height: min(86vh, calc(88vh - 16px));
+  /* The scrim starts it 12vh down: it ends above the bottom bar. */
+  max-height: calc(88vh - 40px);
   padding: 0;
 }
 
@@ -3273,7 +3274,8 @@ button.sb-item:hover .sb-pr {
 /* Limits: a card per account and one for Codex. */
 .usage-limits {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  /* Three accounts and Codex sit in one row. */
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 10px;
 }
 
@@ -3409,13 +3411,12 @@ button.sb-item:hover .sb-pr {
   text-overflow: ellipsis;
 }
 
+/* It may take a second line ("241% more than the 30 days before"); it is never cut. */
 .usage-figure-note {
   font-size: 11px;
+  line-height: 1.35;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 @media (max-width: 720px) {

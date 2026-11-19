@@ -23,7 +23,7 @@ type Tab = "account" | "model" | "project";
 export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
   const l = props.link;
   const [days, setDays] = useState(30);
-  const [by, setBy] = useState<"account" | "model">("account");
+  const [by, setBy] = useState<"account" | "model">("model");
   const [tab, setTab] = useState<Tab>("model");
   const [view, setView] = useState<UsageView | null>(null);
   const [now, setNow] = useState<NowView | null>(null);
@@ -87,7 +87,7 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
               </div>
               <CostChart view={view} by={by} days={days} />
             </section>
-            <Breakdown view={view} tab={tab} onTab={setTab} home={l.home} />
+            <Breakdown view={view} tab={tab} onTab={setTab} by={by} home={l.home} />
           </>
         )}
       </div>
@@ -189,7 +189,7 @@ function Headline(props: { view: UsageView; days: number }) {
   // Today isn't over, so it is held against the whole of yesterday.
   const before = props.days === 1 ? "all of yesterday" : `the ${props.days} days before`;
   const c = change(t.cost, v.previous?.cost);
-  const vs = c === undefined ? "" : c === "the same" ? ` · the same as ${before}` : ` · ${c} than ${before}`;
+  const vs = c === undefined ? "" : c === "the same" ? `the same as ${before}` : `${c} than ${before}`;
   let per: { label: string; value: string; note: string };
   if (props.days === 1 && v.hours) {
     const hours = new Date().getHours() + 1; // today's hours so far, this one included
@@ -200,7 +200,7 @@ function Headline(props: { view: UsageView; days: number }) {
     per = { label: "Per day", value: money(t.cost / Math.max(1, v.days.length)), note: peak ? `busiest ${dayLabel(peak.day)} · ${money(peak.cost)}` : "" };
   }
   const cells = [
-    { label: "Cost", value: money(t.cost), note: `at API prices${vs}` },
+    { label: "Cost at API prices", value: money(t.cost), note: vs },
     { label: "Tokens", value: tokens(sumTokens(t)), note: `${percent(cacheShare(t))} read from cache` },
     { label: "Replies", value: t.replies.toLocaleString("en-US"), note: t.cost > 0 ? `${percent(t.helperCost / t.cost)} of cost by helper agents` : "" },
     per,
@@ -224,12 +224,13 @@ function Headline(props: { view: UsageView; days: number }) {
 // One table with a tab each for accounts, models and projects, most cost first: the name (with the chart's dot when it
 // is one of the chart's series), a bar for its share of the range's cost, then cost, share and tokens. A model with no
 // price says so and has no share.
-function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; home: string }) {
+function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; by: "account" | "model"; home: string }) {
   const v = props.view;
   const total = v.totals.cost;
   // undefined: no dot column (projects); null: a dot's room, empty, so the names line up.
   type Row = { key: string; name: ReactNode; title?: string; sum: Sum; priced?: boolean; dot?: string | null };
-  const dots = (by: "account" | "model") => new Map(chartSeries(v, by).map((s, i) => [s.id, `var(--series-${i + 1})`]));
+  // A dot points at the chart, so rows get theirs only while the chart is drawn by the same thing.
+  const dots = (by: "account" | "model") => new Map(by === props.by ? chartSeries(v, by).map((s, i) => [s.id, `var(--series-${i + 1})`] as const) : []);
   let rows: Row[];
   if (props.tab === "account") {
     const d = dots("account");
