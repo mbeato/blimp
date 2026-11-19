@@ -2,21 +2,24 @@
 // new in Claude Code's transcripts and Codex's session files and adds it to the usage database by hour,
 // account, model, project, helper or not, and tier. blimpd runs it as a child process, so a long first
 // scan (13 GB on claude1) doesn't hold blimpd up. Each file's rows, its seen keys and how far it was read
-// go in one transaction, so a scan stopped half way counts no line twice.
+// go in one transaction, so a scan stopped half way counts no line twice. Once a day it also keeps a copy
+// of the database in <usage dir>/backups, the last 7 kept.
 
 import type { Database } from "bun:sqlite";
-import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { accountsDir, readRecord, recordFile } from "../accounts/store";
 import { claudeDir } from "../sessions";
-import { openUsage } from "./db";
+import { openUsage, usageDir } from "./db";
 import { entryFor, type Entry, pricesFile, readPrices } from "./prices";
 import { accountAt, readTimeline, type Timeline } from "./whose";
 
 export type ScanDirs = { usage?: string; claude?: string; codex?: string; accounts?: string; record?: string; prices?: string };
 
 const CHUNK = 8 * 1024 * 1024;
+const COPIES = 7;
+const COPY_NAME = /^usage-\d{4}-\d{2}-\d{2}\.db$/;
 const DAY = 86_400_000;
 const NL = 0x0a;
 // Only lines holding one of these are parsed. Checked on the bytes: most of 13 GB is tool output and
@@ -96,11 +99,32 @@ export function scan(dirs: ScanDirs = {}, now = Date.now()): { files: number; re
   const extra = readPrices(dirs.prices ?? pricesFile()).extra;
   const timeline = readTimeline(dirs.accounts ?? accountsDir());
   const recordId = readRecord(dirs.record ?? recordFile())?.id ?? "";
-  const db = openUsage(dirs.usage)!;
+  const dir = dirs.usage ?? usageDir();
+  const db = openUsage(dir)!;
   try {
-    return scanWith(db, claude, codex, extra, timeline, recordId, now);
+    const result = scanWith(db, claude, codex, extra, timeline, recordId, now);
+    dailyCopy(db, dir, now);
+    return result;
   } finally {
     db.close();
+  }
+}
+
+// <usage dir>/backups/usage-<UTC day>.db once a day, the newest 7 kept. VACUUM INTO writes a whole,
+// consistent file and can't run inside a transaction. A copy that fails doesn't fail the scan.
+function dailyCopy(db: Database, dir: string, now: number) {
+  try {
+    const backups = join(dir, "backups");
+    const file = join(backups, `usage-${new Date(now).toISOString().slice(0, 10)}.db`);
+    if (existsSync(file)) return;
+    mkdirSync(backups, { recursive: true, mode: 0o700 });
+    chmodSync(backups, 0o700);
+    db.run("vacuum into ?", [file]);
+    chmodSync(file, 0o600);
+    const dated = readdirSync(backups).filter((n) => COPY_NAME.test(n)).sort();
+    for (const n of dated.slice(0, -COPIES)) rmSync(join(backups, n), { force: true });
+  } catch (e) {
+    console.error(`blimpd usage-scan: the daily copy failed: ${(e as Error).message}`);
   }
 }
 

@@ -16,6 +16,8 @@ export type UsageView = {
   projects: (Sum & { project: string })[]; // 20, then { project: "" } for everything else when there is more
   unpriced: string[];
   note?: string; // why prices.json was ignored
+  previous?: Sum; // the same number of local days just before the range, cut at firstDay; absent when the range starts at firstDay
+  hours?: { hour: number; byAccount: Record<string, number>; byModel: Record<string, number> }[]; // days 1 only: today's 24 local hours, cost
 };
 export type Window = { used: number; resetsAt: number; reset: boolean }; // used 0 to 100; resetsAt ms
 export type NowView = {
@@ -33,6 +35,8 @@ const DAY = 86_400_000;
 const PROJECTS = 20;
 
 const dayOf = (hour: number, tz: number) => Math.floor((hour * H + tz * 60_000) / DAY);
+// The local hour of the day, 0 to 23, by the same floor as dayOf, on minutes (a half-hour zone floors).
+const hourOf = (hour: number, tz: number) => (((Math.floor((hour * 60 + tz) / 60) % 24) + 24) % 24);
 const dayText = (day: number) => new Date(day * DAY).toISOString().slice(0, 10);
 const zero = (): Sum => ({ replies: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, helperCost: 0 });
 const tokens = (s: Sum) => s.input + s.output + s.cacheRead + s.cacheWrite;
@@ -66,6 +70,10 @@ export function summarize(
   const first = (db.query("select min(hour) as hour from rows").get() as { hour: number | null }).hour;
   const firstDay = first === null ? undefined : dayOf(first, o.tz);
   const from = Math.max(today - o.days + 1, firstDay ?? today);
+  // The days before the range: as many, cut at the first day. None when the range starts at the first day.
+  const before = firstDay !== undefined && today - o.days + 1 > firstDay ? Math.max(from - o.days, firstDay) : undefined;
+  const previous = before === undefined ? undefined : zero();
+  const hours = o.days === 1 ? Array.from({ length: 24 }, (_, hour) => ({ hour, byAccount: {} as Record<string, number>, byModel: {} as Record<string, number> })) : undefined;
 
   const days = new Map<number, UsageView["days"][number]>();
   for (let d = from; d <= today; d++) days.set(d, { day: dayText(d), byAccount: {}, byModel: {} });
@@ -75,8 +83,13 @@ export function summarize(
   const projects = new Map<string, Sum & { project: string }>();
   const unpriced = new Set<string>();
 
-  for (const r of rowsFrom(db, from, o.tz)) {
-    const day = days.get(dayOf(r.hour, o.tz));
+  for (const r of rowsFrom(db, before ?? from, o.tz)) {
+    const d = dayOf(r.hour, o.tz);
+    if (d < from) {
+      add(previous!, r, rowCost(r, o.prices.extra) ?? 0);
+      continue;
+    }
+    const day = days.get(d);
     if (!day) continue; // a later day than today: a clock that was ahead
     const c = rowCost(r, o.prices.extra);
     if (c === undefined) unpriced.add(r.model);
@@ -84,6 +97,11 @@ export function summarize(
     add(totals, r, cost);
     day.byAccount[r.account] = (day.byAccount[r.account] ?? 0) + cost;
     day.byModel[r.model] = (day.byModel[r.model] ?? 0) + cost;
+    if (hours) {
+      const h = hours[hourOf(r.hour, o.tz)];
+      h.byAccount[r.account] = (h.byAccount[r.account] ?? 0) + cost;
+      h.byModel[r.model] = (h.byModel[r.model] ?? 0) + cost;
+    }
     let a = accounts.get(r.account);
     if (!a) {
       const email = o.emails.get(r.account);
@@ -115,6 +133,8 @@ export function summarize(
     projects: top,
     unpriced: [...unpriced].sort(),
     ...(o.prices.note && { note: o.prices.note }),
+    ...(previous && { previous }),
+    ...(hours && { hours }),
   };
 }
 

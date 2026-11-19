@@ -91,6 +91,15 @@ Ground rule: blimp only reads what Claude Code and Codex already write. The one 
 - `lib/usage.ts`: the types and the wording (1.2M, $12.34, "resets in 1 h 40 min", a meter's level), and the bars' grouping by day or week (`chart`), unit tested.
 - The iPhone app: not in this version.
 
+## Second round (0.3.19)
+
+Asked by Max after 0.3.18: make it more polished, fill out the bottom bar, and keep a copy of the usage data on the server.
+
+- **The daily copy.** After a scan, the first one of each UTC day writes `<socket dir>/usage/backups/usage-<YYYY-MM-DD>.db` with `vacuum into` (folder 700, file 600) and keeps the newest 7 of those files. A failed copy writes one line to stderr and does not fail the scan. To put one back: stop blimpd, copy it over `usage.db`, delete `usage.db-wal` and `usage.db-shm`, start blimpd.
+- **`GET /usage` gives two more things.** `previous`: the totals of the same number of local days just before the range, cut at the first day; left out when the range starts at the first day. `hours`: for `days=1` only, today's 24 local hours with cost by account and by model.
+- **The bottom bar** is 24 px and has two groups. Left, where you are: the server (its dot and name), the branch and its open pull request (a click opens it), sessions working and waiting over the whole server (amber for waiting; a click opens Jump to Session), the focused session's model label and context meter, and running jobs in the folder. Each is left out when it has nothing to say, and the left group gives way first in a narrow window. Right: the usage button as before, restyled (`lib/usage.ts` `barInfo` works out the left group).
+- **The Usage window** is 840 px wide and its head stays put. Limits are cards, one per account and one for Codex, each window with a full-width meter. The headline numbers are one strip of four with a line of context each: cost against the period before, the share read from cache, the helpers' share of cost, and the busiest day (or hour). The chart has a grid with round values (`axis`), dates between the ends, today's bar paler, a hover band and a hover box, today by the hour, and a legend with each series' cost. The three tables are one, with Accounts / Models / Projects tabs, a share bar, cost, share, input, output, cached and replies. Models are named as people say them (`modelName`), projects by folder and where it is (`projectParts`).
+
 ## Not in this version
 
 - The iPhone screen and widget.

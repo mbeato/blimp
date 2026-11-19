@@ -2509,7 +2509,7 @@ body.dragging-session * {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 42px; /* over the bottom bar (22 px) */
+  bottom: 44px; /* over the bottom bar (24 px) */
   transform: translateX(-50%);
   z-index: 20;
   max-width: min(560px, calc(100% - 32px));
@@ -2535,7 +2535,7 @@ body.dragging-session * {
 .transfers {
   position: fixed;
   left: 8px;
-  bottom: 30px; /* over the bottom bar (22 px) */
+  bottom: 32px; /* over the bottom bar (24 px) */
   z-index: 15;
   width: 224px;
   max-height: 50vh;
@@ -3015,42 +3015,138 @@ body.dragging-session * {
 
 /* ---- bottom bar (components/StatusBar.tsx) ---- */
 
-/* Under every workbench, one text line high: the workbench above keeps the rest (.wb is flex: 1). A row of items,
-   so later ones go in without a new layout. Empty, it keeps its height, so nothing moves when numbers arrive. */
+/* Under every workbench, 24 px: the workbench above keeps the rest (.wb is flex: 1). Left, where you are; right, usage.
+   A row of items, so later ones go in without a new layout. Nothing in it wraps or scrolls: when the window is narrow,
+   the left group's items shrink and cut their text first, and the usage group stays whole. Empty, it keeps its height,
+   so nothing moves when numbers arrive. */
 .statusbar {
   flex: none;
   display: flex;
   align-items: stretch;
-  height: 22px;
-  padding: 0 4px;
+  height: 24px;
   background: var(--bg-side);
   border-top: 1px solid var(--line);
   font-size: 11px;
+  line-height: 1;
   color: var(--fg-dim);
-}
-
-.statusbar-usage {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 6px;
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
 }
 
-.statusbar-usage:hover {
-  color: var(--fg);
-  background: var(--hover);
+.sb-left {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.statusbar-item {
+.sb-item {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 9px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-left > .sb-item {
+  overflow: hidden;
+}
+
+.sb-item > svg,
+.sb-item > .srv-dot,
+.sb-item .meter {
+  flex: none;
+}
+
+button.sb-item:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  button.sb-item {
+    transition: background-color 0.12s, color 0.12s;
+  }
+}
+
+/* An item's words, cut with an ellipsis at its own width. */
+.sb-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sb-server {
+  max-width: 160px;
+}
+
+.sb-branch {
+  max-width: 200px;
+}
+
+.sb-label {
+  max-width: 120px;
+}
+
+.sb-pr {
+  flex: none;
+  color: var(--fg-faint);
+}
+
+button.sb-item:hover .sb-pr {
+  color: inherit;
+}
+
+/* The one amber thing in the bar: it is what amber means. */
+.sb-waiting {
+  color: var(--waiting);
+}
+
+.sb-item > span + .sb-waiting {
+  margin-left: 4px;
+}
+
+.sb-ctx .meter {
+  width: 28px;
+}
+
+/* Usage: a hairline from the left group; the account in full ink, labels faint, numbers dim, today's cost last. */
+.sb-usage {
+  flex: none;
+  margin-left: auto;
+  gap: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.sb-group {
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 
-/* A limit's meter: a track and its fill, red over 80% as a session row's context bar (.ctx-meter.high). */
+.sb-account,
+.sb-amount {
+  color: var(--fg);
+}
+
+.sb-label-faint {
+  color: var(--fg-faint);
+}
+
+.sb-num {
+  color: var(--fg-dim);
+}
+
+.sb-usage .meter {
+  width: 32px;
+}
+
+/* A meter: a track and its fill, fully rounded, red over 80% as a session row's context bar (.ctx-meter.high). */
 .meter {
   flex: none;
   position: relative;
@@ -3064,6 +3160,7 @@ body.dragging-session * {
 .meter-fill {
   position: absolute;
   inset: 0 auto 0 0;
+  border-radius: inherit;
   background: var(--fg-dim);
 }
 
@@ -3071,28 +3168,32 @@ body.dragging-session * {
   background: var(--danger);
 }
 
+.sb-num.meter-high,
 .meter-high {
   color: var(--danger);
 }
 
-/* ---- usage (components/UsageDialog.tsx) ---- */
+/* ---- usage (components/UsageDialog.tsx, components/UsageChart.tsx) ---- */
 
+/* The head stays put; the body scrolls inside. As tall as 86% of the window at most, less the scrim's top gap. */
 .dialog.usage {
-  width: 760px;
-  max-height: 80vh;
+  width: 840px;
+  /* The scrim starts it 12vh down: it ends above the bottom bar. */
+  max-height: calc(88vh - 40px);
   padding: 0;
 }
 
 .usage-head {
   flex: none;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
-  padding: 14px 18px 10px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--line);
 }
 
 .usage-server {
+  min-width: 0;
   font-size: 12px;
   color: var(--fg-faint);
   overflow: hidden;
@@ -3100,302 +3201,573 @@ body.dragging-session * {
   white-space: nowrap;
 }
 
+.usage-head .usage-choice {
+  margin-left: auto;
+}
+
 .usage-body {
-  overflow-y: auto;
-  padding: 4px 18px 16px;
-}
-
-.usage-section h3 {
-  margin: 16px 0 6px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-faint);
-}
-
-.usage-section-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 16px 0 6px;
-}
-
-.usage-section-head h3 {
-  margin: 0;
+  flex-direction: column;
+  gap: 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 16px 18px 18px;
 }
 
 .usage-note {
-  margin: 6px 0;
+  margin: 8px 0 0;
   font-size: 12px;
   color: var(--fg-faint);
   user-select: text;
   -webkit-user-select: text;
 }
 
+.usage-body > .usage-note,
+.usage-error {
+  margin: 0;
+}
+
 .usage-error {
   padding: 0;
-  margin: 8px 0;
+}
+
+.usage-faint {
+  color: var(--fg-faint);
+}
+
+/* A rounded track with the chosen option raised in it (the range, By account / By model, the table's tabs). The track is
+   the sidebar's colour: a step below the dialog in both themes, where --bg-input is white like the pill in light. */
+.usage-choice {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-side);
+}
+
+.usage-choice button {
+  padding: 2px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.usage-choice button:hover {
+  color: var(--fg);
+}
+
+.usage-choice button[aria-pressed="true"] {
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .usage-choice button {
+    transition: background-color 0.12s, color 0.12s;
+  }
+}
+
+/* Limits: a card per account and one for Codex. */
+.usage-limits {
+  display: grid;
+  /* Three accounts and Codex sit in one row. */
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
 }
 
 .usage-limit {
   display: flex;
-  align-items: start;
-  gap: 14px;
-  padding: 5px 0;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.usage-limit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 12px;
 }
 
 .usage-limit-name {
   flex: 1 1 0;
   min-width: 0;
+  font-weight: 500;
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.usage-limit-name .usage-faint {
+  font-weight: 400;
+}
+
+.usage-limit-use,
 .usage-limit-age {
   flex: none;
-  width: 60px;
-  color: var(--fg-faint);
+  font-size: 11px;
   white-space: nowrap;
 }
 
-/* The label, the meter and the percent on one line, and when it resets under them: the same
-   columns in every row, so the meters line up down the list. */
-.usage-window {
-  flex: none;
-  display: grid;
-  grid-template-columns: 34px 60px 34px;
-  column-gap: 6px;
+.usage-limit-use {
+  display: inline-flex;
   align-items: center;
-  width: 170px;
+  gap: 5px;
   color: var(--fg-dim);
-  font-variant-numeric: tabular-nums;
 }
 
-/* A row with one window (Codex's week): it sits under the others' last one, and its age under theirs. */
-.usage-limit-age + .usage-window:last-child {
-  margin-left: 184px;
+.usage-use-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-dim);
 }
 
-.usage-window .meter {
-  width: 60px;
+.usage-limit-age {
+  color: var(--fg-faint);
+}
+
+/* A window: its name and percent, a full-width meter under them, and when it resets under that. */
+.usage-window {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 5px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.usage-window-name {
+  color: var(--fg-dim);
 }
 
 .usage-window-num {
-  min-width: 30px;
-  text-align: right;
   color: var(--fg);
+  font-variant-numeric: tabular-nums;
 }
 
-.usage-window-reset,
-.usage-window-none {
-  color: var(--fg-faint);
-  white-space: nowrap;
+.usage-window .meter {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
 }
 
 .usage-window-reset {
   grid-column: 1 / -1;
+  margin-top: -1px;
   font-size: 11px;
+  color: var(--fg-faint);
+  white-space: nowrap;
 }
 
-.usage-controls {
-  display: flex;
-  margin-top: 16px;
+.usage-limit-none {
+  margin: 0;
+  font-size: 12px;
+  color: var(--fg-faint);
 }
 
-/* A row of buttons, one pressed: the range, and By account / By model. */
-.usage-choice {
-  display: inline-flex;
+/* Headline numbers: one strip cut in four by hairlines. */
+.usage-headline {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--line);
-  border-radius: 6px;
-  overflow: hidden;
+  border-radius: 8px;
 }
 
-.usage-choice button {
-  padding: 3px 11px;
+.usage-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.usage-figure + .usage-figure {
+  border-left: 1px solid var(--line);
+}
+
+.usage-figure-label {
   font-size: 12px;
   color: var(--fg-dim);
 }
 
-.usage-choice button + button {
-  border-left: 1px solid var(--line);
-}
-
-.usage-choice button:hover {
-  background: var(--hover);
+.usage-figure-value {
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
   color: var(--fg);
-}
-
-.usage-choice button[aria-pressed="true"] {
-  background: var(--selected);
-  color: var(--fg);
-}
-
-.usage-numbers {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.usage-number {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  min-width: 0;
-}
-
-.usage-number-label,
-.usage-number-note {
-  font-size: 11px;
-  color: var(--fg-faint);
-}
-
-.usage-number-value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--fg);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* The bars: a column per day (or week), parts stacked from the baseline with a 2 px gap of the dialog's colour,
-   rounded only at the top. The biggest one's cost names the top line. */
-.usage-plot {
-  position: relative;
-  height: 140px;
-  padding-top: 18px;
-}
-
-.usage-plot-max {
-  position: absolute;
-  top: 0;
-  left: 0;
+/* It may take a second line ("241% more than the 30 days before"); it is never cut. */
+.usage-figure-note {
   font-size: 11px;
+  line-height: 1.35;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
-.usage-bars {
-  height: 100%;
+@media (max-width: 720px) {
+  .usage-headline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .usage-figure:nth-child(3) {
+    border-left: 0;
+  }
+  .usage-figure:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* A card: the chart, the table. */
+.usage-card {
+  position: relative;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.usage-card-head {
   display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.usage-card-head h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.usage-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* The chart: the axis values in a 44 px gutter on the left (UsageChart.tsx GUTTER), a hairline per step, the bars over
+   them. Its top margin leaves room for the top value, which is centred on the top line. */
+.uc-plot {
+  position: relative;
+  height: 190px;
+  margin-top: 6px;
+}
+
+.uc-grid {
+  position: absolute;
+  inset: 0 0 0 44px;
+}
+
+.uc-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
   border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--fg-faint);
 }
 
-/* Years of days, by week: too many for gaps. */
-.usage-bars.dense {
-  gap: 0;
+/* The baseline, a step stronger: the bars stand on it. */
+.uc-line:first-child {
+  border-top-color: var(--selected);
 }
 
-.usage-bar-slot {
-  flex: 1;
+.uc-tick {
+  position: absolute;
+  right: 100%;
+  top: 0;
+  padding-right: 8px;
+  transform: translateY(-50%);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Slots of equal width, so the slot under the pointer comes from its x; a bar is centred in its slot, 2 px from the
+   next (1 px each side), at most 28 px wide. */
+.uc-bars {
+  position: absolute;
+  inset: 0 0 0 44px;
+  display: flex;
+}
+
+.uc-slot {
+  position: relative; /* painted over the band */
+  flex: 1 1 0;
   min-width: 0;
-  height: 100%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  padding: 0 1px;
 }
 
-.usage-bar-slot:hover .usage-bar {
-  opacity: 0.85;
+/* Years of weeks: too many for gaps. */
+.uc-bars.dense .uc-slot {
+  padding: 0;
 }
 
-.usage-bar {
+.uc-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--hover);
+  pointer-events: none;
+}
+
+/* The parts stacked with no gap; only the whole bar's top corners are rounded. */
+.uc-bar {
   width: 100%;
-  max-width: 24px;
+  max-width: 28px;
+  min-height: 1px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  border-radius: 4px 4px 0 0;
+  border-radius: 2px 2px 0 0;
   overflow: hidden;
 }
 
-.usage-part {
+/* Today's bar (or this hour's) isn't over yet. */
+.uc-bar.current {
+  opacity: 0.7;
+}
+
+.uc-part {
   flex-basis: 0;
   min-height: 0;
 }
 
-.usage-axis {
+.uc-box {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  width: max-content;
   display: flex;
-  justify-content: space-between;
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--fg-faint);
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  pointer-events: none;
 }
 
-.usage-legend {
+.uc-box-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 2px;
+}
+
+.uc-box-when {
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.uc-box-total {
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-box-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.uc-box-name {
+  min-width: 0;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uc-box-cost {
+  padding-left: 10px;
+  text-align: right;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-dates {
+  position: relative;
+  height: 12px;
+  margin: 6px 0 0 44px;
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-dates span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.uc-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 8px;
+  gap: 6px 16px;
+  margin-top: 12px;
   font-size: 12px;
-  color: var(--fg-dim);
 }
 
-.usage-key {
+.uc-key {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 
-.usage-swatch {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
+.uc-key-name {
+  min-width: 0;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.uc-key-cost {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-empty {
+  height: 190px;
+  display: grid;
+  place-items: center;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+/* The breakdown table runs to the card's edges, so its hairlines and the row under the pointer do; its first and last
+   cells keep the card's padding. */
 .usage-table {
-  width: 100%;
+  width: calc(100% + 28px);
+  margin: 0 -14px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 12px;
 }
 
+.usage-col-bar {
+  width: 116px;
+}
+
+.usage-col-cost {
+  width: 84px;
+}
+
+.usage-col-share {
+  width: 58px;
+}
+
+.usage-col-num {
+  width: 72px;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 0 8px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
 .usage-table th {
-  padding: 4px 6px;
+  height: 26px;
+  font-size: 11px;
   font-weight: 400;
   color: var(--fg-faint);
-  text-align: right;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
 }
 
 .usage-table td {
-  padding: 4px 6px;
-  text-align: right;
+  height: 30px;
+  color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--line);
+}
+
+.usage-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.usage-table tbody tr:hover td {
+  background: var(--hover);
 }
 
 .usage-table th:first-child,
 .usage-table td:first-child {
-  width: 40%;
-  padding-left: 0;
+  padding-left: 14px;
   text-align: left;
 }
 
 .usage-table th:last-child,
 .usage-table td:last-child {
-  padding-right: 0;
+  padding-right: 14px;
 }
 
 .usage-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.usage-name-text {
+  min-width: 0;
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.usage-table .usage-cost {
+  color: var(--fg);
+}
+
+.usage-table .usage-faint {
+  color: var(--fg-faint);
+}
+
+/* A row's share of the range's cost. */
+.usage-share {
+  display: block;
+  width: 96px;
+  height: 4px;
+  margin-left: auto;
+  border-radius: 2px;
+  background: var(--hover);
+  overflow: hidden;
+}
+
+.usage-share-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--fg-dim);
 }

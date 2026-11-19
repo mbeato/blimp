@@ -2,24 +2,29 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../lib/api";
 import { errorText, type ServerLink } from "../lib/connection";
 import { relTime } from "../lib/time";
-import { accountName, cacheShare, chart, dayLabel, money, projectName, resetsIn, share, tokens, windowLabel, type NowView, type Sum, type UsageView, type Window } from "../lib/usage";
+import { accountName, busiest, cacheShare, change, dayLabel, high, modelName, money, projectParts, resetsIn, share, tokens, windowLabel, type NowView, type Sum, type UsageView, type Window } from "../lib/usage";
 import { Dialog } from "./Dialog";
-import { Meter, tzNow } from "./StatusBar";
+import { Meter, shown, tzNow } from "./StatusBar";
+import { chartSeries, CostChart } from "./UsageChart";
 
 const RANGES = [
-  { days: 1, label: "Today" },
-  { days: 7, label: "7 days" },
-  { days: 30, label: "30 days" },
-  { days: 3660, label: "All" },
+  { value: 1, label: "Today" },
+  { value: 7, label: "7 days" },
+  { value: 30, label: "30 days" },
+  { value: 3660, label: "All" },
 ];
+
+type Tab = "account" | "model" | "project";
 
 // Usage (Server > Usage…, or a click on the bottom bar; docs/superpowers/specs/2026-11-19-usage-design.md, "Usage
 // window"): for the server of the tab in front, the limits, then tokens and cost at API prices over a range, as
-// numbers, bars per day and tables. blimpd works it all out; this only draws it.
+// headline numbers, a chart and one table. blimpd works it all out; this only draws it. The head stays put while the
+// body scrolls.
 export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
   const l = props.link;
   const [days, setDays] = useState(30);
-  const [by, setBy] = useState<"account" | "model">("account");
+  const [by, setBy] = useState<"account" | "model">("model");
+  const [tab, setTab] = useState<Tab>("model");
   const [view, setView] = useState<UsageView | null>(null);
   const [now, setNow] = useState<NowView | null>(null);
   const [error, setError] = useState("");
@@ -52,31 +57,24 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
     };
   }, [l.api, days]);
 
-  const total = view?.totals.cost ?? 0;
+  const hourly = days === 1 && !!view?.hours;
   return (
     <Dialog className="usage" onClose={props.onClose}>
       <div className="usage-head">
         <h2>Usage</h2>
         <span className="usage-server">{l.name}</span>
+        <Choice label="Range" options={RANGES} value={days} onChange={setDays} />
       </div>
       <div className="usage-body">
         {now && <Limits now={now} />}
-        <div className="usage-controls">
-          <Choice label="Range" options={RANGES.map((r) => ({ value: r.days, label: r.label }))} value={days} onChange={setDays} />
-        </div>
         {error && <p className="dialog-error usage-error">{error}</p>}
         {view?.scanning && <p className="usage-note">Counting your history…</p>}
         {view && !view.scanning && (
           <>
-            <div className="usage-numbers">
-              <Figure label="Cost" value={money(total)} note="at API prices" />
-              <Figure label="Tokens" value={tokens(sumTokens(view.totals))} />
-              <Figure label="Replies" value={view.totals.replies.toLocaleString("en-US")} />
-              <Figure label="From cache" value={`${Math.round(cacheShare(view.totals) * 100)}%`} note="of input" />
-            </div>
-            <section className="usage-section" aria-label="Cost per day">
-              <div className="usage-section-head">
-                <h3>Cost per day</h3>
+            <Headline view={view} days={days} />
+            <section className="usage-card" aria-label={hourly ? "Cost per hour" : "Cost per day"}>
+              <div className="usage-card-head">
+                <h3>{hourly ? "Cost per hour" : "Cost per day"}</h3>
                 <Choice
                   label="Colour by"
                   options={[
@@ -87,14 +85,9 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
                   onChange={setBy}
                 />
               </div>
-              <Bars view={view} by={by} />
+              <CostChart view={view} by={by} days={days} />
             </section>
-            <Table title="By account" total={total} rows={view.accounts.map((a) => ({ key: a.id, name: accountName(a), title: a.id || undefined, sum: a }))} />
-            <Table title="By model" total={total} rows={view.models.map((m) => ({ key: m.model, name: m.model, sum: m, priced: m.priced }))}>
-              {view.note && <p className="usage-note">{view.note}</p>}
-              {view.unpriced.length > 0 && <p className="usage-note">No price for: {view.unpriced.join(", ")}. Add them to ~/.blimp/prices.json on the server.</p>}
-            </Table>
-            <Table title="By project" total={total} rows={view.projects.map((p) => ({ key: p.project, name: projectName(p.project, l.home), title: p.project || undefined, sum: p }))} />
+            <Breakdown view={view} tab={tab} onTab={setTab} by={by} home={l.home} />
           </>
         )}
       </div>
@@ -103,8 +96,9 @@ export function UsageDialog(props: { link: ServerLink; onClose: () => void }) {
 }
 
 const sumTokens = (s: Sum) => s.input + s.output + s.cacheRead + s.cacheWrite;
+const percent = (part: number) => `${Math.round(part * 100)}%`;
 
-// A row of buttons, one of them pressed: the range, and what the bars are coloured by.
+// A rounded track with the chosen option raised in it: the range, what the chart is coloured by, the table's tab.
 function Choice<T extends string | number>(props: { label: string; options: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   return (
     <div className="usage-choice" role="group" aria-label={props.label}>
@@ -117,156 +111,213 @@ function Choice<T extends string | number>(props: { label: string; options: { va
   );
 }
 
-function Figure(props: { label: string; value: string; note?: string }) {
-  return (
-    <div className="usage-number">
-      <span className="usage-number-label">{props.label}</span>
-      <span className="usage-number-value">{props.value}</span>
-      {props.note && <span className="usage-number-note">{props.note}</span>}
-    </div>
-  );
-}
+// A limit window's name on its card: Claude's two, and Codex's by its length.
+const windowName = (minutes: number) => (minutes === 300 ? "5-hour" : minutes === 7 * 24 * 60 ? "Weekly" : windowLabel(minutes));
 
-// One line per account, then Codex: meters with their percent and reset, "in use" or how old the numbers are.
+// One card per account and one for Codex: each window's percent, meter and reset, and "in use" or the numbers' age.
 function Limits(props: { now: NowView }) {
   const at = Date.now();
   const { accounts, codex, statusline } = props.now;
   if (!accounts.length && !codex && statusline) return null;
-  const windows = (list: [string, Window | undefined][]) =>
-    list.map(([label, w]) =>
-      w ? (
-        <span key={label} className="usage-window">
-          {label}
-          <Meter w={w} />
-          <span className="usage-window-num">{w.reset ? 0 : Math.round(w.used)}%</span>
-          <span className="usage-window-reset">{resetsIn(w.resetsAt, at)}</span>
+  const rows = (list: [string, Window | undefined][]) => {
+    const there = list.filter((x): x is [string, Window] => !!x[1]);
+    if (!there.length) return <p className="usage-limit-none">No numbers yet</p>;
+    return there.map(([name, w]) => (
+      <div key={name} className="usage-window">
+        <span className="usage-window-name">{name}</span>
+        <span className={"usage-window-num" + (high(shown(w)) ? " meter-high" : "")}>{shown(w)}%</span>
+        <Meter used={shown(w)} />
+        <span className="usage-window-reset">{resetsIn(w.resetsAt, at)}</span>
+      </div>
+    ));
+  };
+  // name in full ink, rest (an email's domain, Codex's plan) faint; at the right "in use" or the numbers' age.
+  const card = (key: string, name: string, rest: string, title: string | undefined, side: { inUse: boolean; at?: number }, body: ReactNode) => (
+    <div key={key} className="usage-limit">
+      <div className="usage-limit-head">
+        <span className="usage-limit-name" title={title}>
+          {name}
+          {rest && <span className="usage-faint">{rest}</span>}
         </span>
-      ) : null,
-    );
+        {side.inUse ? (
+          <span className="usage-limit-use">
+            <span className="usage-use-dot" aria-hidden />
+            in use
+          </span>
+        ) : side.at ? (
+          <span className="usage-limit-age" title={`Numbers from ${new Date(side.at).toLocaleString()}`}>
+            {relTime(side.at, at)}
+          </span>
+        ) : null}
+      </div>
+      {body}
+    </div>
+  );
   return (
-    <section className="usage-section" aria-label="Limits">
-      <h3>Limits</h3>
-      {accounts.map((a) => (
-        <div key={a.id} className="usage-limit">
-          <span className="usage-limit-name" title={a.id}>
-            {accountName(a)}
-          </span>
-          <span className="usage-limit-age" title={a.at ? `Numbers from ${relTime(a.at, at)}` : undefined}>
-            {a.inUse ? "in use" : a.at ? relTime(a.at, at) : ""}
-          </span>
-          {a.fiveHour || a.sevenDay ? (
-            windows([
-              ["5h", a.fiveHour],
-              ["week", a.sevenDay],
-            ])
-          ) : (
-            <span className="usage-window-none">No numbers yet</span>
+    <section aria-label="Limits">
+      <div className="usage-limits">
+        {accounts.map((a) => {
+          const name = accountName(a);
+          const cut = a.email ? name.indexOf("@") : -1;
+          const limits = rows([
+            ["5-hour", a.fiveHour],
+            ["Weekly", a.sevenDay],
+          ]);
+          return card(a.id, cut > 0 ? name.slice(0, cut) : name, cut > 0 ? name.slice(cut) : "", a.id || undefined, a, limits);
+        })}
+        {codex &&
+          card(
+            "codex",
+            "Codex",
+            codex.plan ? ` ${codex.plan}` : "",
+            undefined,
+            { inUse: false, at: codex.at },
+            rows(codex.windows.map((w) => [windowName(w.minutes), w])),
           )}
-        </div>
-      ))}
-      {codex && (
-        <div className="usage-limit">
-          <span className="usage-limit-name">Codex{codex.plan ? ` (${codex.plan})` : ""}</span>
-          <span className="usage-limit-age">{relTime(codex.at, at)}</span>
-          {windows(codex.windows.map((w) => [windowLabel(w.minutes), w]))}
-        </div>
-      )}
+      </div>
       {!statusline && <p className="usage-note">Claude's limits are not being read. Run blimpd install-statusline on the server.</p>}
     </section>
   );
 }
 
-// Cost per day, stacked by account or by model: plain divs, the height by cost. The 5 costliest series get a colour
-// each and the rest share a grey; the legend under the bars names them, and each part says its day, name and cost.
-function Bars(props: { view: UsageView; by: "account" | "model" }) {
+// Four numbers in one strip, each with a line of context: cost against the period before (never coloured: spending
+// more isn't a fault), tokens and the share read from cache, replies and the helpers' share of cost, cost per day
+// (Today: per hour) and the busiest one.
+function Headline(props: { view: UsageView; days: number }) {
   const v = props.view;
-  const named = props.by === "account" ? v.accounts.filter((a) => a.cost > 0).map((a) => ({ id: a.id, name: accountName(a) })) : v.models.filter((m) => m.cost > 0).map((m) => ({ id: m.model, name: m.model }));
-  const c = chart(v.days, props.by, named.map((n) => n.id));
-  if (!c.max) return <p className="usage-note">No cost in this range.</p>;
-  const names = named.slice(0, c.series.length).map((n) => n.name);
-  const when = (b: (typeof c.bars)[number]) => (b.from === b.to ? dayLabel(b.from) : `${dayLabel(b.from)} – ${dayLabel(b.to)}`);
-  const first = c.bars[0];
-  const last = c.bars[c.bars.length - 1];
+  const t = v.totals;
+  // Today isn't over, so it is held against the whole of yesterday.
+  const before = props.days === 1 ? "all of yesterday" : `the ${props.days} days before`;
+  const c = change(t.cost, v.previous?.cost);
+  const vs = c === undefined ? "" : c === "the same" ? `the same as ${before}` : `${c} than ${before}`;
+  let per: { label: string; value: string; note: string };
+  if (props.days === 1 && v.hours) {
+    const hours = new Date().getHours() + 1; // today's hours so far, this one included
+    const peak = busiest(v.hours.map((h) => ({ day: `${String(h.hour).padStart(2, "0")}:00`, byModel: h.byModel })));
+    per = { label: "Per hour", value: money(t.cost / hours), note: peak ? `busiest ${peak.day} · ${money(peak.cost)}` : "" };
+  } else {
+    const peak = busiest(v.days);
+    per = { label: "Per day", value: money(t.cost / Math.max(1, v.days.length)), note: peak ? `busiest ${dayLabel(peak.day)} · ${money(peak.cost)}` : "" };
+  }
+  const cells = [
+    { label: "Cost at API prices", value: money(t.cost), note: vs },
+    { label: "Tokens", value: tokens(sumTokens(t)), note: `${percent(cacheShare(t))} read from cache` },
+    { label: "Replies", value: t.replies.toLocaleString("en-US"), note: t.cost > 0 ? `${percent(t.helperCost / t.cost)} of cost by helper agents` : "" },
+    per,
+  ];
   return (
-    <>
-      <div className="usage-plot">
-        <span className="usage-plot-max">{money(c.max)}</span>
-        <div className={"usage-bars" + (c.bars.length > 120 ? " dense" : "")}>
-          {c.bars.map((b) => (
-            <div key={b.from} className="usage-bar-slot" title={`${when(b)} · ${money(b.total)}`}>
-              <div className="usage-bar" style={{ height: `${(b.total / c.max) * 100}%` }}>
-                {b.rest > 0 && <Part grow={b.rest} color="var(--series-rest)" title={`${when(b)} · Other · ${money(b.rest)}`} />}
-                {b.costs
-                  .map((cost, i) => ({ cost, i }))
-                  .reverse()
-                  .map(({ cost, i }) => cost > 0 && <Part key={i} grow={cost} color={`var(--series-${i + 1})`} title={`${when(b)} · ${names[i]} · ${money(cost)}`} />)}
-              </div>
-            </div>
-          ))}
+    <div className="usage-headline">
+      {cells.map((x) => (
+        <div key={x.label} className="usage-figure">
+          <span className="usage-figure-label">{x.label}</span>
+          <span className="usage-figure-value">{x.value}</span>
+          {/* Kept when empty, so the four cells stay the same height. */}
+          <span className="usage-figure-note" title={x.note || undefined}>
+            {x.note || " "}
+          </span>
         </div>
-      </div>
-      <div className="usage-axis">
-        <span>{dayLabel(first.from)}</span>
-        {c.bars.length > 1 && <span>{dayLabel(last.to)}</span>}
-      </div>
-      <div className="usage-legend">
-        {names.map((n, i) => (
-          <span key={c.series[i]} className="usage-key">
-            <span className="usage-swatch" style={{ background: `var(--series-${i + 1})` }} />
-            {n}
-          </span>
-        ))}
-        {c.rest && (
-          <span className="usage-key">
-            <span className="usage-swatch" style={{ background: "var(--series-rest)" }} />
-            Other
-          </span>
-        )}
-      </div>
-    </>
+      ))}
+    </div>
   );
 }
 
-function Part(props: { grow: number; color: string; title: string }) {
-  return <div className="usage-part" style={{ flexGrow: props.grow, background: props.color }} title={props.title} />;
-}
-
-// name, input, output, cached (read and written), cost, share of the range's cost. A model with no price says so.
-function Table(props: { title: string; total: number; rows: { key: string; name: string; title?: string; sum: Sum; priced?: boolean }[]; children?: ReactNode }) {
+// One table with a tab each for accounts, models and projects, most cost first: the name (with the chart's dot when it
+// is one of the chart's series), a bar for its share of the range's cost, then cost, share and tokens. A model with no
+// price says so and has no share.
+function Breakdown(props: { view: UsageView; tab: Tab; onTab: (t: Tab) => void; by: "account" | "model"; home: string }) {
+  const v = props.view;
+  const total = v.totals.cost;
+  // undefined: no dot column (projects); null: a dot's room, empty, so the names line up.
+  type Row = { key: string; name: ReactNode; title?: string; sum: Sum; priced?: boolean; dot?: string | null };
+  // A dot points at the chart, so rows get theirs only while the chart is drawn by the same thing.
+  const dots = (by: "account" | "model") => new Map(by === props.by ? chartSeries(v, by).map((s, i) => [s.id, `var(--series-${i + 1})`] as const) : []);
+  let rows: Row[];
+  if (props.tab === "account") {
+    const d = dots("account");
+    rows = v.accounts.map((a) => ({ key: a.id, name: accountName(a), title: a.id ? `${accountName(a)} (${a.id})` : accountName(a), sum: a, dot: d.get(a.id) ?? null }));
+  } else if (props.tab === "model") {
+    const d = dots("model");
+    rows = v.models.map((m) => ({ key: m.model, name: modelName(m.model), title: m.model, sum: m, priced: m.priced, dot: d.get(m.model) ?? null }));
+  } else {
+    rows = v.projects.map((p) => {
+      const parts = projectParts(p.project, props.home || undefined);
+      const name = (
+        <>
+          {parts.name}
+          {parts.where && <span className="usage-faint"> {parts.where}</span>}
+        </>
+      );
+      return { key: p.project, name, title: p.project || "Every other folder", sum: p };
+    });
+  }
   return (
-    <section className="usage-section" aria-label={props.title}>
-      <h3>{props.title}</h3>
-      {props.rows.length === 0 ? (
+    <section className="usage-card" aria-label="Breakdown">
+      <div className="usage-card-head">
+        <Choice
+          label="Break down by"
+          options={[
+            { value: "account" as Tab, label: "Accounts" },
+            { value: "model" as Tab, label: "Models" },
+            { value: "project" as Tab, label: "Projects" },
+          ]}
+          value={props.tab}
+          onChange={props.onTab}
+        />
+      </div>
+      {rows.length === 0 ? (
         <p className="usage-note">Nothing in this range.</p>
       ) : (
         <table className="usage-table">
+          <colgroup>
+            <col />
+            <col className="usage-col-bar" />
+            <col className="usage-col-cost" />
+            <col className="usage-col-share" />
+            <col className="usage-col-num" />
+            <col className="usage-col-num" />
+            <col className="usage-col-num" />
+            <col className="usage-col-num" />
+          </colgroup>
           <thead>
             <tr>
               <th>Name</th>
+              <th aria-label="Share of cost" />
+              <th>Cost</th>
+              <th>Share</th>
               <th>Input</th>
               <th>Output</th>
               <th>Cached</th>
-              <th>Cost</th>
-              <th>Share</th>
+              <th>Replies</th>
             </tr>
           </thead>
           <tbody>
-            {props.rows.map((r) => (
-              <tr key={r.key}>
-                <td className="usage-name" title={r.title ?? r.name}>
-                  {r.name}
-                </td>
-                <td>{tokens(r.sum.input)}</td>
-                <td>{tokens(r.sum.output)}</td>
-                <td>{tokens(r.sum.cacheRead + r.sum.cacheWrite)}</td>
-                <td>{r.priced === false ? "no price" : money(r.sum.cost)}</td>
-                <td>{r.priced === false ? "—" : share(r.sum.cost, props.total)}</td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const priced = r.priced !== false;
+              return (
+                <tr key={r.key}>
+                  <td title={r.title}>
+                    <span className="usage-name">
+                      {r.dot !== undefined && <span className="usage-dot" style={r.dot ? { background: r.dot } : { visibility: "hidden" }} />}
+                      <span className="usage-name-text">{r.name}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span className="usage-share">{priced && total > 0 && <span className="usage-share-fill" style={{ width: `${Math.min(100, (r.sum.cost / total) * 100)}%` }} />}</span>
+                  </td>
+                  <td className={priced ? "usage-cost" : "usage-faint"}>{priced ? money(r.sum.cost) : "no price"}</td>
+                  <td>{priced ? share(r.sum.cost, total) : "—"}</td>
+                  <td>{tokens(r.sum.input)}</td>
+                  <td>{tokens(r.sum.output)}</td>
+                  <td>{tokens(r.sum.cacheRead + r.sum.cacheWrite)}</td>
+                  <td>{r.sum.replies.toLocaleString("en-US")}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
-      {props.children}
+      {props.tab === "model" && v.note && <p className="usage-note">{v.note}</p>}
+      {props.tab === "model" && v.unpriced.length > 0 && <p className="usage-note">No price for: {v.unpriced.join(", ")}. Add them to ~/.blimp/prices.json on the server.</p>}
     </section>
   );
 }
