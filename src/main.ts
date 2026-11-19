@@ -22,6 +22,10 @@
 //   blimpd answer <session> <n>      pick option n of what a session asks (act.ts)
 //   blimpd accounts            the saved Claude logins: which is in use, which is out (accounts/cli.ts)
 //   blimpd account use|forget <email>  put a saved login in place now, or remove one (accounts/cli.ts)
+//   blimpd usage [--days N]    tokens and cost at API prices, and the limits, from the running blimpd (usage/cli.ts)
+//   blimpd install-statusline  put blimpd in front of Claude Code's status line, to read its limit numbers (usage/statusline.ts)
+//   blimpd uninstall-statusline  put the status line back as it was
+//   blimpd statusline          what that status line runs (reads Claude's status line JSON on stdin)
 //   blimpd usage-scan          counts new token usage into the usage database; blimpd runs it (usage/scan.ts)
 //   blimpd --version
 
@@ -42,7 +46,9 @@ import { runRedditKey } from "./feed/reddit";
 import { runSend } from "./send";
 import { serve } from "./server";
 import { formatList, listSessions } from "./sessions";
+import { runUsage } from "./usage/cli";
 import { runUsageScan } from "./usage/scan";
+import { installStatusline, runStatusline, uninstallStatusline } from "./usage/statusline";
 import { runVisualsMcp } from "./visuals/mcp";
 import { withWorkNow } from "./work";
 
@@ -125,11 +131,24 @@ if (cmd === "sessions") {
   process.exit(runAccounts());
 } else if (cmd === "account") {
   process.exit(await runAccount(args));
+} else if (cmd === "usage") {
+  process.exit(await runUsage(args));
+} else if (cmd === "statusline") {
+  process.exit(await runStatusline());
+} else if (cmd === "install-statusline") {
+  // The status line runs this exact binary, as the hooks do.
+  if (!Bun.main.startsWith("/$bunfs/")) {
+    console.error("blimpd: install-statusline has to run from the built blimpd binary");
+    process.exit(1);
+  }
+  console.log(installStatusline(process.execPath) ? "status line: blimp now reads the limits, and your own status line still shows" : "status line: already in place");
+} else if (cmd === "uninstall-statusline") {
+  console.log(uninstallStatusline() ? "status line: put back" : "status line: was not in place");
 } else if (cmd === "usage-scan") {
   process.exit(runUsageScan());
 } else if (cmd === "--version" || cmd === "version") {
   console.log(pkg.version);
 } else {
-  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | visuals-mcp | send <session> <message> | assistant on|off|status | messages on|off|status|revoke | overview | read <session or conversation id> [--last N] | start <folder> [--model <m>] [--effort <e>] <message> | answer <session> <option number> | accounts | account use|forget <email> | --version");
+  console.log("usage: blimpd sessions [--json] | serve | install-hooks | uninstall-hooks | hook [codex] | pair [--url <url> | --revoke] | push-key <file.p8> --key-id <id> --team-id <id> | push-test | reddit-key <client id> <secret> | browser | browser-mcp | visuals-mcp | send <session> <message> | assistant on|off|status | messages on|off|status|revoke | overview | read <session or conversation id> [--last N] | start <folder> [--model <m>] [--effort <e>] <message> | answer <session> <option number> | accounts | account use|forget <email> | usage [--days N] | install-statusline | uninstall-statusline | --version");
   process.exit(cmd ? 1 : 0);
 }

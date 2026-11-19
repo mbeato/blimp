@@ -60,6 +60,7 @@ import { cleanUploads, saveUpload } from "./uploads";
 import { openUsage } from "./usage/db";
 import { readPrices } from "./usage/prices";
 import { ensureScan, startUsage } from "./usage/service";
+import { readLimits, statuslineInstalled } from "./usage/statusline";
 import { nowView, summarize } from "./usage/summary";
 import { visualResponse } from "./visuals/http";
 import { cleanVisuals, makeVisual, visualKey } from "./visuals/store";
@@ -379,7 +380,7 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     const db = openUsage(undefined, true);
     try {
       return Response.json(
-        nowView(db, { tz, now: Date.now(), prices: readPrices(), saved: listSaved(undefined, state), active: state.active, record: record && { id: record.id, email: record.email }, limits: {}, statusline: false }),
+        nowView(db, { tz, now: Date.now(), prices: readPrices(), saved: listSaved(undefined, state), active: state.active, record: record && { id: record.id, email: record.email }, limits: readLimits(), statusline: statuslineInstalled() }),
       );
     } finally {
       db?.close();
