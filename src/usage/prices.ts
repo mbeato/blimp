@@ -12,8 +12,8 @@ export type Price = { input: number; output: number; cacheRead: number; write5m:
 export type Entry = Price & { fast?: number; long?: { over: number; price: Price } }; // fast: a multiplier; long.over: prompt tokens
 
 // USD per million tokens, read 2026-11-19 from Anthropic's pricing page
-// (https://docs.claude.com/en/docs/about-claude/pricing), its fast mode section of the same page, and
-// OpenAI's (https://openai.com/api/pricing/). Fast mode is twice every price of the model, cache
+// (https://platform.claude.com/docs/en/about-claude/pricing), its fast mode section of the same page, and
+// OpenAI's (https://developers.openai.com/api/docs/pricing). Fast mode is twice every price of the model, cache
 // included. Codex caches without a write price, so both writes are the input price.
 export const PRICES: Record<string, Entry> = {
   "claude-fable-5-2": { input: 8, output: 40, cacheRead: 0.2, write5m: 10, write1h: 16, fast: 2 },

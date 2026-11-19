@@ -9,10 +9,10 @@ import { selfCommand } from "../browser/mcp";
 let running: Subprocess | undefined;
 let endedAt = 0;
 
-// Starts a scan unless one runs or the last ended under maxAge ms ago.
+// Starts a scan unless one runs or the last ended under maxAge ms ago. What a failed scan says goes to blimpd's own log.
 export function ensureScan(maxAge = 60_000): void {
   if (running || Date.now() - endedAt < maxAge) return;
-  const p = (running = Bun.spawn([...selfCommand(), "usage-scan"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }));
+  const p = (running = Bun.spawn([...selfCommand(), "usage-scan"], { stdin: "ignore", stdout: "ignore", stderr: "inherit" }));
   void p.exited.then(() => {
     running = undefined;
     endedAt = Date.now();

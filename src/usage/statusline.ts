@@ -60,6 +60,8 @@ export function saveLimits(input: unknown, o: { usage?: string; accounts?: strin
     } catch {}
     if (written < state.switchedAt) return false;
   }
+  // Logins are saved but blimp can't tell which is in place: the numbers are nobody's.
+  if (!state.active && state.order.length) return false;
   // No accounts state (switching never on, or a Mac): "one", which GET /usage/now names from .claude.json.
   const usage = o.usage ?? usageDir();
   privateDir(usage);

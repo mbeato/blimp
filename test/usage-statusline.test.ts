@@ -41,6 +41,13 @@ describe("saveLimits", () => {
     expect(readLimits(d.usage)).toEqual({ A: { at: NOW, fiveHour: { used: 62, resetsAt: 1_795_010_000_000 }, sevenDay: { used: 21, resetsAt: 1_795_400_000_000 } } });
   });
 
+  test("logins are saved but none is known to be in place: nothing is saved", () => {
+    const d = fresh();
+    state(d.accounts, { order: ["A", "B"] });
+    expect(saveLimits(input(), { ...d, now: NOW })).toBe(false);
+    expect(readLimits(d.usage)).toEqual({});
+  });
+
   test("with no accounts state, under one; a window without numbers is left out", () => {
     const d = fresh();
     expect(saveLimits(input({ rate_limits: { five_hour: { used_percentage: 5, resets_at: 10 }, seven_day: { used_percentage: "x" } } }), { ...d, now: NOW })).toBe(true);
