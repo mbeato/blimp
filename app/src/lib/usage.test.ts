@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { accountName, cacheShare, chart, dayLabel, high, money, projectName, resetsIn, share, tokens, windowLabel, type Sum, type UsageView } from "./usage";
+import type { Job, Session } from "./api";
+import { accountName, axis, barInfo, busiest, cacheShare, change, chart, dayLabel, high, modelName, money, projectName, projectParts, resetsIn, share, tokens, windowLabel, type Sum, type UsageView } from "./usage";
 
 const sum = (s: Partial<Sum> = {}): Sum => ({ replies: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, helperCost: 0, ...s });
 
@@ -131,4 +132,115 @@ test("chart: over 90 days, a bar per 7 days from the oldest", () => {
 
 test("chart: an empty range", () => {
   expect(chart([], "account", [])).toEqual({ series: [], rest: false, bars: [], max: 0 });
+});
+
+test("modelName: Claude and GPT ids as people say them; anything else as written", () => {
+  expect(modelName("claude-opus-5-5")).toBe("Opus 5.5");
+  expect(modelName("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
+  expect(modelName("claude-opus-4-8[1m]")).toBe("Opus 4.8");
+  expect(modelName("claude-fable-5-2")).toBe("Fable 5.2");
+  expect(modelName("claude-opus-5")).toBe("Opus 5");
+  expect(modelName("claude-sonnet-4-6")).toBe("Sonnet 4.6");
+  expect(modelName("gpt-6-astra")).toBe("GPT-6 Astra");
+  expect(modelName("gpt-5.6-terra")).toBe("GPT-5.6 Terra");
+  expect(modelName("gpt-6")).toBe("GPT-6");
+  expect(modelName("GLM-5.3")).toBe("GLM-5.3");
+  expect(modelName("GLM-5.3-Flash")).toBe("GLM-5.3-Flash");
+  expect(modelName("morph-kimik31")).toBe("morph-kimik31");
+  expect(modelName("")).toBe("");
+});
+
+test("projectParts: the folder's name, and where it is with ~ for home", () => {
+  expect(projectParts("/Users/m/characterquilt/app", "/Users/m")).toEqual({ name: "app", where: "~/characterquilt" });
+  expect(projectParts("/Users/m/characterquilt/app/", "/Users/m")).toEqual({ name: "app", where: "~/characterquilt" });
+  expect(projectParts("/Users/m/blimp", "/Users/m")).toEqual({ name: "blimp", where: "~" });
+  expect(projectParts("/Users/m", "/Users/m")).toEqual({ name: "~", where: "" });
+  expect(projectParts("/Users/m/", "/Users/m")).toEqual({ name: "~", where: "" });
+  expect(projectParts("/srv/a/b")).toEqual({ name: "b", where: "/srv/a" });
+  expect(projectParts("/srv")).toEqual({ name: "srv", where: "/" });
+  expect(projectParts("/")).toEqual({ name: "/", where: "" });
+  // A folder whose name starts like home's is not in home.
+  expect(projectParts("/Users/mx/a", "/Users/m")).toEqual({ name: "a", where: "/Users/mx" });
+  expect(projectParts("")).toEqual({ name: "Everything else", where: "" });
+});
+
+test("change: more or less in percent; the same within half a percent; nothing to compare with, nothing", () => {
+  expect(change(112, 100)).toBe("12% more");
+  expect(change(80, 100)).toBe("20% less");
+  expect(change(100.4, 100)).toBe("the same");
+  expect(change(99.6, 100)).toBe("the same");
+  expect(change(300, 100)).toBe("200% more");
+  expect(change(0, 100)).toBe("100% less");
+  expect(change(5, undefined)).toBeUndefined();
+  expect(change(5, 0)).toBeUndefined();
+});
+
+test("axis: 0 up to the first nice step at or over max, in about 3 steps", () => {
+  expect(axis(2529)).toEqual([0, 1000, 2000, 3000]);
+  expect(axis(657)).toEqual([0, 250, 500, 750]);
+  expect(axis(0.8)).toEqual([0, 0.5, 1]);
+  expect(axis(0)).toEqual([0]);
+  expect(axis(3000)).toEqual([0, 1000, 2000, 3000]);
+  expect(axis(16_000)).toEqual([0, 10_000, 20_000]);
+  expect(axis(212)).toEqual([0, 100, 200, 300]);
+  expect(axis(0.3)).toEqual([0, 0.1, 0.2, 0.3]);
+  expect(axis(45)).toEqual([0, 20, 40, 60]);
+  // Each step is 1, 2, 2.5 or 5 times a power of ten, and 3 steps reach max.
+  for (const max of [0.01, 0.07, 1, 7, 13, 99, 101, 999, 1001, 2500, 12_345]) {
+    const a = axis(max);
+    const step = a[1];
+    expect(a.at(-1)!).toBeGreaterThanOrEqual(max);
+    expect(a.at(-2)!).toBeLessThan(max);
+    expect(a.length).toBeLessThanOrEqual(4);
+    const m = step / 10 ** Math.floor(Math.log10(step) + 1e-9);
+    expect([1, 2, 2.5, 5].some((x) => Math.abs(m - x) < 1e-9)).toBe(true);
+  }
+});
+
+test("busiest: the day with the most cost; none when nothing cost anything", () => {
+  const days: { day: string; byModel: Record<string, number> }[] = [
+    { day: "2026-11-15", byModel: { a: 1, b: 2 } },
+    { day: "2026-11-16", byModel: { a: 2000, b: 529 } },
+    { day: "2026-11-17", byModel: {} },
+  ];
+  expect(busiest(days)).toEqual({ day: "2026-11-16", cost: 2529 });
+  expect(busiest([{ day: "2026-11-17", byModel: {} }])).toBeUndefined();
+  expect(busiest([])).toBeUndefined();
+});
+
+const sess = (o: Partial<Session> & { name: string }): Session => ({ kind: "claude", pid: 1, clients: 0, created: 0, dir: "/r/app", cmd: "", title: o.name, status: "", state: "done", ...o });
+const job = (label: string, status: Job["status"]): Job => ({ id: label, kind: "bash", label, startedAt: 0, status });
+
+test("barInfo: working and waiting over every session; the focused session's label, context, branch and open pull request; this folder's running jobs", () => {
+  const pr = (number: number, state: string) => ({ number, title: `PR ${number}`, state, url: `https://x/${number}` });
+  const sessions = [
+    sess({ name: "a", title: "Fix the bar", state: "waiting", label: "Opus", context: { used: 90_000, limit: 200_000 }, work: { branch: "usage", prs: [pr(7, "MERGED"), pr(8, "open")] }, jobs: [job("bun test", "running"), job("old", "done")] }),
+    sess({ name: "b", state: "working", dir: "/elsewhere", jobs: [job("far", "running")] }),
+    sess({ name: "c", state: "waiting", kind: "codex", title: "ignored", dir: "/elsewhere" }),
+    sess({ name: "sh", kind: "shell", state: "unknown", git: { cwd: "/r/app", branch: "main" }, jobs: [job("watch", "running")] }),
+  ];
+  expect(barInfo(sessions, "/r/app", "a")).toEqual({
+    branch: "usage",
+    pr: { number: 8, url: "https://x/8", title: "PR 8" },
+    working: 1,
+    waiting: ["Fix the bar", "c"],
+    focused: { label: "Opus", used: 90_000, limit: 200_000 },
+    jobs: ["bun test", "watch"],
+  });
+  // A focused plain shell: no label, so no focused item; its branch from git.
+  const shell = barInfo(sessions, "/r/app", "sh");
+  expect(shell.branch).toBe("main");
+  expect(shell.focused).toBeUndefined();
+  expect(shell.pr).toBeUndefined();
+  // No focused session: the first session in this folder that has a branch.
+  expect(barInfo(sessions, "/r/app", undefined)).toMatchObject({ branch: "usage", pr: { number: 8 } });
+  expect(barInfo(sessions, "/r/app", "gone")).toMatchObject({ branch: "usage" });
+  // A label with no context: no numbers.
+  expect(barInfo([sess({ name: "g", label: "GLM" })], "/r/app", "g").focused).toEqual({ label: "GLM" });
+  // Nothing at all.
+  expect(barInfo([], null, undefined)).toEqual({ working: 0, waiting: [], jobs: [] });
+  // Only closed pull requests: the branch alone.
+  const closed = barInfo([sess({ name: "d", work: { branch: "x", prs: [pr(1, "CLOSED")] } })], "/r/app", "d");
+  expect(closed.branch).toBe("x");
+  expect(closed.pr).toBeUndefined();
 });

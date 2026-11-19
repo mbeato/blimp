@@ -1,6 +1,9 @@
 // Usage: tokens, cost at API prices and limits (docs/superpowers/specs/2026-11-19-usage-design.md, "The apps").
 // The types are copies of blimpd's src/usage/summary.ts (the app never imports the server's code); the rest is
-// the wording the bottom bar and the Usage window share.
+// the wording the bottom bar and the Usage window share, and what the bottom bar says about the tab in front.
+
+import type { Session } from "./api";
+import { sessionTitle, tildify } from "./sessions";
 
 export type Sum = { replies: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; helperCost: number };
 export type UsageView = {
@@ -13,6 +16,8 @@ export type UsageView = {
   projects: (Sum & { project: string })[]; // 20, then { project: "" } for everything else when there is more
   unpriced: string[];
   note?: string; // why prices.json was ignored
+  previous?: Sum; // the same number of days just before the range; absent when the range starts at firstDay (older blimpd: absent)
+  hours?: { hour: number; byAccount: Record<string, number>; byModel: Record<string, number> }[]; // Today only: its 24 local hours, cost (older blimpd: absent)
 };
 export type Window = { used: number; resetsAt: number; reset: boolean }; // used 0 to 100; resetsAt ms
 export type NowView = {
@@ -79,6 +84,89 @@ export function projectName(p: string, home?: string): string {
   if (home && p.replace(/\/+$/, "") === home.replace(/\/+$/, "")) return "~";
   const parts = p.split("/").filter(Boolean);
   return parts.length ? parts.slice(-2).join("/") : p;
+}
+
+// A project as the table shows it: the folder's name, and where it is (home as ~). The full path goes in the row's tooltip.
+export function projectParts(path: string, home?: string): { name: string; where: string } {
+  if (path === "") return { name: "Everything else", where: "" };
+  const p = path.replace(/\/+$/, "") || "/";
+  const h = home?.replace(/\/+$/, "");
+  if (h && p === h) return { name: "~", where: "" };
+  const cut = p.lastIndexOf("/");
+  if (p === "/" || cut === -1) return { name: p, where: "" };
+  const parent = p.slice(0, cut) || "/";
+  return { name: p.slice(cut + 1), where: h ? tildify(parent, h) : parent };
+}
+
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+
+// A model id as people say it: "claude-opus-5-5" is Opus 5.5 (a date ending and [1m] dropped), "gpt-6-astra"
+// is GPT-6 Astra. Anything else (GLM, Morph) as written.
+export function modelName(id: string): string {
+  const c = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[1m\])?$/i.exec(id);
+  if (c) return `${cap(c[1])} ${c[2]}${c[3] ? "." + c[3] : ""}`;
+  const g = /^gpt-(\d+(?:\.\d+)*)((?:-[a-z0-9]+)*)$/i.exec(id);
+  if (g) return `GPT-${g[1]}` + g[2].split("-").filter(Boolean).map((w) => " " + cap(w)).join("");
+  return id;
+}
+
+// This range's cost against the one before it, in words. Never good or bad: spending more isn't a fault.
+export function change(now: number, before: number | undefined): string | undefined {
+  if (!before) return;
+  const d = (now - before) / before;
+  if (Math.abs(d) < 0.005) return "the same";
+  return `${Math.round(Math.abs(d) * 100)}% ${d > 0 ? "more" : "less"}`;
+}
+
+// The chart's grid: 0 up to the first step at or over max, the step the smallest of 1, 2, 2.5 or 5 times
+// a power of ten that reaches max in 3. 2529 → 0, 1000, 2000, 3000.
+export function axis(max: number): number[] {
+  if (!(max > 0)) return [0];
+  const p = 10 ** Math.floor(Math.log10(max / 3));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * p).find((s) => s * 3 >= max)!;
+  const out = [0];
+  while (out[out.length - 1] < max) out.push(Number((out.length * step).toPrecision(12)));
+  return out;
+}
+
+// The day (or hour, given as day) that cost the most; none when nothing cost anything.
+export function busiest(days: { day: string; byModel: Record<string, number> }[]): { day: string; cost: number } | undefined {
+  let best: { day: string; cost: number } | undefined;
+  for (const d of days) {
+    const cost = Object.values(d.byModel).reduce((a, b) => a + b, 0);
+    if (cost > (best?.cost ?? 0)) best = { day: d.day, cost };
+  }
+  return best;
+}
+
+// What the bottom bar's left side says. waiting: the titles of the sessions that wait, for the hover text.
+// focused: the focused session's model label and context. jobs: the labels of running jobs in this folder.
+export type BarInfo = {
+  branch?: string;
+  pr?: { number: number; url: string; title: string };
+  working: number;
+  waiting: string[];
+  focused?: { label: string; used?: number; limit?: number };
+  jobs: string[];
+};
+
+// Working and waiting count every session on the server: one that waits anywhere matters. The branch and its
+// open pull request: the focused session's, or with none focused, the first in this folder that has a branch.
+export function barInfo(sessions: Session[], folder: string | null, focused: string | undefined): BarInfo {
+  const here = sessions.filter((s) => s.dir === folder);
+  const branchOf = (s: Session) => s.work?.branch ?? s.git?.branch;
+  const f = focused === undefined ? undefined : sessions.find((s) => s.name === focused);
+  const from = f ?? here.find(branchOf);
+  const branch = from && branchOf(from);
+  const open = from?.work?.prs?.find((p) => p.state.toLowerCase() === "open");
+  return {
+    ...(branch && { branch }),
+    ...(open && { pr: { number: open.number, url: open.url, title: open.title } }),
+    working: sessions.filter((s) => s.state === "working").length,
+    waiting: sessions.filter((s) => s.state === "waiting").map(sessionTitle),
+    ...(f?.label && { focused: { label: f.label, ...(f.context && { used: f.context.used, limit: f.context.limit }) } }),
+    jobs: here.flatMap((s) => (s.jobs ?? []).filter((j) => j.status === "running").map((j) => j.label)),
+  };
 }
 
 // A part of the total cost, as the tables' last column says it.
