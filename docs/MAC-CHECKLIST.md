@@ -296,27 +296,63 @@ These need a server whose blimpd counts usage, with `blimpd install-statusline` 
 
 - [ ] **The bottom bar.**
   Do: look at the bottom of the window. Run `blimpd usage` on the server and compare.
-  Expect: a thin bar under the files, the terminal and the sessions, full width, in both the light and the dark theme. It shows the account in use (its email before `@`), `5h` and `week` with a meter and a percent each, `Codex` with its meter if you use Codex, and `today $N`. The numbers match `blimpd usage`. The terminal's last line is not hidden behind it. A toast and the transfers list sit just above it.
+  Expect: a bar under the files, the terminal and the sessions, full width, in both the light and the dark theme. On the right, after a thin line: the account in use (its email before `@`), `5h` and `week` with a meter and a percent each, `Codex` with its meter if you use Codex, and `today $N`. The numbers match `blimpd usage`. The terminal's last line is not hidden behind it. A toast and the transfers list sit just above it.
+
+- [ ] **The server.**
+  Do: look at the left end of the bar. Hover it. Then stop blimpd on the server, or turn the network off.
+  Expect: the server's dot and name, as on the Home tab. The tooltip reads like `claude1 · blimpd 0.3.19 · connected`. When the server can't be reached, the dot turns red and the tooltip says offline. A click does nothing.
+
+- [ ] **The branch and its pull request.**
+  Do: focus a session in a git folder whose branch has an open pull request. Hover the branch, then click it. Then focus a session on a branch with no open pull request, then one in a folder that isn't a git checkout.
+  Expect: a branch icon, the branch and `#<number>`. The tooltip is the pull request's title, and a click opens it in the browser. With no open pull request: the branch alone, and a click does nothing. Outside a git checkout: no branch item at all.
+
+- [ ] **Sessions working and waiting.**
+  Do: have one session working and one waiting for you (on any folder of the server). Hover the item, then click it. Then let both finish.
+  Expect: `1 working` and `1 waiting`, with `1 waiting` in amber, the only amber in the bar. The tooltip names the waiting session. A click opens Jump to Session. With nothing working or waiting, the item is gone.
+
+- [ ] **The focused session.**
+  Do: focus a Claude session that has replied. Hover the item. Then focus a plain shell.
+  Expect: its model (`Opus`, `Fable`…), a small meter and its context percent; the tooltip reads like `Context 62% (620k of 1M tokens)`, as the session row's bar. From 80% the meter and the percent are red. With a plain shell focused, the item is gone.
+
+- [ ] **Jobs.**
+  Do: ask Claude to run something in the background (a long `sleep`, say). Hover the item.
+  Expect: `1 job` while it runs; the tooltip lists the jobs' labels, one per line. When it ends, the item is gone.
+
+- [ ] **A narrow window.**
+  Do: make the window as narrow as it goes.
+  Expect: the left items shrink and their words end in "…" first; the usage part on the right stays whole. Nothing in the bar wraps onto a second line or scrolls.
 
 - [ ] **Red over 80%.**
   Do: wait until a limit is over 80% (or note it when it happens).
   Expect: that meter's fill and its percent turn red, the same red as a session row's context bar. At exactly 80% it is not red yet.
 
 - [ ] **Hover and click.**
-  Do: hover the bar. Then click it. Close the window with Esc, then click a row in the session list and press Tab until the bar has the focus ring, and press Space.
-  Expect: the tooltip says each limit's reset ("resets in 1 h 40 min"), how old the numbers are and today's tokens, one per line. A click anywhere on the items opens the Usage window. The bar is one tab stop, and Space opens the window too (write down if Tab never reaches it).
+  Do: hover the usage part of the bar. Then click it. Close the window with Esc, then click a row in the session list and press Tab until the usage part has the focus ring, and press Space.
+  Expect: the tooltip says each limit's reset ("resets in 1 h 40 min"), how old the numbers are and today's tokens, one per line. A click anywhere on the usage part opens the Usage window. It is one tab stop, and Space opens the window too (write down if Tab never reaches it).
 
 - [ ] **The bar follows the tab in front.**
   Do: with two servers saved, switch between tabs on each. On the server, run `blimpd account use <another email>`, then wait a minute or click into the window.
-  Expect: the bar shows the numbers of the server of the tab in front. After the switch it names the new account; its meters show its last numbers, or none until it has replied.
+  Expect: the bar shows the server, branch, sessions and numbers of the tab in front. After the switch it names the new account; its meters show its last numbers, or none until it has replied.
 
 - [ ] **The Usage window.**
-  Do: choose Server > Usage…. Click Today, 7 days, 30 days and All, then By account and By model. Hover a part of a bar.
-  Expect: the window says "Usage" and the server's name, then a line per account with its meters and "in use" or how old the numbers are, and a line for Codex. 30 days is pressed first. Each range changes the four numbers (cost "at API prices", tokens, replies, from cache), the bars and the tables. The bars change colour by account or by model, with a legend under them; a part's tooltip reads like `Nov 19 · claude-opus-5-5 · $12.35`. The colours are easy to tell apart in both themes. The window scrolls inside, and no number is cut off at 30 days or All.
+  Do: choose Server > Usage…. Click Today, 7 days, 30 days and All, then By account and By model. Scroll the window.
+  Expect: the head says "Usage" and the server's name, with the range at the right; it stays put while the rest scrolls. 30 days is raised first. Then a card per account and one for Codex: the name, "in use" or how old the numbers are, and for each window its percent, a meter and when it resets. Then one strip of four numbers, each with a line under it: Cost "at API prices" and how it compares with the days before, Tokens with the share read from cache, Replies with the helpers' share of cost, Per day with the busiest day. Each range changes them, the chart and the table. No number is cut off at 30 days or All. Everything reads in both themes.
 
-- [ ] **The tables.**
-  Do: scroll to By account, By model and By project.
-  Expect: numbers line up on the right. Model names are as the vendor writes them (`claude-haiku-4-5-20251001`, `GLM-5.3`). A model with no price (GLM, Morph, `gpt-6-luna`) says "no price" in Cost, and a line under the table names them and says to add them to `~/.blimp/prices.json`. Accounts show their email; replies from before account tracking show as "Before account tracking". The last project row is "Everything else" when there are more than 20. Hover a project: its full path shows.
+- [ ] **The chart.**
+  Do: at 30 days, look at the chart. Move the pointer slowly across the bars, from the first to the last, then out of the chart.
+  Expect: grid lines with their values on the left, the top line a round number at or above the busiest day; dates under the first and last bars and about every week between. Today's bar is a little paler. Under the pointer, the day gets a light band and a box beside it, to the right in the left half and to the left in the right half, never cut off by the card: the date ("Mon Nov 16", "so far" for today), the total, and a line per account or model with its cost, most first. Moving between bars never flickers. The legend under the chart has each colour's name and its cost. The colours are easy to tell apart in both themes.
+
+- [ ] **Today by the hour.**
+  Do: click Today.
+  Expect: "Cost per hour" with 24 bars, 00 to 23, dates 00, 06, 12 and 18 under them, and this hour's bar paler. The hover box says the hour ("14:00"). The fourth number is Per hour with the busiest hour.
+
+- [ ] **The tabs.**
+  Do: in the table, click Accounts, Models and Projects. Hover a model and a project.
+  Expect: Models is chosen first. Each tab shows one table, most cost first, with a share bar, Cost, Share, Input, Output, Cached and Replies lined up on the right, and a light fill on the row under the pointer. Models read as people say them (`Opus 5.5`, `Haiku 4.5`, `GPT-6 Astra`; `GLM-5.3` as written); the tooltip has the id. An account or model that has a colour in the chart has its dot. A model with no price (GLM, Morph, `gpt-6-luna`) says "no price" with an empty bar and "—", and a line under the table names them and says to add them to `~/.blimp/prices.json`. Accounts show their email; replies from before account tracking show as "Before account tracking". A project shows its folder's name, then where it is in grey (`~/characterquilt`); its tooltip has the full path. The last project row is "Everything else" when there are more than 20.
+
+- [ ] **The daily copy.**
+  Do: on the server, list `~/.blimp/usage/backups` a few minutes after blimpd starts, and again on later days.
+  Expect: one `usage-<date>.db` per day (the UTC date), only you can read it, and never more than 7.
 
 - [ ] **Counting.**
   Do: on a server where blimpd has never counted, update blimpd (or stop it, move `~/.blimp/usage` aside, and start it). Open the Usage window within a minute.
@@ -324,7 +360,7 @@ These need a server whose blimpd counts usage, with `blimpd install-statusline` 
 
 - [ ] **An older blimpd.**
   Do: connect to a server whose blimpd is older than this feature.
-  Expect: the bottom bar is there but empty, and no toast or error shows. Server > Usage… says blimpd there is too old to count usage and to update it.
+  Expect: the bottom bar shows the server and the sessions but no usage part, and no toast or error shows. Server > Usage… says blimpd there is too old to count usage and to update it.
 
 ## Connection
 
