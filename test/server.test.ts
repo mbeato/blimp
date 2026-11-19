@@ -16,7 +16,8 @@ import { widgetKey } from "../src/widget";
 
 const tmp = mkdtempSync(join(tmpdir(), "blimp-server-"));
 const sock = join(tmp, "blimpd.sock");
-const env: Record<string, string | undefined> = { ...process.env, BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude") };
+// CODEX_HOME too: the usage scan that blimpd starts reads Codex's sessions, and must not read the real ones.
+const env: Record<string, string | undefined> = { ...process.env, BLIMPD_SOCKET: sock, CLAUDE_CONFIG_DIR: join(tmp, "claude"), CODEX_HOME: join(tmp, "codex") };
 delete env.ZMX_SESSION; // inside zmx, `zmx attach` would switch sessions instead of creating one
 const tag = `blimptest-${process.pid}`;
 const made: string[] = [];
@@ -169,6 +170,30 @@ afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
   rmSync(homeDir, { recursive: true, force: true });
 }, 30000);
+
+// Usage (usage/): this blimpd's Claude and Codex folders are empty temp ones. Early in the file, so the scan
+// blimpd starts 30 s after its start hasn't run yet: the first GET /usage starts it.
+describe("usage", () => {
+  test("GET /usage: bad days or tz are 400; before the first scan has ended it says scanning, then it answers", async () => {
+    for (const p of ["/usage?days=0", "/usage?days=3661", "/usage?days=1.5", "/usage?days=x", "/usage?tz=841", "/usage/now?tz=-841"]) expect((await api(p)).status).toBe(400);
+    const zero = { replies: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, helperCost: 0 };
+    expect(await (await api("/usage")).json()).toEqual({ scanning: true, totals: zero, days: [], accounts: [], models: [], projects: [], unpriced: [] });
+    const done = await until(async () => {
+      const v = await (await api("/usage?days=7&tz=-300")).json();
+      return !v.scanning && v;
+    }, "the first usage scan to end", 20_000);
+    // No replies at all: the range is today alone.
+    expect(done).toMatchObject({ scanning: false, totals: zero, accounts: [], models: [], projects: [], unpriced: [] });
+    expect(done.days).toHaveLength(1);
+    expect(statSync(join(tmp, "usage", "usage.db")).mode & 0o777).toBe(0o600);
+  }, 30_000);
+
+  test("GET /usage/now: no account, no Codex limit, nothing today, no status line step", async () => {
+    const r = await api("/usage/now?tz=60");
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ accounts: [], today: { cost: 0, tokens: 0 }, statusline: false });
+  });
+});
 
 describe("token", () => {
   test("token file is 64 hex chars, readable only by you; socket and folder too", () => {

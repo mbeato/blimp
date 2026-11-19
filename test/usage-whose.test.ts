@@ -77,3 +77,10 @@ test("openUsage makes the folder 700 and the file 600 with the four tables; read
   expect(() => ro.run("insert into meta values ('k2', 'v')")).toThrow();
   ro.close();
 });
+
+test("read only, a file the first scan has made but not yet filled with its tables is no database yet", () => {
+  const dir = usageDir(fresh());
+  mkdirSync(dir);
+  writeFileSync(join(dir, "usage.db"), "");
+  expect(openUsage(dir, true)).toBeUndefined();
+});

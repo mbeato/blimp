@@ -23,14 +23,16 @@ create table if not exists rows (
 create table if not exists meta (key text primary key, value text not null) without rowid;
 `;
 
-// Read only and no file yet (no scan has run): undefined.
+// Read only, and no file yet or a first scan that hasn't made the tables yet: undefined.
 export function openUsage(dir = usageDir(), readonly = false): Database | undefined {
   const file = join(dir, "usage.db");
   if (readonly) {
     if (!existsSync(file)) return;
     const db = new Database(file, { readonly: true });
     db.run("pragma busy_timeout = 5000");
-    return db;
+    if (db.query("select 1 from sqlite_master where name = 'meta'").get()) return db;
+    db.close();
+    return;
   }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700); // mode only applies to a new folder
@@ -40,6 +42,7 @@ export function openUsage(dir = usageDir(), readonly = false): Database | undefi
   const db = new Database(file);
   db.run("pragma journal_mode = WAL");
   db.run("pragma busy_timeout = 5000");
-  db.run(TABLES);
+  // All at once, so a reader sees all four tables or none.
+  db.transaction(() => db.run(TABLES))();
   return db;
 }
