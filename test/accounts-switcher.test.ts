@@ -105,7 +105,40 @@ test("a limit stop switches to the next account, continues the session and tells
   expect(t.told[0].title).toBe("Now on b@x.com");
   expect(t.told[0].body).toContain("a@x.com ran out");
   expect(t.told[0].body).toContain("1 session continued");
-  expect(t.logs).toContainEqual({ event: "switch", from: "id-a", to: "id-b" });
+  expect(t.logs).toContainEqual({ event: "switch", from: "id-a", to: "id-b", outUntil: T + OUT_MS });
+});
+
+// T is Mar 17 2030, 18:46 in Berlin (UTC+1 then).
+const WEEKLY = "You've hit your weekly limit · resets 2pm (Europe/Berlin)"; // Mar 18, 13:00 UTC
+const LATER = "You've hit your Fable limit · resets Mar 20, 9am (Europe/Berlin)"; // Mar 20, 08:00 UTC
+
+test("a stop whose message names the reset time marks the account out until then, and the switch line says so", async () => {
+  const { t, sw } = setup();
+  t.stops = [{ ...limit("s1", T), message: WEEKLY }];
+  await sw.tick();
+  expect(readState(t.dir).out["id-a"].until).toBe(Date.UTC(2030, 2, 18, 13));
+  expect(t.logs).toContainEqual({ event: "switch", from: "id-a", to: "id-b", outUntil: Date.UTC(2030, 2, 18, 13) });
+});
+
+test("several asking stops: out until the latest reset any of them names; none names one: OUT_MS on", async () => {
+  const two = setup();
+  two.t.stops = [{ ...limit("s1", T), message: LATER }, { ...limit("s2", T - 100), message: WEEKLY }, limit("s3", T - 200, "billing_error")];
+  await two.sw.tick();
+  expect(readState(two.t.dir).out["id-a"].until).toBe(Date.UTC(2030, 2, 20, 8));
+
+  const none = setup();
+  none.t.stops = [{ ...limit("s1", T), message: "API Error: Rate limit reached" }];
+  await none.sw.tick();
+  expect(readState(none.t.dir).out["id-a"].until).toBe(T + OUT_MS);
+});
+
+test("a reset time is read at the stop's own time: one already past when the switch is made means OUT_MS on, not tomorrow", async () => {
+  const { t, sw } = setup();
+  // The stop came 5 s before the 6:46pm it names (17:46:00 UTC is T - 40 s); the tick that switches is at T.
+  t.stops = [{ ...limit("s1", T - 45_000), message: "You've hit your weekly limit · resets 6:46pm (Europe/Berlin)" }];
+  await sw.tick();
+  expect(readState(t.dir).active).toBe("id-b");
+  expect(readState(t.dir).out["id-a"].until).toBe(T + OUT_MS);
 });
 
 test("several sessions stopping in one tick give one switch; the same stops again do nothing", async () => {

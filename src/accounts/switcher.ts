@@ -13,7 +13,7 @@ import { readCreds, readDevices } from "../push/store";
 import { blimpDir, claudeDir, isSafeName, listSessionsLite, type Session, zmxEnv, zmxListAsync, zmxPath } from "../sessions";
 import { typeInto } from "../typing";
 import { Connectors, mcpList } from "./connectors";
-import { filing, LATE_NOTICE_MS, LOGIN_RECORD_MS, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, SETTLE_MS } from "./rules";
+import { filing, LATE_NOTICE_MS, LOGIN_RECORD_MS, nextAccount, OUT_ERRORS, OUT_MS, QUIET_MS, resetAt, SETTLE_MS } from "./rules";
 import { accountsDir, accountsOn, hasLogin, listSaved, liveFile, liveMtime, putLive, type Rec, readLoginNote, readRecord, readState, savedWith, saveLogin, type State, writeState } from "./store";
 
 export type Stop = { session: string; at: number; error: string; details?: string; message?: string };
@@ -99,7 +99,12 @@ export class Switcher {
       let switched: { from: string; to: string } | undefined;
       if (asking.length) {
         const from = state.active;
-        if (from) state.out[from] = { at: now, until: now + OUT_MS };
+        // Out until the latest reset the asking stops' messages name, each read at its stop's own time:
+        // a switch can wait some ticks, and "resets 5pm" read after 5pm would mean tomorrow. When none
+        // names one still ahead (a billing_error never names one), OUT_MS on.
+        const reset = Math.max(0, ...asking.map((s) => resetAt(s.message, s.at) ?? 0));
+        const until = reset > now ? reset : now + OUT_MS;
+        if (from) state.out[from] = { at: now, until };
         const saved = listSaved(this.deps.dir, state);
         const next = nextAccount(saved, state, now);
         if (next) {
@@ -118,7 +123,7 @@ export class Switcher {
           await tellWrong();
           return;
         }
-        this.deps.log({ event: "switch", from, to: next.id });
+        this.deps.log({ event: "switch", from, to: next.id, ...(from && { outUntil: until }) });
         switched = { from: saved.find((a) => a.id === from)?.email || from || "The last account", to: next.email || next.id };
       }
 

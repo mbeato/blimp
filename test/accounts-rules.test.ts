@@ -1,7 +1,7 @@
 // Which account comes next and whose login a changed live file is (src/accounts/rules.ts). Pure: no files.
 
 import { describe, expect, test } from "bun:test";
-import { filing, isOut, nextAccount } from "../src/accounts/rules";
+import { filing, isOut, nextAccount, resetAt } from "../src/accounts/rules";
 import type { Rec, Saved, State } from "../src/accounts/store";
 
 const now = 1_800_000_000_000;
@@ -86,5 +86,71 @@ describe("isOut", () => {
     expect(isOut(state(), "id-a", now)).toBe(false);
     expect(isOut(state({ out: { "id-a": out(now + 1) } }), "id-a", now)).toBe(true);
     expect(isOut(state({ out: { "id-a": out(now - 1) } }), "id-a", now)).toBe(false);
+  });
+});
+
+describe("resetAt", () => {
+  // The two real messages' times: Nov 20 2026 at 17:58 and 20:14 in Berlin (UTC+1 in November).
+  const fable = Date.UTC(2026, 10, 20, 16, 58);
+  const weekly = Date.UTC(2026, 10, 20, 19, 14);
+  const utc = (mo: number, d: number, h: number, min = 0, y = 2026) => Date.UTC(y, mo - 1, d, h, min);
+
+  test.each([
+    ["You've hit your Fable limit · resets Nov 25, 1pm (Europe/Berlin)", fable, "UTC", utc(11, 25, 12)],
+    ["You've hit your weekly limit · resets 2pm (Europe/Berlin)", weekly, "UTC", utc(11, 21, 13)],
+    ["resets 9pm (Europe/Berlin)", fable, "UTC", utc(11, 20, 20)], // later today
+    ["resets 2:30pm (Europe/Berlin)", weekly, "UTC", utc(11, 21, 13, 30)],
+    ["resets 12am (Europe/Berlin)", weekly, "UTC", utc(11, 20, 23)], // midnight
+    ["resets 12pm (Europe/Berlin)", weekly, "UTC", utc(11, 21, 11)], // noon
+    ["Resets 11 AM (Europe/Berlin)", weekly, "UTC", utc(11, 21, 10)],
+    ["resets November 25 1pm (Europe/Berlin)", fable, "UTC", utc(11, 25, 12)],
+    ["resets 5pm", weekly, "America/New_York", utc(11, 20, 22)], // 14:14 there now
+    ["resets 9am", weekly, "Asia/Kolkata", utc(11, 21, 3, 30)], // 00:44 there now
+    ["resets 2:30pm", weekly, "Asia/Kolkata", utc(11, 21, 9)],
+    ["resets 2pm (Europe/Berlin)", weekly, "Asia/Kolkata", utc(11, 21, 13)], // the bracketed zone wins
+    ["resets Jan 2, 9am (Europe/Berlin)", utc(12, 30, 12), "UTC", utc(1, 2, 8, 0, 2027)], // into next year
+  ])("%p at %p in %p", (message, at, zone, want) => {
+    expect(resetAt(message, at, zone)).toBe(want);
+  });
+
+  test.each([
+    ["resets 2pm (Mars/Olympus)", "UTC"], // unknown zone in brackets
+    ["resets 2pm", "Nowhere/Nope"], // unknown zone given
+    ["resets Dec 1, 1pm (Europe/Berlin)", "UTC"], // more than 8 days ahead
+    ["resets Nov 19, 1pm (Europe/Berlin)", "UTC"], // past, so next year: too far
+    ["API Error: Rate limit reached", "UTC"],
+    ["You've hit your limit", "UTC"],
+    ["", "UTC"],
+    [undefined, "UTC"],
+    ["resets soon", "UTC"],
+    ["resets 25pm", "UTC"],
+    ["resets 13:00", "UTC"],
+    ["resets 2:75pm", "UTC"],
+    ["resets Foo 25, 1pm (Europe/Berlin)", "UTC"],
+    ["resets Nov 32, 1pm (Europe/Berlin)", "UTC"],
+    ["resets 2pm (", "UTC"], // a bracket cut short
+    ["resets 2pm (Europe/Ber", "UTC"],
+    ["resets 2pm (  )", "UTC"],
+    ["resets Nov 31, 1pm (Europe/Berlin)", "UTC"], // would roll into Dec 1, six days after `fable`
+  ])("unreadable: %p in %p", (message, zone) => {
+    expect(resetAt(message, weekly, zone)).toBeUndefined();
+  });
+
+  test("a day the month doesn't have is not read as the next month's", () => {
+    expect(resetAt("resets Nov 31, 1pm (Europe/Berlin)", Date.UTC(2026, 10, 28, 12), "UTC")).toBeUndefined();
+    expect(resetAt("resets Feb 30, 1pm (Europe/Berlin)", Date.UTC(2027, 1, 25, 12), "UTC")).toBeUndefined();
+    expect(resetAt("resets Feb 29, 1pm (Europe/Berlin)", Date.UTC(2027, 1, 25, 12), "UTC")).toBeUndefined(); // 2027 has none
+    expect(resetAt("resets Feb 29, 1pm (Europe/Berlin)", Date.UTC(2028, 1, 25, 12), "UTC")).toBe(Date.UTC(2028, 1, 29, 12));
+  });
+
+  test("the day Berlin's clocks go forward: a normal time is right, a skipped one is within an hour and doesn't throw", () => {
+    const before = Date.UTC(2027, 2, 27, 12); // Mar 28 2027, 02:00 CET becomes 03:00 CEST
+    expect(resetAt("resets Mar 28, 1pm (Europe/Berlin)", before, "UTC")).toBe(Date.UTC(2027, 2, 28, 11));
+    expect(resetAt("resets Mar 28, 1:30am (Europe/Berlin)", before, "UTC")).toBe(Date.UTC(2027, 2, 28, 0, 30));
+    const skipped = resetAt("resets Mar 28, 2:30am (Europe/Berlin)", before, "UTC");
+    expect(typeof skipped).toBe("number");
+    expect(Math.abs(skipped! - Date.UTC(2027, 2, 28, 1, 30))).toBeLessThanOrEqual(3600_000);
+    const twice = resetAt("resets Oct 31, 2:30am (Europe/Berlin)", Date.UTC(2027, 9, 30, 12), "UTC"); // comes twice
+    expect(Math.abs(twice! - Date.UTC(2027, 9, 31, 0, 30))).toBeLessThanOrEqual(3600_000);
   });
 });

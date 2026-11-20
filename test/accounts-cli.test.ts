@@ -61,6 +61,8 @@ async function printed(f: (out: (s: string) => void, err: (s: string) => void) =
 const pad = (k: number) => String(k).padStart(2, "0");
 const hhmm = (t: number) => `${pad(new Date(t).getHours())}:${pad(new Date(t).getMinutes())}`;
 const day = (t: number) => `${new Date(t).getFullYear()}-${pad(new Date(t).getMonth() + 1)}-${pad(new Date(t).getDate())}`;
+// As `blimpd accounts` prints it: with the date when T + 1 h is another local day (a zone where T is 23:xx).
+const outAt = (t: number) => (day(t) === day(T) ? hhmm(t) : `${day(t)} ${hhmm(t)}`);
 const liveToken = (live: string) => JSON.parse(readFileSync(live, "utf8")).claudeAiOauth.accessToken;
 const off = (top: string) => `account switching is off. To turn it on, add "accounts": true to ${join(top, "config.json")}`;
 
@@ -102,10 +104,23 @@ test("accounts: one line each, with which is in use, out until when, and when th
   expect(r.code).toBe(0);
   expect(r.out.split("\n")).toEqual([
     `a@x.com (in use), login expires ${day(LATER)}`,
-    `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
+    `b@x.com, out until ${outAt(T + 3600_000)}, login expires ${day(LATER)}`,
     "c@x.com, login expired: log in to it again with /login",
   ]);
   expect(r.out).not.toContain("tok-");
+});
+
+test("accounts: out until later today is the clock only; another day adds the date", async () => {
+  const { dir } = setup(true);
+  const noon = new Date(2027, 0, 15, 12, 0).getTime(); // local, so the date doesn't hang on the machine's zone
+  const outUntil = async (until: number) => {
+    const s = readState(dir);
+    s.out["id-b"] = { at: noon, until };
+    writeState(s, dir);
+    return (await printed((out) => runAccounts(dir, noon, out, "linux"))).out.split("\n")[1];
+  };
+  expect(await outUntil(new Date(2027, 0, 15, 18, 30).getTime())).toBe(`b@x.com, out until 18:30, login expires ${day(LATER)}`);
+  expect(await outUntil(new Date(2027, 0, 17, 9, 5).getTime())).toBe(`b@x.com, out until 2027-01-17 09:05, login expires ${day(LATER)}`);
 });
 
 test("accounts: an out that has ended isn't shown, and one with no account.json shows its id", async () => {
@@ -141,7 +156,7 @@ test("accounts: when blimp can't tell which account is logged in, none is in use
   const r = await printed((out) => runAccounts(dir, T, out, "linux"));
   expect(r.out.split("\n")).toEqual([
     `a@x.com, login expires ${day(LATER)}`,
-    `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
+    `b@x.com, out until ${outAt(T + 3600_000)}, login expires ${day(LATER)}`,
     "c@x.com, login expired: log in to it again with /login",
     "blimp can't tell which account is logged in. Say which with: blimpd account use <email>, or log in again with /login in a session.",
   ]);
@@ -160,7 +175,7 @@ test("accounts: under an account whose reading lacks connectors another has, one
   expect(r.out.split("\n")).toEqual([
     `a@x.com (in use), login expires ${day(LATER)}`,
     "  no Google Calendar, Zapier; Gmail needs a sign-in",
-    `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
+    `b@x.com, out until ${outAt(T + 3600_000)}, login expires ${day(LATER)}`,
     "c@x.com, login expired: log in to it again with /login",
     "  Slack needs a sign-in",
   ]);
@@ -177,7 +192,7 @@ test("accounts: no extra line for an account with no reading, nor with an empty 
   const r = await printed((out) => runAccounts(dir, T, out, "linux"));
   expect(r.out.split("\n")).toEqual([
     `a@x.com (in use), login expires ${day(LATER)}`,
-    `b@x.com, out until ${hhmm(T + 3600_000)}, login expires ${day(LATER)}`,
+    `b@x.com, out until ${outAt(T + 3600_000)}, login expires ${day(LATER)}`,
     "c@x.com, login expired: log in to it again with /login",
   ]);
 });

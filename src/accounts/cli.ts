@@ -33,7 +33,10 @@ export function runAccounts(dir = accountsDir(), now = Date.now(), out: (s: stri
   for (const a of saved) {
     let line = name(a);
     if (a.id === state.active) line += " (in use)";
-    if (isOut(state, a.id, now)) line += `, out until ${clock(state.out[a.id].until)}`;
+    if (isOut(state, a.id, now)) {
+      const u = state.out[a.id].until; // a reset can be days off: then its date too
+      line += `, out until ${date(u) === date(now) ? "" : `${date(u)} `}${clock(u)}`;
+    }
     if (a.expires !== undefined) line += a.expires > now ? `, login expires ${date(a.expires)}` : ", login expired: log in to it again with /login";
     out(line);
     // What this account's stored connector reading lacks against the others' (connectors.ts).
