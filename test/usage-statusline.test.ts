@@ -3,7 +3,7 @@
 // real ~/.claude/settings.json or ~/.blimp.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installStatusline, limitsDir, readLimits, saveLimits, statuslineInstalled, uninstallStatusline } from "../src/usage/statusline";
@@ -63,18 +63,75 @@ describe("saveLimits", () => {
     expect(existsSync(limitsDir(d.usage))).toBe(false);
   });
 
-  test("nothing is saved for a session whose transcript was last written before the swap, or has none on disk", () => {
-    const d = fresh();
-    const switchedAt = Date.now();
-    state(d.accounts, { active: "B", switchedAt });
-    const transcript = join(d.dir, "t.jsonl");
-    writeFileSync(transcript, "{}\n");
-    utimesSync(transcript, new Date(switchedAt - 60_000), new Date(switchedAt - 60_000));
-    expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(false);
-    expect(saveLimits(input({ transcript_path: join(d.dir, "gone.jsonl") }), d)).toBe(false);
-    utimesSync(transcript, new Date(switchedAt + 1000), new Date(switchedAt + 1000));
-    expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(true);
-    expect(Object.keys(readLimits(d.usage))).toEqual(["B"]);
+  describe("after a swap, only a session with a real reply since", () => {
+    const SWITCHED = Date.parse("2026-11-20T10:00:00.000Z");
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const reply = (ms: number) =>
+      JSON.stringify({ type: "assistant", timestamp: iso(ms), isSidechain: false, message: { model: "claude-fable-5-2", id: `m${ms}`, usage: { input_tokens: 1, output_tokens: 1 } } });
+    const apiError = (ms: number) =>
+      JSON.stringify({ type: "assistant", isApiErrorMessage: true, timestamp: iso(ms), message: { model: "<synthetic>", id: `e${ms}`, usage: { input_tokens: 0, output_tokens: 0 } } });
+    const user = (ms: number, text = "carry on") => JSON.stringify({ type: "user", timestamp: iso(ms), message: { role: "user", content: text } });
+    const swapped = (lines: string[] | null) => {
+      const d = fresh();
+      state(d.accounts, { active: "B", switchedAt: SWITCHED });
+      const transcript = join(d.dir, "t.jsonl");
+      if (lines) writeFileSync(transcript, lines.join("\n") + "\n");
+      return { d, transcript };
+    };
+
+    test("only replies dated before the swap: not saved", () => {
+      const { d, transcript } = swapped([user(SWITCHED - 120_000), reply(SWITCHED - 60_000)]);
+      expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(false);
+      expect(readLimits(d.usage)).toEqual({});
+    });
+
+    test("a reply before, then a rate-limit error and blimp's carry-on after (the live bug): not saved", () => {
+      // Both lines after the swap make the file newer than switchedAt; neither is an answer on the new account.
+      const { d, transcript } = swapped([reply(SWITCHED - 60_000), apiError(SWITCHED + 1000), user(SWITCHED + 5000)]);
+      expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(false);
+      expect(existsSync(join(limitsDir(d.usage), "B.json"))).toBe(false);
+      expect(readLimits(d.usage)).toEqual({});
+    });
+
+    test("a real reply dated after the swap: saved under the active account", () => {
+      const { d, transcript } = swapped([reply(SWITCHED - 60_000), apiError(SWITCHED + 1000), user(SWITCHED + 5000), reply(SWITCHED + 9000)]);
+      expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(true);
+      expect(Object.keys(readLimits(d.usage))).toEqual(["B"]);
+    });
+
+    test("no transcript on disk: not saved", () => {
+      const { d, transcript } = swapped(null);
+      expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(false);
+      expect(readLimits(d.usage)).toEqual({});
+    });
+
+    test("a transcript larger than the tail read, its first tail line cut mid-object, a reply after the swap near the end: saved", () => {
+      // One 300 KB line before the reply: the last 256 KB starts inside it.
+      const big = user(SWITCHED - 120_000, "x".repeat(300 * 1024));
+      const { d, transcript } = swapped([reply(SWITCHED - 200_000), big, user(SWITCHED + 5000), reply(SWITCHED + 9000), user(SWITCHED + 10_000)]);
+      const bytes = readFileSync(transcript);
+      expect(bytes.length).toBeGreaterThan(300 * 1024);
+      expect(String.fromCharCode(bytes[bytes.length - 256 * 1024 - 1])).toBe("x");
+      expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(true);
+      expect(Object.keys(readLimits(d.usage))).toEqual(["B"]);
+    });
+
+    test("the only reply after the swap starts exactly where the tail does: it is a whole line, saved", () => {
+      const TAIL = 256 * 1024;
+      const r = reply(SWITCHED + 9000);
+      const pad = user(SWITCHED + 10_000, "x".repeat(TAIL - r.length - 2 - user(SWITCHED + 10_000, "").length));
+      const { d, transcript } = swapped([user(SWITCHED - 120_000), r, pad]);
+      const bytes = readFileSync(transcript);
+      expect(bytes.subarray(bytes.length - TAIL, bytes.length - TAIL + r.length).toString()).toBe(r);
+      expect(saveLimits(input({ transcript_path: transcript }), d)).toBe(true);
+    });
+
+    test("no switchedAt in state: saved without looking at the transcript", () => {
+      const d = fresh();
+      state(d.accounts, { active: "B" });
+      expect(saveLimits(input({ transcript_path: join(d.dir, "gone.jsonl") }), d)).toBe(true);
+      expect(Object.keys(readLimits(d.usage))).toEqual(["B"]);
+    });
   });
 
   test("readLimits skips a broken file; no folder is none", () => {
