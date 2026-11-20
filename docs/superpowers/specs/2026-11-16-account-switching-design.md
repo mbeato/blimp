@@ -23,7 +23,7 @@ Ground rule: a login is a secret. Saved logins live on the server in a 700 folde
 
 ## Still to find out
 
-5. **At the first real limit** (cannot be forced): what `StopFailure` sends (`error`, the message, a reset time or none) and what the session shows. blimp writes these down (see Log) so the first one answers it.
+5. **At the first real limit** (cannot be forced): what `StopFailure` sends (`error`, the message, a reset time or none) and what the session shows. blimp writes these down (see Log) so the first one answers it. Found 2026-11-20: `error` is `rate_limit`, and the message names the reset time (Switching, step 1). What the session shows is still open.
 
 ## Saved accounts
 
@@ -53,7 +53,7 @@ Only some stops count. The session must be of kind `claude` (a `claude-glm` sess
 
 When a session reports the account is out:
 
-1. Mark the active account out: `at` now, `until` 5 hours on. (Once finding 5 shows how the hook's message gives the reset time, `until` becomes that time.)
+1. Mark the active account out: `at` now, `until` the reset time the hook's message names, the latest one when several stops ask at once; when none names one (a `billing_error` never does), 5 hours on. A time not after now or more than 8 days on is taken as misread. The `switch` log line carries it as `outUntil`. (Finding 5, from the first real limits on 2026-11-20: the error is `rate_limit`, and the message names the reset time in the server's zone, "You've hit your Fable limit · resets Nov 25, 1pm (Europe/Berlin)" or, with no date for the next time that clock comes round, "You've hit your weekly limit · resets 2pm (Europe/Berlin)".) A limit on one model (the Fable limit) marks the whole account out, although its other models still work; this is deliberate for now.
 2. File the live file (above). If a change is still unfiled, wait for the next tick. While blimp can't tell whose login is in place, don't switch: nothing is marked out, no next account is picked, nobody gets `continue`, and a stop from that time does not switch later either: the next limit stop does.
 3. Pick the next saved account that isn't out and whose login hasn't expired, in the order they were added, starting after the active one. None: don't switch; one notification, "Every Claude account is out" ("Claude Code carries on by itself when a limit resets."). blimp does not check again on a timer: the next limit stop does, and Claude Code's own wait resumes sessions when a limit resets. There is no automatic switch back.
 4. Put the picked login in place: read `<claude dir>/.credentials.json`, replace only its `claudeAiOauth` key (every other key, such as `mcpOAuth`, stays), write it through a temp file (600) and a rename, and set `active`. `.claude.json` is not touched (finding 2).
@@ -69,7 +69,7 @@ When a session reports the account is out:
 
 ## Log
 
-`<socket dir>/accounts/log.jsonl` (600; past 1 MB it becomes `log.1.jsonl`): one line per event, with its time. Events: `stop` (session, `error`, `details`, `message`, account), `switch` (from, to, `byHand`), `login`, `renewal`, `adopted`, `unfiled` (a change with nobody to file it under, or no login in it), `unknown` (`why`), `late login notice` (`account`, `told`), `held`, `not continued` and `error` (the same text again only after 10 minutes). Ids, emails and the hook's text only, never a token. It answers finding 5 and says why a switch did or didn't happen. Finding 3 (a change to the live file blimp did not make) shows as a `renewal`, `login`, `unfiled` or `held` line.
+`<socket dir>/accounts/log.jsonl` (600; past 1 MB it becomes `log.1.jsonl`): one line per event, with its time. Events: `stop` (session, `error`, `details`, `message`, account), `switch` (from, to, `outUntil` when a limit asked for it, `byHand`), `login`, `renewal`, `adopted`, `unfiled` (a change with nobody to file it under, or no login in it), `unknown` (`why`), `late login notice` (`account`, `told`), `held`, `not continued` and `error` (the same text again only after 10 minutes). Ids, emails and the hook's text only, never a token. It answers finding 5 and says why a switch did or didn't happen. Finding 3 (a change to the live file blimp did not make) shows as a `renewal`, `login`, `unfiled` or `held` line.
 
 ## Not in this version
 
