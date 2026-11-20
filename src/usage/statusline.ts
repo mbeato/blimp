@@ -4,16 +4,18 @@
 // Whatever goes wrong in blimp's part, the user's command still runs. `blimpd install-statusline` keeps
 // the statusLine object that was in settings.json in <usage dir>/statusline.json, and uninstall puts it back.
 
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { accountsDir, readState, write } from "../accounts/store";
 import { shellQuote, writeSettings } from "../hooks";
 import { claudeDir } from "../sessions";
 import { usageDir } from "./db";
+import { isReply } from "./scan";
 import type { Limits } from "./summary";
 
 export const limitsDir = (usage = usageDir()) => join(usage, "limits");
 const keptFile = (usage: string) => join(usage, "statusline.json");
+const TAIL = 256 * 1024;
 const settingsFile = () => join(claudeDir(), "settings.json");
 
 // Ours: any blimpd's status line (an older install, another path), or this exact command whatever the binary is called.
@@ -42,6 +44,37 @@ export function readLimits(usage = usageDir()): Record<string, Limits> {
   return out;
 }
 
+// Whether the transcript has a reply from the model dated after `after`. Only its last 256 KB is read:
+// a transcript can be tens of MB. Missing or unreadable is no.
+function repliedSince(path: string, after: number): boolean {
+  let text: string;
+  try {
+    const fd = openSync(path, "r");
+    try {
+      const size = fstatSync(fd).size;
+      // One byte more than the tail: when that byte ends a line, the tail's first line is whole and is kept.
+      const from = Math.max(0, size - TAIL - 1);
+      const buf = Buffer.alloc(size - from);
+      readSync(fd, buf, 0, buf.length, from);
+      text = buf.toString("utf8");
+      // Unless this is the whole file, what comes before the first line end is a cut line.
+      if (from > 0) text = text.slice(text.indexOf("\n") + 1);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+  return text.split("\n").some((line) => {
+    try {
+      const j = JSON.parse(line);
+      return isReply(j) && typeof j.timestamp === "string" && Date.parse(j.timestamp) > after;
+    } catch {
+      return false;
+    }
+  });
+}
+
 // input: what Claude Code gives the status line. Returns whether it saved.
 export function saveLimits(input: unknown, o: { usage?: string; accounts?: string; now?: number } = {}): boolean {
   const r = (input as any)?.rate_limits;
@@ -51,15 +84,12 @@ export function saveLimits(input: unknown, o: { usage?: string; accounts?: strin
   const sevenDay = win(r.seven_day);
   if (!fiveHour && !sevenDay) return false;
   const state = readState(o.accounts ?? accountsDir());
-  // After a swap, a session that hasn't replied since still carries the old account's numbers.
+  // A session's numbers come from the last API answer it got, so after a swap they stay the old account's
+  // until the model replies on the new one. The transcript's write time is no sign: a rate-limit error and
+  // blimp's carry-on land there after the swap with no answer on the new account. So a reply dated after it.
+  // Not caught: a request already in flight on the old login that answers after the swap.
   const transcript = (input as any).transcript_path;
-  if (typeof state.switchedAt === "number" && typeof transcript === "string") {
-    let written = -Infinity;
-    try {
-      written = statSync(transcript).mtimeMs;
-    } catch {}
-    if (written < state.switchedAt) return false;
-  }
+  if (typeof state.switchedAt === "number" && typeof transcript === "string" && !repliedSince(transcript, state.switchedAt)) return false;
   // Logins are saved but blimp can't tell which is in place: the numbers are nobody's.
   if (!state.active && state.order.length) return false;
   // No accounts state (switching never on, or a Mac): "one", which GET /usage/now names from .claude.json.

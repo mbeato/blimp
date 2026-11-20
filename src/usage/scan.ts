@@ -34,6 +34,11 @@ type Row = { hour: number; account: string; model: string; project: string; help
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
+// A transcript line that is a reply from the model. An API error (rate limit, refusal) is written as an
+// assistant line too, with model "<synthetic>".
+export const isReply = (j: any) =>
+  j?.type === "assistant" && !!j.message?.usage && typeof j.message.usage === "object" && typeof j.message.model === "string" && j.message.model !== "<synthetic>";
+
 // Every *.jsonl under dir, at any depth. A folder that isn't there has none.
 function walk(dir: string, out: string[] = []): string[] {
   let entries;
@@ -174,9 +179,9 @@ function scanWith(db: Database, claude: string, codex: string, extra: Record<str
       } catch {
         return;
       }
-      const m = j?.message;
-      const u = m?.usage;
-      if (j.type !== "assistant" || !u || typeof u !== "object" || typeof m.model !== "string" || m.model === "<synthetic>") return;
+      if (!isReply(j)) return;
+      const m = j.message;
+      const u = m.usage;
       const ms = typeof j.timestamp === "string" ? Date.parse(j.timestamp) : NaN;
       if (Number.isNaN(ms)) return;
       // The same reply is written once per content block, and again in a resumed conversation's file.
