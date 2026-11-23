@@ -1,6 +1,6 @@
 # Sleeping tabs: a browser tab nobody uses stops using memory
 
-Date: 2026-11-23. Status: built (branch sleep-tabs); the phone part is unbuilt until GitHub's Mac build runs it. Size: M.
+Date: 2026-11-23. Status: built, in 0.3.22. Size: M.
 
 ## Problem
 
