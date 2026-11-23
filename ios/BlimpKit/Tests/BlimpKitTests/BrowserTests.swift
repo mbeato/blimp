@@ -24,6 +24,17 @@ let browserTabs = #"""
     #expect(BrowserTab.inFolder(tabs, "/home/u/web").map(\.id) == ["A1", "B2"])
 }
 
+@Test func aSleepingTabSaysSo() {
+    let json = #"{"type":"browser","tabs":[{"id":"S1","folder":"/home/u/web","url":"https://a.com/","title":"A","asleep":true},{"id":"A1","folder":"/home/u/web","url":"https://b.com/","title":"B"}]}"#
+    guard case .browser(let tabs) = EventsMessage.decode(Data(json.utf8)) else { Issue.record("not a browser message"); return }
+    #expect(tabs.map(\.id) == ["S1", "A1"])
+    #expect(tabs[0].isAsleep)
+    #expect(tabs[0] == BrowserTab(id: "S1", folder: "/home/u/web", url: "https://a.com/", title: "A", asleep: true))
+    // An awake tab has no key.
+    #expect(tabs[1].asleep == nil)
+    #expect(!tabs[1].isAsleep)
+}
+
 @Test func sessionsStillDecode() {
     #expect(EventsMessage.decode(Data(#"{"type":"sessions","sessions":[]}"#.utf8)) == .sessions([]))
     #expect(EventsMessage.decode(Data(#"{"type":"ports","ports":[]}"#.utf8)) == .other)

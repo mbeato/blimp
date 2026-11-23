@@ -113,7 +113,7 @@ struct HomeView: View {
                        onAssistant: { show(.session(AssistantJobs.assistant)) },
                        actions: actions, onOpen: { show(.session($0)) },
                        tabs: store.dir.map { BrowserTab.inFolder(store.browserTabs, $0) } ?? [],
-                       onTab: { browserTab = $0.id; drawer = false }, onNewTab: newTab, onCloseTab: closeTab)
+                       onTab: openTab, onNewTab: newTab, onCloseTab: closeTab)
         }
         .overlay {
             if !covered, let browserTab, let tab = store.browserTabs.first(where: { $0.id == browserTab }) {
@@ -378,6 +378,16 @@ struct HomeView: View {
             } catch {
                 actions.failure = Store.words(for: error)
             }
+        }
+    }
+
+    /// A tab from the drawer, full screen. A sleeping one wakes first, as a tab with a new id: it shows once the list
+    /// has that id.
+    private func openTab(_ tab: BrowserTab) {
+        drawer = false
+        guard tab.isAsleep else { browserTab = tab.id; return }
+        Task {
+            do { browserTab = try await store.wakeTab(tab.id) } catch { actions.failure = Store.words(for: error) }
         }
     }
 

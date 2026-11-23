@@ -4,12 +4,13 @@
 // project, FolderBrowserView), Feed (while the feed is on, with a dot while it has cards not seen) and Settings. Above
 // the projects, while the assistant runs, its blimp icon with its mark opens its chat.
 // Beside it the project's name, New session (the inbox's box, ready to type into), its running sessions, the
-// project's browser tabs (a dot on ones a session opened; a tap opens one full screen, New Tab opens one, a swipe
-// right closes one), then its past conversations folded under Earlier (each newest activity first, with its mark, and
-// under its title its branch, jobs and handoff). A tap opens one; a swipe right on a row or press and hold has its
-// actions (Stop, Mark read, End; Resume a past one). It follows the finger: a swipe right in the chat pulls it out
-// (HomeView's `pull`), a swipe left anywhere on it or beside it pushes it back, and letting go settles it open or
-// closed by where it is and how fast it went. A tap beside it closes it too.
+// project's browser tabs (a dot on ones a session opened, dimmed while one sleeps; a tap opens one full screen, waking
+// it first if it sleeps; New Tab opens one, a swipe right closes one), then its past conversations folded under
+// Earlier (each newest activity first, with its mark, and under its title its branch, jobs and handoff). A tap opens
+// one; a swipe right on a row or press and hold has its actions (Stop, Mark read, End; Resume a past one). It follows
+// the finger: a swipe right in the chat pulls it out (HomeView's `pull`), a swipe left anywhere on it or beside it
+// pushes it back, and letting go settles it open or closed by where it is and how fast it went. A tap beside it
+// closes it too.
 import BlimpKit
 import SwiftUI
 
@@ -314,7 +315,7 @@ struct DrawerView: View {
             .modifier(RowMenu(item: row.item, edge: .leading, actions: actions, onOpen: onOpen))
     }
 
-    /// A browser tab: a dot if a session opened it, its title, and under it its site.
+    /// A browser tab: a dot if a session opened it, its title, and under it its site. Dimmed while it sleeps.
     private func tabRow(_ tab: BrowserTab) -> some View {
         Button { onTab(tab) } label: {
             HStack(spacing: 10) {
@@ -325,9 +326,10 @@ struct DrawerView: View {
                 }
                 Spacer(minLength: 0)
             }
+            .opacity(tab.isAsleep ? 0.5 : 1)
         }
         .foregroundStyle(.primary)
-        .accessibilityLabel(tab.openedBy == nil ? tab.label : "\(tab.label), opened by a session")
+        .accessibilityLabel((tab.openedBy == nil ? tab.label : "\(tab.label), opened by a session") + (tab.isAsleep ? ", asleep" : ""))
         .accessibilityIdentifier("tab-" + tab.id)
         // From the left, as the sessions' rows: a swipe left closes the drawer.
         .swipeActions(edge: .leading) {
