@@ -604,8 +604,9 @@ export function Workbench(props: {
   };
 
   // A sleeping tab on screen wakes: the server opens it again as a tab with a new id, which takes
-  // the old one's place in front and in the dragged order. A key is in `waking` while its wake is
-  // under way; a failed wake's error stays for its pane, until Try again.
+  // the old one's place in front and in the dragged order. A key is in `waking` from the wake's
+  // start until the new tab is in front (the effect below takes it out); a failed wake's error
+  // stays for its pane, until Try again.
   const waking = useRef(new Set<string>()).current;
   const wakeErrors = useRef(new Map<string, string>()).current;
   const wakePage = (key: string) => {
@@ -619,8 +620,10 @@ export function Workbench(props: {
         // The server may list the new tab before this answer or after it.
         if (!link.browserTabs.some((t) => t.id === id)) opening.add(`tab:${id}`);
         if (props.pageOrder?.includes(tab.id)) props.onPageOrder(replaced(props.pageOrder, tab.id, id)!);
+        // The key stays in `waking`: the list may have dropped the old id already, and the effect
+        // of that render, run before this change of the front tab, would move the front to the
+        // last tab (and wake that one too, if it sleeps).
         setActiveState((a) => (a === key ? `tab:${id}` : a));
-        waking.delete(key);
         rerender();
       },
       (e) => {
@@ -717,6 +720,7 @@ export function Workbench(props: {
   useEffect(() => {
     for (const k of opening) if (pages.has(k)) opening.delete(k);
     for (const k of gone) if (!link.browserTabs.some((t) => `tab:${t.id}` === k)) gone.delete(k);
+    for (const k of waking) if (k !== active && !pages.has(k)) waking.delete(k);
     if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active) && !waking.has(active)) setActiveState([...docs.keys(), ...galleries, ...visuals.keys(), ...pages.keys()].at(-1) ?? null);
   }, [pageKeys, listed]);
 

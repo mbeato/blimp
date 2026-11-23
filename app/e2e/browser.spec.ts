@@ -283,3 +283,57 @@ test("browser tabs drag into another order, and keep it", async ({ page }) => {
   await expect.poll(async () => (await ids()).map((u) => u.split("/").pop()), { timeout: 10_000 }).toEqual(["three", "one", "two"]);
   killSession(`${sess}-o`);
 });
+
+// A sleeping tab is closed in the server's Chrome and still listed (setup.ts put two in the test
+// blimpd's tabs.json, in ~/sleepy). It's dimmed in the strip, and wakes when it's the one on
+// screen: Chrome opens its address again as a tab with a new id, which takes the old one's place.
+test("a sleeping browser tab is dimmed, and wakes in its place when it's opened", async ({ page }) => {
+  const sleepy = `blimpe2e-sleepy-${process.pid}`;
+  const slept = createServer((req, res) => res.writeHead(200, { "content-type": "text/html" }).end(`<!doctype html><title>Woke ${req.url}</title>`));
+  const sleptPort = Number(process.env.BLIMP_E2E_SLEPT_PORT);
+  await new Promise<void>((r) => slept.listen(sleptPort, "127.0.0.1", r));
+  try {
+    const dir = fixtureDir("sleepy");
+    startSession(sleepy, dir);
+    await openSessionTab(page, dir);
+    const { base, token } = e2e();
+    const onServer = async () =>
+      ((await (await fetch(`${base}/browser/tabs`, { headers: { Authorization: `Bearer ${token}` } })).json()) as { id: string; url: string; folder: string; asleep?: boolean }[]).filter((t) => t.folder === dir);
+    const tabs = frontTab(page).locator(".ftabs .page-tab");
+    await expect(tabs).toHaveCount(2, { timeout: 10_000 });
+    await expect(tabs.nth(0)).toHaveText(/Slept one/);
+    await expect(tabs.nth(0)).toHaveClass(/asleep/);
+    await expect(tabs.nth(1)).toHaveClass(/asleep/);
+    // Neither is on screen yet, so neither wakes.
+    await page.waitForTimeout(1000);
+    expect((await onServer()).map((t) => t.asleep)).toEqual([true, true]);
+
+    await tabs.nth(0).click();
+    await expect(tabs.nth(0)).toHaveText(/Woke \/one/, { timeout: 20_000 });
+    await expect(tabs.nth(0)).toHaveClass(/active/);
+    await expect(tabs.nth(0)).not.toHaveClass(/asleep/);
+    // The page is live.
+    const canvas = frontTab(page).locator(".viewer:not([hidden]) .page-live canvas");
+    await expect.poll(() => canvas.evaluate((c: HTMLCanvasElement) => c.width), { timeout: 10_000 }).toBeGreaterThan(0);
+    // The one behind it still sleeps, in its place.
+    await expect(tabs).toHaveCount(2);
+    await expect(tabs.nth(1)).toHaveText(/Slept two/);
+    await expect(tabs.nth(1)).toHaveClass(/asleep/);
+    const list = await onServer();
+    expect(list.map((t) => [t.url, !!t.asleep])).toEqual([
+      [`http://127.0.0.1:${sleptPort}/one`, false],
+      [`http://127.0.0.1:${sleptPort}/two`, true],
+    ]);
+    expect(list[0].id).not.toBe("slept-one");
+
+    // A sleeping tab closes like any other.
+    await tabs.nth(1).hover();
+    await frontTab(page).getByRole("button", { name: "Close Slept two" }).click();
+    await expect(tabs).toHaveCount(1);
+    await expect.poll(async () => (await onServer()).length).toBe(1);
+    expect(await cspViolations(page)).toEqual([]);
+  } finally {
+    slept.close();
+    killSession(sleepy);
+  }
+});
