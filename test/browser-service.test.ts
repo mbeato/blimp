@@ -15,7 +15,7 @@ const folder = join(tmp, "project");
 mkdirSync(folder);
 
 const { findChrome } = await import("../src/browser/chrome");
-const { browserTabs, startBrowserGate, stopBrowser, openTab, sleepIdleTabs, wakeTab, closeTab, viewTab, SLEEP_AFTER } = await import("../src/browser/service");
+const { browserTabs, startBrowserGate, stopBrowser, ensureChrome, openTab, sleepIdleTabs, wakeTab, closeTab, viewTab, SLEEP_AFTER } = await import("../src/browser/service");
 const { HttpError } = await import("../src/files");
 const { browserDir, gateKey, browserMcpConfigPath, portFile } = await import("../src/browser/mcp");
 const { zmxPath, zmxEnv, parseZmxList } = await import("../src/sessions");
@@ -44,13 +44,15 @@ async function until<T>(f: () => T | Promise<T>, what: string, ms = 8000): Promi
   }
 }
 
-// 60 s: a fresh CI runner's first Chrome launch takes 8 to over 20 s, and with test files run side by side
-// (--parallel) this file's can be it, not browser-chrome.test.ts's.
+// 60 s: a fresh CI runner's first Chrome launch takes 8 to over 20 s, and this file's can be it (the files'
+// order isn't fixed, and with --parallel they run side by side). So Chrome starts here, not in the first
+// test that connects: that one has 5 s, and bun kills the Chrome a test that timed out started (run 45248169080).
 beforeAll(async () => {
   if (!findChrome()) return;
   Bun.spawnSync([zmxPath(), "attach", session, "sh"], { env: zmxEnv(), cwd: folder, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
   await until(() => parseZmxList(Bun.spawnSync([zmxPath(), "list"], { env: zmxEnv() }).stdout.toString()).some((s) => s.name === session), "the zmx session");
   port = await startBrowserGate();
+  await ensureChrome();
 }, 60_000);
 afterAll(async () => {
   site.stop();
