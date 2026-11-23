@@ -11,7 +11,7 @@ import { answerOnce } from "./answer";
 import { ASSISTANT, assistantDir, assistantOn, setAssistantOn, startAssistant } from "./assistant";
 import { newScan, readLast } from "./chat";
 import { writeMcpConfig } from "./browser/mcp";
-import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab } from "./browser/service";
+import { browserTabs, closeTab, hasTab, onBrowserChange, openTab, startBrowserGate, viewTab, wakeTab } from "./browser/service";
 import { type ChatData, chatData, chatMessage, closeChat, openChat } from "./chatsocket";
 import { assistantMessage, browserMessage, closeEvents, type EventsData, eventsData, eventsMessage, openEvents } from "./events";
 import { createFile, deleteEntry, download, guard, guardEntry, guardFile, guardList, HttpError, listDir, listFiles, makeDir, MAX_UPLOAD, readFile, realHome, renameEntry, upload, writeFile } from "./files";
@@ -427,6 +427,9 @@ async function route(req: Request, url: URL, server: Server, phone?: string): Pr
     if (upgrade({ kind: "view", id, queue: [] })) return;
     throw new HttpError(400, "expected a WebSocket");
   }
+  // A sleeping tab opens again: the new tab's id, for the app to put where the old one was.
+  const wake = path.match(/^\/browser\/tabs\/([^/]+)\/wake$/);
+  if (wake && req.method === "POST") return Response.json({ id: await wakeTab(decodeURIComponent(wake[1])) });
   const tab = path.match(/^\/browser\/tabs\/([^/]+)$/);
   if (tab && req.method === "DELETE") {
     await closeTab(decodeURIComponent(tab[1]));

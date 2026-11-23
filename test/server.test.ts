@@ -1576,6 +1576,18 @@ describe("server browser", () => {
   const chrome = findChrome();
   const site = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("<title>Served</title>hi", { headers: { "content-type": "text/html" } }) });
   afterAll(() => site.stop());
+  // Two sleeping tabs, saved as blimpd saves them. blimpd runs in its own process, where the tests
+  // can't put a tab to sleep, so they're in its tabs.json before it starts: describe bodies run as
+  // the file loads, before beforeAll starts blimpd.
+  const slept = `http://127.0.0.1:${site.port}/slept`;
+  mkdirSync(join(tmp, "browser"), { recursive: true });
+  writeFileSync(
+    join(tmp, "browser", "tabs.json"),
+    JSON.stringify([
+      { folder: homeDir, url: slept, id: "slept-1", title: "Slept", asleep: true, madeAt: 1 },
+      { folder: homeDir, url: `${slept}-2`, id: "slept-2", title: "Slept 2", asleep: true, madeAt: 2 },
+    ]),
+  );
 
   test("tabs: bad addresses and folders refused, an unknown tab is 404", async () => {
     const post = (body: object) => api("/browser/tabs", { method: "POST", body: JSON.stringify(body) });
@@ -1585,7 +1597,37 @@ describe("server browser", () => {
     expect((await post({ dir: "/etc", url: "https://example.com/" })).status).toBe(403);
     expect((await api("/browser/tabs/nope", { method: "DELETE" })).status).toBe(404);
     expect((await api("/browser/tabs", {}, false)).status).toBe(401);
+    expect((await api("/browser/tabs/nope/wake", { method: "POST" })).status).toBe(404);
+    expect((await api("/browser/tabs/slept-1/wake", { method: "POST" }, false)).status).toBe(401);
   });
+
+  test("sleeping tabs: listed asleep over GET and the events socket, no view, closed by DELETE", async () => {
+    const tabs = (await (await api("/browser/tabs")).json()) as any[];
+    expect(tabs.find((t) => t.id === "slept-1")).toEqual({ id: "slept-1", folder: homeDir, url: slept, title: "Slept", asleep: true });
+    const e = await socket("/events");
+    await until(() => e.messages.some((m) => m.type === "browser" && m.tabs.some((t: any) => t.id === "slept-1" && t.asleep === true)), "the sleeping tab on the events socket");
+    e.ws.close();
+    expect((await api("/browser/tabs/slept-1/view")).status).toBe(404);
+    expect((await api("/browser/tabs/slept-2", { method: "DELETE" })).status).toBe(204);
+    expect(((await (await api("/browser/tabs")).json()) as any[]).some((t) => t.id === "slept-2")).toBe(false);
+  });
+
+  (chrome ? test : test.skip)("waking a sleeping tab: a new id in the old one's place", async () => {
+    const r = await api("/browser/tabs/slept-1/wake", { method: "POST" });
+    expect(r.status).toBe(200);
+    const { id } = await r.json();
+    expect(id).toBeString();
+    expect(id).not.toBe("slept-1");
+    const tabs = await until(async () => {
+      const list = (await (await api("/browser/tabs")).json()) as any[];
+      return list.some((t) => t.id === id) && list;
+    }, "the woken tab");
+    expect(tabs.find((t) => t.id === id)).toMatchObject({ folder: homeDir, url: slept });
+    expect(tabs.find((t) => t.id === id).asleep).toBeUndefined();
+    expect(tabs.some((t) => t.id === "slept-1")).toBe(false);
+    expect((await api("/browser/tabs/slept-1/wake", { method: "POST" })).status).toBe(404);
+    expect((await api(`/browser/tabs/${id}`, { method: "DELETE" })).status).toBe(204);
+  }, 30_000);
 
   (chrome ? test : test.skip)("a tab opened for a folder: listed for it and not for others, over GET and the events socket, then closed", async () => {
     const e = await socket("/events");

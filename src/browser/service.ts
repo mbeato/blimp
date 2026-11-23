@@ -1,9 +1,11 @@
 // The server browser in blimpd: one Chrome, started when something needs it (a session's MCP
-// connecting, a tab opened from the app, or tabs saved from before), started again a few seconds
-// after it dies (or, if it died a minute before too, when something next needs it), with the
-// saved tabs reopened. Sessions reach it through the
-// gate's listener on 127.0.0.1: /s/<session>, for connections of blimpd's own uid only. The tabs
-// (folder, address, who opened them) are saved in <blimp dir>/browser/tabs.json.
+// connecting, a tab opened or woken from the app, or saved tabs used within the hour), started
+// again a few seconds after it dies (or, if it died a minute before too, when something next needs
+// it), with the saved tabs reopened. Sessions reach it through the
+// gate's listener on 127.0.0.1: /s/<session>, for connections of blimpd's own uid only. A tab
+// nobody has used for an hour sleeps: closed in Chrome, still in the list, opened again when the
+// app wakes it. The tabs (folder, address, who opened them, when they were used and first made,
+// and which sleep) are saved in <blimp dir>/browser/tabs.json.
 
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,14 +14,15 @@ import { HttpError } from "../files";
 import { isSafeName, parseZmxList, realDir, zmxListAsync } from "../sessions";
 import { chromeHint, findChrome, launchChrome, type Chrome } from "./chrome";
 import { Gate, type Tab } from "./gate";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { browserDir, gateKey, portFile, writeMcpConfig } from "./mcp";
 import { keepPasskeyDialogsOff } from "./passkeys";
 import { macPeerUid, peerUid } from "./peer";
 import { openView, type ViewSocket } from "./view";
 
 export type { Tab };
-type Saved = { folder: string; url: string; openedBy?: string };
+type Saved = { folder: string; url: string; openedBy?: string; usedAt?: number; madeAt?: number; id?: string; title?: string; asleep?: boolean };
+type Row = Saved & { madeAt: number };
 type Ws = ServerWebSocket<{ folder: string; session: string; conn?: ReturnType<Gate["connect"]>; queue: string[] }>;
 
 let chrome: Chrome | null = null;
@@ -32,6 +35,16 @@ let lastRestart = 0; // when a Chrome that died by itself was last started again
 const sockets = new Set<Ws>();
 const listeners: ((tabs: Tab[]) => void)[] = [];
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+// A tab nobody has used for this long sleeps (docs/superpowers/specs/2026-11-23-sleeping-tabs-design.md).
+export const SLEEP_AFTER = 60 * 60_000;
+// The sleeping tabs, by the id each had awake: closed in Chrome, still in the list.
+const asleep = new Map<string, { tab: Tab; madeAt: number }>();
+// The saved awake tabs, while Chrome isn't running: what it opens when it next starts.
+let toOpen: Row[] = [];
+let loaded = false;
+const viewing = new Map<string, number>(); // tab id → its open views
+const waking = new Map<string, Promise<string>>(); // sleeping tab id → its wake under way
+let sleeper: ReturnType<typeof setInterval> | undefined;
 
 const tabsFile = () => join(browserDir(), "tabs.json");
 
@@ -44,11 +57,53 @@ function loadSaved(): Saved[] {
   }
 }
 
+// The file's rows, in its order. Rows from before tabs slept have no madeAt: they keep the file's
+// order, before any tab made from now on.
+function savedRows(): Row[] {
+  const saved = loadSaved();
+  const base = Date.now() - saved.length;
+  return saved.map((t, i) => ({ ...t, madeAt: t.madeAt ?? base + i }));
+}
+const awakeRows = () => savedRows().filter((t) => !t.asleep);
+
+const putAsleep = (t: Row) => {
+  const id = t.id ?? `asleep-${randomUUID()}`;
+  asleep.set(id, { tab: { id, folder: t.folder, url: t.url, title: t.title ?? "", ...(t.openedBy && { openedBy: t.openedBy }), asleep: true }, madeAt: t.madeAt });
+};
+
+// Saved tabs nobody used within the limit (or from before tabs slept: no usedAt) don't open: they sleep.
+function settle(now = Date.now()) {
+  const stale = toOpen.filter((t) => !(now - (t.usedAt ?? 0) <= SLEEP_AFTER));
+  if (!stale.length) return;
+  toOpen = toOpen.filter((t) => !stale.includes(t));
+  stale.forEach(putAsleep);
+  save();
+}
+
+// The file, once per start.
+function load() {
+  loaded = true;
+  const all = savedRows();
+  all.filter((t) => t.asleep).forEach(putAsleep);
+  toOpen = all.filter((t) => !t.asleep);
+  settle();
+}
+
+// Every tab, oldest first: the awake ones with their times, and the sleeping ones. With Chrome not
+// running, the file's awake rows.
+function rows(): Row[] {
+  const g = gate;
+  const awake: Row[] = g
+    ? g.tabs().filter((t) => !asleep.has(t.id)).map((t) => ({ folder: t.folder, url: t.url, ...(t.openedBy && { openedBy: t.openedBy }), ...g.times(t.id)! }))
+    : toOpen;
+  const slept: Row[] = [...asleep.values()].map(({ tab, madeAt }) => ({ id: tab.id, folder: tab.folder, url: tab.url, title: tab.title, ...(tab.openedBy && { openedBy: tab.openedBy }), madeAt, asleep: true }));
+  return [...awake, ...slept].sort((a, b) => a.madeAt - b.madeAt);
+}
+
 function save() {
-  if (!gate) return;
-  const tabs: Saved[] = gate.tabs().map((t) => ({ folder: t.folder, url: t.url, ...(t.openedBy && { openedBy: t.openedBy }) }));
+  if (!loaded) return; // nothing read yet, so nothing to write: a write now would empty the file
   try {
-    writeFileSync(tabsFile(), JSON.stringify(tabs, null, 2) + "\n", { mode: 0o600 });
+    writeFileSync(tabsFile(), JSON.stringify(rows(), null, 2) + "\n", { mode: 0o600 });
   } catch (e) {
     console.log(`browser: couldn't save the tabs: ${(e as Error).message}`); // from a timer: never thrown
   }
@@ -104,7 +159,9 @@ export function ensureChrome(): Promise<Gate> {
     const path = chromePath();
     if (!path) throw new Error(NO_CHROME);
     ensureDir();
-    const restore = loadSaved();
+    if (!loaded) load();
+    settle();
+    const restore = toOpen;
     const { c, g } = await launch(path);
     chrome = c;
     // Watched from now on: a Chrome that dies while the tabs reopen ends the start, not hangs it.
@@ -113,7 +170,9 @@ export function ensureChrome(): Promise<Gate> {
       dead = true;
       if (chrome !== c) return;
       clearInterval(refresher);
+      clearInterval(sleeper);
       clearTimeout(saveTimer); // tabs.json keeps the tabs Chrome had, to reopen next time
+      toOpen = awakeRows(); // the file has what Chrome had
       chrome = gate = null;
       for (const ws of sockets) ws.close(1012, "Browser restarted");
       changed();
@@ -125,19 +184,26 @@ export function ensureChrome(): Promise<Gate> {
     });
     for (const t of restore) {
       if (dead) break;
-      await g.createTab(t.folder, t.url, t.openedBy).catch(() => {});
+      await g.createTab(t.folder, t.url, t.openedBy, { usedAt: t.usedAt, madeAt: t.madeAt }).catch(() => {});
     }
     if (dead) throw new Error("Chrome exited as it started");
     g.onChange(changed);
     gate = g;
+    toOpen = [];
     refresher = setInterval(() => void g.refresh().catch(() => {}), 2000);
+    sleeper = setInterval(() => void sleepIdleTabs().then(save).catch(() => {}), 60_000);
     changed();
     return g;
   })().finally(() => (starting = null));
   return starting;
 }
 
-export const browserTabs = (): Tab[] => gate?.tabs() ?? [];
+// The live tabs and the sleeping ones, oldest first.
+export function browserTabs(): Tab[] {
+  const g = gate;
+  const live = g ? g.tabs().filter((t) => !asleep.has(t.id)).map((t) => ({ tab: t, madeAt: g.times(t.id)?.madeAt ?? 0 })) : [];
+  return [...live, ...asleep.values()].sort((a, b) => a.madeAt - b.madeAt).map((x) => x.tab);
+}
 
 export function onBrowserChange(f: (tabs: Tab[]) => void) {
   listeners.push(f);
@@ -154,16 +220,80 @@ export async function openTab(folder: string, url: string): Promise<string> {
 }
 
 export async function closeTab(id: string): Promise<void> {
+  if (asleep.delete(id)) return changed();
   if (!gate || !gate.tabs().some((t) => t.id === id)) throw new HttpError(404, "no such browser tab");
   await gate.closeTab(id);
 }
 
-export const hasTab = (id: string) => browserTabs().some((t) => t.id === id);
+export const hasTab = (id: string) => browserTabs().some((t) => t.id === id && !t.asleep);
 
-// A live view of tab `id` for the app (view.ts).
-export function viewTab(id: string, sock: ViewSocket) {
-  if (!chrome || !gate?.tabs().some((t) => t.id === id)) throw new Error("That browser tab is closed.");
-  return openView(chrome, (t) => gate!.attachDirect(t), id, sock);
+// Every tab with no view open that nobody has used for `after` goes to sleep: closed in Chrome,
+// kept in the list. Saved before the close, so a blimpd that stops between the two doesn't open
+// the tab again.
+export async function sleepIdleTabs(now = Date.now(), after = SLEEP_AFTER): Promise<void> {
+  const g = gate;
+  if (!g) return;
+  const idle = g.tabs().filter((t) => !viewing.has(t.id) && !asleep.has(t.id) && now - (g.times(t.id)?.usedAt ?? now) > after);
+  if (!idle.length) return;
+  for (const t of idle) asleep.set(t.id, { tab: { ...t, asleep: true }, madeAt: g.times(t.id)!.madeAt });
+  save();
+  await Promise.all(idle.map((t) => g.closeTab(t.id).catch(() => {})));
+  changed();
+}
+
+// A sleeping tab opens again at its address, in its folder and at its place in the list. The new
+// tab's id (Chrome's). Two wakes of one tab at once get the same answer.
+export function wakeTab(id: string): Promise<string> {
+  const going = waking.get(id);
+  if (going) return going;
+  if (!asleep.has(id)) return Promise.reject(new HttpError(404, "no such sleeping tab"));
+  const p = (async () => {
+    let g: Gate;
+    try {
+      g = await ensureChrome();
+    } catch (e) {
+      throw new HttpError(503, (e as Error).message);
+    }
+    const s = asleep.get(id);
+    if (!s) throw new HttpError(404, "no such sleeping tab"); // closed meanwhile
+    asleep.delete(id);
+    try {
+      const made = await g.createTab(s.tab.folder, s.tab.url, s.tab.openedBy, { madeAt: s.madeAt });
+      save(); // at once: the file no longer says it sleeps, so a Chrome that dies now reopens it
+      return made;
+    } catch (e) {
+      asleep.set(id, s);
+      changed();
+      throw new HttpError(503, (e as Error).message);
+    }
+  })().finally(() => waking.delete(id));
+  waking.set(id, p);
+  return p;
+}
+
+// A live view of tab `id` for the app (view.ts). It counts the view and touches the tab as it opens
+// and closes.
+export async function viewTab(id: string, sock: ViewSocket) {
+  const g = gate;
+  if (!chrome || !g?.tabs().some((t) => t.id === id) || asleep.has(id)) throw new Error("That browser tab is closed.");
+  // A tab with a view open doesn't sleep; the hour starts when the last view closes.
+  viewing.set(id, (viewing.get(id) ?? 0) + 1);
+  let left = false;
+  const leave = () => {
+    if (left) return;
+    left = true;
+    const n = (viewing.get(id) ?? 1) - 1;
+    if (n) viewing.set(id, n);
+    else viewing.delete(id);
+    g.touch(id);
+  };
+  try {
+    const v = await openView(chrome, (t) => g.attachDirect(t), id, sock);
+    return { message: v.message, close: () => (leave(), v.close()) };
+  } catch (e) {
+    leave();
+    throw e;
+  }
 }
 
 // The gate's listener. It keeps the port it had last time if it's free, so sessions' MCPs from
@@ -233,8 +363,10 @@ export async function startBrowserGate(): Promise<number> {
   }
   writeFileSync(portFile(), `${listener.port}\n`, { mode: 0o600 });
   writeMcpConfig(true);
-  // Tabs from before: Chrome starts now, so they're there for the app and the sessions.
-  if (loadSaved().length && browserAvailable()) ensureChrome().catch((e) => console.log(`browser: ${(e as Error).message}`));
+  // Tabs from before used within the hour: Chrome starts now, so they're there for the app and the
+  // sessions. The others sleep.
+  load();
+  if (toOpen.length && browserAvailable()) ensureChrome().catch((e) => console.log(`browser: ${(e as Error).message}`));
   return listener.port!;
 }
 
@@ -249,4 +381,10 @@ export async function stopBrowser() {
   listener = null;
   c?.kill();
   await c?.exited;
+  // Reset for the next start. Chrome's exit schedules a save; one after the reset would write an empty list.
+  clearTimeout(saveTimer);
+  asleep.clear();
+  toOpen = [];
+  loaded = false;
+  viewing.clear();
 }
