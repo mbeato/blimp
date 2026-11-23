@@ -12,14 +12,19 @@ public struct BrowserTab: Codable, Sendable, Equatable, Identifiable {
     public let title: String
     /// The session that opened it; nil: opened from an app.
     public let openedBy: String?
+    /// True while the tab sleeps: closed in the server's Chrome until woken. nil otherwise.
+    public let asleep: Bool?
 
-    public init(id: String, folder: String, url: String, title: String, openedBy: String? = nil) {
+    public init(id: String, folder: String, url: String, title: String, openedBy: String? = nil, asleep: Bool? = nil) {
         self.id = id
         self.folder = folder
         self.url = url
         self.title = title
         self.openedBy = openedBy
+        self.asleep = asleep
     }
+
+    public var isAsleep: Bool { asleep == true }
 
     /// The title, or the address's host while it has none.
     public var label: String { title.isEmpty ? BrowserAddress.host(of: url) : title }

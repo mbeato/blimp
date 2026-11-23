@@ -2693,6 +2693,11 @@ body.dragging-session * {
   text-overflow: ellipsis;
 }
 
+/* A sleeping browser tab: in the strip, but closed in the server's Chrome until it's opened. */
+.page-tab.asleep {
+  opacity: 0.5;
+}
+
 .page-loading {
   flex: none;
   width: 12px;

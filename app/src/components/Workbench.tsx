@@ -33,7 +33,7 @@ import { HOME, hostOf, serverTabTarget } from "../lib/browser";
 import { galleryDir, galleryKey } from "../lib/gallery";
 import { isVisualTab, visualTab } from "../lib/visuals";
 import type { Action } from "../lib/commands";
-import { byOrder, moved, startReorder } from "../lib/reorder";
+import { byOrder, moved, replaced, startReorder } from "../lib/reorder";
 import { tildify } from "../lib/sessions";
 import { getSettings, onSettings } from "../lib/settings";
 import { download, freeName, pickFiles, upload, type Item } from "../lib/transfers";
@@ -603,6 +603,37 @@ export function Workbench(props: {
     rerender();
   };
 
+  // A sleeping tab on screen wakes: the server opens it again as a tab with a new id, which takes
+  // the old one's place in front and in the dragged order. A key is in `waking` from the wake's
+  // start until the new tab is in front (the effect below takes it out); a failed wake's error
+  // stays for its pane, until Try again.
+  const waking = useRef(new Set<string>()).current;
+  const wakeErrors = useRef(new Map<string, string>()).current;
+  const wakePage = (key: string) => {
+    const tab = pages.get(key);
+    const api = link.api;
+    if (!tab?.asleep || !api || waking.has(key)) return;
+    waking.add(key);
+    wakeErrors.delete(key);
+    api.wakeBrowserTab(tab.id).then(
+      ({ id }) => {
+        // The server may list the new tab before this answer or after it.
+        if (!link.browserTabs.some((t) => t.id === id)) opening.add(`tab:${id}`);
+        if (props.pageOrder?.includes(tab.id)) props.onPageOrder(replaced(props.pageOrder, tab.id, id)!);
+        // The key stays in `waking`: the list may have dropped the old id already, and the effect
+        // of that render, run before this change of the front tab, would move the front to the
+        // last tab (and wake that one too, if it sleeps).
+        setActiveState((a) => (a === key ? `tab:${id}` : a));
+        rerender();
+      },
+      (e) => {
+        waking.delete(key);
+        wakeErrors.set(key, errorText(e));
+        rerender();
+      },
+    );
+  };
+
   // ---- galleries ----
 
   const openGallery = (dir: string) => {
@@ -682,13 +713,15 @@ export function Workbench(props: {
       lastPage.current = null;
     }
   }, [props.showBrowsers]);
-  // A tab closed elsewhere (another Mac, a session) takes this one off it, if it was in front.
+  // A tab closed elsewhere (another Mac, a session) takes this one off it, if it was in front. Not
+  // one waking: the server can drop its old id before the wake's answer says the new one.
   const pageKeys = [...pages.keys()].join(",");
   const listed = link.browserTabs.map((t) => t.id).join(",");
   useEffect(() => {
     for (const k of opening) if (pages.has(k)) opening.delete(k);
     for (const k of gone) if (!link.browserTabs.some((t) => `tab:${t.id}` === k)) gone.delete(k);
-    if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active)) setActiveState([...docs.keys(), ...galleries, ...visuals.keys(), ...pages.keys()].at(-1) ?? null);
+    for (const k of waking) if (k !== active && !pages.has(k)) waking.delete(k);
+    if (active?.startsWith("tab:") && !pages.has(active) && !opening.has(active) && !waking.has(active)) setActiveState([...docs.keys(), ...galleries, ...visuals.keys(), ...pages.keys()].at(-1) ?? null);
   }, [pageKeys, listed]);
 
   // ---- paths, rename, delete, move ----
@@ -1372,8 +1405,8 @@ export function Workbench(props: {
                       key={key}
                       role="tab"
                       aria-selected={key === active}
-                      className={"tab page-tab" + (key === active ? " active" : "")}
-                      title={`${t.url}${t.openedBy ? "\nOpened by a session" : ""}`}
+                      className={"tab page-tab" + (key === active ? " active" : "") + (t.asleep ? " asleep" : "")}
+                      title={`${t.url}${t.openedBy ? "\nOpened by a session" : ""}${t.asleep ? "\nAsleep. It loads again when you open it." : ""}`}
                       onMouseDown={(e) => e.button === 0 && setActive(key)}
                       onPointerDown={(e) =>
                         startReorder(e, () => [...strip.current!.querySelectorAll<HTMLElement>(".page-tab")], (from, to) => props.onPageOrder(moved([...shownPages.values()], from, to).map((t) => t.id)))
@@ -1429,6 +1462,8 @@ export function Workbench(props: {
                 targets={() => props.pane.current.targets()}
                 onSend={(to, text) => props.pane.current.send(to, text)}
                 onNotice={props.onNotice}
+                onWake={() => wakePage(key)}
+                wakeError={wakeErrors.get(key)}
               />
             </div>
           ))}

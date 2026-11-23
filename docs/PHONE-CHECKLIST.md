@@ -167,6 +167,7 @@ The server's browser tabs, from the drawer's Browser section. Items marked (phon
 - [ ] Send to Session. From a session's chat, open a tab, then ••• > Send to Session. The chat comes back with `Browser tab "<title>" <address>` in the box.
 - [ ] The lock. Open a tab, leave the app for over five minutes, come back. The lock covers everything, the page included; after unlocking, the chat shows.
 - [ ] Close Tab. ••• > Close Tab, or swipe a tab's row right in the drawer: it goes, on the Mac too.
+- [ ] A sleeping tab. Leave a tab unopened, on the phone and the Mac, for over an hour. Its row in the drawer is dimmed. Tap it: after a moment it opens full screen, the page loaded again. Swipe another dimmed row right: it goes.
 - [ ] Notifications. After pairing (or on the first launch with this build), blimp asks once whether it may send notifications: Allow. With the server's push key set, `blimpd push-test` prints `sent` for the phone, and the phone shows "blimp can reach this phone". Close blimp and let a session wait on you: a notification comes within a few seconds, titled with the session and "is waiting". Tap it: blimp opens (after Face ID) on that session's chat, and the notification is gone. A Claude turn of 30 s or more that ends sends "… finished" with the start of the reply. With blimp open, none shows (its own banner does). Settings > Notifications off: none come, on again: they do.
 
 ## Widgets

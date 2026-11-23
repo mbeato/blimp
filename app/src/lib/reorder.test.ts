@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { byOrder, dropIndex, moved } from "./reorder";
+import { byOrder, dropIndex, moved, replaced } from "./reorder";
 
 describe("dropIndex", () => {
   // The other tabs' middles, left to right: the dragged tab goes before the first one right of the pointer.
@@ -24,5 +24,15 @@ describe("byOrder", () => {
     expect(byOrder(items, (x) => x, ["c", "a", "b"])).toEqual(["c", "a", "b", "new"]);
     expect(byOrder(items, (x) => x, ["gone", "b"])).toEqual(["b", "a", "c", "new"]);
     expect(byOrder(items, (x) => x, undefined)).toEqual(items);
+  });
+});
+
+describe("replaced", () => {
+  // A woken browser tab has a new id, at the old one's place in the dragged order.
+  test("the new id where the old was; an order without the old one stays", () => {
+    expect(replaced(["a", "b", "c"], "b", "x")).toEqual(["a", "x", "c"]);
+    const order = ["a"];
+    expect(replaced(order, "b", "x")).toBe(order);
+    expect(replaced(undefined, "b", "x")).toBeUndefined();
   });
 });

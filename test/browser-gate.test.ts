@@ -147,6 +147,48 @@ live("a client can't close or crash the browser everyone shares, or reach anothe
   e.close();
 });
 
+live("a tool call's Target.getDevToolsTarget marks the tab used; other commands don't", async () => {
+  const c = client("/p/u", "su");
+  await c.call("Target.setDiscoverTargets", { discover: true });
+  await c.call("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+  const before = Date.now();
+  const { result } = await c.call("Target.createTarget", { url: `http://127.0.0.1:${site.port}/u` });
+  const id = result.targetId;
+  const attached = await until(() => c.events("Target.attachedToTarget").find((m) => m.params.targetInfo.targetId === id), "the client attached to its tab");
+  const made = gate.times(id)!;
+  expect(made.usedAt).toBeGreaterThanOrEqual(before);
+  expect(made.usedAt).toBeLessThanOrEqual(Date.now());
+  expect(made.madeAt).toBeGreaterThanOrEqual(before);
+  expect(made.madeAt).toBeLessThanOrEqual(Date.now());
+  await Bun.sleep(30);
+  // What the MCP sends by itself on a busy page: not use.
+  await c.call("Storage.getStorageKey", {}, attached.params.sessionId);
+  expect(gate.times(id)!.usedAt).toBe(made.usedAt);
+  await c.call("Target.getDevToolsTarget", { targetId: id });
+  expect(gate.times(id)!.usedAt).toBeGreaterThan(made.usedAt);
+  expect(gate.times(id)!.madeAt).toBe(made.madeAt);
+  c.close();
+}, 20_000);
+
+live("another folder's client can't mark a tab used", async () => {
+  const id = await gate.createTab("/p/u", `http://127.0.0.1:${site.port}/u2`);
+  const was = gate.times(id)!.usedAt;
+  await Bun.sleep(30);
+  const o = client("/p/other");
+  expect((await o.call("Target.getDevToolsTarget", { targetId: id })).error?.message).toBe("No target with given id found");
+  expect(gate.times(id)!.usedAt).toBe(was);
+  o.close();
+}, 20_000);
+
+live("a tab made with times keeps them", async () => {
+  const id = await gate.createTab("/p/u", `http://127.0.0.1:${site.port}/u3`, "s", { usedAt: 1000, madeAt: 500 });
+  expect(gate.times(id)).toEqual({ usedAt: 1000, madeAt: 500 });
+  gate.touch(id, 2000);
+  expect(gate.times(id)!.usedAt).toBe(2000);
+  gate.touch(id, 1500);
+  expect(gate.times(id)!.usedAt).toBe(2000);
+}, 20_000);
+
 live("blimp's own attach (the app's live view) is never handed to a client attaching at the same time", async () => {
   const id = await gate.createTab("/p/v", `http://127.0.0.1:${site.port}/v`);
   const c = client("/p/v");

@@ -176,6 +176,12 @@ final class Store {
         try await api.closeTab(id)
     }
 
+    /// Wakes a sleeping tab; returns the new tab's id.
+    func wakeTab(_ id: String) async throws -> String {
+        guard let api else { throw APIError.offline }
+        return try await api.wakeTab(id)
+    }
+
     /// Settings' Assistant switch (PUT /assistant). The events' assistant message says it changed.
     func setAssistant(on: Bool) async throws {
         guard let api else { throw APIError.offline }

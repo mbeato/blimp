@@ -157,6 +157,13 @@ struct API {
         _ = try await call("DELETE", "/browser/tabs/" + id)
     }
 
+    /// Wakes a sleeping tab: blimpd opens its address again, as a tab with a new id; returns that id.
+    func wakeTab(_ id: String) async throws -> String {
+        struct Woken: Decodable { let id: String }
+        let woken: Woken = try await decode(call("POST", "/browser/tabs/" + id + "/wake"))
+        return woken.id
+    }
+
     /// The feed: its unseen cards in order, the saved ones, each source's last run, and when the next run starts.
     func feed() async throws -> Feed {
         try await decode(call("GET", "/feed"))

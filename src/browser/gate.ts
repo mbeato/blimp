@@ -14,10 +14,13 @@
 
 import type { CdpMessage, Chrome } from "./chrome";
 
-export type Tab = { id: string; folder: string; url: string; title: string; openedBy?: string };
+export type Tab = { id: string; folder: string; url: string; title: string; openedBy?: string; asleep?: true };
 export type GateClient = { folder: string; session?: string; send(text: string): void };
 
-type Target = { info: any; folder: string | null; openedBy?: string; seen: boolean; announced: boolean };
+// usedAt: when the tab was last used (made, a session's tool call, a view). madeAt: when it was
+// first made; a tab woken or restored keeps the one it had. Both ms.
+type Target = { info: any; folder: string | null; openedBy?: string; seen: boolean; announced: boolean; usedAt: number; madeAt: number };
+export type Times = { usedAt: number; madeAt: number };
 type Conn = GateClient & { discover: boolean; autoAttach: boolean; sessions: Set<string> };
 
 const NO_TARGET = "No target with given id found";
@@ -56,11 +59,22 @@ export class Gate {
       .map((t) => ({ id: t.info.targetId, folder: t.folder!, url: t.info.url ?? "", title: t.info.title ?? "", ...(t.openedBy && { openedBy: t.openedBy }) }));
   }
 
-  async createTab(folder: string, url: string, openedBy?: string): Promise<string> {
+  async createTab(folder: string, url: string, openedBy?: string, times?: Partial<Times>): Promise<string> {
     const r = await this.chrome.call("Target.createTarget", { url, newWindow: true });
     if (!r.result?.targetId) throw new Error(r.error?.message ?? "Chrome didn't open the tab");
-    this.claim(r.result.targetId, folder, openedBy);
+    this.claim(r.result.targetId, folder, openedBy, times);
     return r.result.targetId;
+  }
+
+  times(id: string): Times | undefined {
+    const t = this.targets.get(id);
+    return t && { usedAt: t.usedAt, madeAt: t.madeAt };
+  }
+
+  // The tab was used at `at`: never moved back.
+  touch(id: string, at = Date.now()) {
+    const t = this.targets.get(id);
+    if (t) t.usedAt = Math.max(t.usedAt, at);
   }
 
   // Chrome doesn't say when a page's own title comes in (targetInfoChanged carries the address as
@@ -161,10 +175,12 @@ export class Gate {
   }
 
   // A target is now in `folder`: Chrome's targetCreated may have come before or after this.
-  private claim(targetId: string, folder: string, openedBy?: string) {
-    const t = this.targets.get(targetId) ?? { info: { targetId, type: "page" }, folder: null, seen: false, announced: false };
+  private claim(targetId: string, folder: string, openedBy?: string, times?: Partial<Times>) {
+    const t = this.targets.get(targetId) ?? { info: { targetId, type: "page" }, folder: null, seen: false, announced: false, usedAt: Date.now(), madeAt: Date.now() };
     t.folder = folder;
     t.openedBy = openedBy;
+    t.usedAt = times?.usedAt ?? Date.now();
+    if (times?.madeAt !== undefined) t.madeAt = times.madeAt;
     this.targets.set(targetId, t);
     if (t.seen) this.announce(t);
   }
@@ -202,7 +218,7 @@ export class Gate {
       case "Target.targetCreated": {
         const info = m.params.targetInfo;
         const opener = info.openerId ? this.targets.get(info.openerId) : undefined;
-        const t = this.targets.get(info.targetId) ?? { info, folder: opener?.folder ?? null, openedBy: opener?.openedBy, seen: false, announced: false };
+        const t = this.targets.get(info.targetId) ?? { info, folder: opener?.folder ?? null, openedBy: opener?.openedBy, seen: false, announced: false, usedAt: Date.now(), madeAt: Date.now() };
         t.info = info;
         t.seen = true;
         this.targets.set(info.targetId, t);
@@ -256,6 +272,9 @@ export class Gate {
     const p = m.params ?? {};
     // Another folder's target is as good as no target, whatever the command.
     if (typeof p.targetId === "string" && !this.visible(c, this.targets.get(p.targetId))) return this.fail(c, m, NO_TARGET);
+    // The MCP names the page with this before each tool call acts on it, and never by itself
+    // (docs/superpowers/specs/2026-11-23-sleeping-tabs-design.md): the session is using the tab.
+    if (m.method === "Target.getDevToolsTarget" && typeof p.targetId === "string") this.touch(p.targetId);
     switch (m.method) {
       case "Target.setDiscoverTargets":
         c.discover = !!p.discover;

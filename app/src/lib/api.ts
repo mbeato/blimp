@@ -8,7 +8,8 @@ export type SessionState = "working" | "waiting" | "done" | "unknown";
 export type Port = { port: number; host: "127.0.0.1" | "::1"; session: string; pid: number; command: string };
 
 // A tab of the server's browser (events `browser`): its folder, and the session that opened it.
-export type BrowserTab = { id: string; folder: string; url: string; title: string; openedBy?: string };
+// asleep: closed in the server's Chrome until it's woken (nobody used it for an hour).
+export type BrowserTab = { id: string; folder: string; url: string; title: string; openedBy?: string; asleep?: boolean };
 
 // A way to start a session (GET /kinds): claude, claude-glm, codex, shell, or one from the
 // server's ~/.blimp/kinds.json. note: why it can't start, or Codex's sign-in.
@@ -254,6 +255,11 @@ export class Api {
 
   closeBrowserTab(id: string) {
     return this.req(`/browser/tabs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  // Wakes a sleeping tab: the server opens its address again, as a tab with a new id.
+  wakeBrowserTab(id: string) {
+    return this.json<{ id: string }>(`/browser/tabs/${encodeURIComponent(id)}/wake`, { method: "POST" });
   }
 
   // The visual key: it reads visuals' pages and blimp's kit, and nothing else (blimpd's GET /visuals/key).

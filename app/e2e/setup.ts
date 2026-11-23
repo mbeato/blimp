@@ -54,6 +54,18 @@ export default async function setup() {
   // The login shell's profile puts it on PATH, as nvm does for the real one (/etc/profile resets PATH).
   writeFileSync(join(fixtures, ".profile"), `PATH="${bin}:$PATH"\n`);
 
+  // Two sleeping browser tabs in ~/sleepy, for browser.spec.ts: blimpd reads its tabs.json only as
+  // it starts, and a tab goes to sleep by itself only after an hour. The spec serves their pages on
+  // this port.
+  const sleptPort = await freePort();
+  mkdirSync(join(fixtures, "sleepy"));
+  mkdirSync(join(tmp, "browser"), { mode: 0o700 });
+  writeFileSync(
+    join(tmp, "browser", "tabs.json"),
+    JSON.stringify(["one", "two"].map((n, i) => ({ folder: join(fixtures, "sleepy"), url: `http://127.0.0.1:${sleptPort}/${n}`, id: `slept-${n}`, title: `Slept ${n}`, asleep: true, madeAt: i + 1 }))),
+  );
+  process.env.BLIMP_E2E_SLEPT_PORT = String(sleptPort);
+
   const log = openSync(join(tmp, "blimpd.log"), "a");
   const children: ChildProcess[] = [];
   // No pipes to children: a zmx daemon started under them would inherit and hold them open.
