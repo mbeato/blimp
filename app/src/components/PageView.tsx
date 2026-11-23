@@ -13,7 +13,9 @@ export type Target = { name: string; title: string };
 // Forward, Reload, the address, Open in Browser and Send to session. While the tab is on screen
 // (`shown`, and the window can be seen: not minimized or behind other apps) the view socket is open: frames come in and are drawn to a canvas at the page's size;
 // clicks, scrolling and typing go out. Typing goes through a hidden text field, so
-// input methods, accents and emoji work. Copy, Cut and Paste use the Mac clipboard.
+// input methods, accents and emoji work. Copy, Cut and Paste use the Mac clipboard. A sleeping tab
+// (closed in the server's Chrome) has no view: on screen, it asks to be woken (onWake), and the
+// woken tab, with its new id, takes its place.
 export function PageView(props: {
   tab: BrowserTab;
   link: ServerLink;
@@ -21,6 +23,8 @@ export function PageView(props: {
   targets: () => Target[];
   onSend: (to: string, text: string) => Promise<void>;
   onNotice: (text: string) => void;
+  onWake: () => void;
+  wakeError?: string;
 }) {
   const { tab, link } = props;
   const [info, setInfo] = useState<ViewInfo | null>(null);
@@ -83,6 +87,8 @@ export function PageView(props: {
   useEffect(() => {
     const api = link.api;
     if (!props.shown || !seen || !api) return;
+    // Only the tab on screen wakes, never one in the background.
+    if (tab.asleep) return props.onWake();
     setState("connecting");
     let timer: ReturnType<typeof setTimeout> | undefined;
     const v = new ServerView(api.viewUrl(tab.id), {
@@ -135,7 +141,7 @@ export function PageView(props: {
       v.close();
       if (view.current === v) view.current = null;
     };
-  }, [props.shown, seen, tab.id, link.api, retry]);
+  }, [props.shown, seen, tab.id, link.api, retry, tab.asleep]);
 
   useEffect(() => {
     const el = area.current;
@@ -348,12 +354,26 @@ export function PageView(props: {
             if (text) (send({ type: "text", text }), askSelection());
           }}
         />
-        {state !== "open" && (drawn || state === "lost") && (
+        {tab.asleep && (
+          <div className="page-status" role="status">
+            {props.wakeError ? (
+              <>
+                Couldn't wake the tab: {props.wakeError}{" "}
+                <button type="button" className="link-button" onClick={props.onWake}>
+                  Try again
+                </button>
+              </>
+            ) : (
+              "Waking…"
+            )}
+          </div>
+        )}
+        {!tab.asleep && state !== "open" && (drawn || state === "lost") && (
           <div className="page-status" role="status">
             {drawn ? "Reconnecting…" : "Can't reach the server's browser. Trying again…"}
           </div>
         )}
-        {state !== "open" && !drawn && state !== "lost" && (
+        {!tab.asleep && state !== "open" && !drawn && state !== "lost" && (
           <div className="page-status" role="status">
             Loading…
           </div>

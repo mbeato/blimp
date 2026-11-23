@@ -230,6 +230,10 @@ The page describes the menu and Rust draws it, so none of this runs in the Linux
   Do: open three folders as project tabs, and three browser tabs in one of them. Drag the last project tab to the left, between two others, and then onto Home. Drag a browser tab past another. Click a tab without moving the mouse. Quit blimp and start it again.
   Expect: each tab moves where you let go of it, and never in front of Home. A click without moving just picks the tab. The new order is still there after the restart.
 
+- [ ] **A browser tab left for an hour sleeps.**
+  Do: open three browser tabs in a folder. Leave the middle one in the background for over an hour (another tab in front). Click it. Then let another tab sleep the same way, and close it with its ×.
+  Expect: after the hour, the middle tab is dimmed, and its tooltip says it's asleep. The click shows Waking… and then the page, loaded again, still in the middle of the strip and no longer dimmed. The closed tab leaves the strip.
+
 - [ ] **A right-click on a terminal link offers the blimp browser.**
   Do: right-click the same `https://` URL. Pick Open in Blimp Browser. Right-click it again and pick Copy Link, then paste somewhere. Right-click plain text in the terminal.
   Expect: a menu with Open in Blimp Browser, Open in Default Browser and Copy Link. The first opens the page in a browser tab next to the file tabs. Copy Link copies the URL. On plain text you get the usual Mac menu, not this one.

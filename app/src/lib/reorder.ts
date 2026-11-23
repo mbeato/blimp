@@ -18,6 +18,11 @@ export function byOrder<T>(items: T[], key: (x: T) => string, order: string[] | 
   return [...known, ...items.filter((x) => !rank.has(key(x)))];
 }
 
+// A woken browser tab has a new id: it takes the old one's place in a dragged order. An order
+// that doesn't have the old id (never dragged, or the tab came after) stays as it is.
+export const replaced = (order: string[] | undefined, was: string, now: string): string[] | undefined =>
+  order?.includes(was) ? order.map((k) => (k === was ? now : k)) : order;
+
 // From a pointerdown on a tab: past a few pixels it's a drag, and the tab follows the pointer. Let go,
 // and onMove gets where it was and where it goes among tabs() (the strip's draggable tabs, left to
 // right). A press that doesn't move stays a click. No pointer capture: it would take the click from
