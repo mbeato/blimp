@@ -1,6 +1,6 @@
 # blimp
 
-blimp is a Mac app for Claude Code sessions that run on your own server. The server is a Linux machine, or a Mac with an Apple chip. It is laid out like VS Code: you open a project folder on the server, its files are on the left, the files you open are in tabs, and the terminal is at the bottom. Next to the terminal is the list of Claude sessions in that folder, with what each one is doing. Click a session to use its terminal, as if you had connected with SSH. You do not need to keep a terminal open, and you do not need another editor.
+blimp is a Mac app for Claude Code sessions. The sessions run on your own server, or on the Mac itself. The server is a Linux machine, or a Mac with an Apple chip. It is laid out like VS Code: you open a project folder on the server, its files are on the left, the files you open are in tabs, and the terminal is at the bottom. Next to the terminal is the list of Claude sessions in that folder, with what each one is doing. Click a session to use its terminal, as if you had connected with SSH. You do not need to keep a terminal open, and you do not need another editor.
 
 ![blimp in dark mode: files on the left, a Markdown file open at the top, a Claude Code terminal below it, and the folder's sessions on the right](docs/screenshots/main-dark.png)
 
@@ -12,6 +12,7 @@ These screenshots come from the browser build that the end-to-end tests use. The
 
 - The app runs your normal `ssh` command. It uses your keys, your SSH agent and your `~/.ssh/config`.
 - On the server, a small service called **blimpd** listens on a private unix socket (`~/.blimp/blimpd.sock`). It does not open a network port. The app forwards a local port to that socket through SSH.
+- On **This Mac** (sessions on the Mac that runs the app), there is no SSH. The app reads blimpd's token from this Mac's disk, and joins a local port to blimpd's socket itself.
 - Sessions run in **zmx**, a small program that keeps terminal sessions alive. When you close the app, your sessions keep running on the server. With user systemd, this needs linger (see [Requirements](#requirements)). On a Mac server, you must stay logged in at that Mac's desktop (see [A Mac as the server](#a-mac-as-the-server)).
 - blimp is one more way to attach to those sessions. A plain terminal still works at the same time. On the server, `zmx list` shows the same sessions, and `zmx attach <name>` joins one. If you type in one place, the text shows in both places.
 
@@ -58,9 +59,10 @@ The notification's text (a session's title, a command, a question, the start of 
 **The Mac that runs the app**
 
 - macOS 11 (Big Sur) or later, with Safari 16 or later installed. macOS 13 (Ventura) and later come with Safari 16 or later.
-- SSH with a key, and no password prompt. blimp runs `/usr/bin/ssh` with `BatchMode=yes`, so ssh never asks you anything. Test this in Terminal first. This command must print `ok` without a prompt:
+- For a server: SSH with a key, and no password prompt. blimp runs `/usr/bin/ssh` with `BatchMode=yes`, so ssh never asks you anything. Test this in Terminal first. This command must print `ok` without a prompt:
   `/usr/bin/ssh -o BatchMode=yes yourserver echo ok`
-- The server's host key must be in `~/.ssh/known_hosts` already. Connect once from Terminal and accept the key.
+- For a server: the server's host key must be in `~/.ssh/known_hosts` already. Connect once from Terminal and accept the key.
+- For **This Mac**: an Apple chip (M1 and later), and macOS 13 (Ventura) or later. Claude Code must be installed and logged in on this Mac. The first setup needs the internet. SSH is not needed: Remote Login can stay off.
 
 ## Install the server part
 
@@ -94,6 +96,8 @@ To check the service: `systemctl --user status blimpd` (on a Mac: `launchctl pri
 ## A Mac as the server
 
 The server can be a Mac with an Apple chip. The install command is the same as on Linux. These things are different.
+
+**This Mac** is the same setup, on the Mac you sit at. The app reaches its blimpd without SSH. Everything below applies to it too: blimpd stops when you log out, sessions pause while the Mac sleeps, macOS asks before blimp reads some folders, and the iPhone app and switching between Claude accounts don't work with it. One blimpd can be another computer's SSH server and this Mac's This Mac at the same time.
 
 **The service is a launchd agent**
 
@@ -143,14 +147,23 @@ The release notes say whether the app is signed and notarized. If it is not, it 
 
 **Updates.** blimp checks for a new version when it opens and every few hours; **blimp > Check for Updates…** checks now. When one is ready, a bar says so: click **Restart to update**. The app downloads it, checks that it was signed by this repository's release build, and restarts into it. Your sessions keep running on the server meanwhile.
 
-When the app is newer than blimpd on a server, a bar offers **Update server** (so do **Server > Update Server…** and Manage servers): it runs the latest release's install script on the server over SSH, the same as the install command above. Sessions keep running; blimp reconnects by itself.
+When the app is newer than blimpd on a server, a bar offers **Update server** (so do **Server > Update Server…** and Manage servers): it runs the latest release's install script on the server over SSH, the same as the install command above. For This Mac, it runs the script on this Mac, with no SSH. Sessions keep running; blimp reconnects by itself.
 
 ## First run
 
-1. Open blimp. It shows **Add a server**.
-2. Enter the **Host**: the same name you type after `ssh`. A `Host` alias from `~/.ssh/config` works, and the field offers the ones it finds there. A Tailscale name or an address works too. This is not always the name that the installer printed.
-3. **User** and **Port** are optional. Leave them empty to use what your `~/.ssh/config` says, as `ssh` does. **Name** is optional too: it's what blimp calls the server. Without one, blimp shows the host.
-4. Click **Add server**.
+Open blimp. It asks **Where should blimp run your sessions?** Choose **This Mac** or **A server…**.
+
+**This Mac.** Sessions run on this Mac. They pause while it sleeps.
+1. Click **This Mac**. blimp says "Connecting to this Mac…".
+2. If blimpd is set up on this Mac already, blimp opens on **Home**: your home folder on this Mac.
+3. If it isn't, macOS asks **Set up blimp on this Mac?** **Set Up** downloads blimpd from the latest blimp release, keeps it running in the background while you are logged in, and adds blimp's status hooks to Claude Code's settings. It is the same install script as in [Install the server part](#install-the-server-part), run on this Mac. blimp says "Setting up this Mac…", then opens on **Home**.
+4. **Cancel** goes back to the choice. Nothing is installed.
+5. If the setup fails (no internet, an Intel Mac, an older macOS), the error shows under the buttons, with the install script's last lines. Click **This Mac** again to try again.
+
+**A server.** Sessions run on a Linux server or another Mac, over SSH. They keep running when this Mac is off. Click **A server…**. blimp shows **Add a server**. **Back** goes back to the choice.
+1. Enter the **Host**: the same name you type after `ssh`. A `Host` alias from `~/.ssh/config` works, and the field offers the ones it finds there. A Tailscale name or an address works too. This is not always the name that the installer printed.
+2. **User** and **Port** are optional. Leave them empty to use what your `~/.ssh/config` says, as `ssh` does. **Name** is optional too: it's what blimp calls the server. Without one, blimp shows the host.
+3. Click **Add server**.
 
 blimp connects before it saves the server: it says "Connecting to *host*…". When that works, blimp opens on **Home**: your home folder on the server. When it fails, the form stays, with the error, and for the common errors a line that says what to do. Then you can:
 - click **Try again**, or change the fields and click **Add server**;
@@ -167,9 +180,11 @@ See [Troubleshooting](#troubleshooting).
 - **Manage servers…** (in the Home tab's list, or **Server > Manage Servers…**), then **Add server…**;
 - **Add server** on the Welcome page.
 
+Add server also says "Or run sessions on this Mac, with no SSH." while This Mac isn't in your list. **Use This Mac** does what **This Mac** does on first open.
+
 The Home tab shows its server: a dot and its name. A solid dot means connected, a ring means connecting, and a red dot means offline. Click the chevron after the name to see every server, with how many sessions it has (and an amber count of the ones waiting for you), or "offline". Click a server to show it at Home. The **Server** menu lists your servers too.
 
-**Manage servers** shows each server's name, address and state. Type a new **Name** to rename a server; blimp keeps its tabs and recent folders. **Remove…** asks first, then closes the server's tabs; its sessions keep running on the server. A server that isn't connected has **Try again**, and **Install blimpd** when blimpd isn't set up there. When blimpd is older than the app, there is **Update server**.
+**Manage servers** shows each server's name, address and state. Type a new **Name** to rename a server; blimp keeps its tabs and recent folders. **Remove…** asks first, then closes the server's tabs; its sessions keep running on the server. A server that isn't connected has **Try again**, and **Install blimpd** when blimpd isn't set up there. When blimpd is older than the app, there is **Update server**. This Mac shows "this Mac" where a server shows its address. Removing This Mac leaves blimpd installed and running on this Mac; [Uninstall](#uninstall) says how to remove it. For This Mac, **Install blimpd** also shows when blimpd doesn't answer, since the install starts it again.
 
 ## Using it
 
@@ -434,6 +449,7 @@ blimpd can start sessions, type into them, and read and write every file in your
 
 - blimpd has no network port. It listens on a unix socket in `~/.blimp`. The folder has mode 700, and the socket and the token file have mode 600.
 - The app reaches blimpd only through your own SSH connection. Because ssh runs with `BatchMode=yes`, an unknown or changed host key makes the connection fail. It is not accepted, unless your own `~/.ssh/config` says so for that host.
+- On This Mac, there is no SSH. The app reads the token from `~/.blimp/token`, which only you can read, and joins a port on `127.0.0.1` to blimpd's socket. That port is the same kind of port the SSH tunnel opens, and the token guards it the same way.
 - On the Mac, any program or web page can reach the local port. So every request must carry a random token (`~/.blimp/token` on the server). The token is never in a cookie.
 - Files from the server cannot run script in the app. Markdown goes through DOMPurify, SVG shows only as an image, and pdf.js runs with scripting off. An HTML file shows in a sandboxed frame: its scripts do not run, and it cannot reach the app or blimpd. A strict content security policy blocks remote and inline script.
 - The installer checks zmx against a pinned SHA-256 sum, and blimpd against the release's `SHA256SUMS`.
@@ -468,7 +484,7 @@ ssh did not find a key that it can use without a prompt. blimp never shows a pas
 The server's key is not in `~/.ssh/known_hosts`, or it changed. Connect once from Terminal (`ssh yourserver`), check the key, and accept it. Then click **Try again**.
 
 **"blimpd isn't set up on yourserver: …No such file or directory"**
-The token file `~/.blimp/token` does not exist. blimpd makes it the first time it starts. Install the server part (**Install blimpd** in Add server or Manage servers does it over SSH), or start blimpd.
+The token file `~/.blimp/token` does not exist. blimpd makes it the first time it starts. Install the server part (**Install blimpd** in Add server or Manage servers does it over SSH), or start blimpd. On This Mac, the error is "blimpd isn't set up on this Mac", and **Install blimpd** runs the install script on this Mac.
 
 **"blimpd on yourserver didn't answer within 10 seconds"**
 SSH works, but the app cannot reach blimpd. Often the message ends with `channel 1: open failed: connect failed: open failed` (the number can differ). There are two causes.
@@ -477,6 +493,7 @@ SSH works, but the app cannot reach blimpd. Often the message ends with `channel
   - `journalctl --user -u blimpd -n 50` shows more of the log.
   - `systemctl --user restart blimpd` starts it again.
   - On a Mac server: `launchctl print gui/$(id -u)/dev.blimp.blimpd` shows if it runs, `tail -n 50 ~/Library/Logs/blimpd.log` shows the end of its log, and `launchctl kickstart -k gui/$(id -u)/dev.blimp.blimpd` starts it again. If `launchctl` says it could not find the service, log in at the Mac's desktop, then run the installer again.
+- On This Mac, blimpd does not run. The `launchctl` lines above apply. **Install blimpd** in Manage servers also starts it again.
 - blimpd runs, but the SSH server does not allow forwarding to a unix socket. Run `sudo sshd -T | grep -i forwarding` on the server. If it shows `disableforwarding yes`, or `allowstreamlocalforwarding no` or `remote`, change that setting in `/etc/ssh/sshd_config` (or in a file in `/etc/ssh/sshd_config.d/`), then reload sshd. Without sudo, ask the server's admin.
 
 **No user systemd (Linux)**
@@ -505,7 +522,7 @@ Apps opened from Finder get a short `PATH`. blimp adds `/opt/homebrew/bin` and `
 
 ## Uninstall
 
-**Server.** Run these on the server, in this order.
+**Server.** Run these on the server, in this order. For This Mac, the server is this Mac: run them in Terminal on it.
 
 1. End the sessions that you want to end. Uninstalling does not stop them. `zmx list` shows them, and `zmx kill <name>` ends one. Do this before step 4, because step 4 can remove zmx. On a Mac, zmx finds them only with `ZMX_DIR` set (see [A Mac as the server](#a-mac-as-the-server)).
 2. Remove the Claude Code and Codex hooks: `~/.local/bin/blimpd uninstall-hooks`

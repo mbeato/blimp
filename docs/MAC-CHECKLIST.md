@@ -384,6 +384,46 @@ These need a server whose blimpd counts usage, with `blimpd install-statusline` 
   Do: open a session in blimp. On the server in Terminal, run `zmx attach <name>` (the name is in `zmx list`). If you have a second Mac with blimp, open the same session there too. Type in each one.
   Expect: what you type in one shows in all of them. When you detach the Terminal client with `ctrl+\`, blimp keeps working.
 
+## This Mac
+
+These need a Mac user with no `~/.blimp` (a fresh macOS user, say), with Remote Login off and Claude Code installed and logged in.
+
+- [ ] **The choice shows.**
+  Do: open blimp with no server saved.
+  Expect: "Where should blimp run your sessions?" with This Mac (focused) and A server…, each with its note.
+
+- [ ] **Cancel installs nothing.**
+  Do: click This Mac. In the "Set up blimp on this Mac?" dialog, click Cancel.
+  Expect: blimp is back at the choice, with no error. `~/.blimp` and `~/Library/LaunchAgents/dev.blimp.blimpd.plist` don't exist.
+
+- [ ] **Set Up.**
+  Do: click This Mac, then Set Up.
+  Expect: "Setting up this Mac…", then Home within a minute. `launchctl print gui/$(id -u)/dev.blimp.blimpd | grep state` says `state = running`.
+
+- [ ] **A session runs.**
+  Do: start a Claude session in a folder that isn't Documents, Desktop or Downloads. Ask it something.
+  Expect: it starts and answers.
+
+- [ ] **Reopen.**
+  Do: quit blimp and open it again.
+  Expect: This Mac reconnects by itself, with its sessions.
+
+- [ ] **No internet.**
+  Do: as a fresh user again, turn Wi-Fi off. Click This Mac, then Set Up.
+  Expect: an error under the buttons that names the download (curl's last lines). Turn Wi-Fi on and click This Mac again: it sets up and opens Home.
+
+- [ ] **This Mac beside a server.**
+  Do: Add server… (the chevron on the Home tab), add a server.
+  Expect: it works as usual. Open Add server… again: "Or run sessions on this Mac, with no SSH." and Use This Mac are not offered, since This Mac is in the list.
+
+- [ ] **Manage servers.**
+  Do: open Manage servers…. Then Remove… This Mac.
+  Expect: This Mac's address reads "this Mac". After Remove, `launchctl print gui/$(id -u)/dev.blimp.blimpd | grep state` still says `state = running`. Add server… offers Use This Mac again.
+
+- [ ] **Open in Browser.**
+  Do: in a session on This Mac, run a dev server (`python3 -m http.server 8123`). Open its port in a browser tab, then click Open in Browser.
+  Expect: the page opens in the Mac's own browser, at `http://127.0.0.1:8123`.
+
 ## A Mac as the server
 
 These need a Mac with an Apple chip that runs blimpd (a Mac mini, say), logged in at its desktop, and a second computer with SSH to it.
