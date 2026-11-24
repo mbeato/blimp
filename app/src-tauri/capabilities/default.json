@@ -12,6 +12,8 @@
     "allow-update-server",
     "allow-install-server",
     "allow-ssh-hosts",
+    "allow-connect-local",
+    "allow-install-local",
     "updater:allow-check",
     "updater:allow-download-and-install",
     "allow-relaunch",

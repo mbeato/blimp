@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { connectHint, isNotSetUp } from "./hints";
+import { thisMac } from "./connection";
+import { canInstall, connectHint, isNotSetUp } from "./hints";
 
 // The errors as the Rust shell words them (open, wait_healthy and with_detail in src-tauri/src/tunnel.rs),
 // with ssh's last stderr line as macOS and Linux print it.
@@ -50,4 +51,19 @@ test("other errors get no hint", () => {
     "",
   ])
     expect(connectHint(e, server)).toBe("");
+});
+
+test("Install blimpd is offered for a server that isn't set up; for This Mac also when blimpd doesn't answer", () => {
+  expect(canInstall("blimpd isn't set up on claude1", { host: "claude1" })).toBe(true);
+  expect(canInstall("blimpd on claude1 didn't answer within 10 seconds", { host: "claude1" })).toBe(false);
+  expect(canInstall("blimpd isn't set up on this Mac", thisMac)).toBe(true);
+  // The install starts it again.
+  expect(canInstall("blimpd on this Mac didn't answer within 10 seconds", thisMac)).toBe(true);
+});
+
+test("This Mac's hints say what is true there: no SSH advice", () => {
+  const hint = "blimpd isn't running on this Mac yet. Install blimpd sets it up.";
+  expect(connectHint("blimpd isn't set up on this Mac: No such file or directory (os error 2)", thisMac)).toBe(hint);
+  expect(connectHint("blimpd on this Mac didn't answer within 10 seconds", thisMac)).toBe(hint);
+  expect(connectHint("Permission denied", thisMac)).toBe("");
 });

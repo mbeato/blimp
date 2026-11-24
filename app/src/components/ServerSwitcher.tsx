@@ -84,13 +84,15 @@ export function ServerSwitcher(props: {
                   const here = l === current;
                   const n = l.sessions?.length ?? 0;
                   const waiting = l.sessions?.filter((s) => s.state === "waiting").length ?? 0;
+                  // This Mac's key is no address.
+                  const addr = l.server.local ? "this Mac" : l.key;
                   return (
                     <button
                       key={l.key}
                       role="menuitem"
                       className="srv-row"
                       aria-current={here ? "true" : undefined}
-                      title={l.status === "connected" ? l.key : l.error || l.key}
+                      title={l.status === "connected" ? addr : l.error || addr}
                       onClick={choose(() => props.onPick(l))}
                     >
                       <span className="srv-check" aria-hidden>

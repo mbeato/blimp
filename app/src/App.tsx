@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { AddServerDialog } from "./components/AddServerDialog";
+import { FirstRun } from "./components/FirstRun";
 import { ManageServersDialog } from "./components/ManageServersDialog";
 import { OpenFolderDialog } from "./components/OpenFolderDialog";
 import { Palette } from "./components/Palette";
@@ -15,7 +16,7 @@ import { Welcome } from "./components/Welcome";
 import { Workbench, type FileDrop, type Opener, type PageOpener } from "./components/Workbench";
 import { commandForKey, inChord, REPO, runner, type Action } from "./lib/commands";
 import { menuSpec, onMenu, setMenu } from "./lib/menu";
-import { errorText, inTauri, loadServers, onServersChanged, saveServers, serverKey, ServerLink, serverName, type Server } from "./lib/connection";
+import { defaultName, errorText, inTauri, loadServers, onServersChanged, saveServers, serverKey, ServerLink, serverName, type Server } from "./lib/connection";
 import { baseName, parentDir } from "./lib/files";
 import { dropPoint, type Item } from "./lib/transfers";
 import type { Panes } from "./lib/panes";
@@ -699,7 +700,7 @@ export function App() {
   if (!servers.length)
     return (
       <div className="app">
-        <AddServerDialog known={[]} onAdd={addServer} />
+        {inTauri() ? <FirstRun onAdd={addServer} /> : <AddServerDialog known={[]} onAdd={addServer} />}
         {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
         {/* With no server, its Models and Assistant sections say to connect one first. */}
         {dialog === "settings" && (
@@ -753,8 +754,16 @@ export function App() {
             const name = t.dir ? baseName(t.dir) || t.dir : "Home";
             const waiting = !!r && l?.status === "connected" && !!l.sessions?.some((s) => s.dir === r && s.state === "waiting");
             const where = r && l ? tildify(r, l.home) : "";
-            // The tooltip has the address too, when the name isn't it.
-            const server = !l ? t.server : l.name === l.key ? l.key : `${l.name} (${l.key})`;
+            // The tooltip has the address too, when the name isn't it. This Mac's is "this Mac".
+            const server = !l
+              ? t.server
+              : l.server.local
+                ? l.name === defaultName(l.server)
+                  ? l.name
+                  : `${l.name} (this Mac)`
+                : l.name === l.key
+                  ? l.key
+                  : `${l.name} (${l.key})`;
             return (
               <Fragment key={tabKey(t)}>
                 <div

@@ -1,6 +1,7 @@
 // How the UI reaches each blimpd.
-// In the Mac app the Rust shell opens an SSH tunnel (invoke "connect") and keeps the server list
-// in the store plugin. In a plain browser (development, e2e tests) the page URL carries
+// In the Mac app the Rust shell opens an SSH tunnel (invoke "connect"), or for the blimpd on this
+// Mac a bridge to its socket with no SSH (invoke "connect_local"), and keeps the server list in
+// the store plugin. In a plain browser (development, e2e tests) the page URL carries
 // ?blimpd=http://127.0.0.1:PORT&token=T instead, and the server list lives in localStorage.
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -9,21 +10,31 @@ import { Api, type BrowserTab, type Conn, type Port, type Session, type Visual }
 import { EventsSocket } from "./events";
 
 // name: what the app calls it (Manage servers); never part of the key.
-export type Server = { host: string; user?: string; port?: number; name?: string };
+// local: the blimpd on this Mac, reached with no SSH (src-tauri/src/local.rs); its host is "".
+export type Server = { host: string; user?: string; port?: number; name?: string; local?: true };
+
+// This Mac's key, the id the Rust shell gives it (local::ID). No SSH server can have it: Rust
+// refuses a host or user with whitespace in it.
+export const LOCAL_KEY = "this mac";
+export const thisMac: Server = { host: "", local: true };
 
 export const inTauri = () => isTauri();
 
 // user@host:port, leaving out what the user left blank. The same as the id the Rust shell gives
 // the tunnel (Target::id in src-tauri/src/tunnel.rs), so it also names the tunnel to disconnect.
-export const serverKey = (s: Server) => `${s.user ? s.user + "@" : ""}${s.host}${s.port ? ":" + s.port : ""}`;
+export const serverKey = (s: Server) => (s.local ? LOCAL_KEY : `${s.user ? s.user + "@" : ""}${s.host}${s.port ? ":" + s.port : ""}`);
 
-const label = (s: Server) => s.name?.trim() || s.host;
+// What a server is called until it's given a name.
+export const defaultName = (s: Server) => (s.local ? "This Mac" : s.host);
+
+const label = (s: Server) => s.name?.trim() || defaultName(s);
 
 // The name a person reads: the one they gave it, else its host. Two servers in `all` that would
-// read the same (box and max@box) each show their key instead, so they can be told apart.
+// read the same (box and max@box) each show their key instead, so they can be told apart; This
+// Mac's key is no address, so it shows "this Mac".
 export function serverName(s: Server, all: Server[]): string {
   const l = label(s);
-  return all.some((o) => serverKey(o) !== serverKey(s) && label(o) === l) ? serverKey(s) : l;
+  return all.some((o) => serverKey(o) !== serverKey(s) && label(o) === l) ? (s.local ? "this Mac" : serverKey(s)) : l;
 }
 
 const LS_KEY = "blimp.servers";
@@ -78,24 +89,28 @@ export const sshHosts = async (): Promise<string[]> => (inTauri() ? invoke<strin
 // and cancel stops the connect with that token only: Rust ends it with an error before it opens
 // a tunnel, also when the cancel gets there before the connect does. A tunnel that was already
 // up when the cancel came stays, as the server's (it ends at quit); a cancel never stops a
-// tunnel by server id, which could be the next try's or a saved server's.
+// tunnel by server id, which could be the next try's or a saved server's. A try of This Mac has
+// no ssh to stop, so its cancel does nothing; the caller already ignores a stale answer.
 export function tryConnect(s: Server): { done: Promise<Conn>; cancel: () => void } {
   const attempt = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
   return {
     done: connectServer(s, attempt),
-    cancel: () => void (inTauri() && invoke("disconnect", { id: serverKey(s), attempt }).catch(() => {})),
+    cancel: () => void (inTauri() && !s.local && invoke("disconnect", { id: serverKey(s), attempt }).catch(() => {})),
   };
 }
 
 async function connectServer(s: Server, attempt?: string): Promise<Conn> {
   let conn: Conn;
   if (inTauri()) {
-    const r = await invoke<{ id: string; port: number; token: string; home: string }>("connect", {
-      host: s.host,
-      user: s.user,
-      port: s.port,
-      ...(attempt && { attempt }),
-    });
+    type Reply = { id: string; port: number; token: string; home: string };
+    const r = s.local
+      ? await invoke<Reply>("connect_local")
+      : await invoke<Reply>("connect", {
+          host: s.host,
+          user: s.user,
+          port: s.port,
+          ...(attempt && { attempt }),
+        });
     conn = { id: r.id, base: `http://127.0.0.1:${r.port}`, token: r.token, home: "" };
   } else {
     const t = browserTarget();

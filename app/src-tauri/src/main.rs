@@ -1,6 +1,7 @@
 // The native half of the blimp app: it opens SSH tunnels to blimpd and hosts the UI.
 // Sessions, terminals and files all live in the UI, which talks to blimpd through the tunnel.
 
+mod local;
 mod menu;
 mod relaunch;
 mod transfer;
@@ -37,6 +38,8 @@ fn main() {
             tunnel::update_server,
             tunnel::install_server,
             tunnel::ssh_hosts,
+            local::connect_local,
+            local::install_local,
             windows::open_window,
             windows::focus_project,
             windows::drop_session,

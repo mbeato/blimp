@@ -33,10 +33,11 @@ export async function checkForUpdate(): Promise<AppUpdate | null> {
 // Runs the latest release's install.sh on the server. Resolves to its last lines.
 export const updateServer = (server: string) => invoke<string>("update_server", { server });
 
-// The same install.sh, on a server where blimpd isn't set up yet (it has no tunnel to update through).
-// Rust asks first in a native dialog; false: the person chose Cancel there, which isn't an error.
+// The same install.sh, on a server where blimpd isn't set up yet (it has no tunnel to update through),
+// or on this Mac (install_local in src-tauri/src/local.rs). Rust asks first in a native dialog;
+// false: the person chose Cancel there, which isn't an error.
 export const installServer = (s: Server): Promise<boolean> =>
-  invoke<string>("install_server", { host: s.host, user: s.user, port: s.port }).then(
+  (s.local ? invoke<string>("install_local") : invoke<string>("install_server", { host: s.host, user: s.user, port: s.port })).then(
     () => true,
     (e) => (errorText(e) === "Cancelled." ? false : Promise.reject(e)),
   );
