@@ -12,6 +12,8 @@ fn main() {
                 "update_server",
                 "install_server",
                 "ssh_hosts",
+                "connect_local",
+                "install_local",
                 "open_window",
                 "focus_project",
                 "drop_session",

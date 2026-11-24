@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::process::{Child, ChildStderr, Command, Stdio};
+use std::process::{Child, ChildStderr, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::local;
 
 // Apps opened from Finder get a bare PATH, so use the system ssh by its full path on macOS.
 #[cfg(target_os = "macos")]
@@ -27,7 +29,7 @@ const INFO_CMD: &str = r#"printf "%s\n" "$HOME"; cat "$HOME/.blimp/token""#;
 
 // Updates blimpd on the server to the latest release (the release's own install.sh; it
 // restarts blimpd, and sessions keep running: zmx holds them).
-const UPDATE_CMD: &str = "curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh | sh";
+pub(crate) const UPDATE_CMD: &str = "curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh | sh";
 
 // The tunnel's command on the server, in place of -N: it runs until the app's end of ssh's stdin
 // closes. The app holds that pipe, so however the app ends (quit, kill, crash) the kernel closes
@@ -37,7 +39,7 @@ const TUNNEL_CMD: &str = "cat >/dev/null";
 /// Debug builds only: BLIMP_REMOTE_DIR (an absolute path on the server, plain characters
 /// only) replaces ~/.blimp there, so app/e2e-native can reach a test blimpd on its own socket
 /// without touching the real one. Release builds never read the variable.
-fn remote_dir() -> Option<String> {
+pub(crate) fn remote_dir() -> Option<String> {
     #[cfg(debug_assertions)]
     if let Ok(d) = std::env::var("BLIMP_REMOTE_DIR") {
         if d.starts_with('/')
@@ -50,7 +52,7 @@ fn remote_dir() -> Option<String> {
     None
 }
 
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
 const STDERR_WAIT: Duration = Duration::from_secs(1);
 
 /// A server as the user entered it in "Add server".
@@ -209,7 +211,7 @@ fn ssh() -> Command {
 /// ssh runs ProxyCommand and `Match exec` helpers with our PATH, which is launchd's bare
 /// one when the app is opened from Finder. Add Homebrew's folders so helpers such as
 /// cloudflared are found the way they are in Terminal.
-fn ssh_path(inherited: &str) -> String {
+pub(crate) fn ssh_path(inherited: &str) -> String {
     let mut dirs: Vec<&str> = inherited.split(':').filter(|d| !d.is_empty()).collect();
     for d in ["/opt/homebrew/bin", "/usr/local/bin"] {
         if !dirs.contains(&d) {
@@ -242,7 +244,7 @@ fn last_line(stderr: &str) -> &str {
 
 /// ssh reached the server, but reading blimpd's token there failed. The UI knows this error by
 /// these words and offers Install blimpd (isNotSetUp in app/src/lib/hints.ts).
-fn not_set_up(host: &str) -> String {
+pub(crate) fn not_set_up(host: &str) -> String {
     format!("blimpd isn't set up on {host}")
 }
 
@@ -277,7 +279,7 @@ fn config_hosts(text: &str) -> Vec<String> {
     out
 }
 
-fn with_detail(msg: String, detail: &str) -> String {
+pub(crate) fn with_detail(msg: String, detail: &str) -> String {
     if detail.is_empty() {
         format!("{msg}.")
     } else {
@@ -292,6 +294,12 @@ pub struct Conn {
     port: u16,
     token: String,
     home: String,
+}
+
+impl Conn {
+    pub(crate) fn new(id: String, port: u16, token: String, home: String) -> Conn {
+        Conn { id, port, token, home }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -318,6 +326,8 @@ pub struct Tunnels {
     inner: Mutex<Inner>,
     // Tells a stale watcher apart from the current tunnel after a reconnect.
     next_serial: AtomicU64,
+    /// This Mac's bridge, which stands in for a tunnel for id local::ID (local.rs).
+    pub(crate) local: local::Local,
 }
 
 #[derive(Default)]
@@ -393,12 +403,16 @@ impl Tries {
 impl Tunnels {
     /// The local port and token of a live tunnel, for transfers done here (transfer.rs).
     pub fn endpoint(&self, id: &str) -> Option<(u16, String)> {
+        if id == local::ID {
+            return self.local.endpoint();
+        }
         let inner = self.inner.lock().unwrap();
         inner.map.get(id).map(|t| (t.conn.port, t.conn.token.clone()))
     }
 
     /// Stops every ssh, starting ones included. Their watchers then find nothing to report.
     pub fn close_all(&self) {
+        self.local.stop();
         let mut inner = self.inner.lock().unwrap();
         inner.closing = true;
         for (_, t) in inner.map.drain() {
@@ -445,6 +459,10 @@ impl Tunnels {
 
     /// Stops the tunnel for `id` and any connect still starting one.
     fn remove(&self, id: &str) {
+        if id == local::ID {
+            self.local.stop();
+            return;
+        }
         let mut inner = self.inner.lock().unwrap();
         // Removed first, so its watcher stays quiet and the UI doesn't reconnect.
         let mut children: Vec<Child> = inner.map.remove(id).map(|t| t.child).into_iter().collect();
@@ -547,6 +565,10 @@ pub async fn forward_port(app: AppHandle, server: String, host: String, port: u1
     if port == 0 {
         return Err("No port.".into());
     }
+    // A session's port on This Mac is already on this Mac: there is nothing to forward.
+    if server == local::ID {
+        return Ok(port);
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let tunnels = app.state::<Tunnels>();
         let key = (server.clone(), host.clone(), port);
@@ -615,6 +637,11 @@ pub async fn update_server(app: AppHandle, server: String) -> Result<String, Str
     if remote_dir().is_some() {
         return Err("Not in a test build.".into());
     }
+    if server == local::ID {
+        return tauri::async_runtime::spawn_blocking(|| local::run_install("Updating"))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     let target = app.state::<Tunnels>().inner.lock().unwrap().map.get(&server).map(|t| t.target.clone()).ok_or("Not connected.")?;
     tauri::async_runtime::spawn_blocking(move || run_install(&target, "Updating"))
         .await
@@ -667,13 +694,19 @@ fn run_install(target: &Target, doing: &str) -> Result<String, String> {
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("Couldn't run ssh: {e}"))?;
+    install_result(out, format!("{doing} blimpd on {} failed", target.host))
+}
+
+/// An install run's answer, over ssh or on this Mac (local::run_install): the last lines it
+/// printed, and on failure `failed` with them.
+pub(crate) fn install_result(out: Output, failed: String) -> Result<String, String> {
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     let tail: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     let tail = tail[tail.len().saturating_sub(4)..].join("\n");
     if out.status.success() {
         Ok(tail)
     } else {
-        Err(with_detail(format!("{doing} blimpd on {} failed", target.host), &tail))
+        Err(with_detail(failed, &tail))
     }
 }
 
@@ -880,7 +913,7 @@ fn free_port() -> io::Result<u16> {
 }
 
 /// Polls GET /health through the tunnel until blimpd answers, ssh exits, or 10 s pass.
-fn wait_healthy(
+pub(crate) fn wait_healthy(
     mut ssh_alive: impl FnMut() -> bool,
     port: u16,
     token: &str,
@@ -1251,6 +1284,39 @@ Host -oProxyCommand=sh \"quoted name\"
 
         tunnels.close_all();
         assert!(!running(fwd_pid));
+    }
+
+    #[test]
+    fn endpoint_answers_for_this_mac() {
+        let dir = local::testing::temp_dir();
+        std::fs::write(dir.join("token"), "tok\n").unwrap();
+        local::testing::fake_blimpd(&dir, "tok");
+        let tunnels = Tunnels::default();
+        tunnels.local.connect(&dir, "/h").unwrap();
+        let (port, token) = tunnels.endpoint(local::ID).unwrap();
+        assert!(port > 0);
+        assert_eq!(token, "tok");
+        // disconnect (Remove… in Manage servers) stops the bridge.
+        tunnels.remove(local::ID);
+        assert!(tunnels.endpoint(local::ID).is_none());
+        // So does quitting.
+        tunnels.local.connect(&dir, "/h").unwrap();
+        tunnels.close_all();
+        assert!(tunnels.endpoint(local::ID).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn install_tail_keeps_the_last_lines() {
+        let run = |script: &str| Command::new("sh").args(["-c", script]).output().unwrap();
+        let ok = run("printf 'one\\ntwo\\n\\nthree\\n'; printf 'four\\nfive\\n' >&2");
+        assert_eq!(install_result(ok, "Updating blimpd on box failed".into()), Ok("two\nthree\nfour\nfive".into()));
+        let failed = run("echo 'curl: (6) Could not resolve host: github.com' >&2; exit 6");
+        assert_eq!(
+            install_result(failed, "Installing blimpd on this Mac failed".into()),
+            Err("Installing blimpd on this Mac failed: curl: (6) Could not resolve host: github.com".into())
+        );
+        assert_eq!(install_result(run("exit 1"), "Updating blimpd on box failed".into()), Err("Updating blimpd on box failed.".into()));
     }
 
     #[test]
