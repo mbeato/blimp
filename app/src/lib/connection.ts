@@ -30,10 +30,11 @@ export const defaultName = (s: Server) => (s.local ? "This Mac" : s.host);
 const label = (s: Server) => s.name?.trim() || defaultName(s);
 
 // The name a person reads: the one they gave it, else its host. Two servers in `all` that would
-// read the same (box and max@box) each show their key instead, so they can be told apart.
+// read the same (box and max@box) each show their key instead, so they can be told apart; This
+// Mac's key is no address, so it shows "this Mac".
 export function serverName(s: Server, all: Server[]): string {
   const l = label(s);
-  return all.some((o) => serverKey(o) !== serverKey(s) && label(o) === l) ? serverKey(s) : l;
+  return all.some((o) => serverKey(o) !== serverKey(s) && label(o) === l) ? (s.local ? "this Mac" : serverKey(s)) : l;
 }
 
 const LS_KEY = "blimp.servers";

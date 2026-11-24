@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { errorText, type ServerLink } from "../lib/connection";
-import { connectHint, isNotSetUp } from "../lib/hints";
+import { defaultName, errorText, type ServerLink } from "../lib/connection";
+import { canInstall, connectHint } from "../lib/hints";
 import { blimpdBehind, canUpdate, installServer, updateLink } from "../lib/updates";
 import { Dialog } from "./Dialog";
 import { ServerDot } from "./ServerSwitcher";
@@ -82,7 +82,7 @@ function ServerBlock(props: { link: ServerLink; onRename: (name: string) => void
         <span>Name</span>
         <input
           value={field.name}
-          placeholder={l.server.host}
+          placeholder={defaultName(l.server)}
           aria-label="Name"
           spellCheck={false}
           autoCapitalize="off"
@@ -95,7 +95,8 @@ function ServerBlock(props: { link: ServerLink; onRename: (name: string) => void
           }}
         />
       </label>
-      <div className="srv-address">{l.key}</div>
+      {/* This Mac's key is no address; it is reached with no SSH. */}
+      <div className="srv-address">{l.server.local ? "this Mac" : l.key}</div>
       <div className={"srv-state" + (l.status === "offline" ? " srv-state-offline" : "")}>
         <ServerDot status={l.status} />
         <span>
@@ -121,7 +122,7 @@ function ServerBlock(props: { link: ServerLink; onRename: (name: string) => void
         <div className="dialog-actions srv-actions">
           {busy && <span className="srv-busy">{busy}</span>}
           {l.status !== "connected" && !busy && <button onClick={() => l.retryNow()}>Try again</button>}
-          {canUpdate() && l.status === "offline" && isNotSetUp(l.error) && !busy && <button onClick={() => void install()}>Install blimpd</button>}
+          {canUpdate() && l.status === "offline" && canInstall(l.error, l.server) && !busy && <button onClick={() => void install()}>Install blimpd</button>}
           {canUpdate() && blimpdBehind(l) && !busy && <button onClick={() => void update()}>Update server</button>}
           <button onClick={() => setAsking(true)}>Remove…</button>
         </div>

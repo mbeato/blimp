@@ -2504,6 +2504,43 @@ body.dragging-session * {
   max-width: calc(100% - 32px);
 }
 
+/* The first-run choice (FirstRun): each button with its note beside it. */
+.dialog-actions.firstrun-choices {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.dialog-actions.firstrun-choices .dialog-note {
+  margin: 0;
+}
+
+/* Outside the button: inside, the ring is lost on the primary button's fill. */
+.firstrun-choices button:focus-visible {
+  outline-offset: 2px;
+}
+
+/* An install's error keeps its lines (the install script's last ones). */
+.firstrun .dialog-error {
+  white-space: pre-wrap;
+}
+
+/* Add server's Use This Mac line: the text, then its button. */
+.dialog-actions.firstrun-row {
+  justify-content: space-between;
+  align-items: center;
+  margin: 0;
+}
+
+.firstrun-row > span {
+  color: var(--fg-dim);
+}
+
+.dialog-actions .firstrun-back {
+  margin-right: auto;
+}
+
 /* ---- notices ---- */
 
 .toast {

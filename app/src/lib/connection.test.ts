@@ -34,6 +34,8 @@ test("This Mac's key is \"this mac\" whatever its name; it reads \"This Mac\" un
   expect(serverName({ ...thisMac, name: "Mini" }, [thisMac])).toBe("Mini");
   expect(defaultName(thisMac)).toBe("This Mac");
   expect(defaultName({ host: "h" })).toBe("h");
+  // Beside a server named This Mac, it reads "this Mac", not its key.
+  expect(serverName(thisMac, [thisMac, { host: "box", name: "This Mac" }])).toBe("this Mac");
 });
 
 test("trying This Mac calls connect_local, with no ssh, and its cancel has nothing to stop", async () => {

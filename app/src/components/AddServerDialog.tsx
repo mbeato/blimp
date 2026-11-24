@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { errorText, inTauri, serverKey, sshHosts, tryConnect, type Server } from "../lib/connection";
-import { connectHint, isNotSetUp } from "../lib/hints";
+import { errorText, inTauri, LOCAL_KEY, serverKey, sshHosts, tryConnect, type Server } from "../lib/connection";
+import { canInstall, connectHint } from "../lib/hints";
 import { installServer } from "../lib/updates";
 import { Dialog } from "./Dialog";
+import { useThisMac } from "./ThisMac";
 
 // Host is anything ssh accepts, including a Host alias from ~/.ssh/config (offered as suggestions).
 // The server is tried before it's saved, so a typo or a missing blimpd shows here, with what to
 // do about it, instead of as a saved server that's offline. known: the saved servers' keys.
-export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => void; onClose?: () => void }) {
+// onBack: the first-run form's way back to the choice (FirstRun). As a dialog, it also offers
+// This Mac while that isn't in the list.
+export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => void; onClose?: () => void; onBack?: () => void }) {
   const [host, setHost] = useState("");
   const [user, setUser] = useState("");
   const [port, setPort] = useState("");
@@ -21,6 +24,10 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
   // The try under way; a newer one, a cancel or closing makes the old one's answer moot.
   const trying = useRef<{ cancel: () => void } | null>(null);
   const turn = useRef(0);
+  const mac = useThisMac(props.onAdd);
+  const offerMac = !!props.onClose && inTauri() && !props.known.includes(LOCAL_KEY);
+  // Either is under way: the fields stay as they are and the form can't be sent.
+  const locked = !!busy || !!mac.busy;
 
   useEffect(() => {
     void sshHosts().then(setHosts);
@@ -126,11 +133,31 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
       className="addserver"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!busy) submit();
+        if (!locked) submit();
       }}
     >
       <h2>Add a server</h2>
       <p className="dialog-note">blimp connects with your SSH keys and settings. Host is a name from your SSH config, a Tailscale name, or an address.</p>
+      {offerMac && (
+        <>
+          <div className="dialog-actions firstrun-row">
+            <span>Or run sessions on this Mac, with no SSH.</span>
+            <button type="button" disabled={locked} onClick={mac.run}>
+              Use This Mac
+            </button>
+          </div>
+          {mac.busy && (
+            <p className="dialog-note srv-trying" role="status">
+              {mac.busy === "connect" ? "Connecting to this Mac…" : "Setting up this Mac…"}
+            </p>
+          )}
+          {mac.error && (
+            <p className="dialog-error" role="alert">
+              {mac.error}
+            </p>
+          )}
+        </>
+      )}
       <label>
         <span>Host</span>
         <input
@@ -141,7 +168,7 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
           spellCheck={false}
           autoCapitalize="off"
           list={hosts.length ? "ssh-hosts" : undefined}
-          readOnly={!!busy}
+          readOnly={locked}
         />
         {hosts.length > 0 && (
           <datalist id="ssh-hosts">
@@ -154,16 +181,16 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
       <div className="field-row">
         <label>
           <span>User</span>
-          <input value={user} onChange={edit(setUser)} placeholder="optional" spellCheck={false} autoCapitalize="off" readOnly={!!busy} />
+          <input value={user} onChange={edit(setUser)} placeholder="optional" spellCheck={false} autoCapitalize="off" readOnly={locked} />
         </label>
         <label className="narrow">
           <span>Port</span>
-          <input value={port} onChange={edit(setPort)} placeholder="22" inputMode="numeric" readOnly={!!busy} />
+          <input value={port} onChange={edit(setPort)} placeholder="22" inputMode="numeric" readOnly={locked} />
         </label>
       </div>
       <label>
         <span>Name</span>
-        <input value={name} onChange={edit(setName)} placeholder="optional, shown in the app" spellCheck={false} autoCapitalize="off" readOnly={!!busy} />
+        <input value={name} onChange={edit(setName)} placeholder="optional, shown in the app" spellCheck={false} autoCapitalize="off" readOnly={locked} />
       </label>
       {busy && (
         <p className="dialog-note srv-trying" role="status">
@@ -181,6 +208,11 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
         </p>
       )}
       <div className="dialog-actions">
+        {props.onBack && !busy && (
+          <button type="button" className="firstrun-back" onClick={() => (stop(), props.onBack?.())}>
+            Back
+          </button>
+        )}
         {/* On the first-run form (no onClose) it shows only while something runs, and stops that. */}
         {(props.onClose || busy) && (
           <button type="button" onClick={props.onClose ? close : stop}>
@@ -189,7 +221,7 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
         )}
         {failed && !busy && (
           <>
-            {inTauri() && isNotSetUp(error) && (
+            {inTauri() && canInstall(error, failed) && (
               <button type="button" onClick={() => void install(failed)}>
                 Install blimpd
               </button>
@@ -197,13 +229,13 @@ export function AddServerDialog(props: { known: string[]; onAdd: (s: Server) => 
             <button type="button" onClick={addAnyway}>
               Add anyway
             </button>
-            <button type="submit" className="primary">
+            <button type="submit" className="primary" disabled={locked}>
               Try again
             </button>
           </>
         )}
         {!failed && (
-          <button type="submit" className="primary" disabled={!!busy}>
+          <button type="submit" className="primary" disabled={locked}>
             Add server
           </button>
         )}
