@@ -583,6 +583,15 @@ try {
   record("closing the window quits the app and leaves no ssh tunnel", !!exited && tunnels().length === 0, { appPid, exited: !!exited, left: tunnels() });
   await wd("DELETE", "").catch(() => {});
 
+  // WebDriver's close (5b) ends a window's page but not the window: the app sees it go only at the
+  // quit above, with the last one, and a window that goes with the quit comes back at the next
+  // launch (QUIT_GRACE in src-tauri/src/windows.rs). Whether 7c then started with one window or
+  // two depended on how far that window's page got before 7b's SIGTERM. So only the first window
+  // stays saved, and 7c's second one is the one it opens.
+  const windowsStore = join(appHome, ".local/share/dev.blimp.app/windows.json");
+  const savedWindows = JSON.parse(readFileSync(windowsStore, "utf8"));
+  writeFileSync(windowsStore, JSON.stringify({ ...savedWindows, windows: savedWindows.windows.slice(0, 1) }));
+
   // 7b. SIGTERM (logout, `kill`, a service manager) is another way the app ends.
   await openApp();
   await until(20_000, () => tunnels().length === 1);
