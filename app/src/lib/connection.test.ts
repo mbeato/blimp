@@ -6,11 +6,11 @@ const calls: [string, any][] = [];
 let connectReply: () => Promise<unknown> = () => new Promise(() => {});
 mock.module("@tauri-apps/api/core", () => ({
   isTauri: () => true,
-  invoke: (cmd: string, args: any) => (calls.push([cmd, args]), cmd === "connect" ? connectReply() : Promise.resolve()),
+  invoke: (cmd: string, args: any) => (calls.push([cmd, args]), cmd === "connect" || cmd === "connect_local" ? connectReply() : Promise.resolve()),
 }));
 mock.module("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
-const { ServerLink, serverKey, serverName, tryConnect } = await import("./connection");
+const { ServerLink, defaultName, serverKey, serverName, thisMac, tryConnect } = await import("./connection");
 
 test("the server key is the Rust tunnel id: user@host:port without the blank parts", () => {
   expect(serverKey({ host: "h" })).toBe("h");
@@ -25,6 +25,25 @@ test("a server's name is the one it was given, else its host; never part of its 
   expect(serverKey(lab)).toBe("max@100.64.0.7");
   expect(serverName({ host: "box" }, [])).toBe("box");
   expect(serverName({ host: "box", name: "   " }, [])).toBe("box");
+});
+
+test("This Mac's key is \"this mac\" whatever its name; it reads \"This Mac\" until it's given one", () => {
+  expect(serverKey(thisMac)).toBe("this mac");
+  expect(serverKey({ ...thisMac, name: "Mini" })).toBe("this mac");
+  expect(serverName(thisMac, [thisMac])).toBe("This Mac");
+  expect(serverName({ ...thisMac, name: "Mini" }, [thisMac])).toBe("Mini");
+  expect(defaultName(thisMac)).toBe("This Mac");
+  expect(defaultName({ host: "h" })).toBe("h");
+});
+
+test("trying This Mac calls connect_local, with no ssh, and its cancel has nothing to stop", async () => {
+  connectReply = () => Promise.resolve({ id: "this mac", port: 3, token: "t", home: "/Users/max" });
+  calls.length = 0;
+  const t = tryConnect(thisMac);
+  t.cancel();
+  expect((await t.done).base).toBe("http://127.0.0.1:3");
+  expect(calls).toEqual([["connect_local", undefined]]);
+  connectReply = () => new Promise(() => {});
 });
 
 test("two servers that would read the same each show their key instead", () => {
