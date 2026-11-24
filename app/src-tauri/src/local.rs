@@ -157,8 +157,8 @@ pub async fn connect_local(app: AppHandle) -> Result<Conn, String> {
 }
 
 /// Runs the latest release's install.sh on this Mac, as tunnel::run_install does on a server
-/// over ssh; resolves to the last lines it printed. After it ends well, waits for the token file
-/// it writes, so the connect that follows finds it.
+/// over ssh; resolves to the last lines it printed, once blimpd's token file is there (see
+/// installed).
 pub(crate) fn run_install(doing: &str) -> Result<String, String> {
     // The same PATH ssh gets: an app opened from Finder has launchd's bare one.
     let out = Command::new("/bin/sh")
@@ -167,10 +167,20 @@ pub(crate) fn run_install(doing: &str) -> Result<String, String> {
         .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("Couldn't run the install script: {e}"))?;
-    let tail = install_result(out, format!("{doing} blimpd on {NAME} failed"))?;
-    let token = dir().0.join("token");
-    let deadline = Instant::now() + HEALTH_TIMEOUT;
-    while !token.exists() && Instant::now() < deadline {
+    let failed = format!("{doing} blimpd on {NAME} failed");
+    let tail = install_result(out, failed.clone())?;
+    installed(tail, &dir().0.join("token"), HEALTH_TIMEOUT, failed)
+}
+
+/// Waits for the token file blimpd writes when it first starts, so the connect that follows
+/// finds it. No file by then is a failed install, with the script's last lines: `curl … | sh`
+/// ends well also when the download fails (sh then runs nothing), and curl's error is in them.
+fn installed(tail: String, token: &Path, wait: Duration, failed: String) -> Result<String, String> {
+    let deadline = Instant::now() + wait;
+    while !token.exists() {
+        if Instant::now() >= deadline {
+            return Err(with_detail(failed, &tail));
+        }
         thread::sleep(Duration::from_millis(200));
     }
     Ok(tail)
@@ -258,6 +268,21 @@ mod tests {
             INSTALL_QUESTION,
             "Set up blimp on this Mac? This downloads blimpd from the latest blimp release and keeps it running in the background while you are logged in. It also adds blimp's status hooks to Claude Code's settings."
         );
+    }
+
+    #[test]
+    fn an_install_that_left_no_token_failed() {
+        let dir = temp_dir();
+        let token = dir.join("token");
+        // What a failed download leaves: the script "ended well", and curl's error is its output.
+        let tail = "curl: (6) Could not resolve host: github.com".to_string();
+        assert_eq!(
+            installed(tail.clone(), &token, Duration::ZERO, "Installing blimpd on this Mac failed".into()),
+            Err("Installing blimpd on this Mac failed: curl: (6) Could not resolve host: github.com".into())
+        );
+        std::fs::write(&token, "tok\n").unwrap();
+        assert_eq!(installed(tail.clone(), &token, Duration::ZERO, "x".into()), Ok(tail));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

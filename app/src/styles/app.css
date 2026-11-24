@@ -2521,8 +2521,10 @@ body.dragging-session * {
   outline-offset: 2px;
 }
 
-/* An install's error keeps its lines (the install script's last ones). */
-.firstrun .dialog-error {
+/* An install's error keeps its lines (the install script's last ones): on first run, and under
+   Add server's Use This Mac line. */
+.firstrun .dialog-error,
+.firstrun-row + .dialog-error {
   white-space: pre-wrap;
 }
 
