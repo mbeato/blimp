@@ -1,5 +1,6 @@
 // Drives the REAL app (Rust shell + WebKitGTK webview + CSP + capabilities) over WebDriver,
-// against a test blimpd reached through the app's own `connect` command (a real ssh -L tunnel).
+// against a test blimpd reached through the app's own `connect` command (a real ssh -L tunnel),
+// and as This Mac through `connect_local` (the app's own bridge to its socket, no ssh).
 // Linux only (tauri-driver has no macOS WKWebView driver).
 //
 // Needs: tauri-driver (cargo install tauri-driver --locked), WebKitWebDriver (apt install
@@ -14,7 +15,8 @@
 // Isolation: the test blimpd gets its own short temp socket dir, ZMX_DIR, CLAUDE_CONFIG_DIR and
 // HOME, and only blimptest-* sessions exist there. The app runs with HOME set to a temp folder
 // (so its store, servers.json, is a throwaway) and BLIMP_REMOTE_DIR=<temp socket dir>, which a
-// DEBUG build of the Rust shell uses instead of ~/.blimp on the server (release builds ignore it).
+// DEBUG build of the Rust shell uses instead of ~/.blimp on the server and on this Mac (release
+// builds ignore it).
 // Max's ~/.blimp, blimpd.service and zmx sessions are never touched.
 
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -166,11 +168,15 @@ try {
   });
   await until(10_000, () => fetch(`http://127.0.0.1:${PORT}/status`).then((r) => r.ok));
 
-  // 1. Window opens, welcome form, no CSP violations.
+  // 1. Window opens on the first-run choice; A server… shows the Add server form.
   await openApp();
-  await until(10_000, () => js("return !!document.querySelector('.welcome input')"));
+  const choice = await until(10_000, () => js("return document.querySelector('.welcome .firstrun')?.innerText"));
   await shot("01-welcome");
-  record("window opens with the Add server form", await js("return !!document.querySelector('.welcome form')"), await js("return document.title + ' ' + innerWidth + 'x' + innerHeight"));
+  record("window opens with the first-run choice (This Mac or a server)", !!choice && choice.includes("This Mac") && choice.includes("A server…"), { choice, size: await js("return document.title + ' ' + innerWidth + 'x' + innerHeight") });
+  await click(".welcome .firstrun-choices button:nth-of-type(2)");
+  await until(10_000, () => js("return !!document.querySelector('.welcome input')"));
+  await shot("01b-add-server-form");
+  record("A server… shows the Add server form", await js("return !!document.querySelector('.welcome form')"), await js("return document.querySelector('.welcome form h2')?.textContent"));
 
   // 2. Add server -> connect through the Rust command -> real ssh -L tunnel -> Home.
   await click(".welcome input");
@@ -182,6 +188,60 @@ try {
   record("real ssh -L tunnel in ps", tunnels().length === 1, tunnels());
   record("Home shows the server's home folder and Welcome", !!home, await js("return document.querySelector('.wb')?.innerText.slice(0, 300)"));
   await shot("02-home");
+
+  // 2b. This Mac beside the server: Add server… > Use This Mac reaches the same test blimpd
+  // through the app's bridge (connect_local; BLIMP_REMOTE_DIR stands in for ~/.blimp), with no
+  // ssh child for it. Removed again afterwards, so the steps below see one server.
+  await click(".srv-switch");
+  await until(3000, () => js("return !!document.querySelector('.srv-menu')"));
+  await click(".srv-menu > button:nth-of-type(1)"); // Add server…
+  await until(5000, () => js("return !!document.querySelector('.dialog .firstrun-row button')"));
+  await click(".dialog .firstrun-row button"); // Use This Mac
+  const macHome = await until(20_000, () =>
+    js("return !document.querySelector('.dialog') && document.querySelector('.ptab-home-server')?.textContent === 'This Mac' && document.querySelector('.welcome-page .conn')?.textContent === 'connected'"),
+  );
+  const p1m = await probe();
+  record("Use This Mac connects through connect_local, and Home shows This Mac connected", !!macHome && !!p1m.invokes.find((i: any) => i.cmd === "connect_local" && i.ok), {
+    home: await js("return document.querySelector('.ptab-home-server')?.textContent + ' ' + document.querySelector('.welcome-page .conn')?.textContent"),
+    invokes: p1m.invokes.filter((i: any) => /connect|disconnect/.test(i.cmd)),
+  });
+  record("This Mac adds no ssh tunnel (still the server's one)", tunnels().length === 1, tunnels());
+  // Its sessions: those of the folder they run in, as for the server.
+  await click(".ptabs-add");
+  await until(5000, () => js("return !!document.querySelector('.dialog .dialog-input')"));
+  await typeKeys([..."~/proj", "\uE007"]);
+  const macRows: string[] | undefined = await until(20_000, async () => {
+    const r: string[] = await js("return [...document.querySelectorAll('.wb:not([hidden]) .srow')].map(e => e.dataset.session)");
+    return r.includes("blimptest-a") && r.includes("blimptest-b") ? r : undefined;
+  });
+  record("This Mac shows the test blimpd's sessions", !!macRows, macRows ?? (await js("return document.querySelector('.wb:not([hidden])')?.innerText.slice(0, 300)")));
+  await shot("02c-this-mac-sessions");
+  // Manage servers: both listed and connected; This Mac's address reads "this Mac".
+  await click(".srv-switch");
+  await until(3000, () => js("return !!document.querySelector('.srv-menu')"));
+  await click(".srv-menu > button:nth-of-type(2)"); // Manage servers…
+  const blocks = () =>
+    js("return [...document.querySelectorAll('.dialog.servers .srv-block')].map(b => ({ name: b.getAttribute('aria-label'), address: b.querySelector('.srv-address')?.textContent, state: b.querySelector('.srv-state')?.innerText }))");
+  const listed: any[] | undefined = await until(5000, async () => {
+    const b: any[] = await blocks();
+    return b.length === 2 && b.every((x) => x.state?.startsWith("connected")) ? b : undefined;
+  });
+  record("Manage servers lists the server and This Mac (address \"this Mac\"), both connected", !!listed && listed.some((b) => b.name === "This Mac" && b.address === "this Mac"), listed ?? (await blocks()));
+  await shot("02d-this-mac-manage");
+  await click('.dialog.servers .srv-block[aria-label="This Mac"] .srv-actions button:last-child'); // Remove…
+  await click('.dialog.servers .srv-block[aria-label="This Mac"] .srv-ask button.danger');
+  const oneLeft: any[] | undefined = await until(5000, async () => {
+    const b: any[] = await blocks();
+    return b.length === 1 ? b : undefined;
+  });
+  await typeKeys(["\uE00C"]);
+  const backHome = await until(5000, () => js("return !document.querySelector('.dialog') && document.querySelector('.ptab-home-server')?.textContent === 'localhost' && document.querySelectorAll('.ptab').length === 1"));
+  const p1r = await probe();
+  record("removing This Mac leaves one server, Home back on it, and its disconnect goes through", !!oneLeft && oneLeft[0].name === "localhost" && !!backHome && p1r.invokes.some((i: any) => i.cmd === "disconnect" && i.ok), {
+    servers: oneLeft ?? (await blocks()),
+    tabs: await js("return [...document.querySelectorAll('.ptab')].map(t => t.getAttribute('aria-label'))"),
+    home: await js("return document.querySelector('.ptab-home-server')?.textContent"),
+  });
 
   // Open Folder (the + after the project tabs), typed path.
   await click(".ptabs-add");
