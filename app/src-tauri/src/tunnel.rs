@@ -26,8 +26,11 @@ const SSH: &str = "ssh";
 const INFO_CMD: &str = r#"printf "%s\n" "$HOME"; cat "$HOME/.blimp/token""#;
 
 // Updates blimpd on the server to the latest release (the release's own install.sh; it
-// restarts blimpd, and sessions keep running: zmx holds them).
-const UPDATE_CMD: &str = "curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh | sh";
+// restarts blimpd, and sessions keep running: zmx holds them). The script is downloaded whole
+// before sh gets it: with `curl … | sh`, a download that fails leaves sh nothing to run, sh ends
+// well, and the update would count as done. Inside `sh -c '…'`, so the server's login shell
+// (fish or csh, say) only has to pass one quoted word on.
+const UPDATE_CMD: &str = r#"sh -c 's=$(curl -fsSL https://github.com/mbeato/blimp/releases/latest/download/install.sh) && printf %s "$s" | sh'"#;
 
 // The tunnel's command on the server, in place of -N: it runs until the app's end of ssh's stdin
 // closes. The app holds that pipe, so however the app ends (quit, kill, crash) the kernel closes
@@ -964,6 +967,29 @@ mod tests {
         assert!(Target::new("claude1.example.com".into(), Some("max-b".into()), None).is_ok());
         assert!(Target::new("::1".into(), None, Some(22)).is_ok());
         assert!(Target::new("100.64.0.1".into(), None, None).is_ok());
+    }
+
+    #[test]
+    fn the_update_fails_when_the_download_fails() {
+        // sh stands in for the server's login shell, and a file:// address for the release's.
+        const URL: &str = "https://github.com/mbeato/blimp/releases/latest/download/install.sh";
+        assert!(UPDATE_CMD.contains(URL));
+        let dir = std::env::temp_dir().join(format!("blimp-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("install.sh"), "echo installed\n").unwrap();
+        let run = |file: &str| {
+            let cmd = UPDATE_CMD.replace(URL, &format!("file://{}/{file}", dir.display()));
+            Command::new("sh").args(["-c", &cmd]).output().unwrap()
+        };
+        let ok = run("install.sh");
+        assert!(ok.status.success());
+        assert_eq!(String::from_utf8_lossy(&ok.stdout), "installed\n");
+        // With `curl … | sh`, sh ran the nothing curl sent, ended well, and the UI said "updated".
+        let failed = run("missing.sh");
+        assert!(!failed.status.success());
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("curl:"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
